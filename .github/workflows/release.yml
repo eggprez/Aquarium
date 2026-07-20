@@ -6,6 +6,9 @@ on:
       - "v*"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -39,6 +42,8 @@ jobs:
         id: artifacts
         run: |
           BUNDLE_DIR="src-tauri/target/release/bundle/appimage"
+          echo "== bundle dir contents (debug) =="
+          ls -la "$BUNDLE_DIR"
           echo "appimage=$BUNDLE_DIR/FellyJin-x86_64.AppImage" >> "$GITHUB_OUTPUT"
           echo "zsync=$BUNDLE_DIR/FellyJin-x86_64.AppImage.zsync" >> "$GITHUB_OUTPUT"
 

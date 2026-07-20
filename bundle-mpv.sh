@@ -38,6 +38,9 @@ FINAL="$BUNDLE_DIR/FellyJin-x86_64.AppImage"
 GEN="$(ls -t "$BUNDLE_DIR"/*.AppImage 2>/dev/null | head -1)"
 if [ -n "$GEN" ] && [ "$GEN" != "$FINAL" ]; then
   mv "$GEN" "$FINAL"
+  # The .zsync sidecar (if UPDATE_INFORMATION was set) is generated next to
+  # the pre-rename filename — move it along so it matches FINAL.
+  [ -f "$GEN.zsync" ] && mv "$GEN.zsync" "$FINAL.zsync"
 fi
 echo "==> Done: $FINAL"
-ls -lh "$FINAL"
+ls -lh "$FINAL" "$FINAL.zsync" 2>/dev/null || ls -lh "$FINAL"
