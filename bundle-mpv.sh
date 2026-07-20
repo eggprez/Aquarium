@@ -20,7 +20,10 @@ export NO_STRIP=1
 export LDAI_OUTPUT="$BUNDLE_DIR/FellyJin_repack.AppImage"
 
 echo "==> Deploying mpv + dependencies into AppDir"
-"$LINUXDEPLOY" --appdir "$APPDIR" -e "$MPV_BIN" 2>&1 | tail -30
+# linuxdeploy exits non-zero on warnings even when it actually succeeds, so
+# don't let set -e abort here — later steps verify success by checking for
+# the actual output files instead of trusting the exit code.
+"$LINUXDEPLOY" --appdir "$APPDIR" -e "$MPV_BIN" 2>&1 | tail -30 || true
 
 echo "==> Renaming bundled mpv to fellyjin-mpv"
 mv "$APPDIR/usr/bin/mpv" "$APPDIR/usr/bin/fellyjin-mpv"
@@ -31,7 +34,7 @@ mkdir -p "$APPDIR/usr/share/fellyjin"
 cp -r "$PROJ/src-tauri/mpv-config" "$APPDIR/usr/share/fellyjin/mpv"
 
 echo "==> Repacking AppImage"
-"$LINUXDEPLOY" --appdir "$APPDIR" --output appimage 2>&1 | tail -30
+"$LINUXDEPLOY" --appdir "$APPDIR" --output appimage 2>&1 | tail -30 || true
 
 FINAL="$BUNDLE_DIR/FellyJin-x86_64.AppImage"
 # linuxdeploy names output from desktop file; normalize.
@@ -45,5 +48,8 @@ fi
 if [ -n "$GEN_ZSYNC" ] && [ "$GEN_ZSYNC" != "$FINAL.zsync" ]; then
   mv "$GEN_ZSYNC" "$FINAL.zsync"
 fi
+# Genuine failure check: the linuxdeploy warning-exit-code quirk is fine to
+# swallow, but if the final AppImage genuinely wasn't produced, stop here.
+[ -f "$FINAL" ] || { echo "FATAL: $FINAL was not produced"; exit 1; }
 echo "==> Done: $FINAL"
 ls -lh "$FINAL" "$FINAL.zsync" 2>/dev/null || ls -lh "$FINAL"
