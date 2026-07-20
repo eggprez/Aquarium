@@ -20,7 +20,7 @@ export NO_STRIP=1
 export LDAI_OUTPUT="$BUNDLE_DIR/FellyJin_repack.AppImage"
 
 echo "==> Deploying mpv + dependencies into AppDir"
-"$LINUXDEPLOY" --appdir "$APPDIR" -e "$MPV_BIN" 2>&1 | tail -4
+"$LINUXDEPLOY" --appdir "$APPDIR" -e "$MPV_BIN" 2>&1 | tail -30
 
 echo "==> Renaming bundled mpv to fellyjin-mpv"
 mv "$APPDIR/usr/bin/mpv" "$APPDIR/usr/bin/fellyjin-mpv"
@@ -31,7 +31,7 @@ mkdir -p "$APPDIR/usr/share/fellyjin"
 cp -r "$PROJ/src-tauri/mpv-config" "$APPDIR/usr/share/fellyjin/mpv"
 
 echo "==> Repacking AppImage"
-"$LINUXDEPLOY" --appdir "$APPDIR" --output appimage 2>&1 | tail -4
+"$LINUXDEPLOY" --appdir "$APPDIR" --output appimage 2>&1 | tail -30
 
 FINAL="$BUNDLE_DIR/FellyJin-x86_64.AppImage"
 # linuxdeploy names output from desktop file; normalize.
