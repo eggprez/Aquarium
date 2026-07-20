@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FellyJin</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="login-root" class="hidden"></div>
+      <div id="shell" class="hidden">
+        <aside id="sidebar">
+          <div class="brand">
+            <div class="brand-mark">▶</div>
+            <span>FellyJin</span>
+          </div>
+          <nav id="nav"></nav>
+          <div class="sidebar-footer" id="sidebar-footer"></div>
+        </aside>
+        <main id="main">
+          <header id="topbar">
+            <button id="back-btn" class="nav-btn" title="Back" aria-label="Go back" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <input id="search-input" type="search" placeholder="Search movies, shows, episodes…" autocomplete="off" />
+            <div id="offline-pill" hidden>
+              <span class="offline-dot"></span>
+              <span>Offline</span>
+              <button id="offline-retry" class="btn small" type="button">Retry</button>
+            </div>
+            <div id="topbar-user"></div>
+          </header>
+          <div id="content"></div>
+        </main>
+      </div>
+      <div id="player-bar" class="hidden"></div>
+      <div id="toasts"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
