@@ -20,10 +20,16 @@ export NO_STRIP=1
 export LDAI_OUTPUT="$BUNDLE_DIR/FellyJin_repack.AppImage"
 
 echo "==> Deploying mpv + dependencies into AppDir"
-# linuxdeploy exits non-zero on warnings even when it actually succeeds, so
-# don't let set -e abort here — later steps verify success by checking for
-# the actual output files instead of trusting the exit code.
-"$LINUXDEPLOY" --appdir "$APPDIR" -e "$MPV_BIN" 2>&1 | tail -30 || true
+# linuxdeploy exits non-zero on warnings even when it actually succeeds. A
+# plain `| tail || true` should swallow that under set -e/pipefail, but that
+# hasn't held up reliably in CI, so capture the exit code explicitly instead
+# of trusting pipe/subshell status propagation at all.
+set +e
+"$LINUXDEPLOY" --appdir "$APPDIR" -e "$MPV_BIN" > /tmp/ld1.log 2>&1
+LD1_EXIT=$?
+set -e
+tail -30 /tmp/ld1.log
+echo "(linuxdeploy exit code: $LD1_EXIT — non-zero here is expected/benign)"
 
 echo "==> Renaming bundled mpv to fellyjin-mpv"
 mv "$APPDIR/usr/bin/mpv" "$APPDIR/usr/bin/fellyjin-mpv"
@@ -34,7 +40,12 @@ mkdir -p "$APPDIR/usr/share/fellyjin"
 cp -r "$PROJ/src-tauri/mpv-config" "$APPDIR/usr/share/fellyjin/mpv"
 
 echo "==> Repacking AppImage"
-"$LINUXDEPLOY" --appdir "$APPDIR" --output appimage 2>&1 | tail -30 || true
+set +e
+"$LINUXDEPLOY" --appdir "$APPDIR" --output appimage > /tmp/ld2.log 2>&1
+LD2_EXIT=$?
+set -e
+tail -30 /tmp/ld2.log
+echo "(linuxdeploy exit code: $LD2_EXIT — non-zero here is expected/benign)"
 
 FINAL="$BUNDLE_DIR/FellyJin-x86_64.AppImage"
 # linuxdeploy names output from desktop file; normalize.
