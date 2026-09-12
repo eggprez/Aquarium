@@ -1,6 +1,6 @@
 # FellyJin Privacy Policy
 
-_Last updated: 12 September 2026_
+_Last updated: 13 September 2026_
 
 FellyJin is a client application for Jellyfin media servers, available for
 iPhone, iPad and Apple TV. This policy describes what the app does with your
@@ -15,8 +15,9 @@ information. The short version: **FellyJin collects nothing.**
 - **Downloads** you have chosen to keep for offline viewing, together with
   your playback position for them.
 
-All of this stays on the device. You can remove it at any time by signing out
-(which deletes the session, token and downloads) or by deleting the app.
+All of this stays on the device, with one exception described below (your own
+iCloud). You can remove it at any time by signing out (which deletes the
+session and token and stops any downloads in progress) or by deleting the app.
 
 ## What the app sends, and to whom
 
@@ -26,9 +27,12 @@ library and media, and playback progress (so the server can show what you have
 watched). What that server does with this information is governed by whoever
 operates it — usually you.
 
-If you have iCloud enabled, your **app settings** (not your credentials, and
-not your library) are synchronised between your own devices through Apple's
-iCloud Key-Value Store. Apple's privacy policy applies to that transport.
+If you have iCloud enabled, the app synchronises between **your own devices**:
+your settings, your server address and user name, and the addresses of any
+Live TV playlist and guide you entered (through Apple's iCloud Key-Value
+Store), and your access token (through iCloud Keychain, so it is end-to-end
+encrypted by Apple). None of this is visible to the developer. Apple's privacy
+policy applies to that transport, and turning iCloud off for the app stops it.
 
 FellyJin has **no server of its own**. It contains **no analytics, no crash
 reporting, no advertising, and no tracking**. The developer receives no

@@ -1,5 +1,15 @@
 # FellyJin
 
+## iPhone, iPad and Apple TV
+
+FellyJin is also on the App Store for iPhone, iPad and Apple TV, as a native
+SwiftUI app that shares its behaviour with this Linux build but not its code.
+It was written with AI assistance (Anthropic's Claude), directed and tested by
+the developer, and is shared as-is. **Support:** open an issue on this
+repository. **Privacy policy:** [PRIVACY.md](PRIVACY.md) — the app collects
+nothing and talks only to your own Jellyfin server.
+
+
 A lightweight, modern Jellyfin client for Linux, packaged as an AppImage.
 
 > **Note:** This app was built with AI assistance (Claude). It's a personal
