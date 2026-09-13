@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FellyJin</title>
+    <!-- Applies the last resolved theme before first paint. A separate file
+         rather than an inline script so the CSP can refuse inline scripts. -->
+    <script src="/theme-boot.js"></script>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
@@ -12,10 +15,10 @@
       <div id="shell" class="hidden">
         <aside id="sidebar">
           <div class="brand">
-            <div class="brand-mark">▶</div>
-            <span>FellyJin</span>
+            <img class="brand-mark" src="/fellyjin-logo.png" alt="" width="30" height="30" />
+            <span class="wordmark">Felly<b>Jin</b></span>
           </div>
-          <nav id="nav"></nav>
+          <nav id="nav" aria-label="Primary"></nav>
           <div class="sidebar-footer" id="sidebar-footer"></div>
         </aside>
         <main id="main">
@@ -23,7 +26,10 @@
             <button id="back-btn" class="nav-btn" title="Back" aria-label="Go back" hidden>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
             </button>
-            <input id="search-input" type="search" placeholder="Search movies, shows, episodes…" autocomplete="off" />
+            <div class="search-wrap">
+              <input id="search-input" type="search" placeholder="Search movies, shows, episodes…" autocomplete="off" aria-label="Search movies, shows and episodes" />
+              <div id="search-recent" class="search-recent" hidden></div>
+            </div>
             <div id="offline-pill" hidden>
               <span class="offline-dot"></span>
               <span>Offline</span>

@@ -16,11 +16,17 @@ pub fn http() -> &'static reqwest::Client {
     })
 }
 
-pub fn auth_header(token: &str, device_id: &str) -> String {
+/// The `Authorization` value for an unauthenticated request — sign-in, and
+/// anything else that runs before there is a token.
+pub fn auth_header_anon(device_id: &str) -> String {
     format!(
-        "MediaBrowser Client=\"{}\", Device=\"Linux\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
-        CLIENT_NAME, device_id, CLIENT_VERSION, token
+        "MediaBrowser Client=\"{}\", Device=\"Linux\", DeviceId=\"{}\", Version=\"{}\"",
+        CLIENT_NAME, device_id, CLIENT_VERSION
     )
+}
+
+pub fn auth_header(token: &str, device_id: &str) -> String {
+    format!("{}, Token=\"{}\"", auth_header_anon(device_id), token)
 }
 
 /// POST a JSON body to a Jellyfin endpoint. `path` must start with '/'.
@@ -34,8 +40,11 @@ pub async fn post(
     let url = format!("{}{}", server.trim_end_matches('/'), path);
     let resp = http()
         .post(&url)
+        // The `MediaBrowser` scheme in the standard `Authorization` header is
+        // the only carrier Jellyfin 12 reads by default; `X-Emby-Token` and
+        // the other Emby-era headers are behind an admin opt-in there and
+        // going away, so there is no point sending the token twice.
         .header("Authorization", auth_header(token, device_id))
-        .header("X-Emby-Token", token)
         .json(body)
         .send()
         .await

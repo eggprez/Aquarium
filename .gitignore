@@ -9,3 +9,5 @@ src-tauri/gen/
 *.AppImage
 *.appimage
 .claude/
+*.deb
+wayland-spike/

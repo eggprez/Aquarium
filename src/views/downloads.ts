@@ -3,22 +3,40 @@ import { listen } from "@tauri-apps/api/event";
 import * as api from "../api";
 import {
   playLocal,
+  startLocalShuffle,
   syncOfflineProgress,
   getQueuedDownloads,
   cancelQueuedDownload,
+  clearDownloadQueue,
+  retryDownload,
+  retryFailedDownloads,
+  getDownloadConcurrency,
+  setDownloadConcurrency,
+  MAX_DOWNLOAD_CONCURRENCY,
   type PendingDownload,
 } from "../playback";
-import { el, clear, spinner, toast } from "../ui";
+import {
+  el,
+  clear,
+  art,
+  toast,
+  attachContextMenu,
+  emptyState,
+  icon,
+  skeletonGrid,
+  type MenuAction,
+} from "../ui";
 
 type Tab = "tv" | "movies" | "queue";
 
-let refreshTimer: number | null = null;
 let activeTab: Tab = "tv";
 let openSeries: string | null = null;
 let openSeason: number | null = null;
 let currentRoot: HTMLElement | null = null;
 let queueListenerInstalled = false;
 let playbackListenerInstalled = false;
+/** Guards the self-heal re-render below against stacking up on progress ticks. */
+let healingQueueTab = false;
 
 // ---------- Helpers ----------
 
@@ -30,7 +48,7 @@ function completedSub(dl: any): string {
   const s: string[] = [];
   if (dl.quality) s.push(dl.quality);
   if (dl.size_bytes) s.push(api.bytesToText(dl.size_bytes));
-  if (dl.played) s.push("watched ✓");
+  if (dl.played) s.push("watched");
   else if (dl.position_ticks > 0 && dl.run_time_ticks) {
     s.push(`resume at ${api.ticksToText(dl.position_ticks)}`);
   }
@@ -46,7 +64,7 @@ function dlRow(
 ): HTMLElement {
   return el("div", { class: "dl-row" }, [
     el("div", { class: "dl-poster" }, [
-      posterPath ? el("img", { src: convertFileSrc(posterPath) }) : null,
+      posterPath ? art(convertFileSrc(posterPath), title) : null,
       ...posterExtra,
     ]),
     el("div", { class: "dl-body" }, [el("h4", {}, [title]), ...bodyExtra]),
@@ -79,7 +97,7 @@ function watchedOverlay(dl: any): (Node | null)[] {
       : 0;
   return [
     pct > 1 ? el("div", { class: "progress-strip" }, [el("div", { style: `width:${pct}%` })]) : null,
-    dl.played ? el("div", { class: "badge played" }, ["✓"]) : null,
+    dl.played ? el("div", { class: "badge played" }, [icon("check")]) : null,
   ];
 }
 
@@ -87,22 +105,30 @@ function libCard(opts: {
   posterPath?: string;
   title: string;
   sub: string;
-  overlay?: string;
+  overlay?: boolean;
   /** ✓ badge (fully watched). */
   played?: boolean;
   /** 0–100 progress strip along the poster bottom. */
   progressPct?: number | null;
   onOpen: () => void;
   onDelete?: () => void;
+  /** Renders a shuffle badge on the poster (series cards). */
+  onShuffle?: () => void;
+  /** Right-click menu contents. */
+  actions?: () => MenuAction[];
+  /** Title shown at the top of that menu. */
+  menuTitle?: string;
 }): HTMLElement {
   const pct = opts.progressPct ?? 0;
   const poster = el("div", { class: "card-poster" }, [
-    opts.posterPath
-      ? el("img", { src: convertFileSrc(opts.posterPath), loading: "lazy", alt: "" })
-      : el("div", { class: "noart" }, [opts.title.slice(0, 1).toUpperCase() || "?"]),
+    art(opts.posterPath ? convertFileSrc(opts.posterPath) : null, opts.title),
     pct > 1 ? el("div", { class: "progress-strip" }, [el("div", { style: `width:${pct}%` })]) : null,
-    opts.played ? el("div", { class: "badge played" }, ["✓"]) : null,
-    opts.overlay ? el("div", { class: "play-overlay" }, [el("button", { class: "pbtn" }, [opts.overlay])]) : null,
+    opts.played ? el("div", { class: "badge played" }, [icon("check")]) : null,
+    opts.overlay
+      ? el("div", { class: "play-overlay" }, [
+          el("button", { class: "pbtn", "aria-label": `Play ${opts.title}` }, [icon("play", 20)]),
+        ])
+      : null,
     opts.onDelete
       ? el("button", {
           class: "dl-del-badge",
@@ -111,14 +137,28 @@ function libCard(opts: {
             ev.stopPropagation();
             opts.onDelete!();
           },
-        }, ["×"])
+        }, [icon("close", 15)])
+      : null,
+    opts.onShuffle
+      ? el("button", {
+          class: "dl-shuffle-badge",
+          title: "Shuffle play",
+          onClick: (ev: MouseEvent) => {
+            ev.stopPropagation();
+            opts.onShuffle!();
+          },
+        }, [icon("shuffle", 14)])
       : null,
   ]);
-  return el("div", { class: "card", onClick: opts.onOpen }, [
+  const card = el("div", { class: "card", onClick: opts.onOpen }, [
     poster,
     el("div", { class: "card-title" }, [opts.title]),
     el("div", { class: "card-sub" }, [opts.sub]),
   ]);
+  if (opts.actions) {
+    attachContextMenu(card, opts.menuTitle ?? opts.title, opts.actions);
+  }
+  return card;
 }
 
 async function deleteDownload(itemId: string, root: HTMLElement): Promise<void> {
@@ -137,21 +177,27 @@ async function deleteMany(eps: any[], root: HTMLElement): Promise<void> {
 
 /** Danger button that arms on first click ("Delete N episodes?") and only
  *  deletes on a second click within a few seconds. */
-function deleteAllButton(label: string, count: number, onConfirm: () => void): HTMLElement {
+function deleteAllButton(
+  label: string,
+  count: number,
+  onConfirm: () => void,
+  noun = "episode",
+  verb = "Delete"
+): HTMLElement {
   const btn = el("button", { class: "btn small danger" }, [label]);
   let armed = false;
   let timer = 0;
   btn.addEventListener("click", () => {
     if (!armed) {
       armed = true;
-      btn.textContent = `Delete ${count} episode${count === 1 ? "" : "s"}?`;
+      btn.textContent = `${verb} ${count} ${noun}${count === 1 ? "" : "s"}?`;
       timer = window.setTimeout(() => {
         armed = false;
         btn.textContent = label;
       }, 4000);
     } else {
       clearTimeout(timer);
-      btn.textContent = "Deleting…";
+      btn.textContent = "Working…";
       (btn as HTMLButtonElement).disabled = true;
       onConfirm();
     }
@@ -159,12 +205,158 @@ function deleteAllButton(label: string, count: number, onConfirm: () => void): H
   return btn;
 }
 
+/**
+ * Empty the download queue: drop everything still waiting and cancel whatever
+ * is mid-transfer. Files already downloaded are left alone.
+ */
+async function clearQueue(root: HTMLElement): Promise<void> {
+  const dropped = clearDownloadQueue();
+  // Re-read rather than trusting the render-time snapshot: the queue may have
+  // started another item since this view was painted.
+  const items = await invoke<any[]>("downloads_list").catch(() => []);
+  const running = items.filter((d) => d.status === "downloading");
+  for (const dl of running) {
+    await invoke("download_cancel", { itemId: dl.item_id }).catch(() => {});
+  }
+  const bits = [
+    running.length ? `${running.length} in progress cancelled` : null,
+    dropped ? `${dropped} queued item${dropped === 1 ? "" : "s"} dropped` : null,
+  ].filter(Boolean);
+  toast(bits.length ? `Queue cleared · ${bits.join(" · ")}` : "Queue was already empty", "ok");
+  renderDownloads(root, { keepTab: true });
+}
+
+// ---------- Context menus (downloaded items) ----------
+
+/** Watched/unwatched for a downloaded file: writes meta.json and queues the
+ *  change for the next server sync (same path playback progress takes). */
+async function setLocalPlayed(dl: any, played: boolean, root: HTMLElement): Promise<void> {
+  try {
+    // Either way the resume point is cleared — that's what the toggle means.
+    await invoke("progress_store_local", { itemId: dl.item_id, positionTicks: 0, played });
+    dl.played = played;
+    dl.position_ticks = 0;
+    toast(played ? "Marked watched" : "Marked unwatched", "ok");
+    renderDownloads(root, { keepTab: true });
+  } catch (e: any) {
+    toast(e.message ?? String(e), "error");
+  }
+}
+
+/** Right-click actions for one downloaded item. */
+function localActions(dl: any, root: HTMLElement): MenuAction[] {
+  const out: MenuAction[] = [];
+  if (dl.path) {
+    const resume = !dl.played && dl.position_ticks > 0;
+    if (resume) {
+      out.push({
+        label: `Resume (${api.ticksToText(dl.position_ticks)} in)`,
+        icon: "play",
+        run: () => playLocal(dl),
+      });
+      out.push({ label: "Play from start", run: () => playLocal({ ...dl, position_ticks: 0 }) });
+    } else {
+      out.push({ label: "Play", icon: "play", run: () => playLocal({ ...dl, position_ticks: 0 }) });
+    }
+  }
+  out.push({
+    label: dl.played ? "Mark unwatched" : "Mark watched",
+    icon: "check",
+    run: () => setLocalPlayed(dl, !dl.played, root),
+  });
+  if (dl.item_id && api.getSession()) {
+    out.push({
+      label: "Show details",
+      icon: "library",
+      run: () => {
+        location.hash = `#/item/${dl.item_id}`;
+      },
+    });
+  }
+  out.push({
+    label: "Delete download",
+    icon: "trash",
+    danger: true,
+    run: () => deleteDownload(dl.item_id, root),
+  });
+  return out;
+}
+
+/** Right-click actions for a group card (a series or a season). */
+function groupActions(eps: any[], label: string, root: HTMLElement): MenuAction[] {
+  const playable = eps.filter((e) => e.status === "complete" && e.path);
+  const sorted = [...playable].sort(
+    (a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0)
+  );
+  const firstUnwatched = sorted.find((e) => !e.played) ?? sorted[0];
+  const allPlayed = eps.every((e) => e.played);
+  return [
+    firstUnwatched
+      ? {
+          label: `Play ${firstUnwatched.episode != null ? `E${firstUnwatched.episode}` : "first"}`,
+          icon: "play",
+          run: () => playLocal(firstUnwatched),
+        }
+      : null,
+    playable.length
+      ? { label: "Shuffle", icon: "shuffle", run: () => startLocalShuffle(playable) }
+      : null,
+    {
+      label: allPlayed ? `Mark ${label} unwatched` : `Mark ${label} watched`,
+      icon: "check",
+      run: async () => {
+        for (const e of eps) {
+          await invoke("progress_store_local", {
+            itemId: e.item_id,
+            positionTicks: 0,
+            played: !allPlayed,
+          }).catch(() => {});
+          e.played = !allPlayed;
+          e.position_ticks = 0;
+        }
+        toast(`Marked ${eps.length} episode${eps.length === 1 ? "" : "s"} ${allPlayed ? "unwatched" : "watched"}`, "ok");
+        renderDownloads(root, { keepTab: true });
+      },
+    },
+    { label: `Delete ${label}`, danger: true, run: () => deleteMany(eps, root) },
+  ].filter(Boolean) as MenuAction[];
+}
+
+/** How many queued downloads may run at once. */
+function concurrencySelector(): HTMLElement {
+  const current = getDownloadConcurrency();
+  const select = el("select", { class: "control", title: "How many queued downloads run at the same time" });
+  for (let n = 1; n <= MAX_DOWNLOAD_CONCURRENCY; n++) {
+    select.append(
+      el("option", { value: String(n), ...(n === current ? { selected: "selected" } : {}) }, [
+        n === 1 ? "1 at a time" : `${n} at a time`,
+      ])
+    );
+  }
+  select.addEventListener("change", () => {
+    const n = parseInt(select.value, 10);
+    setDownloadConcurrency(n);
+    toast(n === 1 ? "Downloading one at a time" : `Downloading up to ${n} at a time`, "ok");
+  });
+  return el("label", { class: "dl-concurrency-wrap" }, [
+    el("span", {}, ["Parallel"]),
+    select,
+  ]);
+}
+
 // ---------- Tabs ----------
 
 function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
   clear(pane);
   if (!tv.length) {
-    pane.append(el("div", { class: "empty" }, ["No TV downloads yet."]));
+    pane.append(
+      emptyState({
+        icon: "download",
+        title: "No TV downloads yet",
+        body: "Right-click an episode, a season or a whole series and pick “Download” — anything saved here plays without the server.",
+        action: { label: "Browse shows", run: () => (location.hash = "#/home") },
+      })
+    );
     return;
   }
 
@@ -204,6 +396,8 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
             openSeason = null;
             renderTvTab(pane, tv, root);
           },
+          onShuffle: () => startLocalShuffle(eps),
+          actions: () => groupActions(eps, "series", root),
         })
       );
     }
@@ -233,9 +427,14 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
             openSeries = null;
             renderTvTab(pane, tv, root);
           },
-        }, ["← All shows"]),
+        }, [icon("arrow-left"), "All shows"]),
         el("span", {}, [openSeries]),
-        el("span", { style: "margin-left:auto" }, [
+        el("span", { class: "row-actions" }, [
+          el("button", {
+            class: "btn small primary",
+            title: "Play every downloaded episode in random order",
+            onClick: () => startLocalShuffle(eps),
+          }, [icon("shuffle"), `Shuffle ${eps.length} episode${eps.length === 1 ? "" : "s"}`]),
           deleteAllButton("Delete series", eps.length, () => deleteMany(eps, root)),
         ]),
       ])
@@ -261,6 +460,8 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
             openSeason = season;
             renderTvTab(pane, tv, root);
           },
+          actions: () => groupActions(list, "season", root),
+          menuTitle: `${openSeries} · ${seasonTitle(season)}`,
         })
       );
     }
@@ -277,9 +478,9 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
           openSeason = null;
           renderTvTab(pane, tv, root);
         },
-      }, ["← Seasons"]),
+      }, [icon("arrow-left"), "Seasons"]),
       el("span", {}, [`${openSeries} · ${seasonTitle(openSeason)}`]),
-      el("span", { style: "margin-left:auto" }, [
+      el("span", { class: "row-actions" }, [
         deleteAllButton("Delete season", list.length, () => deleteMany(list, root)),
       ]),
     ])
@@ -287,25 +488,37 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
   for (const ep of list) {
     const code = ep.episode != null ? `${ep.episode}. ` : "";
     const actions = el("div", { class: "dl-actions" }, [
-      ep.path ? el("button", { class: "btn small primary", onClick: () => playLocal(ep) }, ["▶ Play"]) : null,
+      ep.path
+        ? el("button", { class: "btn small primary", onClick: () => playLocal(ep) }, [
+            icon("play"),
+            "Play",
+          ])
+        : null,
       el("button", { class: "btn small danger", onClick: () => deleteDownload(ep.item_id, root) }, ["Delete"]),
     ]);
-    pane.append(
-      dlRow(
-        ep.poster_path,
-        `${code}${ep.name ?? ep.title ?? ep.item_id}`,
-        [el("div", { class: "dl-sub" }, [completedSub(ep)])],
-        actions,
-        watchedOverlay(ep)
-      )
+    const row = dlRow(
+      ep.poster_path,
+      `${code}${ep.name ?? ep.title ?? ep.item_id}`,
+      [el("div", { class: "dl-sub" }, [completedSub(ep)])],
+      actions,
+      watchedOverlay(ep)
     );
+    attachContextMenu(row, ep.name ?? ep.title ?? null, () => localActions(ep, root));
+    pane.append(row);
   }
 }
 
 function renderMoviesTab(pane: HTMLElement, movies: any[], root: HTMLElement): void {
   clear(pane);
   if (!movies.length) {
-    pane.append(el("div", { class: "empty" }, ["No movie downloads yet."]));
+    pane.append(
+      emptyState({
+        icon: "download",
+        title: "No movie downloads yet",
+        body: "Right-click any film and pick “Download” to keep a copy on this machine — useful before a flight, or when the server is unreachable.",
+        action: { label: "Browse movies", run: () => (location.hash = "#/home") },
+      })
+    );
     return;
   }
   const grid = el("div", { class: "card-grid" });
@@ -322,11 +535,12 @@ function renderMoviesTab(pane: HTMLElement, movies: any[], root: HTMLElement): v
         sub,
         played: !!dl.played,
         progressPct: pct,
-        overlay: dl.path ? "▶" : undefined,
+        overlay: !!dl.path,
         onOpen: () => {
           if (dl.path) playLocal(dl);
         },
         onDelete: () => deleteDownload(dl.item_id, root),
+        actions: () => localActions(dl, root),
       })
     );
   }
@@ -342,8 +556,29 @@ function renderQueueTab(
 ): void {
   clear(pane);
   if (!active.length && !errored.length && !waiting.length) {
-    pane.append(el("div", { class: "empty" }, ["No active or queued downloads."]));
+    pane.append(
+      emptyState({
+        icon: "download",
+        title: "The queue is empty",
+        body: "Nothing is transferring right now. Downloads you start appear here with their progress, and resume automatically if they're interrupted.",
+      })
+    );
     return;
+  }
+
+  const queued = active.length + waiting.length;
+  if (queued) {
+    pane.append(
+      el("div", { class: "lib-crumb" }, [
+        el("span", {}, [
+          `${queued} download${queued === 1 ? "" : "s"} in the queue` +
+            (active.length ? ` · ${active.length} running` : ""),
+        ]),
+        el("span", { class: "row-actions" }, [
+          deleteAllButton("Clear queue", queued, () => clearQueue(root), "queued download", "Cancel"),
+        ]),
+      ])
+    );
   }
 
   if (active.length) {
@@ -359,14 +594,20 @@ function renderQueueTab(
           onClick: () => invoke("download_cancel", { itemId: dl.item_id }),
         }, ["Cancel"]),
       ]);
-      pane.append(
-        dlRow(
-          dl.poster_path,
-          dl.title ?? dl.name ?? dl.item_id,
-          [el("div", { class: "dl-sub", "data-sub": dl.item_id }, [sub.join(" · ")]), bar],
-          actions
-        )
+      const row = dlRow(
+        dl.poster_path,
+        dl.title ?? dl.name ?? dl.item_id,
+        [el("div", { class: "dl-sub", "data-sub": dl.item_id }, [sub.join(" · ")]), bar],
+        actions
       );
+      attachContextMenu(row, dl.title ?? dl.name ?? null, () => [
+        {
+          label: "Cancel download",
+          danger: true,
+          run: () => void invoke("download_cancel", { itemId: dl.item_id }),
+        },
+      ]);
+      pane.append(row);
     }
   }
 
@@ -376,40 +617,77 @@ function renderQueueTab(
       const parts: string[] = [];
       if (p.series && p.season != null && p.episode != null) parts.push(`${p.series} · S${p.season}E${p.episode}`);
       else if (p.series) parts.push(p.series);
-      parts.push(`Waiting · ${p.quality}`);
+      // A retry replays the stored request, so its quality isn't known here —
+      // saying "Waiting · retrying" reads as a stutter. Name what it is.
+      parts.push(p.retry ? "Waiting · retry of a failed download" : `Waiting · ${p.quality}`);
       const actions = el("div", { class: "dl-actions" }, [
         el("span", { class: "queue-pos" }, [`#${i + 1}`]),
         el("button", { class: "btn small danger", onClick: () => cancelQueuedDownload(p.id) }, ["Remove"]),
       ]);
-      pane.append(dlRow(undefined, p.title, [el("div", { class: "dl-sub" }, [parts.join(" · ")])], actions));
+      const row = dlRow(undefined, p.title, [el("div", { class: "dl-sub" }, [parts.join(" · ")])], actions);
+      attachContextMenu(row, p.title, () => [
+        { label: "Remove from queue", danger: true, run: () => cancelQueuedDownload(p.id) },
+      ]);
+      pane.append(row);
     });
   }
 
   if (errored.length) {
-    pane.append(el("h3", { class: "season-group" }, ["Failed"]));
-    for (const dl of errored) {
-      const actions = el("div", { class: "dl-actions" }, [
-        el("button", {
-          class: "btn small",
-          onClick: async () => {
-            try {
-              await invoke("download_retry", { itemId: dl.item_id });
+    const head = el("div", { class: "dl-group-head" }, [
+      el("h3", { class: "season-group" }, [`Failed · ${errored.length}`]),
+    ]);
+    // One click to restart everything a network drop knocked out, instead of
+    // one click per episode. Queued rather than fired at once, so the parallel
+    // limit still applies.
+    if (errored.length > 1) {
+      head.append(
+        el(
+          "button",
+          {
+            class: "btn small",
+            onClick: async () => {
+              const n = retryFailedDownloads(
+                errored.map((d) => ({ item_id: d.item_id, title: d.title ?? d.name }))
+              );
+              toast(
+                n ? `Retrying ${n} download${n === 1 ? "" : "s"}` : "Those are already retrying",
+                n ? "ok" : "error"
+              );
               renderDownloads(root, { keepTab: true });
-            } catch (e) {
-              toast(`Retry failed: ${e}`, "error");
-            }
+            },
           },
-        }, ["Retry"]),
-        el("button", { class: "btn small danger", onClick: () => deleteDownload(dl.item_id, root) }, ["Delete"]),
-      ]);
-      pane.append(
-        dlRow(
-          dl.poster_path,
-          dl.title ?? dl.name ?? dl.item_id,
-          [el("div", { class: "dl-sub" }, [`failed: ${dl.error ?? "unknown error"}`])],
-          actions
+          [`Retry all ${errored.length}`]
         )
       );
+    }
+    pane.append(head);
+    for (const dl of errored) {
+      // Queued, not started: the parallel limit applies to a retry the same as
+      // to a fresh download. It goes to the front of the queue, so with the
+      // limit free it still starts immediately.
+      const retry = (): void => {
+        const queued = retryDownload(dl.item_id, dl.title ?? dl.name);
+        toast(
+          queued ? "Queued for retry" : "That one is already retrying",
+          queued ? "ok" : "error"
+        );
+        renderDownloads(root, { keepTab: true });
+      };
+      const actions = el("div", { class: "dl-actions" }, [
+        el("button", { class: "btn small", onClick: retry }, ["Retry"]),
+        el("button", { class: "btn small danger", onClick: () => deleteDownload(dl.item_id, root) }, ["Delete"]),
+      ]);
+      const row = dlRow(
+        dl.poster_path,
+        dl.title ?? dl.name ?? dl.item_id,
+        [el("div", { class: "dl-sub" }, [`failed: ${dl.error ?? "unknown error"}`])],
+        actions
+      );
+      attachContextMenu(row, dl.title ?? dl.name ?? null, () => [
+        { label: "Retry download", run: retry },
+        { label: "Delete", danger: true, run: () => deleteDownload(dl.item_id, root) },
+      ]);
+      pane.append(row);
     }
   }
 }
@@ -453,10 +731,6 @@ export async function renderDownloads(
   root: HTMLElement,
   opts: { keepTab?: boolean } = {}
 ): Promise<void> {
-  if (refreshTimer) {
-    clearInterval(refreshTimer);
-    refreshTimer = null;
-  }
   currentRoot = root;
   if (!opts.keepTab) {
     activeTab = "tv";
@@ -464,8 +738,14 @@ export async function renderDownloads(
     openSeason = null;
   }
 
-  clear(root);
-  root.append(spinner());
+  // This view re-renders constantly — on every finished download, every queue
+  // change, and after playback. Only the first paint gets a placeholder; a
+  // refresh keeps the current content on screen until the new one is ready,
+  // instead of flashing the whole page.
+  if (!root.querySelector(".dl-tabs")) {
+    clear(root);
+    root.append(skeletonGrid(10));
+  }
 
   const [items, pending] = await Promise.all([
     invoke<any[]>("downloads_list"),
@@ -477,13 +757,19 @@ export async function renderDownloads(
   const tv = completed.filter(isEpisode);
   const movies = completed.filter((d) => !isEpisode(d));
   const active = items.filter((d) => d.status === "downloading");
-  const errored = items.filter((d) => d.status === "error");
+  // A queued retry keeps `status: "error"` in meta.json until it actually
+  // starts, so without this it renders twice — once under "Up next" and again
+  // under "Failed", the second with a Retry button that does nothing because
+  // it's already queued.
+  const waitingIds = new Set(waiting.map((p) => p.id));
+  const errored = items.filter((d) => d.status === "error" && !waitingIds.has(d.item_id));
 
   clear(root);
   root.append(
     el("div", { class: "section-head" }, [
-      el("h1", { class: "page-title", style: "margin-bottom:0" }, ["Downloads"]),
-      el("div", { style: "display:flex;gap:10px;align-items:center" }, [
+      el("h1", { class: "page-title" }, ["Downloads"]),
+      el("div", { class: "head-tools" }, [
+        concurrencySelector(),
         el("span", { class: "sync-pill" }, [
           pending > 0 ? `${pending} watch state(s) waiting to sync` : "Watch state in sync",
         ]),
@@ -592,6 +878,17 @@ export function updateDownloadProgress(payload: any, root: HTMLElement): void {
   }
   const bar = root.querySelector<HTMLElement>(`.dl-bar[data-item="${payload.item_id}"] > div`);
   const sub = root.querySelector<HTMLElement>(`[data-sub="${payload.item_id}"]`);
+
+  // Progress for a download the Queue tab never drew a row for: the view was
+  // rendered before this item's meta.json existed. Re-render once so it shows
+  // up, instead of leaving the tab looking like the queue died.
+  if (!bar && activeTab === "queue" && !healingQueueTab && root.querySelector(".dl-tabs")) {
+    healingQueueTab = true;
+    void renderDownloads(root, { keepTab: true }).finally(() => {
+      healingQueueTab = false;
+    });
+    return;
+  }
   const approx = payload.estimated ? "~" : "";
   const speed = payload.speed_bps ? `${api.bytesToText(payload.speed_bps)}/s` : "";
 

@@ -1,16 +1,31 @@
-// Jellyfin API client. All requests go through the Tauri HTTP plugin so we
-// aren't subject to webview CORS rules against arbitrary user servers.
-import { fetch } from "@tauri-apps/plugin-http";
+// Jellyfin API client.
+//
+// Nothing here talks to the network. Every request is handed to the Rust side
+// (`server.rs`), which adds the access token, checks the server is still the
+// one we signed in to, and hands back a status and a body. The token has never
+// been in this file since; a script that gets into the webview has no
+// credential to steal and no way to reach an outside host anyway — the window
+// holds no HTTP permission and the CSP forbids it.
 import { invoke } from "@tauri-apps/api/core";
 
 export const CLIENT_VERSION = "0.1.0";
 
 export interface Session {
   server: string;
-  token: string;
   userId: string;
   userName: string;
   deviceId: string;
+  /** Whether the connection to the server is encrypted. */
+  secure: boolean;
+}
+
+/** What a server said about itself when probed, before any sign-in. */
+export interface ServerProbe {
+  server: string;
+  secure: boolean;
+  server_id: string | null;
+  server_name: string | null;
+  version: string | null;
 }
 
 let session: Session | null = null;
@@ -19,6 +34,36 @@ let offline = false;
 
 export function getSession(): Session | null {
   return session;
+}
+
+// Errors from Rust arrive as "<kind>|<message>" so the difference between "the
+// network is down" and "that is not the server you signed in to" survives the
+// trip across the IPC boundary.
+interface ApiError {
+  kind: "offline" | "identity" | "auth" | "config" | "server";
+  message: string;
+}
+
+function splitError(e: any): ApiError {
+  const raw = typeof e === "string" ? e : e?.message ?? String(e);
+  const i = raw.indexOf("|");
+  const kind = i > 0 ? raw.slice(0, i) : "";
+  if (["offline", "identity", "auth", "config", "server"].includes(kind)) {
+    return { kind: kind as ApiError["kind"], message: raw.slice(i + 1) };
+  }
+  return { kind: "server", message: raw };
+}
+
+/**
+ * The address we have saved is answering as a different Jellyfin install than
+ * the one the session belongs to. That is either a moved server or someone
+ * editing config.json to point the client — and its token — somewhere else, so
+ * it stops the app rather than degrading to offline mode.
+ */
+function announceIdentityChange(message: string): void {
+  document.dispatchEvent(
+    new CustomEvent("fellyjin-server-identity", { detail: { message } })
+  );
 }
 
 // ---------- Connectivity ----------
@@ -37,20 +82,41 @@ function setOffline(v: boolean): void {
 
 /** Probe the saved server. Updates the offline flag; true when reachable. */
 export async function checkOnline(): Promise<boolean> {
-  const s = session;
-  if (!s) return false;
+  if (!session) return false;
   try {
-    // Any HTTP response at all means the server is reachable.
-    await fetch(s.server + "/System/Info/Public", {
-      method: "GET",
-      connectTimeout: 3000,
-    } as any);
-    setOffline(false);
-    return true;
-  } catch {
+    const ok = await invoke<boolean>("jf_ping");
+    setOffline(!ok);
+    return ok;
+  } catch (e) {
+    const { kind, message } = splitError(e);
+    if (kind === "identity") {
+      announceIdentityChange(message);
+      return false;
+    }
     setOffline(true);
     return false;
   }
+}
+
+/**
+ * A failed request says the server *may* be unreachable; one probe decides.
+ * The request itself is not enough: a resolver with no network under it yet —
+ * the seconds after a wake, a Wi-Fi hand-off — fails instantly, and taking
+ * that as the verdict put the app in offline mode on the strength of a single
+ * failure it never re-checked. The probe (`ping` in server.rs) retries a fast
+ * failure before answering, and the burst of requests a page makes shares one
+ * probe rather than each starting its own.
+ */
+let offlineProbe: Promise<boolean> | null = null;
+
+async function confirmOffline(): Promise<void> {
+  if (offline || !session) return;
+  if (!offlineProbe) {
+    offlineProbe = checkOnline().finally(() => {
+      offlineProbe = null;
+    });
+  }
+  await offlineProbe;
 }
 
 export function getConfig(): any {
@@ -59,14 +125,18 @@ export function getConfig(): any {
 
 export async function loadConfig(): Promise<any> {
   appConfig = await invoke("config_load");
-  if (appConfig.server && appConfig.token && appConfig.user_id) {
+  // `has_token` rather than the token itself: the config the frontend sees no
+  // longer carries the credential, only the fact that one is stored.
+  if (appConfig.server && appConfig.has_token && appConfig.user_id) {
     session = {
       server: appConfig.server,
-      token: appConfig.token,
       userId: appConfig.user_id,
       userName: appConfig.user_name ?? "",
       deviceId: appConfig.device_id,
+      secure: String(appConfig.server).startsWith("https://"),
     };
+  } else {
+    session = null;
   }
   return appConfig;
 }
@@ -76,112 +146,159 @@ export async function saveConfig(patch: Record<string, any>): Promise<void> {
   await invoke("config_save", { cfg: appConfig });
 }
 
-function authHeader(token?: string): string {
-  const deviceId = appConfig.device_id ?? "fellyjin";
-  let h = `MediaBrowser Client="FellyJin", Device="Linux", DeviceId="${deviceId}", Version="${CLIENT_VERSION}"`;
-  if (token) h += `, Token="${token}"`;
-  return h;
-}
-
 export async function api(
   path: string,
-  opts: { method?: string; body?: any; server?: string; token?: string } = {}
+  opts: { method?: string; body?: any } = {}
 ): Promise<any> {
-  const server = (opts.server ?? session?.server ?? "").replace(/\/+$/, "");
-  if (!server) throw new Error("Not connected to a server");
-  const token = opts.token ?? session?.token;
-  const headers: Record<string, string> = {
-    Authorization: authHeader(token),
-  };
-  if (opts.body !== undefined) headers["Content-Type"] = "application/json";
-  let resp: Response;
+  let res: { status: number; body: any };
   try {
-    resp = await fetch(server + path, {
+    res = await invoke("jf_request", {
+      path,
       method: opts.method ?? "GET",
-      headers,
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      body: opts.body ?? null,
     });
   } catch (e) {
-    // The request never reached the server — we're offline (or it's down).
-    if (session && server === session.server.replace(/\/+$/, "")) setOffline(true);
-    throw new Error("Server unreachable — you appear to be offline");
+    const { kind, message } = splitError(e);
+    if (kind === "offline") {
+      void confirmOffline();
+      throw new Error(message);
+    }
+    if (kind === "identity") {
+      announceIdentityChange(message);
+      throw new Error(message);
+    }
+    throw new Error(message);
   }
-  if (session && server === session.server.replace(/\/+$/, "")) setOffline(false);
-  if (!resp.ok) {
-    throw new Error(`Server error ${resp.status} on ${path.split("?")[0]}`);
+  setOffline(false);
+  // A revoked or expired token answers 401 on every endpoint, so without this
+  // branch the whole app reads as broken — each page failing with its own
+  // "Server error 401" and no route back to the sign-in screen.
+  if (res.status === 401 && session) {
+    await expireSession();
+    throw new Error("Your session has expired — please sign in again");
   }
-  const text = await resp.text();
-  return text ? JSON.parse(text) : null;
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`Server error ${res.status} on ${path.split("?")[0]}`);
+  }
+  return res.body;
 }
 
 // ---------- Auth ----------
 
-export async function checkServer(server: string): Promise<any> {
-  const resp = await fetch(server.replace(/\/+$/, "") + "/System/Info/Public", {
-    method: "GET",
-  });
-  if (!resp.ok) throw new Error(`Server responded with ${resp.status}`);
-  return resp.json();
+/**
+ * Find out what is at an address, before any credential is sent to it. A bare
+ * hostname is tried over https first — see `server.rs`. The returned `secure`
+ * flag is what the sign-in screen warns on.
+ */
+export async function probeServer(server: string): Promise<ServerProbe> {
+  try {
+    return await invoke<ServerProbe>("jf_probe", { server });
+  } catch (e) {
+    throw new Error(splitError(e).message);
+  }
 }
 
+/**
+ * Sign in. The password goes straight to Rust and the access token never comes
+ * back out — it is written to the keyring there, and every later request is
+ * made on this session's behalf by the backend.
+ */
 export async function login(
   server: string,
   username: string,
   password: string
 ): Promise<Session> {
-  server = server.replace(/\/+$/, "");
-  const resp = await fetch(server + "/Users/AuthenticateByName", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: authHeader(),
-    },
-    body: JSON.stringify({ Username: username, Pw: password }),
-  });
-  if (resp.status === 401) throw new Error("Invalid username or password");
-  if (!resp.ok) throw new Error(`Login failed (${resp.status})`);
-  const data = await resp.json();
+  let res: any;
+  try {
+    res = await invoke("jf_login", { server, username, password });
+  } catch (e) {
+    throw new Error(splitError(e).message);
+  }
+  await loadConfig();
   session = {
-    server,
-    token: data.AccessToken,
-    userId: data.User.Id,
-    userName: data.User.Name,
-    deviceId: appConfig.device_id,
+    server: res.server,
+    userId: res.user_id,
+    userName: res.user_name ?? "",
+    deviceId: res.device_id,
+    secure: !!res.secure,
   };
-  await saveConfig({
-    server,
-    token: data.AccessToken,
-    user_id: data.User.Id,
-    user_name: data.User.Name,
-  });
+  setOffline(false);
   return session;
 }
 
-export async function logout(): Promise<void> {
+/**
+ * Sign out. Resolves to whether the server actually confirmed the token was
+ * revoked; when it didn't, the backend keeps retrying and the caller should
+ * say so rather than let the user believe the session is dead.
+ */
+export async function logout(): Promise<{ revoked: boolean; pending: boolean }> {
+  let res: any = { revoked: false, pending: false };
   try {
-    await api("/Sessions/Logout", { method: "POST" });
-  } catch {
-    /* best effort */
+    res = await invoke("jf_logout");
+  } catch (e) {
+    throw new Error(splitError(e).message);
+  } finally {
+    session = null;
+    await loadConfig().catch(() => {});
   }
+  return { revoked: !!res.revoked, pending: !!res.pending };
+}
+
+/**
+ * Drop a session the server has stopped honouring. Same teardown as `logout`
+ * minus the Logout call (the token it would authenticate with is exactly the
+ * one that just failed), plus a broadcast so the shell can show the login
+ * screen instead of leaving the user on a page that can no longer load.
+ *
+ * Guarded against re-entry: a page load fires several requests at once and they
+ * would otherwise each announce the expiry.
+ */
+let expiring = false;
+
+async function expireSession(): Promise<void> {
+  if (expiring || !session) return;
+  expiring = true;
   session = null;
-  await saveConfig({ server: appConfig.server, token: null, user_id: null, user_name: null });
+  try {
+    // Same teardown as a sign-out, which also clears the stored token. The
+    // revocation call it makes answers 401 for an already-dead token, which
+    // the backend counts as revoked — so nothing is left behind or retried.
+    await invoke("jf_logout");
+    await loadConfig();
+  } catch {
+    /* the sign-in screen is the important part */
+  }
+  document.dispatchEvent(new CustomEvent("fellyjin-auth-expired"));
+  expiring = false;
 }
 
 // ---------- Browse ----------
+//
+// Every user-scoped request names the user with a `userId=` query parameter
+// on the plain route (`/Items?userId=…`, `/UserViews?userId=…`) rather than
+// the older `/Users/{userId}/…` form. Jellyfin marked the old routes obsolete
+// in 10.9 and still answers them in 12.0, but only "for backwards
+// compatibility", and 12.0 is the release that dropped the rest of its legacy
+// API surface — so these are the routes with a future. Nothing here works on a
+// server older than 10.9.
 
 const ITEM_FIELDS =
   "PrimaryImageAspectRatio,Overview,Genres,MediaSources,UserData,SeriesPrimaryImage,ChildCount,RecursiveItemCount,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,ParentId";
 
+/** `ITEM_FIELDS` plus the ones only the detail page draws. `People` is a long
+ *  list on a feature film, so it isn't asked for on every grid query. */
+const DETAIL_FIELDS = `${ITEM_FIELDS},People,Studios,Taglines`;
+
 export async function getViews(): Promise<any[]> {
   const s = session!;
-  const r = await api(`/Users/${s.userId}/Views`);
+  const r = await api(`/UserViews?userId=${s.userId}`);
   return r.Items ?? [];
 }
 
 export async function getResume(): Promise<any[]> {
   const s = session!;
   const r = await api(
-    `/Users/${s.userId}/Items/Resume?Limit=16&Fields=${ITEM_FIELDS}&MediaTypes=Video&EnableImageTypes=Primary,Backdrop,Thumb`
+    `/UserItems/Resume?userId=${s.userId}&Limit=16&Fields=${ITEM_FIELDS}&MediaTypes=Video&EnableImageTypes=Primary,Backdrop,Thumb,Logo`
   );
   return r.Items ?? [];
 }
@@ -189,24 +306,92 @@ export async function getResume(): Promise<any[]> {
 export async function getNextUp(): Promise<any[]> {
   const s = session!;
   const r = await api(
-    `/Shows/NextUp?userId=${s.userId}&Limit=16&Fields=${ITEM_FIELDS}&EnableImageTypes=Primary,Backdrop,Thumb`
+    `/Shows/NextUp?userId=${s.userId}&Limit=16&Fields=${ITEM_FIELDS}&EnableImageTypes=Primary,Backdrop,Thumb,Logo`
   );
   return r.Items ?? [];
 }
 
+/**
+ * The one episode the user should watch next in a series — the in-progress
+ * one, else the first unwatched. Null when the server has nothing queued (a
+ * finished show, or one that was never started). Used by the series page's
+ * play button.
+ */
+export async function getSeriesNextUp(seriesId: string): Promise<any | null> {
+  const s = session!;
+  const r = await api(
+    `/Shows/NextUp?userId=${s.userId}&seriesId=${seriesId}&Limit=1&Fields=${ITEM_FIELDS}&EnableImageTypes=Primary,Backdrop,Thumb,Logo`
+  );
+  return r.Items?.[0] ?? null;
+}
+
+/**
+ * Newest additions to a library.
+ *
+ * The server's own grouping is half-hearted: several new episodes of a show
+ * collapse into the series, but a show with exactly one new episode comes back
+ * as the bare episode — so a TV row ends up mixing shows with single episodes.
+ * Every episode is folded into its series here, so the row reads as "shows
+ * with something new" throughout.
+ */
 export async function getLatest(parentId: string, limit = 16): Promise<any[]> {
   const s = session!;
-  return api(
-    `/Users/${s.userId}/Items/Latest?parentId=${parentId}&Limit=${limit}&Fields=${ITEM_FIELDS}`
+  const items: any[] = await api(
+    `/Items/Latest?userId=${s.userId}&parentId=${parentId}&Limit=${limit}&Fields=${ITEM_FIELDS}`
   );
+  return foldEpisodesIntoSeries(items);
+}
+
+/** Replace every episode with its series, keeping the row's order and dropping
+ *  the duplicates that leaves behind. */
+async function foldEpisodesIntoSeries(items: any[]): Promise<any[]> {
+  const episodes = items.filter((i) => i?.Type === "Episode" && i.SeriesId);
+  if (!episodes.length) return items;
+
+  // Series already in the row cost nothing; the rest are fetched in one go,
+  // deduplicated so two new episodes of the same show are a single lookup.
+  const series = new Map<string, any>();
+  for (const i of items) if (i?.Type === "Series" && i.Id) series.set(i.Id, i);
+  const missing = [...new Set(episodes.map((e) => e.SeriesId))].filter((id) => !series.has(id));
+  if (missing.length) {
+    // A failed lookup leaves the episode where it was: a row with one odd card
+    // is better than a row that quietly lost a title.
+    const fetched = await getItemsByIds(missing, ITEM_FIELDS).catch(() => []);
+    for (const s of fetched) if (s?.Id) series.set(s.Id, s);
+  }
+
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const item of items) {
+    const card = (item?.Type === "Episode" ? series.get(item.SeriesId) : null) ?? item;
+    if (card?.Id) {
+      if (seen.has(card.Id)) continue;
+      seen.add(card.Id);
+    }
+    out.push(card);
+  }
+  return out;
+}
+
+export interface LibraryQuery {
+  startIndex?: number;
+  limit?: number;
+  includeTypes?: string;
+  sortBy?: string;
+  sortOrder?: string;
+  /** Only items with something left to watch. */
+  unwatched?: boolean;
+  favorites?: boolean;
+  genre?: string;
 }
 
 export async function getLibraryItems(
   parentId: string,
-  opts: { startIndex?: number; limit?: number; includeTypes?: string; sortBy?: string; sortOrder?: string } = {}
+  opts: LibraryQuery = {}
 ): Promise<{ Items: any[]; TotalRecordCount: number }> {
   const s = session!;
   const p = new URLSearchParams({
+    userId: s.userId,
     ParentId: parentId,
     Recursive: "true",
     SortBy: opts.sortBy ?? "SortName",
@@ -216,12 +401,62 @@ export async function getLibraryItems(
     Limit: String(opts.limit ?? 60),
   });
   if (opts.includeTypes) p.set("IncludeItemTypes", opts.includeTypes);
-  return api(`/Users/${s.userId}/Items?${p}`);
+  if (opts.unwatched) p.set("Filters", "IsUnplayed");
+  if (opts.favorites) p.set("IsFavorite", "true");
+  if (opts.genre) p.set("Genres", opts.genre);
+  return api(`/Items?${p}`);
+}
+
+/**
+ * Everything the user has starred, across every library. `Filters=IsFavorite`
+ * with no ParentId is the server-side equivalent of the per-library favorites
+ * toggle, so this and the library filter agree on what counts.
+ */
+export async function getFavorites(
+  opts: { startIndex?: number; limit?: number; includeTypes?: string; sortBy?: string; sortOrder?: string } = {}
+): Promise<{ Items: any[]; TotalRecordCount: number }> {
+  const s = session!;
+  const p = new URLSearchParams({
+    userId: s.userId,
+    Recursive: "true",
+    Filters: "IsFavorite",
+    IncludeItemTypes: opts.includeTypes || "Movie,Series,Episode",
+    SortBy: opts.sortBy ?? "SortName",
+    SortOrder: opts.sortOrder ?? "Ascending",
+    Fields: ITEM_FIELDS,
+    StartIndex: String(opts.startIndex ?? 0),
+    Limit: String(opts.limit ?? 60),
+  });
+  const r = await api(`/Items?${p}`);
+  return { Items: r.Items ?? [], TotalRecordCount: r.TotalRecordCount ?? (r.Items?.length ?? 0) };
+}
+
+/** Genre names present in one library, for the filter bar. Empty on servers
+ *  that don't answer the filters endpoint — the control is then hidden. */
+export async function getGenres(parentId: string, includeTypes: string): Promise<string[]> {
+  const s = session!;
+  const p = new URLSearchParams({ userId: s.userId, parentId });
+  if (includeTypes) p.set("IncludeItemTypes", includeTypes);
+  const r = await api(`/Items/Filters?${p}`);
+  const names: string[] = (r?.Genres ?? []).filter((g: any) => typeof g === "string" && g);
+  return names.sort((a, b) => a.localeCompare(b));
 }
 
 export async function getItem(itemId: string): Promise<any> {
   const s = session!;
-  return api(`/Users/${s.userId}/Items/${itemId}`);
+  return api(`/Items/${itemId}?userId=${s.userId}&Fields=${DETAIL_FIELDS}`);
+}
+
+/**
+ * "More like this" — the server's own recommendation for an item. Purely
+ * additive to the detail page, so callers treat a failure as an empty list.
+ */
+export async function getSimilar(itemId: string, limit = 12): Promise<any[]> {
+  const s = session!;
+  const r = await api(
+    `/Items/${itemId}/Similar?userId=${s.userId}&limit=${limit}&Fields=${ITEM_FIELDS}`
+  );
+  return r.Items ?? [];
 }
 
 export async function getSeasons(seriesId: string): Promise<any[]> {
@@ -238,17 +473,109 @@ export async function getEpisodes(seriesId: string, seasonId: string): Promise<a
   return r.Items ?? [];
 }
 
-export async function search(term: string): Promise<any[]> {
+// ---------- Trickplay (scrubber previews) ----------
+
+/** One resolution of trickplay tiles, as the server describes them. */
+export interface TrickplayInfo {
+  /** Item the tiles belong to — not always the item being played. */
+  itemId: string;
+  /** Pixel size of a single thumbnail. */
+  width: number;
+  height: number;
+  /** Thumbnails per tile sheet. */
+  tileWidth: number;
+  tileHeight: number;
+  /** Milliseconds between thumbnails. */
+  interval: number;
+  thumbnailCount: number;
+}
+
+/**
+ * Trickplay metadata for an item, or null when the server has none — which is
+ * the common case: tiles are generated by a scheduled task that many installs
+ * never run, and by default only for larger libraries. Callers fall back to a
+ * plain time readout.
+ *
+ * `Trickplay` is only populated when it's asked for by name, so this is its own
+ * request rather than a field on the item every list already fetches.
+ */
+export async function getTrickplay(itemId: string): Promise<TrickplayInfo | null> {
+  const s = session;
+  if (!s) return null;
+  const item = await api(`/Items/${itemId}?userId=${s.userId}&Fields=Trickplay`).catch(() => null);
+  const byWidth = item?.Trickplay?.[item?.MediaSources?.[0]?.Id] ?? Object.values(item?.Trickplay ?? {})[0];
+  if (!byWidth || typeof byWidth !== "object") return null;
+  // Several resolutions may exist; the widest still fits in a scrubber bubble.
+  const widths = Object.keys(byWidth as object)
+    .map(Number)
+    .filter((n) => n > 0)
+    .sort((a, b) => b - a);
+  const info: any = widths.length ? (byWidth as any)[widths[0]!] : null;
+  if (!info?.Width || !info?.Interval) return null;
+  return {
+    itemId,
+    width: info.Width,
+    height: info.Height ?? Math.round(info.Width * 0.5625),
+    tileWidth: info.TileWidth ?? 1,
+    tileHeight: info.TileHeight ?? 1,
+    interval: info.Interval,
+    thumbnailCount: info.ThumbnailCount ?? 0,
+  };
+}
+
+/**
+ * One tile sheet as a data URL. Trickplay images need the access token, which
+ * lives in the backend, so unlike every other image in the app these come
+ * across the IPC boundary rather than being fetched by the webview.
+ */
+export async function trickplayTile(info: TrickplayInfo, tileIndex: number): Promise<string> {
+  return invoke<string>("jf_image", {
+    path: `/Videos/${info.itemId}/Trickplay/${info.width}/${tileIndex}.jpg`,
+  });
+}
+
+// ---------- Media segments (intros, credits) ----------
+
+export interface MediaSegment {
+  type: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Skippable stretches of an item — an opening title sequence, closing credits.
+ * Jellyfin 10.10 and up, and only for items some plugin has actually analysed;
+ * everything else answers 404 or an empty list, and the skip button never
+ * appears.
+ */
+export async function getMediaSegments(itemId: string): Promise<MediaSegment[]> {
+  const r = await api(`/MediaSegments/${itemId}?includeSegmentTypes=Intro,Outro`).catch(() => null);
+  const items: any[] = r?.Items ?? [];
+  return items
+    .map((s) => ({
+      type: String(s.Type ?? ""),
+      start: (s.StartTicks ?? 0) / 10_000_000,
+      end: (s.EndTicks ?? 0) / 10_000_000,
+    }))
+    .filter((s) => s.end > s.start);
+}
+
+export async function search(
+  term: string,
+  opts: { startIndex?: number; limit?: number } = {}
+): Promise<{ Items: any[]; TotalRecordCount: number }> {
   const s = session!;
   const p = new URLSearchParams({
+    userId: s.userId,
     searchTerm: term,
     Recursive: "true",
     IncludeItemTypes: "Movie,Series,Episode",
     Fields: ITEM_FIELDS,
-    Limit: "40",
+    StartIndex: String(opts.startIndex ?? 0),
+    Limit: String(opts.limit ?? 48),
   });
-  const r = await api(`/Users/${s.userId}/Items?${p}`);
-  return r.Items ?? [];
+  const r = await api(`/Items?${p}`);
+  return { Items: r.Items ?? [], TotalRecordCount: r.TotalRecordCount ?? (r.Items?.length ?? 0) };
 }
 
 export async function getChannels(): Promise<any[]> {
@@ -259,33 +586,86 @@ export async function getChannels(): Promise<any[]> {
   return r.Items ?? [];
 }
 
+/**
+ * Guide entries overlapping [from, to) for a set of channels — everything the
+ * TV Guide draws. `minEndDate`/`maxStartDate` (rather than a start-date range)
+ * is what catches the programme already half-finished when the window opens,
+ * which is the one every viewer is actually looking at.
+ *
+ * Channels go out in batches because the ids are carried in the query string
+ * and a 500-channel tuner would otherwise build a URL no server will accept.
+ */
+export async function getPrograms(
+  channelIds: string[],
+  from: Date,
+  to: Date
+): Promise<any[]> {
+  const s = session!;
+  const out: any[] = [];
+  for (let i = 0; i < channelIds.length; i += 80) {
+    const p = new URLSearchParams({
+      userId: s.userId,
+      channelIds: channelIds.slice(i, i + 80).join(","),
+      minEndDate: from.toISOString(),
+      maxStartDate: to.toISOString(),
+      sortBy: "StartDate",
+      fields: "Overview",
+      enableImages: "false",
+      enableUserData: "false",
+      enableTotalRecordCount: "false",
+      limit: "20000",
+    });
+    const r = await api(`/LiveTv/Programs?${p}`);
+    out.push(...(r.Items ?? []));
+  }
+  return out;
+}
+
+/** Items for a batch of ids, 50 per request. `fields` is left empty by callers
+ *  that only want the lean default shape. */
+export async function getItemsByIds(ids: string[], fields = ""): Promise<any[]> {
+  const s = session!;
+  const out: any[] = [];
+  for (let i = 0; i < ids.length; i += 50) {
+    const r = await api(
+      `/Items?userId=${s.userId}&Ids=${ids.slice(i, i + 50).join(",")}` +
+        (fields ? `&Fields=${fields}` : "")
+    );
+    out.push(...(r.Items ?? []));
+  }
+  return out;
+}
+
 /** Server UserData (watched state, resume position) for a batch of item ids. */
 export async function getUserDataByIds(ids: string[]): Promise<Map<string, any>> {
-  const s = session!;
   const out = new Map<string, any>();
-  for (let i = 0; i < ids.length; i += 50) {
-    const r = await api(`/Users/${s.userId}/Items?Ids=${ids.slice(i, i + 50).join(",")}`);
-    for (const it of r.Items ?? []) out.set(it.Id, it.UserData ?? {});
-  }
+  for (const it of await getItemsByIds(ids)) out.set(it.Id, it.UserData ?? {});
   return out;
 }
 
 export async function markPlayed(itemId: string, played: boolean): Promise<void> {
   const s = session!;
-  await api(`/Users/${s.userId}/PlayedItems/${itemId}`, {
+  await api(`/UserPlayedItems/${itemId}?userId=${s.userId}`, {
     method: played ? "POST" : "DELETE",
+  });
+}
+
+export async function setFavorite(itemId: string, favorite: boolean): Promise<void> {
+  const s = session!;
+  await api(`/UserFavoriteItems/${itemId}?userId=${s.userId}`, {
+    method: favorite ? "POST" : "DELETE",
   });
 }
 
 // ---------- Images ----------
 
-export function imageUrl(
-  item: any,
-  type = "Primary",
-  width = 400
-): string | null {
-  const s = session;
-  if (!s) return null;
+/**
+ * Which item and which image tag a request for `type` actually resolves to.
+ * Split out of `imageUrl` because the BlurHash for an image is filed under the
+ * same tag: a placeholder that resolved the tag differently would be the blur
+ * of some other artwork.
+ */
+function resolveImage(item: any, type: string): { id: string; tag: string } | null {
   let id = item.Id;
   let tag = item.ImageTags?.[type];
   if (!tag && type === "Primary") {
@@ -299,8 +679,59 @@ export function imageUrl(
   if (!tag && type === "Backdrop" && item.BackdropImageTags?.length) {
     tag = item.BackdropImageTags[0];
   }
-  if (!tag) return null;
-  return `${s.server}/Items/${id}/Images/${type}?maxWidth=${width}&tag=${tag}&quality=90`;
+  return tag ? { id, tag } : null;
+}
+
+export function imageUrl(
+  item: any,
+  type = "Primary",
+  width = 400
+): string | null {
+  const s = session;
+  if (!s) return null;
+  const found = resolveImage(item, type);
+  if (!found) return null;
+  return `${s.server}/Items/${found.id}/Images/${type}?maxWidth=${width}&tag=${found.tag}&quality=90`;
+}
+
+/**
+ * The BlurHash for the same image `imageUrl` would return — a placeholder to
+ * paint while the real artwork is still in flight. Null whenever the server
+ * hasn't computed one (older Jellyfin, or an image added since the last scan).
+ *
+ * Jellyfin files these by image type and then by tag, so an item with several
+ * backdrops has a hash per backdrop; matching on the resolved tag is what keeps
+ * the placeholder and the picture in step.
+ */
+export function imageHash(item: any, type = "Primary"): string | null {
+  const found = resolveImage(item, type);
+  if (!found) return null;
+  const byTag = item.ImageBlurHashes?.[type];
+  const hash = byTag?.[found.tag];
+  return typeof hash === "string" && hash.length > 5 ? hash : null;
+}
+
+/**
+ * The item's title art — the transparent PNG wordmark studios ship with a film
+ * or show ("logo" in Jellyfin's vocabulary). Heroes use it in place of typeset
+ * text, which is what Apple TV, Infuse and Netflix all do: the title reads as
+ * part of the artwork rather than as a caption on top of it.
+ *
+ * Episodes and seasons carry their series' logo through the Parent* tags, so a
+ * hero for "S2:E4" still gets the show's wordmark. Returns null when the server
+ * has no logo for the item, which is common — callers fall back to text.
+ */
+export function logoUrl(item: any, width = 640): string | null {
+  const s = session;
+  if (!s) return null;
+  let id = item.Id;
+  let tag = item.ImageTags?.Logo;
+  if (!tag && item.ParentLogoItemId && item.ParentLogoImageTag) {
+    id = item.ParentLogoItemId;
+    tag = item.ParentLogoImageTag;
+  }
+  if (!tag || !id) return null;
+  return `${s.server}/Items/${id}/Images/Logo?maxWidth=${width}&tag=${tag}&quality=90`;
 }
 
 /**
@@ -323,6 +754,28 @@ export function seasonPosterUrl(item: any, width = 400): string | null {
   const s = session;
   if (!s || !item.SeasonId) return null;
   return `${s.server}/Items/${item.SeasonId}/Images/Primary?maxWidth=${width}&quality=90`;
+}
+
+// ---------- Bandwidth ----------
+
+/**
+ * Time a download of `size` bytes from the server's own bandwidth-test
+ * endpoint, for a starting-bitrate estimate before a stream begins. Runs
+ * through Rust, like every other request — the payload itself needs no
+ * decoding here, only its timing, which is measured on the other side of the
+ * IPC boundary so a slow link's round trip isn't inflated by carrying the
+ * bytes across it twice.
+ *
+ * Returns null on any failure — offline, a server too old to have the
+ * endpoint, the probe's own timeout — which the caller treats as "couldn't
+ * measure it" rather than an error worth surfacing.
+ */
+export async function probeBandwidth(size = 1_000_000): Promise<number | null> {
+  try {
+    return await invoke<number>("jf_bitrate_test", { size });
+  } catch {
+    return null;
+  }
 }
 
 // ---------- Playback source resolution ----------
@@ -409,12 +862,13 @@ export async function resolvePlayback(
     };
   }
 
-  // Direct stream of the original media.
+  // Direct stream of the original media. No `api_key` here: mpv is given the
+  // token as an Authorization header instead (see player.rs), which keeps it
+  // out of Jellyfin's access log and out of our own mpv log.
   const container = ms.Container || "mkv";
   const p = new URLSearchParams({
     static: "true",
     mediaSourceId: ms.Id,
-    api_key: s.token,
     playSessionId,
     deviceId: s.deviceId,
   });
@@ -442,15 +896,92 @@ export interface DownloadQuality {
   label: string;
   original?: boolean;
   videoBitrate?: number;
+  audioBitrate?: number;
   maxWidth?: number;
+  /** Resolution as people say it ("1080p"), for filenames. `maxWidth` is the
+   *  wrong number to put there: nobody calls a 1080p file "1920p". */
+  name?: string;
 }
 
+/**
+ * Download rungs, largest-first. Unlike the streaming ladder these are
+ * *video-only* rates — audio is requested separately and added to the estimate —
+ * and the resolution is pinned with MaxWidth rather than inferred by the server.
+ *
+ * Sized for the h264 the download URL asks for, at the point where the re-encode
+ * stops being distinguishable from its source on that size of picture. Grain and
+ * gradients are what break first if you go lower.
+ */
 export const DOWNLOAD_QUALITIES: DownloadQuality[] = [
   { label: "Original quality", original: true },
-  { label: "1080p · 10 Mbps (transcoded)", videoBitrate: 10_000_000, maxWidth: 1920 },
-  { label: "720p · 4 Mbps (transcoded)", videoBitrate: 4_000_000, maxWidth: 1280 },
-  { label: "480p · 1.5 Mbps (transcoded)", videoBitrate: 1_500_000, maxWidth: 854 },
+  { label: "4K · 32 Mbps", name: "4K", videoBitrate: 32_000_000, audioBitrate: 384_000, maxWidth: 3840 },
+  { label: "1440p · 16 Mbps", name: "1440p", videoBitrate: 16_000_000, audioBitrate: 256_000, maxWidth: 2560 },
+  { label: "1080p · 9 Mbps", name: "1080p", videoBitrate: 9_000_000, audioBitrate: 256_000, maxWidth: 1920 },
+  { label: "720p · 4.5 Mbps", name: "720p", videoBitrate: 4_500_000, audioBitrate: 192_000, maxWidth: 1280 },
+  { label: "480p · 2 Mbps", name: "480p", videoBitrate: 2_000_000, audioBitrate: 192_000, maxWidth: 854 },
 ];
+
+/** Audio rate for a rung. Defaulted rather than required so a download queued
+ *  by an older version, restored from localStorage, still builds a valid URL. */
+function audioRate(q: DownloadQuality): number {
+  return q.audioBitrate ?? 192_000;
+}
+
+// ---------- Source media description ----------
+
+/** Height → the name people actually use for it. */
+function resolutionLabel(stream: any): string | null {
+  const h = stream?.Height;
+  const w = stream?.Width;
+  if (!h) return null;
+  if (h >= 2000 || w >= 3800) return "4K";
+  if (h >= 1000) return "1080p";
+  if (h >= 700) return "720p";
+  if (h >= 550) return "576p";
+  if (h >= 400) return "480p";
+  return `${h}p`;
+}
+
+function channelLabel(stream: any): string | null {
+  const layout = stream?.ChannelLayout;
+  if (typeof layout === "string" && layout) return layout === "mono" ? "Mono" : layout;
+  switch (stream?.Channels) {
+    case 8: return "7.1";
+    case 6: return "5.1";
+    case 2: return "Stereo";
+    case 1: return "Mono";
+    default: return null;
+  }
+}
+
+/**
+ * What the file on the server actually is: "1080p · HEVC · 5.1 · 8.4 GB".
+ *
+ * `MediaSources` was already being fetched for every item — only the download
+ * size estimator read it — so the detail page could tell you the choices it was
+ * offering but not what it was choosing between. Returns an empty list for
+ * anything with no usable media source (a series, a stub).
+ */
+export function mediaSummary(item: any): string[] {
+  const ms = item?.MediaSources?.[0];
+  if (!ms) return [];
+  const streams: any[] = ms.MediaStreams ?? [];
+  const video = streams.find((s) => s.Type === "Video");
+  const audio = streams.find((s) => s.Type === "Audio");
+  const subs = streams.filter((s) => s.Type === "Subtitle").length;
+
+  const upper = (v: unknown): string | null =>
+    typeof v === "string" && v ? v.toUpperCase() : null;
+
+  return [
+    resolutionLabel(video),
+    upper(video?.Codec),
+    upper(audio?.Codec),
+    channelLabel(audio),
+    subs ? `${subs} subtitle track${subs === 1 ? "" : "s"}` : null,
+    typeof ms.Size === "number" && ms.Size > 0 ? bytesToText(ms.Size) : null,
+  ].filter((x): x is string => !!x);
+}
 
 /// Estimated on-disk size for a download choice. Exact for originals (server
 /// reports file size), bitrate × runtime for transcodes.
@@ -462,34 +993,66 @@ export function estimateDownloadSize(item: any, q: DownloadQuality): number | nu
   const ticks = item.RunTimeTicks;
   if (!ticks || !q.videoBitrate) return null;
   const seconds = ticks / 10_000_000;
-  // Video + 192 kbps audio, ~2% container overhead.
-  return Math.round(((q.videoBitrate + 192_000) / 8) * seconds * 1.02);
+  // Video + audio, ~2% container overhead.
+  return Math.round(((q.videoBitrate + audioRate(q)) / 8) * seconds * 1.02);
 }
 
+/**
+ * The rung a download will actually use, which is not always the one asked for.
+ *
+ * A transcode that lands bigger than the file it came from is the worst of both
+ * outcomes: more bytes on disk *and* a generation of quality thrown away
+ * re-encoding. It is not a corner case — an efficiently encoded source (HEVC,
+ * AV1, anything from a careful encoder) routinely sits well under the h264 rate
+ * it takes to match it, so "4K · 32 Mbps" against a 12 Mbps HEVC remux is the
+ * normal case rather than the odd one. Whenever the original is the smaller
+ * file, take the original.
+ *
+ * Substitutes only downwards in size, and only when both numbers are real: with
+ * no size reported by the server there is nothing to compare and the transcode
+ * stands. The estimate it is compared against is bitrate x runtime, so a VBR
+ * encode that comes in under its cap can still lose this bet — but only by the
+ * margin between the cap and the average, and always in the safe direction.
+ */
+export function effectiveDownloadQuality(item: any, q: DownloadQuality): DownloadQuality {
+  if (q.original) return q;
+  const original = DOWNLOAD_QUALITIES.find((x) => x.original);
+  if (!original) return q;
+  const originalSize = estimateDownloadSize(item, original);
+  const transcoded = estimateDownloadSize(item, q);
+  if (originalSize == null || transcoded == null) return q;
+  return originalSize <= transcoded ? original : q;
+}
+
+/**
+ * Download URLs carry no `api_key`. The Rust downloader authenticates with an
+ * Authorization header, which matters more here than for playback: the URL is
+ * written into the download's meta.json so an interrupted transfer can resume,
+ * and a token embedded in it would sit in the downloads folder indefinitely.
+ */
 export function buildDownload(item: any, q: DownloadQuality): { url: string; fileName: string } {
   const s = session!;
   const safe = (item.Name ?? item.Id).replace(/[^\w\s.\-()\[\]']/g, "_").slice(0, 120);
   if (q.original) {
     const container = item.MediaSources?.[0]?.Container ?? item.Container ?? "mkv";
     return {
-      url: `${s.server}/Items/${item.Id}/Download?api_key=${s.token}`,
+      url: `${s.server}/Items/${item.Id}/Download`,
       fileName: `${safe}.${container}`,
     };
   }
   const p = new URLSearchParams({
-    api_key: s.token,
     static: "false",
     VideoCodec: "h264",
     AudioCodec: "aac",
     VideoBitrate: String(q.videoBitrate),
-    AudioBitrate: "192000",
+    AudioBitrate: String(audioRate(q)),
     MaxWidth: String(q.maxWidth),
     deviceId: s.deviceId,
     Context: "Static",
   });
   return {
     url: `${s.server}/Videos/${item.Id}/stream.mkv?${p}`,
-    fileName: `${safe} (${q.maxWidth}p).mkv`,
+    fileName: `${safe} (${q.name ?? `${q.maxWidth}w`}).mkv`,
   };
 }
 

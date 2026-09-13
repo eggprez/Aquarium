@@ -128,17 +128,12 @@ async fn mark_played(
     user_id: &str,
     item_id: &str,
 ) -> bool {
-    // Jellyfin 10.9+ endpoint, then legacy fallback.
-    let paths = [
-        format!("/UserPlayedItems/{}?userId={}", item_id, user_id),
-        format!("/Users/{}/PlayedItems/{}", user_id, item_id),
-    ];
-    for p in paths {
-        if let Ok(s) = jellyfin::post(server, token, device_id, &p, &json!({})).await {
-            if s.is_success() {
-                return true;
-            }
-        }
-    }
-    false
+    // The 10.9+ route, which is also the only one the rest of the app uses;
+    // the `/Users/{userId}/PlayedItems/{itemId}` fallback that used to sit
+    // behind it served servers no other request here can talk to any more.
+    let path = format!("/UserPlayedItems/{}?userId={}", item_id, user_id);
+    matches!(
+        jellyfin::post(server, token, device_id, &path, &json!({})).await,
+        Ok(s) if s.is_success()
+    )
 }

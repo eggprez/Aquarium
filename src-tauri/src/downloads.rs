@@ -35,8 +35,43 @@ pub struct DlManager {
     cancels: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
+/// How long to wait on a single poll of the byte stream.
+const STALL_POLL: std::time::Duration = std::time::Duration::from_secs(5);
+/// Total silence from the server before the download is declared stalled.
+const STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+
 fn item_dir(item_id: &str) -> PathBuf {
     config::downloads_dir().join(item_id)
+}
+
+/// Bytes an unprivileged process can still write to the filesystem holding the
+/// downloads directory, or `None` when the platform won't say.
+///
+/// Queueing a season used to be unconditional: forty episodes at original
+/// quality went onto a disk with fifteen gigabytes free and the user found out
+/// four episodes in, as a row that had turned red.
+pub fn free_space() -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+
+    // On a fresh install nothing under the data directory exists yet, and
+    // statvfs on a missing path just fails — walk up to something real.
+    let mut dir = config::downloads_dir();
+    while !dir.exists() {
+        if !dir.pop() {
+            return None;
+        }
+    }
+
+    let path = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `path` is a valid NUL-terminated string and `st` is a live
+    // statvfs the call is allowed to fill in.
+    if unsafe { libc::statvfs(path.as_ptr(), &mut st) } != 0 {
+        return None;
+    }
+    // f_bavail, not f_bfree: the difference is the root reserve, which this
+    // process can't touch.
+    (st.f_bavail as u64).checked_mul(st.f_frsize as u64)
 }
 
 fn write_meta(dir: &PathBuf, meta: &Value) {
@@ -58,6 +93,12 @@ impl DlManager {
 
     pub fn is_active(&self, item_id: &str) -> bool {
         self.cancels.lock().unwrap().contains_key(item_id)
+    }
+
+    /// Transfers currently running. Read at quit time: closing the window
+    /// silently kills them mid-file, so the user gets asked first.
+    pub fn active_count(&self) -> usize {
+        self.cancels.lock().unwrap().len()
     }
 
     pub fn start(&self, app: AppHandle, req: DownloadRequest) -> Result<(), String> {
@@ -84,7 +125,7 @@ impl DlManager {
         // Everything needed to restart this download after an interruption
         // (app closed mid-transfer, network drop).
         meta["request"] = json!({
-            "url": req.url,
+            "url": strip_api_key(&req.url),
             "image_url": req.image_url,
             "series_image_url": req.series_image_url,
             "season_image_url": req.season_image_url,
@@ -98,6 +139,12 @@ impl DlManager {
             .unwrap()
             .insert(req.item_id.clone(), flag.clone());
 
+        crate::debug_log_line(&format!(
+            "download start {} ({})",
+            req.item_id,
+            meta.get("title").and_then(|v| v.as_str()).unwrap_or("")
+        ));
+
         let cancels_key = req.item_id.clone();
         // Self is managed state (alive for the app's lifetime); use a raw
         // pointer-free approach: clean the map entry via a clone of the Arc map.
@@ -109,6 +156,15 @@ impl DlManager {
                 .ok()
                 .and_then(|s| serde_json::from_str::<Value>(&s).ok())
                 .unwrap_or_else(|| json!({}));
+
+            crate::debug_log_line(&format!(
+                "download {} -> {}",
+                req.item_id,
+                match &result {
+                    Ok(()) => "complete".to_string(),
+                    Err(e) => e.clone(),
+                }
+            ));
 
             match result {
                 Ok(()) => {
@@ -147,6 +203,38 @@ impl DlManager {
     }
 }
 
+/// Remove an `api_key=` parameter from a URL. Applied to every URL on its way
+/// into meta.json, which is a plain file in the downloads folder and outlives
+/// the transfer that created it.
+fn strip_api_key(url: &str) -> String {
+    let Some((base, query)) = url.split_once('?') else {
+        return url.to_string();
+    };
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|p| !p.starts_with("api_key=") && !p.starts_with("ApiKey="))
+        .collect();
+    if kept.is_empty() {
+        base.to_string()
+    } else {
+        format!("{}?{}", base, kept.join("&"))
+    }
+}
+
+/// Current credentials as an `Authorization` header value. Rebuilt per request
+/// from the keyring rather than stored alongside the download, so a resumed
+/// transfer picks up the token in force today and no copy of it is written to
+/// meta.json.
+fn auth_header_now() -> Option<String> {
+    let token = crate::secret::token()?;
+    let cfg = config::load();
+    let device = cfg
+        .get("device_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("fellyjin");
+    Some(jellyfin::auth_header(&token, device))
+}
+
 /// Best-effort image fetch, skipped if already on disk from a previous run.
 async fn fetch_image(url: &Option<String>, path: PathBuf) {
     let Some(img) = url.as_ref().filter(|_| !path.exists()) else {
@@ -181,6 +269,13 @@ async fn run_download(
     // 200 and we start over.
     let part_len = std::fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
     let mut request = jellyfin::http().get(&req.url);
+    // Authenticate by header. The URL is persisted in meta.json so an
+    // interrupted transfer can be resumed, and an `api_key=` in it would leave
+    // a live credential lying in the downloads folder (as well as in the
+    // server's access log).
+    if let Some(auth) = auth_header_now() {
+        request = request.header("Authorization", auth);
+    }
     if part_len > 0 {
         request = request.header("Range", format!("bytes={}-", part_len));
     }
@@ -214,13 +309,38 @@ async fn run_download(
     let mut last_emit = std::time::Instant::now();
     let mut last_emit_bytes: u64 = received;
     let mut speed_bps: f64 = 0.0;
+    let mut idle = std::time::Duration::ZERO;
 
-    while let Some(chunk) = stream.next().await {
+    loop {
         if cancel.load(Ordering::SeqCst) {
             drop(file);
             let _ = tokio::fs::remove_file(&part_path).await;
             return Err("canceled".into());
         }
+        // A Jellyfin transcode that dies (or is throttled into oblivion) leaves
+        // the connection open and simply stops sending. Without this the task
+        // would await forever, never emit a terminal state, and the frontend
+        // queue would sit behind it for good. Poll in short ticks so cancel
+        // still responds promptly.
+        let chunk = match tokio::time::timeout(STALL_POLL, stream.next()).await {
+            Ok(Some(c)) => {
+                idle = std::time::Duration::ZERO;
+                c
+            }
+            Ok(None) => break,
+            Err(_) => {
+                idle += STALL_POLL;
+                if idle >= STALL_TIMEOUT {
+                    // The .part file is left in place: retry resumes from it
+                    // for static downloads and restarts cleanly otherwise.
+                    return Err(format!(
+                        "stalled: no data from the server for {}s",
+                        STALL_TIMEOUT.as_secs()
+                    ));
+                }
+                continue;
+            }
+        };
         let chunk = chunk.map_err(|e| format!("stream error: {}", e))?;
         file.write_all(&chunk).await.map_err(|e| e.to_string())?;
         received += chunk.len() as u64;
@@ -267,7 +387,9 @@ pub fn restart(app: AppHandle, mgr: &DlManager, item_id: &str) -> Result<(), Str
     let str_of = |v: &Value, k: &str| v.get(k).and_then(|x| x.as_str()).map(String::from);
     let req = DownloadRequest {
         item_id: item_id.to_string(),
-        url: str_of(request, "url").ok_or("stored request has no url")?,
+        // Downloads queued by an older build stored the token in the URL; drop
+        // it on the way back out so resuming one also stops carrying it.
+        url: strip_api_key(&str_of(request, "url").ok_or("stored request has no url")?),
         file_name: str_of(&meta, "file").ok_or("stored meta has no file name")?,
         image_url: str_of(request, "image_url"),
         series_image_url: str_of(request, "series_image_url"),

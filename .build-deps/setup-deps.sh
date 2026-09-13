@@ -11,6 +11,7 @@ mkdir -p "$DEBS" "$ROOT"
 echo "==> Resolving package URIs via apt"
 mapfile -t URIS < <(apt-get install --print-uris -qq \
   libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libssl-dev libdbus-1-dev \
+  libmpv-dev \
   | sed -E "s/^'([^']+)'.*/\1/")
 
 echo "==> Downloading ${#URIS[@]} packages"
