@@ -1,0 +1,497 @@
+// X11 child-window embedding for mpv. We create a child window of the Tauri
+// toplevel and hand its id to mpv via --wid, so video renders inside the app.
+// Works on X11 and on Wayland via XWayland (the app forces GDK_BACKEND=x11).
+//
+// The same surface is what picture-in-picture moves: rather than restarting
+// mpv into a window of its own, the surface is reparented into a small
+// always-on-top toplevel and back again, so the stream never stops.
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use std::sync::{Arc, Mutex};
+use x11rb::connection::{Connection, RequestConnection};
+use x11rb::properties::WmSizeHints;
+use x11rb::protocol::shape::{self, ConnectionExt as _, SK, SO};
+use x11rb::protocol::xproto::{
+    AtomEnum, ClientMessageEvent, ClipOrdering, ConfigureWindowAux, ConnectionExt, CreateWindowAux,
+    EventMask, PropMode, Rectangle, WindowClass,
+};
+use x11rb::protocol::Event;
+use x11rb::rust_connection::RustConnection;
+use x11rb::wrapper::ConnectionExt as _;
+
+/// CSS height of the bottom player bar; the video surface stops above it.
+pub const BAR_HEIGHT_CSS: f64 = 72.0;
+
+/// Opening size of the picture-in-picture window, and the gap it keeps from the
+/// bottom-right corner of the screen. 16:9 at a size that is readable over a
+/// browser without being in the way; the window manager lets it be dragged and
+/// resized from there.
+const PIP_W: u16 = 480;
+const PIP_H: u16 = 270;
+const PIP_MARGIN_X: i32 = 32;
+/// Larger than the horizontal margin so the window clears a bottom panel.
+const PIP_MARGIN_Y: i32 = 72;
+const PIP_TITLE: &str = "FellyJin — Picture in Picture";
+
+/// XC_left_ptr in the standard cursor font: the plain arrow.
+///
+/// An X11 window with no cursor of its own inherits its parent's, and the
+/// parent here is the GTK toplevel, whose cursor is whatever GTK last set —
+/// the resize arrows from the window edges, or a hand from the page. Over the
+/// video that read as "this is all clickable", which it isn't. Naming a cursor
+/// explicitly cuts the inheritance.
+const XC_LEFT_PTR: u16 = 68;
+
+struct Atoms {
+    wm_protocols: u32,
+    wm_delete_window: u32,
+    net_wm_state: u32,
+    net_wm_state_above: u32,
+    net_wm_window_type: u32,
+    net_wm_window_type_normal: u32,
+    net_wm_name: u32,
+    utf8_string: u32,
+}
+
+fn intern(conn: &RustConnection, name: &str) -> u32 {
+    conn.intern_atom(false, name.as_bytes())
+        .ok()
+        .and_then(|c| c.reply().ok())
+        .map(|r| r.atom)
+        .unwrap_or(x11rb::NONE)
+}
+
+/// Load the arrow from the cursor font. Returns `NONE` if anything fails,
+/// which is exactly the "inherit from the parent" value, so a server without
+/// the cursor font simply behaves as before.
+fn arrow_cursor(conn: &RustConnection) -> u32 {
+    let (Ok(font), Ok(cursor)) = (conn.generate_id(), conn.generate_id()) else {
+        return x11rb::NONE;
+    };
+    if conn.open_font(font, b"cursor").is_err() {
+        return x11rb::NONE;
+    }
+    let made = conn
+        .create_glyph_cursor(
+            cursor,
+            font,
+            font,
+            XC_LEFT_PTR,
+            XC_LEFT_PTR + 1,
+            0,
+            0,
+            0,
+            u16::MAX,
+            u16::MAX,
+            u16::MAX,
+        )
+        .is_ok();
+    let _ = conn.close_font(font);
+    if made {
+        cursor
+    } else {
+        x11rb::NONE
+    }
+}
+
+pub struct Embed {
+    conn: RustConnection,
+    root: u32,
+    screen_w: u16,
+    screen_h: u16,
+    parent: u32,
+    child: Mutex<Option<u32>>,
+    /// The floating always-on-top toplevel the surface is reparented into for
+    /// picture-in-picture, while there is one.
+    pip: Mutex<Option<u32>>,
+    cursor: u32,
+    atoms: Atoms,
+    /// Whether the server has the SHAPE extension, which is how the fullscreen
+    /// controls get their strip without the video being resized.
+    shape: bool,
+}
+
+pub struct EmbedShared(pub Option<std::sync::Arc<Embed>>);
+
+pub fn window_xid(window: &tauri::WebviewWindow) -> Result<u64, String> {
+    let handle = window
+        .window_handle()
+        .map_err(|e| format!("no window handle: {e}"))?;
+    match handle.as_raw() {
+        RawWindowHandle::Xlib(h) => Ok(h.window as u64),
+        RawWindowHandle::Xcb(h) => Ok(h.window.get() as u64),
+        _ => Err("window is not X11 (Wayland backend?); falling back to external mpv".into()),
+    }
+}
+
+/// Compute the video surface geometry in physical pixels.
+/// `reserve_bar` leaves the bottom player bar visible below the video —
+/// always in windowed mode, and in fullscreen while the auto-hiding
+/// controls are revealed.
+pub fn geometry(
+    size: tauri::PhysicalSize<u32>,
+    scale: f64,
+    reserve_bar: bool,
+) -> (i16, i16, u16, u16) {
+    let bar = if reserve_bar {
+        (BAR_HEIGHT_CSS * scale).ceil() as u32
+    } else {
+        0
+    };
+    let h = size.height.saturating_sub(bar).max(1);
+    (0, 0, size.width.max(1) as u16, h as u16)
+}
+
+impl Embed {
+    pub fn new(parent_xid: u64) -> Result<Self, String> {
+        let (conn, screen_num) = x11rb::connect(None).map_err(|e| format!("X11 connect: {e}"))?;
+        let shape = conn
+            .extension_information(shape::X11_EXTENSION_NAME)
+            .ok()
+            .flatten()
+            .is_some();
+        let screen = &conn.setup().roots[screen_num];
+        let (root, screen_w, screen_h) =
+            (screen.root, screen.width_in_pixels, screen.height_in_pixels);
+        let cursor = arrow_cursor(&conn);
+        let atoms = Atoms {
+            wm_protocols: intern(&conn, "WM_PROTOCOLS"),
+            wm_delete_window: intern(&conn, "WM_DELETE_WINDOW"),
+            net_wm_state: intern(&conn, "_NET_WM_STATE"),
+            net_wm_state_above: intern(&conn, "_NET_WM_STATE_ABOVE"),
+            net_wm_window_type: intern(&conn, "_NET_WM_WINDOW_TYPE"),
+            net_wm_window_type_normal: intern(&conn, "_NET_WM_WINDOW_TYPE_NORMAL"),
+            net_wm_name: intern(&conn, "_NET_WM_NAME"),
+            utf8_string: intern(&conn, "UTF8_STRING"),
+        };
+        Ok(Self {
+            conn,
+            root,
+            screen_w,
+            screen_h,
+            parent: parent_xid as u32,
+            child: Mutex::new(None),
+            pip: Mutex::new(None),
+            cursor,
+            atoms,
+            shape,
+        })
+    }
+
+    /// False on servers without SHAPE, where the fullscreen bar has to fall
+    /// back to shrinking the video to make room for itself.
+    pub fn can_clip(&self) -> bool {
+        self.shape
+    }
+
+    /// Hide the bottom `bar` physical pixels of the video surface without
+    /// resizing it. Shrinking the window makes mpv re-fit the picture, so the
+    /// whole frame jumps and rescales the moment the controls arrive; clipping
+    /// the window's shape leaves mpv's geometry — and the picture — exactly
+    /// where it was and simply stops the strip from being drawn, revealing the
+    /// player bar underneath. Input follows the bounding shape, so clicks in
+    /// the strip land on the bar rather than on mpv.
+    pub fn set_bottom_clip(&self, w: u16, h: u16, bar: u32) {
+        if !self.shape {
+            return;
+        }
+        let Some(id) = *self.child.lock().unwrap() else { return };
+        if bar == 0 {
+            // A null mask resets the window to its own rectangle.
+            let _ = self
+                .conn
+                .shape_mask(SO::SET, SK::BOUNDING, id, 0, 0, x11rb::NONE);
+        } else {
+            let rect = Rectangle {
+                x: 0,
+                y: 0,
+                width: w.max(1),
+                height: h.saturating_sub(bar.min(u16::MAX as u32) as u16).max(1),
+            };
+            let _ = self.conn.shape_rectangles(
+                SO::SET,
+                SK::BOUNDING,
+                ClipOrdering::UNSORTED,
+                id,
+                0,
+                0,
+                &[rect],
+            );
+        }
+        let _ = self.conn.flush();
+    }
+
+    /// Create the surface mpv draws into. While picture-in-picture is up the
+    /// floating window is the parent, not the app window, so starting the next
+    /// episode doesn't yank the picture back into the app.
+    pub fn create_surface(&self, x: i16, y: i16, w: u16, h: u16) -> Result<u32, String> {
+        self.drop_child();
+        let pip = *self.pip.lock().unwrap();
+        let (parent, x, y, w, h) = match pip {
+            Some(p) => {
+                let (pw, ph) = self.size_of(p).unwrap_or((PIP_W, PIP_H));
+                (p, 0, 0, pw, ph)
+            }
+            None => (self.parent, x, y, w, h),
+        };
+        let id = self.conn.generate_id().map_err(|e| e.to_string())?;
+        let aux = CreateWindowAux::new()
+            .background_pixel(0x0e0e14)
+            .cursor(self.cursor);
+        self.conn
+            .create_window(
+                x11rb::COPY_DEPTH_FROM_PARENT,
+                id,
+                parent,
+                x,
+                y,
+                w.max(1),
+                h.max(1),
+                0,
+                WindowClass::INPUT_OUTPUT,
+                x11rb::COPY_FROM_PARENT,
+                &aux,
+            )
+            .map_err(|e| e.to_string())?;
+        self.conn.map_window(id).map_err(|e| e.to_string())?;
+        self.conn.flush().map_err(|e| e.to_string())?;
+        *self.child.lock().unwrap() = Some(id);
+        Ok(id)
+    }
+
+    pub fn resize(&self, x: i16, y: i16, w: u16, h: u16) {
+        if let Some(id) = *self.child.lock().unwrap() {
+            let aux = ConfigureWindowAux::new()
+                .x(x as i32)
+                .y(y as i32)
+                .width(w.max(1) as u32)
+                .height(h.max(1) as u32);
+            let _ = self.conn.configure_window(id, &aux);
+            let _ = self.conn.flush();
+        }
+    }
+
+    /// Destroy only if `id` is still the current surface. A finished playback
+    /// session must not tear down the surface a newer session just created.
+    pub fn destroy_surface_if(&self, id: u32) {
+        let mut guard = self.child.lock().unwrap();
+        if *guard == Some(id) {
+            guard.take();
+            let _ = self.conn.destroy_window(id);
+            let _ = self.conn.flush();
+        }
+    }
+
+    pub fn has_surface(&self) -> bool {
+        self.child.lock().unwrap().is_some()
+    }
+
+    /// Tear down the surface only. The picture-in-picture window outlives it:
+    /// mpv exits and restarts between episodes and on a quality switch, and
+    /// closing the floating window under the user for a second of that would
+    /// be worse than the pause in the picture. The frontend closes it when
+    /// playback is over for good.
+    fn drop_child(&self) {
+        if let Some(id) = self.child.lock().unwrap().take() {
+            let _ = self.conn.destroy_window(id);
+            let _ = self.conn.flush();
+        }
+    }
+
+    fn size_of(&self, window: u32) -> Option<(u16, u16)> {
+        let geo = self.conn.get_geometry(window).ok()?.reply().ok()?;
+        Some((geo.width.max(1), geo.height.max(1)))
+    }
+
+    // ---------- Picture in picture ----------
+
+    pub fn is_pip(&self) -> bool {
+        self.pip.lock().unwrap().is_some()
+    }
+
+    /// Move the running video out into a small always-on-top window of its
+    /// own. The surface is reparented rather than recreated, so mpv keeps
+    /// decoding the same stream at the same position — nothing restarts.
+    pub fn enter_pip(&self) -> Result<(), String> {
+        if self.is_pip() {
+            return Ok(());
+        }
+        let child = (*self.child.lock().unwrap()).ok_or("no video surface to move")?;
+
+        // Whatever the fullscreen bar cut out of the surface belongs to a
+        // control strip that isn't over this window; give the picture its
+        // whole rectangle back before it leaves.
+        if self.shape {
+            let _ = self
+                .conn
+                .shape_mask(SO::SET, SK::BOUNDING, child, 0, 0, x11rb::NONE);
+        }
+
+        let id = self.conn.generate_id().map_err(|e| e.to_string())?;
+        let x = (self.screen_w as i32 - PIP_W as i32 - PIP_MARGIN_X).max(0) as i16;
+        let y = (self.screen_h as i32 - PIP_H as i32 - PIP_MARGIN_Y).max(0) as i16;
+        let aux = CreateWindowAux::new()
+            .background_pixel(0x000000)
+            .border_pixel(0)
+            .cursor(self.cursor)
+            // The window manager owns this window's size and position; these
+            // are how we hear about the two things it can do to it.
+            .event_mask(EventMask::STRUCTURE_NOTIFY);
+        self.conn
+            .create_window(
+                x11rb::COPY_DEPTH_FROM_PARENT,
+                id,
+                self.root,
+                x,
+                y,
+                PIP_W,
+                PIP_H,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                x11rb::COPY_FROM_PARENT,
+                &aux,
+            )
+            .map_err(|e| e.to_string())?;
+        self.describe_pip(id);
+        // Reparent, fill, then map the new parent: the surface is already
+        // mapped, and an unmapped parent keeps it off screen until we're
+        // ready, so the video never flashes at the wrong size or place.
+        self.conn
+            .reparent_window(child, id, 0, 0)
+            .map_err(|e| e.to_string())?;
+        let _ = self.conn.configure_window(
+            child,
+            &ConfigureWindowAux::new()
+                .x(0)
+                .y(0)
+                .width(PIP_W as u32)
+                .height(PIP_H as u32),
+        );
+        let _ = self.conn.map_window(child);
+        self.conn.map_window(id).map_err(|e| e.to_string())?;
+        self.conn.flush().map_err(|e| e.to_string())?;
+        *self.pip.lock().unwrap() = Some(id);
+        // Some window managers only read _NET_WM_STATE at map time, others
+        // only act on the message. Both, so "on top" means on top.
+        self.ask_above(id);
+        Ok(())
+    }
+
+    /// Bring the picture back into the app window and close the floating one.
+    /// The caller puts the surface back at the right geometry afterwards.
+    pub fn leave_pip(&self) {
+        let Some(id) = self.pip.lock().unwrap().take() else { return };
+        if let Some(child) = *self.child.lock().unwrap() {
+            let _ = self.conn.reparent_window(child, self.parent, 0, 0);
+            let _ = self.conn.map_window(child);
+        }
+        let _ = self.conn.destroy_window(id);
+        let _ = self.conn.flush();
+    }
+
+    /// Everything the window manager needs to treat this as a window a person
+    /// owns: a name in the task list, a type, "keep above", a floor on its
+    /// size, and — the important one — a promise to handle its own close
+    /// button. Without WM_DELETE_WINDOW the close button kills the X client
+    /// instead, and this connection is the one holding the video surface.
+    fn describe_pip(&self, id: u32) {
+        let _ = self.conn.change_property8(
+            PropMode::REPLACE,
+            id,
+            self.atoms.net_wm_name,
+            self.atoms.utf8_string,
+            PIP_TITLE.as_bytes(),
+        );
+        let _ = self.conn.change_property8(
+            PropMode::REPLACE,
+            id,
+            u32::from(AtomEnum::WM_NAME),
+            u32::from(AtomEnum::STRING),
+            PIP_TITLE.as_bytes(),
+        );
+        let _ = self.conn.change_property8(
+            PropMode::REPLACE,
+            id,
+            u32::from(AtomEnum::WM_CLASS),
+            u32::from(AtomEnum::STRING),
+            b"fellyjin\0FellyJin\0",
+        );
+        let _ = self.conn.change_property32(
+            PropMode::REPLACE,
+            id,
+            self.atoms.net_wm_window_type,
+            u32::from(AtomEnum::ATOM),
+            &[self.atoms.net_wm_window_type_normal],
+        );
+        let _ = self.conn.change_property32(
+            PropMode::REPLACE,
+            id,
+            self.atoms.net_wm_state,
+            u32::from(AtomEnum::ATOM),
+            &[self.atoms.net_wm_state_above],
+        );
+        let _ = self.conn.change_property32(
+            PropMode::REPLACE,
+            id,
+            self.atoms.wm_protocols,
+            u32::from(AtomEnum::ATOM),
+            &[self.atoms.wm_delete_window],
+        );
+        let mut hints = WmSizeHints::new();
+        hints.min_size = Some((192, 108));
+        let _ = hints.set_normal_hints(&self.conn, id);
+    }
+
+    fn ask_above(&self, id: u32) {
+        const ADD: u32 = 1;
+        const SOURCE_APPLICATION: u32 = 1;
+        let ev = ClientMessageEvent::new(
+            32,
+            id,
+            self.atoms.net_wm_state,
+            [ADD, self.atoms.net_wm_state_above, 0, SOURCE_APPLICATION, 0],
+        );
+        let _ = self.conn.send_event(
+            false,
+            self.root,
+            EventMask::SUBSTRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_REDIRECT,
+            ev,
+        );
+        let _ = self.conn.flush();
+    }
+
+    /// Watch the floating window for the two things only the window manager
+    /// can tell us: the user resized it, or closed it. `on_close` runs on the
+    /// close, after the picture is already back in the app window, so the
+    /// frontend can put its own button back.
+    pub fn watch_pip(self: &Arc<Self>, on_close: impl Fn() + Send + 'static) {
+        let me = Arc::clone(self);
+        std::thread::spawn(move || loop {
+            let Ok(event) = me.conn.wait_for_event() else { return };
+            let pip = *me.pip.lock().unwrap();
+            match event {
+                // The user dragged an edge: the picture fills whatever size
+                // they settled on. mpv follows its own parent, so setting the
+                // surface is enough.
+                Event::ConfigureNotify(ev) if pip == Some(ev.window) => {
+                    if let Some(child) = *me.child.lock().unwrap() {
+                        let aux = ConfigureWindowAux::new()
+                            .x(0)
+                            .y(0)
+                            .width(ev.width.max(1) as u32)
+                            .height(ev.height.max(1) as u32);
+                        let _ = me.conn.configure_window(child, &aux);
+                        let _ = me.conn.flush();
+                    }
+                }
+                Event::ClientMessage(ev) if pip == Some(ev.window) => {
+                    let data = ev.data.as_data32();
+                    if ev.type_ == me.atoms.wm_protocols && data[0] == me.atoms.wm_delete_window {
+                        me.leave_pip();
+                        on_close();
+                    }
+                }
+                _ => {}
+            }
+        });
+    }
+}
