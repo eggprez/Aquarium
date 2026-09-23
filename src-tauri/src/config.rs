@@ -14,13 +14,39 @@ const DIR_MODE: u32 = 0o700;
 pub fn config_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("fellyjin")
+        .join("aquarium")
 }
 
 pub fn data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("fellyjin")
+        .join("aquarium")
+}
+
+/// The app was called FellyJin before it was renamed to Aquarium. Its config,
+/// downloads, window state and webview storage (localStorage, IndexedDB) all
+/// sat under directories named after the old name and identifier; move each
+/// one across on first launch so an upgrade keeps the user signed in, keeps
+/// their downloads and doesn't reset their preferences. Must run before the
+/// webview starts, which is when WebKit opens its storage under the new name.
+pub fn migrate_legacy_dirs() {
+    let pairs = [
+        (dirs::config_dir(), "fellyjin", "aquarium"),
+        (dirs::data_dir(), "fellyjin", "aquarium"),
+        (dirs::config_dir(), "dev.fellyjin.app", "dev.aquarium.app"),
+        (dirs::data_dir(), "dev.fellyjin.app", "dev.aquarium.app"),
+        (dirs::cache_dir(), "dev.fellyjin.app", "dev.aquarium.app"),
+    ];
+    for (base, old, new) in pairs {
+        let Some(base) = base else { continue };
+        let (from, to) = (base.join(old), base.join(new));
+        // Never merge into or clobber a directory the new build already made.
+        if from.is_dir() && !to.exists() {
+            if let Err(e) = std::fs::rename(&from, &to) {
+                eprintln!("aquarium: couldn't move {} to {}: {e}", from.display(), to.display());
+            }
+        }
+    }
 }
 
 pub fn downloads_dir() -> PathBuf {
@@ -111,6 +137,6 @@ pub fn device_id() -> String {
     load()
         .get("device_id")
         .and_then(|v| v.as_str())
-        .unwrap_or("fellyjin")
+        .unwrap_or("aquarium")
         .to_string()
 }

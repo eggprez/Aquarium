@@ -62,7 +62,7 @@ fn load_lib(
         match libloading::Library::new(name) {
             Ok(l) => Some(l),
             Err(e) => {
-                eprintln!("fellyjin: {name} not loadable: {e}");
+                eprintln!("aquarium: {name} not loadable: {e}");
                 None
             }
         }
@@ -92,7 +92,7 @@ macro_rules! api_struct {
                 let lib = load_lib(&$slot, $libname)?;
                 $( let $field = sym(lib, $c_name);
                    if $field.is_null() {
-                       eprintln!(concat!("fellyjin: ", $libname, " entry point missing: ", $c_name));
+                       eprintln!(concat!("aquarium: ", $libname, " entry point missing: ", $c_name));
                        return None;
                    } )*
                 Some($struct {

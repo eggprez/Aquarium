@@ -152,7 +152,7 @@ fn http_auth_header(req: &PlayRequest) -> Option<String> {
         return None;
     }
     let token = crate::secret::token()?;
-    let device = ctx.device_id.as_deref().unwrap_or("fellyjin");
+    let device = ctx.device_id.as_deref().unwrap_or("aquarium");
     Some(jellyfin::auth_header(&token, device))
 }
 
@@ -274,7 +274,7 @@ impl Player {
         self.stop().await;
         let my_epoch = self.epoch.fetch_add(1, Ordering::SeqCst) + 1;
 
-        let title = req.title.clone().unwrap_or_else(|| "FellyJin".to_string());
+        let title = req.title.clone().unwrap_or_else(|| "Aquarium".to_string());
         let is_live = req.ctx.as_ref().map(|c| c.live).unwrap_or(false);
 
         self.viewport_full.store(false, Ordering::SeqCst);
@@ -372,7 +372,7 @@ impl Player {
             // rather than repeating what was asked for.
             (16, "hwdec-current"),
             // mpv's own accounting of frames shown late or at the wrong
-            // time; logged under FELLYJIN_SURFACE_TEST next to the video
+            // time; logged under AQUARIUM_SURFACE_TEST next to the video
             // thread's frame gaps, to tell a late frame from a held one.
             (17, "vo-delayed-frame-count"),
             (18, "mistimed-frame-count"),
@@ -526,13 +526,13 @@ impl Player {
                         let t0 = std::time::Instant::now();
                         emit_status(&app, &status);
                         if diag {
-                            eprintln!("fellyjin: player: status tick at {} ({} ms)", crate::now_ms(), t0.elapsed().as_millis());
+                            eprintln!("aquarium: player: status tick at {} ({} ms)", crate::now_ms(), t0.elapsed().as_millis());
                         }
                         if last_report.elapsed().as_secs() >= 10 {
                             let t1 = std::time::Instant::now();
                             report_progress(&ctx, &status).await;
                             if diag {
-                                eprintln!("fellyjin: player: progress report at {} ({} ms)", crate::now_ms(), t1.elapsed().as_millis());
+                                eprintln!("aquarium: player: progress report at {} ({} ms)", crate::now_ms(), t1.elapsed().as_millis());
                             }
                             last_report = std::time::Instant::now();
                         }
@@ -768,7 +768,7 @@ fn apply_event(
         "vo-delayed-frame-count" | "mistimed-frame-count" => {
             if crate::surface::debug_enabled() {
                 if let Some(n) = data.and_then(|v| v.as_u64()) {
-                    eprintln!("fellyjin: player: {name}={n} (at {})", crate::now_ms());
+                    eprintln!("aquarium: player: {name}={n} (at {})", crate::now_ms());
                 }
             }
         }
@@ -833,7 +833,7 @@ fn server_creds(ctx: &PlayContext) -> Option<(String, String, String)> {
     Some((
         ctx.server_url.clone()?,
         crate::secret::token()?,
-        ctx.device_id.clone().unwrap_or_else(|| "fellyjin".into()),
+        ctx.device_id.clone().unwrap_or_else(|| "aquarium".into()),
     ))
 }
 
@@ -879,7 +879,7 @@ async fn report_stopped(ctx: &Option<PlayContext>, st: &Status) {
         if let (Some(server), Some(token), Some(user_id)) =
             (&ctx.server_url, crate::secret::token(), &ctx.user_id)
         {
-            let device_id = ctx.device_id.clone().unwrap_or_else(|| "fellyjin".into());
+            let device_id = ctx.device_id.clone().unwrap_or_else(|| "aquarium".into());
             let _ = progress::sync(server, &token, &device_id, user_id).await;
         }
         return;

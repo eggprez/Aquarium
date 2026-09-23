@@ -59,6 +59,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
+name = "aquarium"
+version = "0.1.30"
+dependencies = [
+ "dbus",
+ "dbus-crossroads",
+ "dbus-secret-service",
+ "dirs",
+ "flate2",
+ "futures-util",
+ "gtk",
+ "libc",
+ "libloading 0.8.9",
+ "libmpv2",
+ "libmpv2-sys",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-window-state",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "atk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -834,31 +859,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
 dependencies = [
  "simd-adler32",
-]
-
-[[package]]
-name = "fellyjin"
-version = "0.1.30"
-dependencies = [
- "dbus",
- "dbus-crossroads",
- "dbus-secret-service",
- "dirs",
- "flate2",
- "futures-util",
- "gtk",
- "libc",
- "libloading 0.8.9",
- "libmpv2",
- "libmpv2-sys",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-window-state",
- "tokio",
- "uuid",
 ]
 
 [[package]]

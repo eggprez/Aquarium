@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Full FellyJin .deb build: compile frontend + Rust, bundle, drop the package
-# in the project root as felly.deb.
+# Full Aquarium .deb build: compile frontend + Rust, bundle, drop the package
+# in the project root as aquarium.deb.
 #
 # Unlike the AppImage this replaced, the package does not carry mpv or GTK with
 # it — `Depends: libmpv2, libwebkit2gtk-4.1-0, libgtk-3-0` pulls them from the
@@ -27,9 +27,9 @@ npx tauri build
 DEB="$(ls -t "$PROJ/src-tauri/target/release/bundle/deb"/*.deb 2>/dev/null | head -1)"
 [ -n "$DEB" ] || { echo "FATAL: no .deb was produced"; exit 1; }
 
-cp "$DEB" "$PROJ/felly.deb"
-echo "==> Done: $PROJ/felly.deb"
-dpkg-deb -I "$PROJ/felly.deb" | sed -n '3,12p'
-ls -lh "$PROJ/felly.deb"
+cp "$DEB" "$PROJ/aquarium.deb"
+echo "==> Done: $PROJ/aquarium.deb"
+dpkg-deb -I "$PROJ/aquarium.deb" | sed -n '3,12p'
+ls -lh "$PROJ/aquarium.deb"
 echo
-echo "Install with: sudo apt install $PROJ/felly.deb"
+echo "Install with: sudo apt install $PROJ/aquarium.deb"

@@ -36,9 +36,9 @@ use tokio::sync::mpsc;
 // --------------------------------------------------------------- config dirs
 
 /// mpv config dir shipped with the package (uosc UI + our control layout).
-/// Installed at /usr/share/fellyjin/mpv, found relative to the executable.
+/// Installed at /usr/share/aquarium/mpv, found relative to the executable.
 pub fn resolve_mpv_config_dir() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("FELLYJIN_MPV_CONFIG") {
+    if let Ok(p) = std::env::var("AQUARIUM_MPV_CONFIG") {
         let p = PathBuf::from(p);
         if p.is_dir() {
             return Some(p);
@@ -46,7 +46,7 @@ pub fn resolve_mpv_config_dir() -> Option<PathBuf> {
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let cand = dir.join("../share/fellyjin/mpv");
+            let cand = dir.join("../share/aquarium/mpv");
             if cand.is_dir() {
                 return cand.canonicalize().ok();
             }
@@ -87,7 +87,7 @@ pub fn mpv_log_path() -> Option<PathBuf> {
 //
 // Two things the Settings page wants that aren't playback: what mpv build is
 // actually running, and what audio outputs it can see. Both used to shell out
-// to the standalone `mpv` binary FellyJin depended on for exactly this; there
+// to the standalone `mpv` binary Aquarium depended on for exactly this; there
 // is no such binary any more (see WAYLAND-MIGRATION.md Phase 5), so both spin
 // up a throwaway core — `Mpv::new()` already gives the isolated, no-config,
 // no-terminal handle these want — read one property, and drop it.

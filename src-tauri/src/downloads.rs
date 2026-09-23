@@ -231,7 +231,7 @@ fn auth_header_now() -> Option<String> {
     let device = cfg
         .get("device_id")
         .and_then(|v| v.as_str())
-        .unwrap_or("fellyjin");
+        .unwrap_or("aquarium");
     Some(jellyfin::auth_header(&token, device))
 }
 

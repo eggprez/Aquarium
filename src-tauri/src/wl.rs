@@ -101,7 +101,7 @@ fn lib() -> Option<&'static libloading::Library> {
         match libloading::Library::new("libwayland-client.so.0") {
             Ok(l) => Some(l),
             Err(e) => {
-                eprintln!("fellyjin: libwayland-client.so.0 not loadable: {e}");
+                eprintln!("aquarium: libwayland-client.so.0 not loadable: {e}");
                 None
             }
         }
@@ -171,7 +171,7 @@ pub fn api() -> Option<&'static Api> {
         ($name:literal as $t:ty) => {{
             let p = sym($name);
             if p.is_null() {
-                eprintln!(concat!("fellyjin: libwayland-client symbol missing: ", $name));
+                eprintln!(concat!("aquarium: libwayland-client symbol missing: ", $name));
                 return None;
             }
             unsafe { std::mem::transmute::<*mut c_void, $t>(p) }

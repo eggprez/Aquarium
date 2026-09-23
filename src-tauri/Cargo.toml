@@ -1,5 +1,5 @@
 [package]
-name = "fellyjin"
+name = "aquarium"
 version = "0.1.30"
 description = "Lightweight Jellyfin client"
 edition = "2021"
@@ -57,5 +57,5 @@ strip = true
 opt-level = "s"
 
 [lib]
-name = "fellyjin_lib"
+name = "aquarium_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

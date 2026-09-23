@@ -312,7 +312,7 @@ end
 
 ---@param opacity number 0-1
 function opacity_to_alpha(opacity)
-	-- FellyJin patch: clamp to [0, 255]. Tween easing can overshoot opacity
+	-- Aquarium patch: clamp to [0, 255]. Tween easing can overshoot opacity
 	-- slightly past 1.0, and Lua 5.2's string.format('%X') errors on negative
 	-- numbers, which killed every menu render.
 	return 255 - math.max(0, math.min(255, math.ceil(255 * opacity)))

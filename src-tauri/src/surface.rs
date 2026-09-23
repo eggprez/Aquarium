@@ -11,7 +11,7 @@
 //!   it), and whose allocation is what positions and sizes the subsurface.
 //!   See WAYLAND-SUBSURFACE-PLAN.md.
 //! - **GtkGLArea** (`Backend::Gl`: X11 sessions, a Wayland compositor without
-//!   `wp_viewporter`, or the `FELLYJIN_VIDEO_BACKEND=gl` override): mpv
+//!   `wp_viewporter`, or the `AQUARIUM_VIDEO_BACKEND=gl` override): mpv
 //!   renders on the GTK thread into the GLArea's framebuffer, and every video
 //!   frame costs GTK a repaint of the widget's rectangle. See
 //!   WAYLAND-MIGRATION.md.
@@ -66,7 +66,7 @@ pub const BAR_HEIGHT_CSS: f64 = 72.0;
 /// position: a Wayland client cannot place its own toplevels.
 const PIP_W: i32 = 480;
 const PIP_H: i32 = 270;
-const PIP_TITLE: &str = "FellyJin — Picture in Picture";
+const PIP_TITLE: &str = "Aquarium — Picture in Picture";
 
 /// The app background, so the surface reads as part of the window before the
 /// first frame arrives. Same colour the X11 child was filled with.
@@ -81,7 +81,7 @@ extern "C" {
     fn gdk_wayland_window_get_wl_surface(window: *mut c_void) -> *mut c_void;
 }
 
-/// `FELLYJIN_SURFACE_TEST=1` turns on the migration's own diagnostics: the
+/// `AQUARIUM_SURFACE_TEST=1` turns on the migration's own diagnostics: the
 /// widget tree the surface was built into, and what the render callback (or
 /// the video thread) actually got handed. The failure modes here — a widget
 /// allocated zero height, hwdec silently resolving to `no`, a subsurface
@@ -90,7 +90,7 @@ pub fn debug_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
         matches!(
-            std::env::var("FELLYJIN_SURFACE_TEST").as_deref(),
+            std::env::var("AQUARIUM_SURFACE_TEST").as_deref(),
             Ok("1") | Ok("true")
         )
     })
@@ -99,7 +99,7 @@ pub fn debug_enabled() -> bool {
 fn dump_tree(w: &gtk::Widget, depth: usize) {
     let a = w.allocation();
     eprintln!(
-        "fellyjin:   {:indent$}{} {}x{}+{}+{} visible={}",
+        "aquarium:   {:indent$}{} {}x{}+{}+{} visible={}",
         "",
         w.type_().name(),
         a.width(),
@@ -181,7 +181,7 @@ impl Offscreen {
                 (g.fb_texture_2d)(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, tex, 0);
                 let status = (g.check_fb_status)(gl::FRAMEBUFFER);
                 if status != gl::FRAMEBUFFER_COMPLETE {
-                    eprintln!("fellyjin: offscreen FBO incomplete: 0x{status:x}");
+                    eprintln!("aquarium: offscreen FBO incomplete: 0x{status:x}");
                 }
                 (g.bind_framebuffer)(gl::FRAMEBUFFER, 0);
             }
@@ -271,7 +271,7 @@ impl Layout {
         let want = (avail - self.trim.get()).max(1);
         if debug_enabled() {
             eprintln!(
-                "fellyjin: layout: avail {avail} trim {} → want {want} (requested {}, allocated {})",
+                "aquarium: layout: avail {avail} trim {} → want {want} (requested {}, allocated {})",
                 self.trim.get(),
                 self.requested.get(),
                 area.allocated_height()
@@ -286,7 +286,7 @@ impl Layout {
         glib::idle_add_local_once(move || {
             if !me.pip.get() {
                 if debug_enabled() {
-                    eprintln!("fellyjin: layout: set_size_request(-1, {})", me.requested.get());
+                    eprintln!("aquarium: layout: set_size_request(-1, {})", me.requested.get());
                 }
                 area.set_size_request(-1, me.requested.get());
             }
@@ -401,7 +401,7 @@ impl Ui {
                 if debug_enabled() {
                     let (sid, ssid) = sub.ids();
                     eprintln!(
-                        "fellyjin: video subsurface wl_surface#{sid}/wl_subsurface#{ssid} on toplevel {parent:?} at ({x},{y})"
+                        "aquarium: video subsurface wl_surface#{sid}/wl_subsurface#{ssid} on toplevel {parent:?} at ({x},{y})"
                     );
                 }
                 w.parent.set(parent);
@@ -419,7 +419,7 @@ impl Ui {
                 // this sends nothing stale there.
                 self.wl_push_geometry();
             }
-            Err(e) => eprintln!("fellyjin: video subsurface: {e}"),
+            Err(e) => eprintln!("aquarium: video subsurface: {e}"),
         }
     }
 
@@ -484,7 +484,7 @@ fn wl_geometry_changed(
 ) {
     if debug_enabled() {
         eprintln!(
-            "fellyjin: layout: placeholder allocated {}x{}+{}+{}",
+            "aquarium: layout: placeholder allocated {}x{}+{}+{}",
             alloc.width(),
             alloc.height(),
             alloc.x(),
@@ -517,7 +517,7 @@ fn wl_geometry_changed(
     };
     if debug_enabled() && w.last_pos.get() != (x, y) {
         eprintln!(
-            "fellyjin: video widget {}x{}+{}+{} → subsurface at ({x},{y}), fit height {} css, scale {scale}",
+            "aquarium: video widget {}x{}+{}+{} → subsurface at ({x},{y}), fit height {} css, scale {scale}",
             alloc.width(),
             alloc.height(),
             alloc.x(),
@@ -563,8 +563,8 @@ pub struct SurfaceShared(pub Option<Arc<Surface>>);
 
 /// Which backend to build, and why not the other one.
 fn choose_backend() -> Result<Arc<wl::Globals>, String> {
-    if std::env::var("FELLYJIN_VIDEO_BACKEND").as_deref() == Ok("gl") {
-        return Err("FELLYJIN_VIDEO_BACKEND=gl".into());
+    if std::env::var("AQUARIUM_VIDEO_BACKEND").as_deref() == Ok("gl") {
+        return Err("AQUARIUM_VIDEO_BACKEND=gl".into());
     }
     let display = gtk::gdk::Display::default().ok_or("no GDK display")?;
     if !display.type_().name().contains("Wayland") {
@@ -647,13 +647,13 @@ impl Surface {
         gtk_win.add(&overlay);
         overlay.show();
 
-        // Test hook: FELLYJIN_TEST_INPUT=1 fires a synthetic left click and a
+        // Test hook: AQUARIUM_TEST_INPUT=1 fires a synthetic left click and a
         // touch-begin at the webview two seconds in, through the same signals
         // real input arrives on, so wry's handlers above run against this
         // widget tree. Handlers of our own, connected last so they run after
         // wry's, swallow the events before WebKit's class handler sees them.
         // The old tree aborted here; the log line proves the new one doesn't.
-        if std::env::var_os("FELLYJIN_TEST_INPUT").is_some() {
+        if std::env::var_os("AQUARIUM_TEST_INPUT").is_some() {
             let webview = webview.clone();
             glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
                 webview.connect_button_press_event(|_, _| glib::Propagation::Stop);
@@ -665,7 +665,7 @@ impl Surface {
                 let touch = gdk::Event::new(gdk::EventType::TouchBegin);
                 let a = webview.emit_by_name::<bool>("button-press-event", &[&click]);
                 let b = webview.emit_by_name::<bool>("touch-event", &[&touch]);
-                eprintln!("fellyjin: test input: click={a} touch={b} — survived");
+                eprintln!("aquarium: test input: click={a} touch={b} — survived");
             });
         }
 
@@ -682,19 +682,19 @@ impl Surface {
             Ok(globals) => match video_thread::Handle::spawn(globals.clone()) {
                 Ok(thread) => Some((globals, thread)),
                 Err(e) => {
-                    eprintln!("fellyjin: video backend: GtkGLArea ({e})");
+                    eprintln!("aquarium: video backend: GtkGLArea ({e})");
                     None
                 }
             },
             Err(why) => {
-                eprintln!("fellyjin: video backend: GtkGLArea ({why})");
+                eprintln!("aquarium: video backend: GtkGLArea ({why})");
                 None
             }
         };
 
         let (widget, backend): (gtk::Widget, Backend) = match wl_thread {
             Some((globals, thread)) => {
-                eprintln!("fellyjin: video backend: Wayland subsurface");
+                eprintln!("aquarium: video backend: Wayland subsurface");
                 let area = gtk::DrawingArea::new();
                 // A GdkWindow of its own, like the GLArea has: for the cursor
                 // below and so its events are its own rather than the
@@ -798,7 +798,7 @@ impl Surface {
         });
 
         if debug_enabled() {
-            eprintln!("fellyjin: video surface widget tree:");
+            eprintln!("aquarium: video surface widget tree:");
             dump_tree(gtk_win.upcast_ref::<gtk::Widget>(), 0);
         }
 
@@ -1391,7 +1391,7 @@ fn set_video_cursor(widget: &gtk::Widget, blank: bool) {
     };
     win.set_cursor(cursor.as_ref());
     if debug_enabled() {
-        eprintln!("fellyjin: video cursor {}", if blank { "hidden" } else { "shown" });
+        eprintln!("aquarium: video cursor {}", if blank { "hidden" } else { "shown" });
     }
 }
 
@@ -1443,7 +1443,7 @@ fn leave_pip_on_main(app: &AppHandle) {
 fn connect_render(area: &gtk::GLArea, video: Rc<RefCell<Video>>) {
     area.connect_render(move |area, _ctx| {
         if let Some(e) = area.error() {
-            eprintln!("fellyjin: GLArea failed to realize: {e}");
+            eprintln!("aquarium: GLArea failed to realize: {e}");
             return glib::Propagation::Proceed;
         }
         let Some(g) = gl::api() else {
@@ -1479,7 +1479,7 @@ fn connect_render(area: &gtk::GLArea, video: Rc<RefCell<Video>>) {
             let shape = ((w as u64) << 40) | ((visible as u64) << 20) | (clip.max(0) as u64);
             if LAST.swap(shape, Ordering::Relaxed) != shape || n.is_multiple_of(120) {
                 eprintln!(
-                    "fellyjin: render #{n} widget={}x{} scale={scale} \
+                    "aquarium: render #{n} widget={}x{} scale={scale} \
                      phys={w}x{visible} clip={clip} full={full} mpv={}",
                     area.allocated_width(),
                     area.allocated_height(),
@@ -1551,7 +1551,7 @@ fn build_render_ctx(area: &gtk::GLArea, v: &mut Video) -> bool {
             true
         }
         Err(e) => {
-            eprintln!("fellyjin: {e}");
+            eprintln!("aquarium: {e}");
             false
         }
     }
@@ -1584,7 +1584,7 @@ fn make_render_ctx(area: &gtk::GLArea, mpv: Arc<Mpv>) -> Result<RenderCtx, Strin
         };
         // GL_VENDOR / GL_RENDERER.
         eprintln!(
-            "fellyjin: video surface on {backend}, GL vendor={} renderer={}",
+            "aquarium: video surface on {backend}, GL vendor={} renderer={}",
             name(0x1F00),
             name(0x1F01)
         );
@@ -1640,7 +1640,7 @@ fn send_input(video: &Rc<RefCell<Video>>, cmd: &str) {
     let err = unsafe { libmpv2_sys::mpv_command_string(mpv.ctx.as_ptr(), c.as_ptr()) };
     if err < 0 && debug_enabled() {
         eprintln!(
-            "fellyjin: input {cmd:?} failed: {}",
+            "aquarium: input {cmd:?} failed: {}",
             libmpv2_sys::mpv_error_str(err)
         );
     }

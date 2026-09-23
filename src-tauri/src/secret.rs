@@ -1,6 +1,6 @@
 //! Where the Jellyfin access token lives.
 //!
-//! It used to be written straight into `~/.config/fellyjin/config.json`, which
+//! It used to be written straight into `~/.config/aquarium/config.json`, which
 //! means any process running as the user — and any backup that sweeps up dotfiles
 //! — walks away with a credential that grants full access to the media server.
 //! The token now goes to the desktop keyring (Secret Service: gnome-keyring,
@@ -34,7 +34,10 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
 
-const SERVICE: &str = "dev.fellyjin.app";
+const SERVICE: &str = "dev.aquarium.app";
+/// The service the token was filed under before the app was renamed from
+/// FellyJin. Read once as a fallback and moved to `SERVICE` — see `adopt_legacy`.
+const LEGACY_SERVICE: &str = "dev.fellyjin.app";
 const ACCOUNT: &str = "jellyfin-access-token";
 /// A token whose sign-out couldn't reach the server yet. Parked here so the
 /// revocation can be retried instead of silently leaving a live session behind.
@@ -91,7 +94,11 @@ fn attrs(account: &str) -> HashMap<&str, &str> {
 /// searched the default collection on service and username alone, so an item
 /// written before the `target` attribute existed still turns up.
 fn search_attrs(account: &str) -> HashMap<&str, &str> {
-    HashMap::from([("service", SERVICE), ("username", account)])
+    search_attrs_in(SERVICE, account)
+}
+
+fn search_attrs_in<'a>(service: &'a str, account: &'a str) -> HashMap<&'a str, &'a str> {
+    HashMap::from([("service", service), ("username", account)])
 }
 
 fn label(account: &str) -> String {
@@ -159,7 +166,11 @@ fn with_collection<T>(op: impl Fn(&Collection<'_>) -> Result<T, SsError>) -> Res
 /// stored" and "the keyring wouldn't answer" are different facts, even though
 /// most callers end up treating both as "no token".
 fn read(account: &str) -> Result<Option<String>, String> {
-    let raw = with_collection(|c| match c.search_items(search_attrs(account))?.first() {
+    read_in(SERVICE, account)
+}
+
+fn read_in(service: &str, account: &str) -> Result<Option<String>, String> {
+    let raw = with_collection(|c| match c.search_items(search_attrs_in(service, account))?.first() {
         // More than one match only happens if something else wrote an item
         // under our service and username; the first is as good as any.
         Some(item) => item.get_secret().map(Some),
@@ -200,8 +211,12 @@ fn write(account: &str, value: &str) -> Result<(), String> {
 
 /// Deleting nothing is success — the caller wanted the secret gone, and it is.
 fn wipe(account: &str) -> Result<(), String> {
+    wipe_in(SERVICE, account)
+}
+
+fn wipe_in(service: &str, account: &str) -> Result<(), String> {
     with_collection(|c| {
-        for item in c.search_items(search_attrs(account))? {
+        for item in c.search_items(search_attrs_in(service, account))? {
             item.delete()?;
         }
         Ok(())
@@ -222,6 +237,10 @@ fn cached_token(st: &mut State) -> Option<String> {
         return known.clone();
     }
     let found = match read(ACCOUNT) {
+        Ok(None) => {
+            st.backend = Some("keyring");
+            adopt_legacy(ACCOUNT)
+        }
         Ok(v) => {
             st.backend = Some("keyring");
             v
@@ -234,6 +253,18 @@ fn cached_token(st: &mut State) -> Option<String> {
     };
     st.token = Some(found.clone());
     found
+}
+
+/// Move an item filed under the pre-rename service name across to `SERVICE`,
+/// so upgrading from FellyJin doesn't sign the user out. The old copy is only
+/// removed once the new one is written.
+fn adopt_legacy(account: &str) -> Option<String> {
+    let value = read_in(LEGACY_SERVICE, account).ok().flatten()?;
+    if write(account, &value).is_ok() {
+        let _ = wipe_in(LEGACY_SERVICE, account);
+        crate::debug_log_line("secret: moved token from the FellyJin keyring entry");
+    }
+    Some(value)
 }
 
 /// Read the token from the keyring. `None` covers both "nothing stored" and
@@ -374,7 +405,7 @@ pub fn park_pending_revocation(token: &str, server: &str, device_id: &str) -> Re
 
 pub fn pending_revocation() -> Option<Value> {
     let _guard = state();
-    match read(PENDING_ACCOUNT) {
+    match read(PENDING_ACCOUNT).map(|v| v.or_else(|| adopt_legacy(PENDING_ACCOUNT))) {
         Ok(v) => v.and_then(|s| serde_json::from_str::<Value>(&s).ok()),
         Err(e) => {
             crate::debug_log_line(&format!("secret: pending-revocation read failed: {}", e));

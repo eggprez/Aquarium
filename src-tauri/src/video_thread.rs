@@ -113,12 +113,12 @@ impl Handle {
         };
         let h = handle.clone();
         std::thread::Builder::new()
-            .name("fellyjin-video".into())
+            .name("aquarium-video".into())
             .spawn(move || run(globals, rx, h, ready_tx))
             .map_err(|e| format!("spawn video thread: {e}"))?;
         match ready_rx.recv() {
             Ok(Ok(desc)) => {
-                eprintln!("fellyjin: video thread up, EGL {desc}");
+                eprintln!("aquarium: video thread up, EGL {desc}");
                 Ok(handle)
             }
             Ok(Err(e)) => Err(e),
@@ -204,12 +204,12 @@ impl State {
         let win = match EglWindowSurface::new(&self.egl, sub.surface as *mut c_void, w, h) {
             Ok(w) => w,
             Err(e) => {
-                eprintln!("fellyjin: video thread: {e}");
+                eprintln!("aquarium: video thread: {e}");
                 return false;
             }
         };
         if !self.egl.make_current(&win) {
-            eprintln!("fellyjin: video thread: eglMakeCurrent failed");
+            eprintln!("aquarium: video thread: eglMakeCurrent failed");
             return false;
         }
         // mpv paces frames itself; a swap that waited for the compositor's
@@ -218,7 +218,7 @@ impl State {
         if self.debug() {
             let (sid, ssid) = sub.ids();
             eprintln!(
-                "fellyjin: video thread: EGL window on wl_surface#{sid} (wl_subsurface#{ssid}), buffer {}x{}",
+                "aquarium: video thread: EGL window on wl_surface#{sid} (wl_subsurface#{ssid}), buffer {}x{}",
                 win.w, win.h
             );
         }
@@ -255,7 +255,7 @@ impl State {
             sub.set_size(s.w_css, s.full_h_css, s.vis_h_css, s.scale);
         }
         if self.debug() && self.size.is_none() {
-            eprintln!("fellyjin: video thread: waiting for the new toplevel's size before drawing");
+            eprintln!("aquarium: video thread: waiting for the new toplevel's size before drawing");
         }
         self.try_attach();
         self.schedule_redraw(Duration::ZERO);
@@ -288,7 +288,7 @@ impl State {
                             }
                         };
                         eprintln!(
-                            "fellyjin: video thread: render context up, GL vendor={} renderer={}",
+                            "aquarium: video thread: render context up, GL vendor={} renderer={}",
                             name(0x1F00),
                             name(0x1F01)
                         );
@@ -318,7 +318,7 @@ impl State {
         if !ours {
             if self.debug() {
                 eprintln!(
-                    "fellyjin: video thread: size {}x{} css is for toplevel {parent:#x}, not the current one; holding",
+                    "aquarium: video thread: size {}x{} css is for toplevel {parent:#x}, not the current one; holding",
                     size.w_css, size.full_h_css
                 );
             }
@@ -344,7 +344,7 @@ impl State {
         }
         if self.debug() {
             eprintln!(
-                "fellyjin: video thread: size {}x{} css, shown {} css, scale {}",
+                "aquarium: video thread: size {}x{} css, shown {} css, scale {}",
                 size.w_css, size.full_h_css, size.vis_h_css, size.scale
             );
         }
@@ -386,11 +386,11 @@ impl State {
         let ctx = self.ctx.as_ref().unwrap();
         let win = self.win.as_ref().unwrap();
         if let Err(e) = ctx.render(0, w, h, true) {
-            eprintln!("fellyjin: video thread: {e}");
+            eprintln!("aquarium: video thread: {e}");
         }
         let swap_started = Instant::now();
         if !self.egl.swap(win) {
-            eprintln!("fellyjin: video thread: eglSwapBuffers failed");
+            eprintln!("aquarium: video thread: eglSwapBuffers failed");
         }
         if self.debug() && swap_started.elapsed() > Duration::from_millis(30) {
             // Mesa's Wayland EGL blocks in the swap when the compositor has
@@ -400,7 +400,7 @@ impl State {
             // stops for the same interval): the periodic stutter reported
             // for local playback was the compositor, not the player.
             eprintln!(
-                "fellyjin: video thread: swap took {} ms (at {})",
+                "aquarium: video thread: swap took {} ms (at {})",
                 swap_started.elapsed().as_millis(),
                 crate::now_ms()
             );
@@ -419,7 +419,7 @@ impl State {
                 let gap = now.duration_since(last);
                 if gap > Duration::from_millis(80) {
                     eprintln!(
-                        "fellyjin: video thread: frame #{n} came {} ms after the previous one (at {})",
+                        "aquarium: video thread: frame #{n} came {} ms after the previous one (at {})",
                         gap.as_millis(),
                         crate::now_ms()
                     );
@@ -428,7 +428,7 @@ impl State {
             self.last_draw = Some(now);
         }
         if self.debug() && n.is_multiple_of(240) {
-            eprintln!("fellyjin: video thread: frame #{n} at {w}x{h}");
+            eprintln!("aquarium: video thread: frame #{n} at {w}x{h}");
         }
     }
 

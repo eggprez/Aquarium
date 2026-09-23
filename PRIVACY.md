@@ -1,10 +1,10 @@
-# FellyJin Privacy Policy
+# Aquarium Privacy Policy
 
 _Last updated: 13 September 2026_
 
-FellyJin is a client application for Jellyfin media servers, available for
+Aquarium is a client application for Jellyfin media servers, available for
 iPhone, iPad and Apple TV. This policy describes what the app does with your
-information. The short version: **FellyJin collects nothing.**
+information. The short version: **Aquarium collects nothing.**
 
 ## What the app stores on your device
 
@@ -21,7 +21,7 @@ session and token and stops any downloads in progress) or by deleting the app.
 
 ## What the app sends, and to whom
 
-The only network peer FellyJin talks to is **the Jellyfin server you entered
+The only network peer Aquarium talks to is **the Jellyfin server you entered
 at sign-in**. It sends that server your sign-in credentials, requests for your
 library and media, and playback progress (so the server can show what you have
 watched). What that server does with this information is governed by whoever
@@ -34,7 +34,7 @@ Store), and your access token (through iCloud Keychain, so it is end-to-end
 encrypted by Apple). None of this is visible to the developer. Apple's privacy
 policy applies to that transport, and turning iCloud off for the app stops it.
 
-FellyJin has **no server of its own**. It contains **no analytics, no crash
+Aquarium has **no server of its own**. It contains **no analytics, no crash
 reporting, no advertising, and no tracking**. The developer receives no
 information from the app, and has no way to see who uses it or how.
 

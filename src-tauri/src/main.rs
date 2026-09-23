@@ -4,26 +4,26 @@ fn main() {
     // No backend override: video is rendered through libmpv's render API into
     // a GtkGLArea we own (see WAYLAND-MIGRATION.md), so the app runs as a
     // plain client on whichever backend GDK picks — native Wayland under a
-    // Wayland session, X11 otherwise. FELLYJIN_GDK_BACKEND overrides this for
-    // debugging, e.g. `FELLYJIN_GDK_BACKEND=x11` to compare against the old
+    // Wayland session, X11 otherwise. AQUARIUM_GDK_BACKEND overrides this for
+    // debugging, e.g. `AQUARIUM_GDK_BACKEND=x11` to compare against the old
     // embedding path (hwdec resolves to `no` there — see Phase 0).
-    if let Ok(v) = std::env::var("FELLYJIN_GDK_BACKEND") {
+    if let Ok(v) = std::env::var("AQUARIUM_GDK_BACKEND") {
         if !v.is_empty() {
             std::env::set_var("GDK_BACKEND", v);
         }
     }
     webkit_defaults();
-    fellyjin_lib::run()
+    aquarium_lib::run()
 }
 
 /// WebKitGTK tuning for a mostly static page sitting next to a video surface.
 /// These have to be in the environment before wry initialises WebKit, which
 /// is why they live here rather than in `lib.rs`. Each is only set when the
 /// environment doesn't already say otherwise, so `WEBKIT_..._FORCE_SHM=0
-/// fellyjin` gets the stock behaviour back for comparison, and
-/// `FELLYJIN_WEBKIT_DEFAULTS=0` skips all of them at once.
+/// aquarium` gets the stock behaviour back for comparison, and
+/// `AQUARIUM_WEBKIT_DEFAULTS=0` skips all of them at once.
 fn webkit_defaults() {
-    if std::env::var("FELLYJIN_WEBKIT_DEFAULTS").as_deref() == Ok("0") {
+    if std::env::var("AQUARIUM_WEBKIT_DEFAULTS").as_deref() == Ok("0") {
         return;
     }
     let defaults = [
@@ -40,7 +40,7 @@ fn webkit_defaults() {
         //
         // Re-measured 4 Sep 2026 on the Wayland subsurface backend with a
         // synthetic full-window CSS animation running in the page (the
-        // `FELLYJIN_TEST_EVAL` hook), which is the worst case either way:
+        // `AQUARIUM_TEST_EVAL` hook), which is the worst case either way:
         //
         //   fullscreen video over it:  SHM main 0.8 %, web process idle;
         //                              GPU path main 27 %, web process 160 %.

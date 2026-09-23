@@ -34,7 +34,7 @@ sed -i "0,/^  \"version\": \"$CUR\",$/s//  \"version\": \"$NEW\",/" package.json
 sed -i "0,/^version = \"$CUR\"$/s//version = \"$NEW\"/" src-tauri/Cargo.toml
 # The lock's own entry for this crate, found by its name line rather than by
 # position — every dependency in the file has a `version =` line too.
-sed -i "/^name = \"fellyjin\"$/{n;s/^version = \".*\"$/version = \"$NEW\"/}" src-tauri/Cargo.lock
+sed -i "/^name = \"aquarium\"$/{n;s/^version = \".*\"$/version = \"$NEW\"/}" src-tauri/Cargo.lock
 
 echo "$CUR -> $NEW"
 grep -Hn "\"version\": \"$NEW\"\|^version = \"$NEW\"" \

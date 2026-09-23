@@ -23,7 +23,7 @@ fn lib() -> Option<&'static libloading::Library> {
         match libloading::Library::new("libepoxy.so.0") {
             Ok(l) => Some(l),
             Err(e) => {
-                eprintln!("fellyjin: libepoxy.so.0 not loadable: {e}");
+                eprintln!("aquarium: libepoxy.so.0 not loadable: {e}");
                 None
             }
         }
@@ -83,7 +83,7 @@ macro_rules! gl_api {
             API.get_or_init(|| {
                 $( let $field = proc_addr($c_name);
                    if $field.is_null() {
-                       eprintln!(concat!("fellyjin: GL entry point missing: ", $c_name));
+                       eprintln!(concat!("aquarium: GL entry point missing: ", $c_name));
                        return None;
                    } )*
                 Some(Api {

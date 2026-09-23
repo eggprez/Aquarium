@@ -831,7 +831,7 @@ export async function renderDownloads(
   // Refresh the view when the in-memory batch queue changes (installed once).
   if (!queueListenerInstalled) {
     queueListenerInstalled = true;
-    document.addEventListener("fellyjin-download-queue", () => {
+    document.addEventListener("aquarium-download-queue", () => {
       if (currentRoot && document.contains(currentRoot) && currentRoot.querySelector(".dl-tabs")) {
         renderDownloads(currentRoot, { keepTab: true });
       }

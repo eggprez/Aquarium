@@ -34,8 +34,8 @@ export function renderLogin(root: HTMLElement, onSuccess: () => void): void {
 
   const form = el("form", { class: "login-card" }, [
     el("div", { class: "login-brand" }, [
-      el("img", { src: "/fellyjin-logo.png", alt: "", width: "56", height: "56" }),
-      el("span", { class: "wordmark" }, [el("span", {}, ["Felly"]), el("b", {}, ["Jin"])]),
+      el("img", { src: "/aquarium-logo.png", alt: "", width: "56", height: "56" }),
+      el("span", { class: "wordmark" }, [el("span", {}, ["Aqua"]), el("b", {}, ["rium"])]),
     ]),
     el("h1", {}, ["Connect to Jellyfin"]),
     el("label", {}, ["Server address"]),

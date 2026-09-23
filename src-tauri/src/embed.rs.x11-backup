@@ -30,7 +30,7 @@ const PIP_H: u16 = 270;
 const PIP_MARGIN_X: i32 = 32;
 /// Larger than the horizontal margin so the window clears a bottom panel.
 const PIP_MARGIN_Y: i32 = 72;
-const PIP_TITLE: &str = "FellyJin — Picture in Picture";
+const PIP_TITLE: &str = "Aquarium — Picture in Picture";
 
 /// XC_left_ptr in the standard cursor font: the plain arrow.
 ///
@@ -413,7 +413,7 @@ impl Embed {
             id,
             u32::from(AtomEnum::WM_CLASS),
             u32::from(AtomEnum::STRING),
-            b"fellyjin\0FellyJin\0",
+            b"aquarium\0Aquarium\0",
         );
         let _ = self.conn.change_property32(
             PropMode::REPLACE,

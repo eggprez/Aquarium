@@ -17,7 +17,7 @@ type Resolved = "light" | "dark";
 // Mirrored to localStorage so the inline script in index.html can set the
 // theme before first paint — otherwise light-mode users get a dark flash
 // while config.json is read over IPC.
-const CACHE_KEY = "fellyjin.theme.resolved";
+const CACHE_KEY = "aquarium.theme.resolved";
 
 let pref: ThemePref = "auto";
 /// Desktop preference, or null when the system expresses none.
@@ -30,7 +30,7 @@ export function normalizePref(v: unknown): ThemePref {
 function fromMediaQuery(): Resolved {
   if (window.matchMedia?.("(prefers-color-scheme: light)").matches) return "light";
   if (window.matchMedia?.("(prefers-color-scheme: dark)").matches) return "dark";
-  return "dark"; // FellyJin's own default
+  return "dark"; // Aquarium's own default
 }
 
 function resolved(): Resolved {

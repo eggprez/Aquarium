@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-/// Append a line to ~/.local/share/fellyjin/debug.log — used to diagnose
+/// Append a line to ~/.local/share/aquarium/debug.log — used to diagnose
 /// "button does nothing" reports where errors are otherwise invisible.
 pub(crate) fn debug_log_line(msg: &str) {
     use std::io::Write;
@@ -652,6 +652,7 @@ fn progress_pending_ids() -> Vec<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    config::migrate_legacy_dirs();
     tauri::Builder::default()
         // No HTTP plugin: the webview no longer talks to the network at all,
         // so there is nothing there to point at an attacker's host.
@@ -697,7 +698,7 @@ pub fn run() {
                 Some(w) => match surface::Surface::new(&w) {
                     Ok(s) => Some(s),
                     Err(e) => {
-                        eprintln!("fellyjin: video surface unavailable: {e}");
+                        eprintln!("aquarium: video surface unavailable: {e}");
                         None
                     }
                 },
@@ -743,63 +744,63 @@ pub fn run() {
             // a token that is still live over there. Keep trying.
             tauri::async_runtime::spawn(server::retry_pending_revocation());
 
-            // Dev/test hook: FELLYJIN_TEST_PLAY=<path|url> auto-plays a file
+            // Dev/test hook: AQUARIUM_TEST_PLAY=<path|url> auto-plays a file
             // shortly after startup so playback can be exercised standalone.
-            if let Ok(test_url) = std::env::var("FELLYJIN_TEST_PLAY") {
+            if let Ok(test_url) = std::env::var("AQUARIUM_TEST_PLAY") {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     let player = handle.state::<player::Player>();
                     let req = player::PlayRequest {
                         url: test_url,
-                        title: Some("FellyJin test playback".into()),
+                        title: Some("Aquarium test playback".into()),
                         start_seconds: None,
                         known_duration_seconds: None,
                         volume: None,
                         ctx: None,
                     };
                     if let Err(e) = player.play(handle.clone(), req).await {
-                        eprintln!("fellyjin: test playback failed: {e}");
+                        eprintln!("aquarium: test playback failed: {e}");
                     }
-                    // FELLYJIN_TEST_REPLAY restarts playback mid-stream —
+                    // AQUARIUM_TEST_REPLAY restarts playback mid-stream —
                     // exercises the same path as an in-player quality switch.
                     // Value: "1" replays the same URL at +5s, or "<url>|<start>"
                     // to switch to a different stream/position.
-                    if let Ok(replay) = std::env::var("FELLYJIN_TEST_REPLAY") {
+                    if let Ok(replay) = std::env::var("AQUARIUM_TEST_REPLAY") {
                         tokio::time::sleep(std::time::Duration::from_secs(6)).await;
                         let (url2, start2) = match replay.rsplit_once('|') {
                             Some((u, s)) => (u.to_string(), s.parse::<f64>().unwrap_or(5.0)),
                             None => (
-                                std::env::var("FELLYJIN_TEST_PLAY").unwrap_or_default(),
+                                std::env::var("AQUARIUM_TEST_PLAY").unwrap_or_default(),
                                 5.0,
                             ),
                         };
                         let req2 = player::PlayRequest {
                             url: url2,
-                            title: Some("FellyJin replay test".into()),
+                            title: Some("Aquarium replay test".into()),
                             start_seconds: Some(start2),
                             known_duration_seconds: None,
                             volume: None,
                             ctx: None,
                         };
                         if let Err(e) = player.play(handle.clone(), req2).await {
-                            eprintln!("fellyjin: replay test failed: {e}");
+                            eprintln!("aquarium: replay test failed: {e}");
                         }
                     }
                 });
             }
 
-            // Dev/test hook: FELLYJIN_TEST_SEQUENCE="6:fs,9:bar,12:nobar,15:nofs,18:pip,24:nopip"
+            // Dev/test hook: AQUARIUM_TEST_SEQUENCE="6:fs,9:bar,12:nobar,15:nofs,18:pip,24:nopip"
             // drives the window states the video surface has to follow, at
             // the given seconds after startup, the way the frontend would:
             // fullscreen on/off (`fs`/`nofs`), the fullscreen bar revealed or
             // hidden (`bar`/`nobar`), picture-in-picture on/off
             // (`pip`/`nopip`), and `stop`/`play` to end the session and start
-            // another on the FELLYJIN_TEST_PLAY file — the way the next thing
+            // another on the AQUARIUM_TEST_PLAY file — the way the next thing
             // opened from the page starts, i.e. windowed, whatever the last
             // session was. Native Wayland has no input injection, so this is
             // how those paths get exercised without a hand on the mouse.
-            if let Ok(seq) = std::env::var("FELLYJIN_TEST_SEQUENCE") {
+            if let Ok(seq) = std::env::var("AQUARIUM_TEST_SEQUENCE") {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let mut last = 0u64;
@@ -809,7 +810,7 @@ pub fn run() {
                         tokio::time::sleep(std::time::Duration::from_secs(t.saturating_sub(last))).await;
                         last = t;
                         let what = what.trim();
-                        eprintln!("fellyjin: test sequence: {what}");
+                        eprintln!("aquarium: test sequence: {what}");
                         let player = handle.state::<player::Player>();
                         let win = handle.get_webview_window("main");
                         match what {
@@ -828,40 +829,40 @@ pub fn run() {
                             }
                             "pip" | "nopip" => {
                                 if let Err(e) = player_set_pip(handle.clone(), what == "pip") {
-                                    eprintln!("fellyjin: test sequence: pip failed: {e}");
+                                    eprintln!("aquarium: test sequence: pip failed: {e}");
                                 }
                             }
                             "stop" => player.stop().await,
                             "play" => {
                                 let req = player::PlayRequest {
-                                    url: std::env::var("FELLYJIN_TEST_PLAY").unwrap_or_default(),
-                                    title: Some("FellyJin test playback".into()),
+                                    url: std::env::var("AQUARIUM_TEST_PLAY").unwrap_or_default(),
+                                    title: Some("Aquarium test playback".into()),
                                     start_seconds: None,
                                     known_duration_seconds: None,
                                     volume: None,
                                     ctx: None,
                                 };
                                 if let Err(e) = player.play(handle.clone(), req).await {
-                                    eprintln!("fellyjin: test sequence: play failed: {e}");
+                                    eprintln!("aquarium: test sequence: play failed: {e}");
                                 }
                             }
-                            _ => eprintln!("fellyjin: test sequence: unknown step {what:?}"),
+                            _ => eprintln!("aquarium: test sequence: unknown step {what:?}"),
                         }
                     }
                 });
             }
-            // Dev/test hook: FELLYJIN_TEST_EVAL=<js> runs a script in the main
+            // Dev/test hook: AQUARIUM_TEST_EVAL=<js> runs a script in the main
             // webview 4 s after startup. Used to put a known load on the
             // page (e.g. a full-window CSS animation) when measuring how the
             // WebKit frame path in `main.rs` behaves next to the video
             // surface; nothing in the app itself uses it.
-            if let Ok(js) = std::env::var("FELLYJIN_TEST_EVAL") {
+            if let Ok(js) = std::env::var("AQUARIUM_TEST_EVAL") {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(4)).await;
                     if let Some(w) = handle.get_webview_window("main") {
                         if let Err(e) = w.eval(&js) {
-                            eprintln!("fellyjin: test eval failed: {e}");
+                            eprintln!("aquarium: test eval failed: {e}");
                         }
                     }
                 });
@@ -934,7 +935,7 @@ pub fn run() {
             progress_pending_ids,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building FellyJin")
+        .expect("error while building Aquarium")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 app.state::<player::Player>().stop_sync();

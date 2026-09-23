@@ -27,7 +27,7 @@
 // router still shows the offline screen for server-backed pages, and nothing
 // here is consulted for it.
 
-const DB_NAME = "fellyjin-screens";
+const DB_NAME = "aquarium-screens";
 const STORE = "screens";
 const DB_VERSION = 1;
 

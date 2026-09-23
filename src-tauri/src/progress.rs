@@ -101,7 +101,7 @@ pub async fn sync(server: &str, token: &str, device_id: &str, user_id: &str) -> 
             let body = json!({
                 "ItemId": item_id,
                 "PositionTicks": ticks,
-                "PlaySessionId": format!("fellyjin-offline-{}", item_id),
+                "PlaySessionId": format!("aquarium-offline-{}", item_id),
             });
             matches!(
                 jellyfin::post(server, token, device_id, "/Sessions/Playing/Stopped", &body).await,

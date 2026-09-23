@@ -292,7 +292,7 @@ function onStarted(ev: Event): void {
 
 /** Wire the policy to the player. Called once at boot. */
 export async function registerAdaptiveQuality(): Promise<void> {
-  document.addEventListener("fellyjin-player-started", onStarted);
+  document.addEventListener("aquarium-player-started", onStarted);
   await listen("player-stall", () => onStall());
   await listen("player-status", (ev) => onStatus(ev.payload as any));
 }

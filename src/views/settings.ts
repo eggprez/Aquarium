@@ -153,7 +153,7 @@ const LANGUAGES: [code: string, name: string][] = [
 /** How the app last saw a stream actually being decoded (see main.ts). */
 function lastDecoder(): string | null {
   try {
-    return localStorage.getItem("fellyjin.hwdec-last");
+    return localStorage.getItem("aquarium.hwdec-last");
   } catch {
     return null;
   }
@@ -200,7 +200,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
               if (!res.revoked) {
                 toast(
                   res.pending
-                    ? "Signed out here, but the server couldn't be reached to end the session — FellyJin will keep retrying."
+                    ? "Signed out here, but the server couldn't be reached to end the session — Aquarium will keep retrying."
                     : "Signed out here, but the session could not be ended on the server. Revoke this device in Jellyfin → Dashboard → Devices.",
                   "error"
                 );
@@ -236,7 +236,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
           el("div", { class: "lbl" }, ["Server identity"]),
           el("div", { class: "sub" }, [
             info.server_pinned
-              ? "Pinned. If this address ever answers as a different Jellyfin server, FellyJin stops instead of signing in to it."
+              ? "Pinned. If this address ever answers as a different Jellyfin server, Aquarium stops instead of signing in to it."
               : "Not pinned yet — it will be recorded the next time this server answers.",
           ]),
         ]),
@@ -253,7 +253,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
           el("div", { class: "sub" }, [
             info.token_storage === "keyring"
               ? "Stored in your desktop keyring (Secret Service). Never written to the config file, and never sent in a URL."
-              : "Your desktop keyring is unavailable, so the token is stored in ~/.config/fellyjin/config.json. Unlock or install a keyring (gnome-keyring, KWallet) to secure it.",
+              : "Your desktop keyring is unavailable, so the token is stored in ~/.config/aquarium/config.json. Unlock or install a keyring (gnome-keyring, KWallet) to secure it.",
           ]),
         ]),
         el("span", {
@@ -268,7 +268,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
             el("div", {}, [
               el("div", { class: "lbl" }, ["Unfinished sign-out"]),
               el("div", { class: "sub" }, [
-                "A previous sign-out couldn't reach the server, so that session may still be active on it. FellyJin retries at every launch; to end it now, remove this device in Jellyfin → Dashboard → Devices.",
+                "A previous sign-out couldn't reach the server, so that session may still be active on it. Aquarium retries at every launch; to end it now, remove this device in Jellyfin → Dashboard → Devices.",
               ]),
             ]),
             el("span", { class: "sync-pill warn" }, ["Pending"]),
@@ -415,7 +415,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     (v) => {
       syncLiveRows(v);
       iptv.invalidate();
-      document.dispatchEvent(new CustomEvent("fellyjin-nav-refresh"));
+      document.dispatchEvent(new CustomEvent("aquarium-nav-refresh"));
     }
   );
 
@@ -678,10 +678,10 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     el("div", { class: "settings-block about-block" }, [
       el("h3", {}, ["About"]),
       el("div", { class: "about-row" }, [
-        el("img", { src: "/fellyjin-logo.png", alt: "", width: "48", height: "48" }),
+        el("img", { src: "/aquarium-logo.png", alt: "", width: "48", height: "48" }),
         el("div", {}, [
           el("div", { class: "about-name" }, [
-            el("span", { class: "wordmark" }, [el("span", {}, ["Felly"]), el("b", {}, ["Jin"])]),
+            el("span", { class: "wordmark" }, [el("span", {}, ["Aqua"]), el("b", {}, ["rium"])]),
             el("span", { class: "about-version" }, [info.version ? `v${info.version}` : ""]),
           ]),
           el("div", { class: "sub" }, [

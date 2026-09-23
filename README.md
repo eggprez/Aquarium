@@ -1,8 +1,8 @@
-# FellyJin
+# Aquarium
 
 ## iPhone, iPad and Apple TV
 
-FellyJin is also on the App Store for iPhone, iPad and Apple TV, as a native
+Aquarium is also on the App Store for iPhone, iPad and Apple TV, as a native
 SwiftUI app that shares its behaviour with this Linux build but not its code.
 It was written with AI assistance (Anthropic's Claude), directed and tested by
 the developer, and is shared as-is. **Support:** open an issue on this
@@ -59,7 +59,7 @@ query parameter, all of which Jellyfin 12 disables by default), and the
   in-player quality menu or for good in Settings → Playback.
 - **Downloads** — original-quality direct download or transcoded downloads
   (4K/1440p/1080p/720p/480p) via the progressive transcode endpoint, stored under
-  `~/.local/share/fellyjin/downloads`. A transcode that would come out *larger*
+  `~/.local/share/aquarium/downloads`. A transcode that would come out *larger*
   than the source file is silently replaced by the direct download — an
   efficiently encoded original is the smaller file and the better picture, so
   re-encoding it is a loss twice over. Before anything is queued the estimated
@@ -103,14 +103,14 @@ before building.
 
 ```sh
 npm install
-./build-deb.sh   # compiles frontend + Rust, bundles, writes ./felly.deb
+./build-deb.sh   # compiles frontend + Rust, bundles, writes ./aquarium.deb
 ```
 
-Final artifact: `felly.deb` in the project root (also left at
+Final artifact: `aquarium.deb` in the project root (also left at
 `src-tauri/target/release/bundle/deb/`). Install it with:
 
 ```sh
-sudo apt install ./felly.deb
+sudo apt install ./aquarium.deb
 ```
 
 The package depends on `libmpv2`, `libwebkit2gtk-4.1-0` and `libgtk-3-0` rather
@@ -123,19 +123,19 @@ source .build-deps/env.sh
 npm run tauri dev
 ```
 
-The uosc layout and mpv config install to `/usr/share/fellyjin/mpv`, found at
-runtime relative to the executable; `$FELLYJIN_MPV_CONFIG` overrides it.
+The uosc layout and mpv config install to `/usr/share/aquarium/mpv`, found at
+runtime relative to the executable; `$AQUARIUM_MPV_CONFIG` overrides it.
 
 ## Storage
 
-- Config: `~/.config/fellyjin/config.json` (server, token, device id, prefs)
-- Downloads + offline progress queue: `~/.local/share/fellyjin/`
+- Config: `~/.config/aquarium/config.json` (server, token, device id, prefs)
+- Downloads + offline progress queue: `~/.local/share/aquarium/`
 
 ## Releases & updating
 
 Pushing a `v*` tag (e.g. `git tag v0.1.0 && git push --tags`) triggers a GitHub
-Actions build that publishes `felly.deb` to [Releases](../../releases).
+Actions build that publishes `aquarium.deb` to [Releases](../../releases).
 
-Updating is `sudo apt install ./felly.deb` over the installed version — there is
+Updating is `sudo apt install ./aquarium.deb` over the installed version — there is
 no self-update mechanism (the AppImage's embedded AppImageUpdate info went away
 with it).

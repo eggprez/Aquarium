@@ -9,7 +9,7 @@ import { openDialog, toast } from "./ui";
 // is remembered here and handed to each new process on its command line — a
 // session you turned down at 1am must not come back up at full volume.
 
-const VOLUME_KEY = "fellyjin.volume";
+const VOLUME_KEY = "aquarium.volume";
 export const MAX_VOLUME = 130;
 
 function loadVolume(): number {
@@ -93,7 +93,7 @@ let autoplayCancelled = false;
 
 export function cancelAutoplay(): void {
   autoplayCancelled = true;
-  document.dispatchEvent(new CustomEvent("fellyjin-upnext-changed"));
+  document.dispatchEvent(new CustomEvent("aquarium-upnext-changed"));
 }
 
 export function isAutoplayCancelled(): boolean {
@@ -103,7 +103,7 @@ export function isAutoplayCancelled(): boolean {
 /** Undo a "stop after this one" — the sleep panel can turn it back off. */
 export function resumeAutoplay(): void {
   autoplayCancelled = false;
-  document.dispatchEvent(new CustomEvent("fellyjin-upnext-changed"));
+  document.dispatchEvent(new CustomEvent("aquarium-upnext-changed"));
 }
 
 // ---------- Picture adjustments ----------
@@ -178,7 +178,7 @@ export function cancelSleepTimer(): void {
   clearTimeout(sleepTimer);
   sleepTimer = 0;
   sleepAt = null;
-  document.dispatchEvent(new CustomEvent("fellyjin-sleep-changed"));
+  document.dispatchEvent(new CustomEvent("aquarium-sleep-changed"));
 }
 
 /** Stop playback in `minutes`. Replaces any timer already running. */
@@ -194,9 +194,9 @@ export function setSleepTimer(minutes: number): void {
     cancelAutoplay();
     void playerCtl.stop().catch(() => {});
     toast("Sleep timer — playback stopped", "ok");
-    document.dispatchEvent(new CustomEvent("fellyjin-sleep-changed"));
+    document.dispatchEvent(new CustomEvent("aquarium-sleep-changed"));
   }, ms);
-  document.dispatchEvent(new CustomEvent("fellyjin-sleep-changed"));
+  document.dispatchEvent(new CustomEvent("aquarium-sleep-changed"));
 }
 
 // ---------- Remembered audio and subtitle tracks ----------
@@ -233,7 +233,7 @@ function seriesTrackKey(): string | null {
   // Server episodes only. A downloaded file has been transcoded down to a
   // single audio track, and a film has no "next one" to carry a choice to.
   if (!np || np.isLocal || !np.item?.SeriesId) return null;
-  return `fellyjin.tracks.${np.item.SeriesId}`;
+  return `aquarium.tracks.${np.item.SeriesId}`;
 }
 
 function readTrackChoice(key: string): TrackChoice | null {
@@ -357,7 +357,7 @@ function itemTitle(item: any): string {
     const code = s != null && e != null ? ` Season ${s}, Episode ${e}` : "";
     return `${item.SeriesName}${code} · ${item.Name}`;
   }
-  return item.Name ?? "FellyJin";
+  return item.Name ?? "Aquarium";
 }
 
 /** Bytes fetched for the pre-flight bandwidth probe: enough that connection
@@ -468,7 +468,7 @@ export async function playItem(
       },
     });
     document.dispatchEvent(
-      new CustomEvent("fellyjin-player-started", {
+      new CustomEvent("aquarium-player-started", {
         detail: { inherited: !!meta.inherited, continuation: !!meta.continuation },
       })
     );
@@ -525,7 +525,7 @@ export async function playChannelUrl(ch: any): Promise<void> {
         },
       },
     });
-    document.dispatchEvent(new CustomEvent("fellyjin-player-started", { detail: {} }));
+    document.dispatchEvent(new CustomEvent("aquarium-player-started", { detail: {} }));
   } catch (e: any) {
     clearTimeout(slow);
     invoke("ui_log", { msg: `playChannelUrl FAILED: ${e?.message ?? e}` }).catch(() => {});
@@ -571,7 +571,7 @@ export async function playLocal(
       },
     });
     document.dispatchEvent(
-      new CustomEvent("fellyjin-player-started", {
+      new CustomEvent("aquarium-player-started", {
         detail: { continuation: !!opts.continuation },
       })
     );
@@ -746,7 +746,7 @@ function maybeAutoplay(st: any): void {
     // Nothing next (or it failed): let the UI tear the player down normally.
     if (!started) {
       shuffleState = null;
-      document.dispatchEvent(new CustomEvent("fellyjin-autoplay-none"));
+      document.dispatchEvent(new CustomEvent("aquarium-autoplay-none"));
     }
   })();
 }
@@ -927,8 +927,8 @@ let dlBridgeReady = false;
 // The queue is persisted so closing the app mid-season doesn't silently drop
 // the episodes that hadn't started yet (the backend only resumes the one
 // download that was actually mid-transfer).
-const DL_QUEUE_KEY = "fellyjin-dl-queue";
-const DL_CONCURRENCY_KEY = "fellyjin-dl-concurrency";
+const DL_QUEUE_KEY = "aquarium-dl-queue";
+const DL_CONCURRENCY_KEY = "aquarium-dl-concurrency";
 
 export const MAX_DOWNLOAD_CONCURRENCY = 6;
 
@@ -979,7 +979,7 @@ export interface PendingDownload {
  * The batch queue lives only in this module's memory, so `downloads_list`
  * (which reads on-disk meta) can't see items still waiting to start. The
  * Downloads view calls this to render the full queue, and listens for
- * `fellyjin-download-queue` to refresh when it changes.
+ * `aquarium-download-queue` to refresh when it changes.
  */
 export function getQueuedDownloads(): PendingDownload[] {
   return dlQueue.map((e) =>
@@ -1087,7 +1087,7 @@ export function clearDownloadQueue(): number {
 
 function notifyQueueChanged(): void {
   saveQueue();
-  document.dispatchEvent(new CustomEvent("fellyjin-download-queue"));
+  document.dispatchEvent(new CustomEvent("aquarium-download-queue"));
 }
 
 function ensureQueueBridge(): void {
@@ -1102,7 +1102,7 @@ function ensureQueueBridge(): void {
     }
   });
   // A queue restored while offline waits here until the server is back.
-  document.addEventListener("fellyjin-connectivity", (ev) => {
+  document.addEventListener("aquarium-connectivity", (ev) => {
     if (!(ev as CustomEvent).detail?.offline) void pumpQueue();
   });
 }
@@ -1333,7 +1333,7 @@ export async function switchQuality(maxBitrate?: number, meta: StartMeta = {}): 
 // the in-player menu and the Settings page can read it without either of them
 // importing the policy.
 
-const ADAPTIVE_KEY = "fellyjin.adaptive";
+const ADAPTIVE_KEY = "aquarium.adaptive";
 
 /**
  * May the player change transcode quality by itself when a stream stops
@@ -1350,7 +1350,7 @@ export function setAdaptiveEnabled(on: boolean): void {
   } catch {
     // Quota exceeded — the setting just won't survive a restart.
   }
-  document.dispatchEvent(new CustomEvent("fellyjin-adaptive-changed"));
+  document.dispatchEvent(new CustomEvent("aquarium-adaptive-changed"));
 }
 
 function mpvCommand(cmd: any[]): Promise<void> {
@@ -1376,12 +1376,12 @@ export async function showQualityMenu(): Promise<void> {
       {
         title: `Adapt to the connection: ${auto ? "on" : "off"}`,
         hint: auto ? "drops a rung when the stream stalls" : "stays where you put it",
-        value: "script-message fellyjin-adaptive toggle",
+        value: "script-message aquarium-adaptive toggle",
       },
       ...QUALITY_CHOICES.map((q) => ({
         title: q.label,
         active: q.maxBitrate === current,
-        value: `script-message fellyjin-quality ${q.maxBitrate ?? "direct"}`,
+        value: `script-message aquarium-quality ${q.maxBitrate ?? "direct"}`,
       })),
     ],
   });
@@ -1409,7 +1409,7 @@ export async function showEpisodeMenu(): Promise<void> {
       title: `${ep.IndexNumber != null ? ep.IndexNumber + ". " : ""}${ep.Name}`,
       hint: `S${pad(ep.ParentIndexNumber)}E${pad(ep.IndexNumber)}${ep.UserData?.Played ? " ✓" : ""}`,
       active: ep.Id === np.item.Id,
-      value: `script-message fellyjin-episode ${ep.Id}`,
+      value: `script-message aquarium-episode ${ep.Id}`,
     })),
   });
 }
@@ -1417,14 +1417,14 @@ export async function showEpisodeMenu(): Promise<void> {
 async function handlePlayerMessage(args: any[]): Promise<void> {
   const [name, arg] = args;
   switch (name) {
-    case "fellyjin-menu":
+    case "aquarium-menu":
       if (arg === "quality") await showQualityMenu();
       else if (arg === "episodes") await showEpisodeMenu();
       break;
-    case "fellyjin-quality":
+    case "aquarium-quality":
       await switchQuality(arg === "direct" ? undefined : parseInt(arg, 10));
       break;
-    case "fellyjin-adaptive": {
+    case "aquarium-adaptive": {
       const on = !isAdaptiveEnabled();
       setAdaptiveEnabled(on);
       toast(
@@ -1435,22 +1435,22 @@ async function handlePlayerMessage(args: any[]): Promise<void> {
       );
       break;
     }
-    case "fellyjin-episode": {
+    case "aquarium-episode": {
       const np = nowPlaying;
       const ep = np?.queue?.find((e: any) => e.Id === arg);
       if (ep) await playItem(ep, { resume: true, maxBitrate: np!.opts.maxBitrate }, { inherited: true, continuation: true });
       break;
     }
-    case "fellyjin-fullscreen":
-      document.dispatchEvent(new CustomEvent("fellyjin-fullscreen-toggle"));
+    case "aquarium-fullscreen":
+      document.dispatchEvent(new CustomEvent("aquarium-fullscreen-toggle"));
       break;
-    case "fellyjin-fullscreen-exit":
+    case "aquarium-fullscreen-exit":
       // ESC pressed inside mpv (it can hold keyboard focus after a
       // WM-level fullscreen) — exit fullscreen but never enter it.
-      document.dispatchEvent(new CustomEvent("fellyjin-fullscreen-exit"));
+      document.dispatchEvent(new CustomEvent("aquarium-fullscreen-exit"));
       break;
-    case "fellyjin-play-local": {
-      // Diagnostic hook (see FELLYJIN_TEST_PLAY in lib.rs): starts a
+    case "aquarium-play-local": {
+      // Diagnostic hook (see AQUARIUM_TEST_PLAY in lib.rs): starts a
       // downloaded item through the real frontend path — unlike TEST_PLAY it
       // sets nowPlaying, so quality/episode menus and autoplay are exercised.
       const items = await invoke<any[]>("downloads_list").catch(() => []);

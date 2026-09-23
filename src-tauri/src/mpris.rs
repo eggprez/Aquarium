@@ -13,7 +13,7 @@
 //!
 //! State changes are pushed, not polled: the player calls `notify` when it
 //! changes something the shell is told about, and this thread otherwise sleeps
-//! on D-Bus's own socket. An idle FellyJin costs no wakeups at all.
+//! on D-Bus's own socket. An idle Aquarium costs no wakeups at all.
 
 use crate::player::{Player, Status};
 use dbus::arg::{RefArg, Variant};
@@ -32,7 +32,7 @@ const PATH: &str = "/org/mpris/MediaPlayer2";
 const PLAYER_IFACE: &str = "org.mpris.MediaPlayer2.Player";
 /// Everything after the well-known prefix is ours to choose; it has to match
 /// the desktop-entry name for the shell to find our icon.
-const BUS_NAME: &str = "org.mpris.MediaPlayer2.fellyjin";
+const BUS_NAME: &str = "org.mpris.MediaPlayer2.aquarium";
 
 type Metadata = HashMap<String, Variant<Box<dyn RefArg>>>;
 
@@ -220,11 +220,11 @@ fn track_path(item_id: &str) -> dbus::Path<'static> {
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect();
     let raw = if clean.is_empty() {
-        format!("{}/fellyjin/notrack", PATH)
+        format!("{}/aquarium/notrack", PATH)
     } else {
-        format!("{}/fellyjin/{}", PATH, clean)
+        format!("{}/aquarium/{}", PATH, clean)
     };
-    dbus::Path::new(raw).unwrap_or_else(|_| dbus::Path::from("/org/mpris/MediaPlayer2/fellyjin"))
+    dbus::Path::new(raw).unwrap_or_else(|_| dbus::Path::from("/org/mpris/MediaPlayer2/aquarium"))
 }
 
 fn metadata(app: &AppHandle) -> Metadata {
@@ -289,10 +289,10 @@ fn serve(app: AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         b.property("CanQuit").get(|_, _| Ok(true));
         b.property("CanRaise").get(|_, _| Ok(true));
         b.property("HasTrackList").get(|_, _| Ok(false));
-        b.property("Identity").get(|_, _| Ok("FellyJin".to_string()));
+        b.property("Identity").get(|_, _| Ok("Aquarium".to_string()));
         // Lets the shell show the app's own icon next to the controls.
         b.property("DesktopEntry")
-            .get(|_, _| Ok("fellyjin".to_string()));
+            .get(|_, _| Ok("aquarium".to_string()));
         b.property("SupportedUriSchemes")
             .get(|_, _| Ok(Vec::<String>::new()));
         b.property("SupportedMimeTypes")

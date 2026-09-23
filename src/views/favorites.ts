@@ -31,7 +31,7 @@ interface FavPrefs {
   type: string;
 }
 
-const PREFS_KEY = "fellyjin.favorites";
+const PREFS_KEY = "aquarium.favorites";
 
 function loadPrefs(): FavPrefs {
   const fallback: FavPrefs = { sort: "SortName|Ascending", type: "" };

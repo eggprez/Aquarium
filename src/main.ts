@@ -504,7 +504,7 @@ function paintNav(views: any[] | null): void {
     add(`#/lib/${v.Id}`, v.Name, icon);
   }
 
-  nav.append(el("div", { class: "nav-sep" }, ["FellyJin"]));
+  nav.append(el("div", { class: "nav-sep" }, ["Aquarium"]));
   add("#/favorites", "Favorites", ICONS.favorites);
   // Only servers that actually have a Live TV library get the entry: without a
   // tuner configured, the page can never say anything but "no channels". A
@@ -550,8 +550,8 @@ async function updateSidebarFooter(): Promise<void> {
   clear(foot);
   foot.append(
     el("div", { class: "foot-version" }, [
-      el("img", { src: "/fellyjin-logo.png", alt: "" }),
-      el("span", {}, [`FellyJin ${info.version ? `v${info.version}` : ""}`.trim()]),
+      el("img", { src: "/aquarium-logo.png", alt: "" }),
+      el("span", {}, [`Aquarium ${info.version ? `v${info.version}` : ""}`.trim()]),
     ]),
     el("div", { class: `foot-line ${cls}` }, [
       el("span", { class: "foot-dot" }),
@@ -656,7 +656,7 @@ function pbButton(id: string, icon: string, tip: string, onClick: () => void): H
   const b = el("button", { class: "btn icon", id, title: tip, html: icon });
   b.addEventListener("click", () => {
     // Trace clicks so "button does nothing" reports can be diagnosed from
-    // ~/.local/share/fellyjin/debug.log.
+    // ~/.local/share/aquarium/debug.log.
     invoke("ui_log", { msg: `click ${id}` }).catch(() => {});
     Promise.resolve(onClick()).catch((e) => {
       invoke("ui_log", { msg: `click ${id} error: ${e}` }).catch(() => {});
@@ -1604,7 +1604,7 @@ function updatePlayerBar(st: any): void {
   // can't be, since the video covers the page.
   if (typeof st.hwdec === "string" && st.hwdec) {
     try {
-      localStorage.setItem("fellyjin.hwdec-last", st.hwdec);
+      localStorage.setItem("aquarium.hwdec-last", st.hwdec);
     } catch {
       // Settings just says "not measured yet".
     }
@@ -1867,8 +1867,8 @@ function askBeforeQuit(count: number): void {
     body: [
       el("p", {}, [
         count === 1
-          ? "Quitting now stops the transfer. The partial file is kept, and the download resumes from where it stopped the next time FellyJin starts."
-          : "Quitting now stops those transfers. Partial files are kept, and the downloads resume from where they stopped the next time FellyJin starts.",
+          ? "Quitting now stops the transfer. The partial file is kept, and the download resumes from where it stopped the next time Aquarium starts."
+          : "Quitting now stops those transfers. Partial files are kept, and the downloads resume from where they stopped the next time Aquarium starts.",
       ]),
     ],
     actions: [
@@ -1880,7 +1880,7 @@ function askBeforeQuit(count: number): void {
 
 // ---------- Session memory ----------
 
-const LAST_ROUTE_KEY = "fellyjin.last-route";
+const LAST_ROUTE_KEY = "aquarium.last-route";
 // Pages that make no sense to reopen into: a stale search, or a detail page for
 // something that may since have been deleted from the server.
 const RESUMABLE = ["home", "lib", "favorites", "livetv", "downloads", "settings"];
@@ -1935,17 +1935,17 @@ async function boot(): Promise<void> {
     document.body.classList.toggle("bg-idle", document.hidden);
   });
 
-  document.addEventListener("fellyjin-fullscreen-toggle", () => {
+  document.addEventListener("aquarium-fullscreen-toggle", () => {
     if (playerActive && playerEmbedded) setVideoFullscreen(!videoFullscreen);
   });
 
-  document.addEventListener("fellyjin-fullscreen-exit", () => {
+  document.addEventListener("aquarium-fullscreen-exit", () => {
     if (videoFullscreen) setVideoFullscreen(false);
   });
 
   // Switching the Live TV source in Settings can add or remove that entry, and
   // the sidebar is otherwise only built at startup and on reconnect.
-  document.addEventListener("fellyjin-nav-refresh", () => {
+  document.addEventListener("aquarium-nav-refresh", () => {
     void buildNav();
   });
 
@@ -1956,21 +1956,21 @@ async function boot(): Promise<void> {
   // viewport); anything picked from the page starts windowed, bar and all,
   // even if a stale fullscreen flag says otherwise. Fullscreen is something
   // the user asks for, per session, with the button or the key.
-  document.addEventListener("fellyjin-player-started", (ev) => {
+  document.addEventListener("aquarium-player-started", (ev) => {
     if (!videoFullscreen) return;
     const continuation = !!(ev as CustomEvent).detail?.continuation;
     setVideoFullscreen(continuation);
   });
 
   // Autoplay found nothing next (or failed) — tear the player UI down.
-  document.addEventListener("fellyjin-autoplay-none", () => {
+  document.addEventListener("aquarium-autoplay-none", () => {
     updatePlayerBar({ active: false });
   });
 
   // The server stopped honouring our token (expired, or the session was
   // revoked from another device). Every page would otherwise fail on its own,
   // with Settings → Sign out as the only way out.
-  document.addEventListener("fellyjin-auth-expired", () => {
+  document.addEventListener("aquarium-auth-expired", () => {
     closeMenus();
     showLogin();
     toast("Your session expired — please sign in again", "error");
@@ -1981,7 +1981,7 @@ async function boot(): Promise<void> {
   // pointing the client at a host of their choosing. Either way the token does
   // not go out until a human has looked at it.
   let identityWarned = false;
-  document.addEventListener("fellyjin-server-identity", (ev) => {
+  document.addEventListener("aquarium-server-identity", (ev) => {
     if (identityWarned) return;
     identityWarned = true;
     closeMenus();
@@ -1999,7 +1999,7 @@ async function boot(): Promise<void> {
   });
 
   // Offline/online transitions from the API layer.
-  document.addEventListener("fellyjin-connectivity", (ev) => {
+  document.addEventListener("aquarium-connectivity", (ev) => {
     const off = !!(ev as CustomEvent).detail?.offline;
     updateOfflinePill();
     if (off) {

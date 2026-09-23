@@ -12,7 +12,7 @@ came out in favour of keeping the shared-memory default, see its section.**
 The app renders video on a Wayland
 subsurface from its own thread; the `GtkGLArea` path is kept as the fallback
 behind the same `Surface` API (`Backend::Gl`: X11 sessions, compositors
-without `wp_viewporter`, or `FELLYJIN_VIDEO_BACKEND=gl`).
+without `wp_viewporter`, or `AQUARIUM_VIDEO_BACKEND=gl`).
 
 | release build, fullscreen 1080p H.264 on the 2880×1920 panel, 10 s | main thread | whole app |
 |---|---|---|
@@ -27,7 +27,7 @@ not just the spike: windowed, fullscreen, the fullscreen bar reveal (crop,
 picture pinned), picture-in-picture out and back (no restart, render context
 kept), hwdec `vaapi` with the dmabuf interop line, clean quit mid-playback
 through MPRIS `Quit`, and the GLArea fallback still working. The
-`FELLYJIN_TEST_SEQUENCE` hook in `lib.rs` drives those window states, since
+`AQUARIUM_TEST_SEQUENCE` hook in `lib.rs` drives those window states, since
 native Wayland has no input injection.
 
 What landed, by file:
@@ -350,7 +350,7 @@ its new window.
 
 #### What finishing it found: the two directions order things differently
 
-`FELLYJIN_SURFACE_TEST=1` logs on 4 Sep showed that entering PiP the
+`AQUARIUM_SURFACE_TEST=1` logs on 4 Sep showed that entering PiP the
 placeholder's 480×270 allocation reached the video thread *before* the new
 subsurface did (GTK allocates a toplevel's children inside `show_all`, before
 it maps the window), while leaving PiP the new subsurface arrived first and the
@@ -443,7 +443,7 @@ and so harmless. With the fix, three repeats of the failing timing
 (`6:fs,11:bar,17:nobar,22:nofs`) plus a screenshot run all show the crop
 applied and, right after it, `layout: placeholder allocated 1440x888` — GTK
 thawed and caught up — and no EGL rebuild on either toggle.
-`FELLYJIN_SURFACE_TEST=1` now also logs the layout path
+`AQUARIUM_SURFACE_TEST=1` now also logs the layout path
 (`layout: …` lines: want/requested, the size request, every placeholder
 allocation), which is how a frozen clock shows up without a protocol trace.
 
@@ -459,7 +459,7 @@ allocation), which is how a frozen clock shows up without a protocol trace.
   app reaches on its own — idle home page, windowed and fullscreen playback,
   bar revealed: the web process used ≤ 1 tick in 10 s in all of them) the two
   settings are indistinguishable, main thread 0.6–0.8 % either way. To see a
-  difference the page has to paint, so a `FELLYJIN_TEST_EVAL=<js>` hook was
+  difference the page has to paint, so a `AQUARIUM_TEST_EVAL=<js>` hook was
   added to `lib.rs` and a full-window CSS gradient animation injected
   (worst case for both paths, 2880×1920 at the 30 fps throttle):
 
@@ -495,7 +495,7 @@ Same method as the 2026-09-03 measurements so the numbers compare:
 
 ```bash
 # per-thread CPU over 10 s, main thread vs whole app
-PID=$(pgrep -x fellyjin); T=/proc/$PID/task/$PID
+PID=$(pgrep -x aquarium); T=/proc/$PID/task/$PID
 a=$(awk '{print $14+$15}' $T/stat); b=$(awk '{print $14+$15}' /proc/$PID/stat); sleep 10
 echo "main $(( $(awk '{print $14+$15}' $T/stat)-a ))0 ms/10s  app $(( $(awk '{print $14+$15}' /proc/$PID/stat)-b ))0 ms/10s"
 ```

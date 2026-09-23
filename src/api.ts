@@ -62,13 +62,13 @@ function splitError(e: any): ApiError {
  */
 function announceIdentityChange(message: string): void {
   document.dispatchEvent(
-    new CustomEvent("fellyjin-server-identity", { detail: { message } })
+    new CustomEvent("aquarium-server-identity", { detail: { message } })
   );
 }
 
 // ---------- Connectivity ----------
 // A saved session with an unreachable server is "offline", not "logged out".
-// State flips are broadcast as `fellyjin-connectivity` so the shell can react.
+// State flips are broadcast as `aquarium-connectivity` so the shell can react.
 
 export function isOffline(): boolean {
   return offline;
@@ -77,7 +77,7 @@ export function isOffline(): boolean {
 function setOffline(v: boolean): void {
   if (offline === v) return;
   offline = v;
-  document.dispatchEvent(new CustomEvent("fellyjin-connectivity", { detail: { offline: v } }));
+  document.dispatchEvent(new CustomEvent("aquarium-connectivity", { detail: { offline: v } }));
 }
 
 /** Probe the saved server. Updates the offline flag; true when reachable. */
@@ -268,7 +268,7 @@ async function expireSession(): Promise<void> {
   } catch {
     /* the sign-in screen is the important part */
   }
-  document.dispatchEvent(new CustomEvent("fellyjin-auth-expired"));
+  document.dispatchEvent(new CustomEvent("aquarium-auth-expired"));
   expiring = false;
 }
 
@@ -790,7 +790,7 @@ export interface PlaybackSource {
 
 function deviceProfile(forceTranscode: boolean, maxBitrate?: number): any {
   return {
-    Name: "FellyJin mpv",
+    Name: "Aquarium mpv",
     MaxStreamingBitrate: maxBitrate ?? 200_000_000,
     DirectPlayProfiles: forceTranscode
       ? []

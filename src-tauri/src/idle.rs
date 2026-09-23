@@ -1,6 +1,6 @@
 //! Keeps the screen awake during playback.
 //!
-//! mpv can't do this itself in FellyJin: it runs in-process and renders
+//! mpv can't do this itself in Aquarium: it runs in-process and renders
 //! through libmpv's render API into a GtkGLArea we own (see
 //! WAYLAND-MIGRATION.md), so it has no window or VO of its own for its
 //! built-in screensaver suspension to hook — that mechanism assumes mpv owns
@@ -30,7 +30,7 @@ impl IdleInhibitor {
         let conn = Connection::new_session()?;
         let (cookie,): (u32,) = conn
             .with_proxy(BUS, PATH, TIMEOUT)
-            .method_call(BUS, "Inhibit", ("FellyJin", "Video playback"))?;
+            .method_call(BUS, "Inhibit", ("Aquarium", "Video playback"))?;
         Ok(Self { conn, cookie })
     }
 }

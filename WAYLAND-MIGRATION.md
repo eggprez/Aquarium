@@ -11,12 +11,12 @@ video froze the app) traced back three phases to `overlay.add(&webview)`.
 
 **Where the app is right now:** it runs as a native Wayland client by
 default — confirmed with no environment overrides at all, `GdkWaylandDisplay`
-in the render log — with `FELLYJIN_GDK_BACKEND=x11` kept as a debug escape
+in the render log — with `AQUARIUM_GDK_BACKEND=x11` kept as a debug escape
 hatch back to the old path. Real playback goes through the video surface and
 the in-process libmpv adapter end to end — `player.rs` no longer spawns an
 external mpv, and nothing in the app reaches for an external mpv *binary* any
 more either, at build or run time. Native Wayland reports
-`hwdec-current=vaapi` with no XWayland client for FellyJin, natural
+`hwdec-current=vaapi` with no XWayland client for Aquarium, natural
 end-of-file and a mid-playback quality switch both tear down and rebuild the
 render context cleanly. Mouse and keyboard input on the video surface is
 translated GTK event → mpv command by `surface.rs`, exercised with real
@@ -29,7 +29,7 @@ exactly as intended. What no pass here covers: native-Wayland input
 specifically (XTest only reaches an XWayland client) and uosc's own on-screen
 reactions to hover/drag, which need eyes on a real screen — see §8.
 
-Goal: run FellyJin as a native Wayland client instead of forcing the whole app
+Goal: run Aquarium as a native Wayland client instead of forcing the whole app
 onto XWayland, while keeping video embedded in the window and keeping the look
 and behaviour of the player **exactly** as it is today.
 
@@ -90,7 +90,7 @@ drop to the `-sys` crate for any param the safe wrapper doesn't re-export.
 
 > **Superseded on Wayland (3 Sep 2026).** The `GtkGLArea` described here is now
 > the fallback (X11 sessions, compositors without `wp_viewporter`, and the
-> `FELLYJIN_VIDEO_BACKEND=gl` override). On a Wayland session the video goes to
+> `AQUARIUM_VIDEO_BACKEND=gl` override). On a Wayland session the video goes to
 > a `wl_subsurface` rendered by a thread of its own, and the widget in the
 > overlay is a plain `GtkDrawingArea` — same layout, same input routing, and
 > GTK never repaints per video frame. See
@@ -319,7 +319,7 @@ is ever set.
 
 #### Verifying it without a server
 
-`FELLYJIN_SURFACE_TEST=1` runs a self-test: it reveals the surface, reserves
+`AQUARIUM_SURFACE_TEST=1` runs a self-test: it reveals the surface, reserves
 the player bar, takes the fullscreen clip and gives it back, moves the widget
 out to picture-in-picture and home again, shrinks the window, and dumps the
 widget tree at each step before exiting. No Jellyfin server and no mpv needed,
@@ -387,7 +387,7 @@ thread caused non-unwinding panic. aborting.
 ```
 
 The panic is inside `tauri-runtime-wry`'s `undecorated_resizing.rs`, a
-click-to-resize-by-dragging feature for undecorated windows (FellyJin uses
+click-to-resize-by-dragging feature for undecorated windows (Aquarium uses
 ordinary decorations, so the feature itself is dead code for this app — but
 its setup crashes before it ever gets to check that). It's connected
 unconditionally on every Linux build, on the **webview widget itself**, and
@@ -525,7 +525,7 @@ That last test is worth its length: mpv accepts an option name it does not have
 and does nothing with it, so this whole class of failure (no uosc, no hardware
 decode, no `Authorization`) presents from outside as "video didn't work".
 
-`FELLYJIN_MPV_TEST=<path|url>` is the rest: it brings a core up in the real
+`AQUARIUM_MPV_TEST=<path|url>` is the rest: it brings a core up in the real
 window, reveals the surface, attaches, and prints every event. Together with
 Phase 1's self-test — which it suppresses, since the two drive the same widget
 — this is the first time the GLArea shows a picture. Both go away in Phase 3.
@@ -554,11 +554,11 @@ Only the process-shaped parts changed:
   `attach()` or `loadfile` is a failed `play()`: the surface is detached and
   hidden and the mpv core is asked to quit before the error goes back to the
   caller.
-- The `FELLYJIN_SURFACE_TEST` branch in `play()` is gone, and so are
-  `surface::self_test` and `mpv::self_test` (and the `FELLYJIN_MPV_TEST`
+- The `AQUARIUM_SURFACE_TEST` branch in `play()` is gone, and so are
+  `surface::self_test` and `mpv::self_test` (and the `AQUARIUM_MPV_TEST`
   branch that ran the latter from `setup()`): real playback now exercises
   exactly the path those three used to stand in for, so there was nothing
-  left for them to cover. `FELLYJIN_SURFACE_TEST`'s diagnostics
+  left for them to cover. `AQUARIUM_SURFACE_TEST`'s diagnostics
   (`debug_enabled()`, the widget-tree dump, the per-frame geometry log) stay —
   Phase 4 still wants them.
 - `SessionHandle.pid` and the `kill -9` escape hatch are gone; there is no
@@ -587,7 +587,7 @@ returning `None`) drive teardown exactly as it did for an explicit `stop()`.
 #### Verifying it
 
 Measured on this box (same machine as Phase 0–2), driving real `play()` end to
-end via `FELLYJIN_TEST_PLAY=<path>` rather than either self-test — those are
+end via `AQUARIUM_TEST_PLAY=<path>` rather than either self-test — those are
 gone, so this is the only path left to exercise:
 
 | | native Wayland | XWayland |
@@ -596,7 +596,7 @@ gone, so this is the only path left to exercise:
 | `hwdec-current` | `vaapi` ✓ | `no`, as Phase 0 said |
 | frame loop | continuous through the clip (`render #0`…`#240`) ✓ | ✓ |
 | natural EOF | `mpv: event thread finished`, session ends `requested_stop=false`, surface hidden ✓ | — |
-| `FELLYJIN_TEST_REPLAY` (mid-playback switch) | old session ends `requested_stop=true`, new session attaches a fresh render context (`hwdec-current=vaapi` again), frame loop continues without a gap ✓ | — |
+| `AQUARIUM_TEST_REPLAY` (mid-playback switch) | old session ends `requested_stop=true`, new session attaches a fresh render context (`hwdec-current=vaapi` again), frame loop continues without a gap ✓ | — |
 
 No black window and no orphaned surface on the replay path — the two things
 §7's risk list and the verification checklist both call out by name.
@@ -652,7 +652,7 @@ events, and a real double click under the fixed version's plain
 
 ```
 [12.681] Run command: keydown, args=[name="MBTN_LEFT"]
-[12.681] Run command: script-message, args=[args="fellyjin-fullscreen"]
+[12.681] Run command: script-message, args=[args="aquarium-fullscreen"]
 [12.748] Run command: keyup, args=[name="MBTN_LEFT"]
 ```
 
@@ -677,7 +677,7 @@ extension (`XTestFakeKeyEvent`/`XTestFakeButtonEvent`) and core
 `XWarpPointer`, installed user-local with `pip install --user python-xlib` (no
 root needed), drive it exactly as real hardware would. Against a real
 `Surface`/`Session` with the bundled `mpv-config` loaded
-(`FELLYJIN_MPV_CONFIG=src-tauri/mpv-config`, so uosc and `input.conf` are
+(`AQUARIUM_MPV_CONFIG=src-tauri/mpv-config`, so uosc and `input.conf` are
 actually active — the default dev fallback with no config dir found disables
 `input-default-bindings` entirely and every key silently does nothing, a
 separate trap worth knowing about but out of Phase 4's scope to fix):
@@ -686,18 +686,18 @@ separate trap worth knowing about but out of Phase 4's scope to fix):
 | --- | --- | --- |
 | motion to (1440, 700) | `mouse 1440 700` | physical px, exact |
 | left click, release | `keydown MBTN_LEFT` then `keyup MBTN_LEFT` | ✓ |
-| double click | `keydown`, `script-message fellyjin-fullscreen` (mpv's own `MBTN_LEFT_DBL`), `keyup` | ✓, once, after the fix |
+| double click | `keydown`, `script-message aquarium-fullscreen` (mpv's own `MBTN_LEFT_DBL`), `keyup` | ✓, once, after the fix |
 | right click | `keydown`/`keyup MBTN_RIGHT` | ✓ (bound to `ignore`) |
 | wheel up / down | `keypress WHEEL_UP` / `WHEEL_DOWN` | ✓ (tested individually — fired back-to-back in one script, the second was lost to GDK coalescing at that pace, a test-harness pacing artifact, not an app bug) |
 | ←/→/↑/↓, `m`, `[`, `]` | `keypress LEFT/RIGHT/UP/DOWN/m/[/]` | ✓ |
 | `z`, Shift+`z` | `keypress z`, `keypress Z` | ✓ — confirms the shift-normalization rule against a real modifier |
 | `f`, Esc | `keypress f`, `keypress ESC` | ✓ |
 | Space | `keypress SPACE` → mpv's own `cycle pause` → `Set property: pause` | ✓, symmetric on a second press |
-| Esc (fullscreen open) | `script-message fellyjin-fullscreen-exit` | ✓ |
+| Esc (fullscreen open) | `script-message aquarium-fullscreen-exit` | ✓ |
 
 Every row after the fix is exactly one command per input, with no duplicate or
 missing firings — confirmed against `mpv`'s own `log-file` output
-(`~/.local/share/fellyjin/mpv-logs/`), which records every `Run command:` mpv
+(`~/.local/share/aquarium/mpv-logs/`), which records every `Run command:` mpv
 actually executed, not just what `surface.rs` sent.
 
 What this pass does **not** cover: native-Wayland input specifically (XTest
@@ -709,9 +709,9 @@ does the timeline visibly scrub) — those need eyes on a real screen. See §8.
 
 - Deleted the `GDK_BACKEND=x11` override in `main.rs` — the app is a plain
   client on whichever backend GDK picks now. Confirmed with no environment
-  overrides at all: `fellyjin: video surface on GdkWaylandDisplay` in the
+  overrides at all: `aquarium: video surface on GdkWaylandDisplay` in the
   render log, same as Phase 3's verification but now the *default*, not
-  something `GDK_BACKEND=wayland` had to force. `FELLYJIN_GDK_BACKEND` stays
+  something `GDK_BACKEND=wayland` had to force. `AQUARIUM_GDK_BACKEND` stays
   as the debug escape hatch to compare against the old X11 path.
 - `cmd.env_remove("WAYLAND_DISPLAY")` was already gone — it lived on the
   `Command::new(mpv_binary).spawn()` call Phase 3 deleted along with the rest
@@ -757,7 +757,7 @@ to avoid at every other step). Fixed properly instead of left as a tradeoff:
   what Settings and bug reports show now that there's no binary path to name.
   Both are covered by new tests (`mpv::tests::audio_devices_lists_at_least_one_output`,
   `runtime_version_reports_something`).
-- `resolve_mpv_binary()`, `$FELLYJIN_MPV`, and `Player::play()`'s `mpv_binary`
+- `resolve_mpv_binary()`, `$AQUARIUM_MPV`, and `Player::play()`'s `mpv_binary`
   parameter are gone — nothing computes an mpv path any more, so nothing
   needed them. The "mpv binary" Settings row (a live override that would have
   gone from doing something to silently doing nothing) is now a plain
@@ -772,7 +772,7 @@ app reaches for an external mpv binary any more, at build time or run time.
 the two new probe tests) and `cargo clippy --release` all clean — no new
 warnings from this phase. `npx tsc --noEmit` clean after the Settings row
 removal. Runtime: launched with no environment overrides at all —
-`FELLYJIN_SURFACE_TEST=1 FELLYJIN_TEST_PLAY=...` and nothing else — and the
+`AQUARIUM_SURFACE_TEST=1 AQUARIUM_TEST_PLAY=...` and nothing else — and the
 render log shows `GdkWaylandDisplay`, confirming the app is a native Wayland
 client by default for the first time in this migration, not just under a
 forced `GDK_BACKEND`.
@@ -781,13 +781,13 @@ forced `GDK_BACKEND`.
 
 ## 6. The one functional casualty — resolved in Phase 5
 
-This section originally predicted that `mpv_path` in Settings, `$FELLYJIN_MPV`,
+This section originally predicted that `mpv_path` in Settings, `$AQUARIUM_MPV`,
 and `resolve_mpv_binary()` would stop meaning anything once there was no
 external binary to point at, and offered a choice: rewrite `prefs::warm()`'s
 `mpv --list-options` shell-out to probe in-process and drop `Depends: mpv`
 entirely, or skip that and keep the dependency purely for the probe. Phase 5
 took the first path — see its "what Phase 5 found" section — so as shipped
-there is no casualty: `resolve_mpv_binary()`, `$FELLYJIN_MPV`, and the editable
+there is no casualty: `resolve_mpv_binary()`, `$AQUARIUM_MPV`, and the editable
 Settings field are gone rather than left inert, `audio_devices()` and a new
 `runtime_version()` probe in-process via a throwaway `Mpv::new()`, and
 `Depends: mpv` is genuinely dropped in favour of `libmpv2`.
@@ -804,7 +804,7 @@ untouched by design.
    showed it works in a standalone binary, and Phase 1 showed Tauri's own
    webview survives being re-parented into a `GtkOverlay` in the real app.
 2. **In-process crashes are now fatal.** Today an mpv/FFmpeg/driver fault kills a
-   child process and the app survives. Linked in, it takes FellyJin down with it.
+   child process and the app survives. Linked in, it takes Aquarium down with it.
    Note that the journal already shows a `corrupted double-linked list` abort
    from 15 Aug — whatever that was, in-process it becomes an app crash. No easy
    mitigation; it is the price of the render API.
@@ -824,7 +824,7 @@ untouched by design.
 Nothing here is "looks fine". Each line is a thing that works today and must
 still work, checked against a real Jellyfin server. No phase of this migration
 has actually had one available, though — every check so far, including the
-2 Sep 2026 pass through this list, has used `FELLYJIN_TEST_PLAY`'s synthetic
+2 Sep 2026 pass through this list, has used `AQUARIUM_TEST_PLAY`'s synthetic
 `av://lavfi:testsrc` source, which stands in fine for the backend/mpv-level
 rows (embedding, geometry, hwdec, input translation, MPRIS) but not for
 anything that needs real audio/subtitle tracks, chapters, an unreliable
@@ -834,7 +834,7 @@ which the backdoor doesn't drive). The 2 Sep pass also hit an environment-level
 snag worth knowing about if this list is revisited on the same box: partway
 through, XTest-synthesized input (`python-xlib`, used since this box has no
 Wayland input-injection tool) stopped reaching any X11 window at all, confirmed
-with a control test against a freshly created plain window with no FellyJin
+with a control test against a freshly created plain window with no Aquarium
 involvement — so a couple of rows that looked like they might be regressions
 (uosc's hover UI never appearing) are flagged as unproven rather than broken;
 re-test with working synthetic input, or real hardware, before trusting either
@@ -842,7 +842,7 @@ verdict.
 
 - [x] the surface composites over the webview and leaves the player bar clear,
       on both backends, at scale 2, across window resizes (Phase 1 self-test)
-- [x] `xdpyinfo`-free: `WAYLAND_DISPLAY` set, no XWayland client for FellyJin —
+- [x] `xdpyinfo`-free: `WAYLAND_DISPLAY` set, no XWayland client for Aquarium —
       confirmed via `GdkWaylandDisplay` in the render log with `GDK_BACKEND`
       forced to wayland (Phase 3 verification, §5); "the jitter is gone" is a
       subjective read on real content and wasn't separately assessed
@@ -859,7 +859,7 @@ verdict.
       blocked**: app-chrome fullscreen is gated in the frontend behind
       `playerActive`/`playerEmbedded`, which only go true once a real
       `player-status` event reaches a JS session that has passed login; the
-      `FELLYJIN_TEST_PLAY` backdoor plays real video but never puts the
+      `AQUARIUM_TEST_PLAY` backdoor plays real video but never puts the
       webview through that flow. Needs a real Jellyfin login to test.
 - [ ] in fullscreen, moving the mouse reveals the bar over the video **with the
       picture pinned to the pixel**, and hides again after 1s (`cursor-autohide`)
@@ -874,7 +874,7 @@ verdict.
       before drawing conclusions from that, the test rig itself turned out to
       be broken: XTest-synthesized input had stopped reaching *any* X11
       window, confirmed with a control test against a freshly created plain
-      window with no FellyJin/GTK involved at all. So the `hover` observation
+      window with no Aquarium/GTK involved at all. So the `hover` observation
       is unproven, not confirmed — it may be a real render-API limitation
       (there is no VO backend to set it the way a real window's input driver
       would) or may equally have been a casualty of the same broken XTest.
@@ -894,13 +894,13 @@ verdict.
 - [ ] scrubber buffer band and chapter marks still draw — needs real streamed
       content (buffering) and a source with chapters; the synthetic clip has
       neither
-- [x] mid-playback quality switch (`FELLYJIN_TEST_REPLAY`) — no black window,
+- [x] mid-playback quality switch (`AQUARIUM_TEST_REPLAY`) — no black window,
       no orphaned surface (Phase 3 verification, §5)
 - [ ] progress reported to Jellyfin every 10s; resume point correct on stop —
       needs a real server to report to
 - [x] MPRIS: media keys, lock screen, GNOME shell controls — verified directly
       over D-Bus (§8 verification pass, 2 Sep 2026), bypassing the need for a
-      real media key: `org.mpris.MediaPlayer2.fellyjin` is live with correct
+      real media key: `org.mpris.MediaPlayer2.aquarium` is live with correct
       `Metadata`/`PlaybackStatus`; calling `PlayPause` genuinely pauses mpv
       (the render-frame counter measurably freezes, not just a property
       flip) and reports `Paused`, and calling it again resumes and reports

@@ -431,7 +431,7 @@ export function toast(msg: string, kind: "info" | "error" | "ok" = "info"): void
 
 // ---------- Recent searches ----------
 
-const RECENT_KEY = "fellyjin.recent-searches";
+const RECENT_KEY = "aquarium.recent-searches";
 const RECENT_MAX = 8;
 
 export function recentSearches(): string[] {

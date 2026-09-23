@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::sync::OnceLock;
 
-pub const CLIENT_NAME: &str = "FellyJin";
+pub const CLIENT_NAME: &str = "Aquarium";
 pub const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 static HTTP: OnceLock<reqwest::Client> = OnceLock::new();

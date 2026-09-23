@@ -34,7 +34,7 @@ interface LibPrefs {
   genre: string;
 }
 
-const prefsKey = (libId: string): string => `fellyjin.lib.${libId}`;
+const prefsKey = (libId: string): string => `aquarium.lib.${libId}`;
 
 function loadPrefs(libId: string): LibPrefs {
   const fallback: LibPrefs = { sort: "SortName|Ascending", unwatched: false, favorites: false, genre: "" };
@@ -442,7 +442,7 @@ export async function renderSearch(root: HTMLElement, term: string): Promise<voi
       emptyState({
         icon: "search",
         title: `No results for “${term}”`,
-        body: "Check the spelling, or try a shorter search — FellyJin matches titles across movies, shows and episodes.",
+        body: "Check the spelling, or try a shorter search — Aquarium matches titles across movies, shows and episodes.",
         action: {
           label: "Clear search",
           run: () => {

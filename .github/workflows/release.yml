@@ -37,5 +37,5 @@ jobs:
       - name: Publish to Releases
         uses: softprops/action-gh-release@v2
         with:
-          files: felly.deb
+          files: aquarium.deb
           fail_on_unmatched_files: true
