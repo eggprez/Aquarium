@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- tvOS only, and only because of the top shelf: the app and the TopShelf
+	     extension are separate processes with separate containers, and the
+	     group is the one folder both can see. The other platforms keep
+	     Aquarium.entitlements, which has no group in it — an app group id is
+	     spelled differently on macOS (it wants the team prefix), and none of
+	     them have a home screen shelf to fill anyway. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.scottai.FellyJin</string>
+	</array>
+	<!-- The shared settings dictionary — see Core/CloudSync.swift. Needs
+	     iCloud (Key-value storage) enabled on the App ID; without it the store
+	     answers false to synchronize() and the whole feature stands down
+	     quietly, so a build signed without it behaves as before. -->
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+	<!-- Apple TV profiles. The system keeps a separate container, defaults and
+	     keychain for each Apple TV user and relaunches the app when the user
+	     changes in Control Centre, so each person's `Preferences.accounts` and
+	     session are simply their own — no mapping code. This form of the value
+	     also gives them one keychain in common (`kSecUseUserIndependentKeychain`),
+	     which is where `Keychain.Household` keeps a copy of every token and
+	     the list of who is signed in, so a second person's first launch can
+	     offer the household's accounts and servers instead of a blank form.
+	     Needs User Management ticked on the App ID (it is). Not run on a
+	     device with two users yet: what the first launch does with the data
+	     already there, and whether the group container the TopShelf extension
+	     reads is split as well, are both undocumented. -->
+	<key>com.apple.developer.user-management</key>
+	<array>
+		<string>runs-as-current-user-with-user-independent-keychain</string>
+	</array>
+</dict>
+</plist>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The one thing the extension needs: the folder the app writes the shelf
+	     into. It has no network entitlement and asks for no keychain, because
+	     it never talks to the server — see TopShelfSnapshot. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.scottai.FellyJin</string>
+	</array>
+</dict>
+</plist>
