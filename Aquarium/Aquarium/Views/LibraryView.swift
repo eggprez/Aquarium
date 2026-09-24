@@ -31,6 +31,13 @@ struct LibraryView: View {
     @State private var unwatchedOnly = false
     @State private var favouritesOnly = false
     @State private var genre: String?
+    /// The sort run the other way from its natural direction — set by clicking
+    /// a column heading twice in the Mac's list view.
+    @State private var reversed = false
+    #if os(macOS)
+    /// Posters or a list; remembered across libraries and launches.
+    @AppStorage("libraryLayout") private var layout: LibraryLayout = .grid
+    #endif
 
     /// Pages asked for so far. This, not the item count, is what ends paging:
     /// a page that adds nothing new would never move the count to the total.
@@ -102,47 +109,13 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                #if os(tvOS)
-                // The library's name, which on every other platform is in the
-                // navigation bar. There isn't one worth using here — see
-                // `screenTitle` — so it is the first thing in the page instead,
-                // and scrolls away with the first row of posters.
-                PageHeading(title: title)
-                #endif
-                filterBar
-                    .hiddenOnTV()
-                if isLoading, items.isEmpty {
-                    // The grid this is about to become, rather than a spinner
-                    // in the middle of an empty screen.
-                    SkeletonGrid(count: 12)
-                } else if let error, items.isEmpty {
-                    ErrorState(error: error) { Task { await reload() } }
-                } else if items.isEmpty {
-                    EmptyState(
-                        symbol: emptySymbol,
-                        title: "Nothing here",
-                        message: emptyMessage
-                    )
-                } else {
-                    MediaGrid(items: items, pendingCount: isPaging ? pendingTileCount : 0) { item in
-                        app.push(.item(item.Id))
-                    } onReachEnd: {
-                        Task { await loadMore() }
-                    }
-                    Text("\(items.count) of \(total)")
-                        .font(.caption)
-                        .foregroundStyle(Theme.textDim)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 4)
-                        .padding(.bottom, 24)
-                }
-            }
-            .padding(.top, 8)
-        }
+        page
         .screenTitle(title)
         .paletteBar()
+        #if os(macOS)
+        .toolbar { macToolbar }
+        .navigationSubtitle(total > 0 ? "\(total) item\(total == 1 ? "" : "s")" : "")
+        #endif
         // The filter bar is the one place in the app where a tap changes what
         // the whole page says without moving anything under your finger.
         .sensoryFeedback(.selection, trigger: filterKey)
@@ -161,8 +134,78 @@ struct LibraryView: View {
             genresType = nil
             genre = nil
             sort = .name
+            reversed = false
             unwatchedOnly = false
             favouritesOnly = false
+        }
+    }
+
+    @ViewBuilder
+    private var page: some View {
+        #if os(macOS)
+        if layout == .list, !items.isEmpty {
+            LibraryTable(
+                items: items,
+                sort: $sort,
+                reversed: $reversed,
+                onOpen: { app.push(.item($0.Id)) },
+                onReachEnd: { Task { await loadMore() } }
+            )
+        } else {
+            grid
+        }
+        #else
+        grid
+        #endif
+    }
+
+    private var grid: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                #if os(tvOS)
+                // The library's name, which on every other platform is in the
+                // navigation bar. There isn't one worth using here — see
+                // `screenTitle` — so it is the first thing in the page instead,
+                // and scrolls away with the first row of posters.
+                PageHeading(title: title)
+                #endif
+                #if !os(macOS)
+                // The Mac has these in the window's toolbar — see `macToolbar`.
+                filterBar
+                    .hiddenOnTV()
+                #endif
+                if isLoading, items.isEmpty {
+                    // The grid this is about to become, rather than a spinner
+                    // in the middle of an empty screen.
+                    SkeletonGrid(count: 12)
+                } else if let error, items.isEmpty {
+                    ErrorState(error: error) { Task { await reload() } }
+                } else if items.isEmpty {
+                    EmptyState(
+                        symbol: emptySymbol,
+                        title: "Nothing here",
+                        message: emptyMessage,
+                        actionTitle: hasFilters ? "Clear Filters" : nil
+                    ) {
+                        unwatchedOnly = false
+                        favouritesOnly = false
+                        genre = nil
+                    }
+                } else {
+                    MediaGrid(items: items, pendingCount: isPaging ? pendingTileCount : 0) { item in
+                        app.push(.item(item.Id))
+                    } onReachEnd: {
+                        Task { await loadMore() }
+                    }
+                    Text("\(items.count) of \(total)")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textDim)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 4)
+                        .padding(.bottom, 24)
+                }
+            }
+            .padding(.top, 8)
         }
     }
 
@@ -182,7 +225,11 @@ struct LibraryView: View {
         #if os(tvOS)
         "This library has nothing in it yet."
         #else
-        "No items in this library match the filters above."
+        // Only blamed on the filters when one is on; an empty library with
+        // none set was told it didn't match them.
+        hasFilters
+            ? "No items in this library match the filters above."
+            : "This library has nothing in it yet."
         #endif
     }
 
@@ -197,8 +244,71 @@ struct LibraryView: View {
     /// in it because it can arrive late — the shell may still be fetching the
     /// libraries when this screen first asks.
     private var filterKey: String {
-        "\(parentId)|\(includeTypes ?? "")|\(sort.rawValue)|\(unwatchedOnly)|\(favouritesOnly)|\(genre ?? "")"
+        "\(parentId)|\(includeTypes ?? "")|\(sort.rawValue)|\(reversed)|\(unwatchedOnly)|\(favouritesOnly)|\(genre ?? "")"
     }
+
+    private var hasFilters: Bool { unwatchedOnly || favouritesOnly || genre != nil }
+
+    #if os(macOS)
+    enum LibraryLayout: String { case grid, list }
+
+    /// The filter bar, as the window's toolbar: the view switch, sorting, the
+    /// two filters as toggles, and the genre menu.
+    @ToolbarContentBuilder
+    private var macToolbar: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Picker("View", selection: $layout) {
+                Label("Grid", systemImage: "square.grid.2x2").tag(LibraryLayout.grid)
+                Label("List", systemImage: "list.bullet").tag(LibraryLayout.list)
+            }
+            .pickerStyle(.segmented)
+            .help("Show as posters or as a list")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Picker("Sort By", selection: $sort) {
+                    ForEach(SortOption.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.inline)
+                Divider()
+                Toggle("Reverse Order", isOn: $reversed)
+                    .disabled(sort == .random)
+            } label: {
+                Label("Sort: \(sort.label)", systemImage: "arrow.up.arrow.down")
+            }
+            .help("Sort by \(sort.label.lowercased())")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Toggle(isOn: $unwatchedOnly) {
+                Label("Unwatched", systemImage: "eye.slash")
+            }
+            .help("Show only what you haven't watched")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Toggle(isOn: $favouritesOnly) {
+                Label("Favorites", systemImage: "star")
+            }
+            .help("Show only favorites")
+        }
+        if !genres.isEmpty {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("All Genres") { genre = nil }
+                    Divider()
+                    ForEach(genres, id: \.self) { name in
+                        Toggle(name, isOn: Binding(
+                            get: { genre == name },
+                            set: { genre = $0 ? name : nil }
+                        ))
+                    }
+                } label: {
+                    Label(genre ?? "Genre", systemImage: genre == nil ? "tag" : "tag.fill")
+                }
+                .help("Filter by genre")
+            }
+        }
+    }
+    #endif
 
     private var filterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -334,7 +444,7 @@ struct LibraryView: View {
             limit: limit,
             includeTypes: includeTypes,
             sortBy: sort.field,
-            sortOrder: sort.order,
+            sortOrder: reversed ? (sort.order == "Ascending" ? "Descending" : "Ascending") : sort.order,
             unwatched: unwatchedOnly,
             favorites: favouritesOnly,
             genre: genre

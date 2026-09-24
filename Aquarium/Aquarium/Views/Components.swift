@@ -149,7 +149,10 @@ enum Metrics {
         // right, which is how a guide has always been read.
         return 12
         #elseif os(macOS)
-        return 4.5
+        // 180 points to a half hour: two lines of title and the time under
+        // them. At 4.5 a half-hour cell was cut to a word, and anything that
+        // started before the window was a sliver reading "Fr".
+        return 6
         #else
         return phoneGuideMinuteWidth
         #endif
@@ -718,6 +721,28 @@ extension View {
     }
 }
 
+#if os(macOS)
+/// The pointer resting on a poster: the artwork lifts a little and throws a
+/// shadow, the way the TV and Music apps answer a hover, so a grid of posters
+/// says which one a click would open before the click.
+struct PosterHover: ViewModifier {
+    var radius: CGFloat = Theme.cornerRadius
+    @State private var isHovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(.white.opacity(isHovering ? 0.35 : 0), lineWidth: 1)
+            )
+            .scaleEffect(isHovering ? 1.035 : 1)
+            .shadow(color: .black.opacity(isHovering ? 0.28 : 0), radius: isHovering ? 10 : 0, y: isHovering ? 6 : 0)
+            .animation(.easeOut(duration: 0.14), value: isHovering)
+            .onHover { isHovering = $0 }
+    }
+}
+#endif
+
 struct PosterButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -941,6 +966,8 @@ extension View {
     func posterFocus(radius: CGFloat = Theme.cornerRadius) -> some View {
         #if os(tvOS)
         modifier(PosterFocus(radius: radius))
+        #elseif os(macOS)
+        modifier(PosterHover(radius: radius))
         #else
         self
         #endif
@@ -1058,15 +1085,27 @@ enum PosterGrid {
                 count: count
             )
         }
+        #if os(macOS)
+        // A range rather than a fixed width, with the cards filling their
+        // column: a window made narrower gets one more, smaller column instead
+        // of two fixed posters with a gulf of page between them.
+        return [GridItem(.adaptive(minimum: wide ? 220 : 136, maximum: wide ? 360 : 210),
+                         spacing: Metrics.gridSpacing, alignment: .top)]
+        #else
         return [GridItem(.adaptive(minimum: wide ? Metrics.stillWidth : Metrics.posterWidth),
                          spacing: Metrics.gridSpacing, alignment: .top)]
+        #endif
     }
 
     /// `nil` hands sizing to the column, which is what the fixed-count phone
     /// layout needs; elsewhere the card keeps its own width.
     static func cardWidth(wide: Bool, compact: Bool) -> CGFloat? {
+        #if os(macOS)
+        return nil
+        #else
         guard phoneColumns(wide: wide, compact: compact) == nil else { return nil }
         return wide ? Metrics.stillWidth : Metrics.posterWidth
+        #endif
     }
 }
 
@@ -1408,6 +1447,10 @@ struct EmptyState: View {
     var symbol: String = "tray"
     var title: String
     var message: String
+    /// A way out of the empty state, when there is one — clearing the filters
+    /// that emptied it, say. Nil draws no button.
+    var actionTitle: String? = nil
+    var action: (() -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 10) {
@@ -1420,6 +1463,11 @@ struct EmptyState: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textDim)
                 .frame(maxWidth: 420)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .appButtonStyle()
+                    .padding(.top, 6)
+            }
         }
         .frame(maxWidth: .infinity, minHeight: 240)
         .padding(Metrics.gutter)

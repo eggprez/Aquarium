@@ -280,6 +280,15 @@ final class AppModel {
     /// alongside the path, pushed and popped with it. See `navigate(to:)`.
     private var routeStacks: [String: [Route]] = [:]
 
+    #if os(macOS)
+    /// The title window in front, when one is. Everything that opens a page
+    /// goes through `push` and `navigate(to:)`, and a click lands in the window
+    /// you are working in — so while a title window is the main window, what
+    /// it opens opens in it rather than in the app's window behind. See
+    /// `ItemWindow`.
+    @ObservationIgnored weak var keyNavigator: ItemWindowNavigator?
+    #endif
+
     #if os(tvOS)
     /// The title page a television opens over everything else, and the stack of
     /// pages reached from it.
@@ -457,7 +466,11 @@ final class AppModel {
                 out.append(kind)
             }
         }
+        // A Mac keeps its settings in the Settings window (⌘, and the app
+        // menu), not as a page in the sidebar.
+        #if !os(macOS)
         out.append(.settings)
+        #endif
         return out
         #endif
     }
@@ -492,7 +505,13 @@ final class AppModel {
     /// downloaded (an Audiobooks tab for one book). Downloaded music and
     /// audiobooks are rows on the Downloads page. The same list whether the
     /// app was opened offline or lost the server while open.
-    private var offlineSections: [AppSection] { [.downloads, .settings] }
+    private var offlineSections: [AppSection] {
+        #if os(macOS)
+        [.downloads]
+        #else
+        [.downloads, .settings]
+        #endif
+    }
     #endif
 
     /// The section the shell is actually showing: `selection`, unless that
@@ -747,6 +766,12 @@ final class AppModel {
     func push(_ route: Route) {
         pendingZoomSource = zoomSource
         zoomSource = nil
+        #if os(macOS)
+        if let window = keyNavigator {
+            window.push(route)
+            return
+        }
+        #endif
         #if os(tvOS)
         // Once the title screen is up it owns everything opened from it — the
         // seasons, the episodes, an actor's name searched for from the cast
@@ -789,6 +814,12 @@ final class AppModel {
     /// not there at all and the only way to it is forwards. So: pop where we
     /// can, push where we can't, and either way you end up on the page.
     func navigate(to route: Route) {
+        #if os(macOS)
+        if let window = keyNavigator {
+            window.navigate(to: route)
+            return
+        }
+        #endif
         #if os(tvOS)
         if let root = detailRoot {
             if route == root {

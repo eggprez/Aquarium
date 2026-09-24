@@ -2663,3 +2663,17 @@ extension DownloadManager: AVAssetDownloadDelegate {
 }
 
 #endif
+
+#if os(macOS)
+import AppKit
+
+extension DownloadManager {
+    /// Opens the downloads folder in Finder, making it first if nothing has
+    /// been downloaded yet — Finder can't show a folder that isn't there.
+    @MainActor
+    static func revealInFinder() {
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        NSWorkspace.shared.activateFileViewerSelecting([root])
+    }
+}
+#endif

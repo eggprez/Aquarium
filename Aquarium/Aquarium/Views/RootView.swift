@@ -12,6 +12,9 @@ struct RootView: View {
     @Environment(JellyfinClient.self) private var client
     @Environment(PlayerModel.self) private var player
     @Environment(\.scenePhase) private var scenePhase
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
 
     /// Shared by every poster tile and every title page, so a page can zoom
     /// out of the tile that opened it — see `ZoomedDestination`.
@@ -163,12 +166,15 @@ struct RootView: View {
             if let root = app.detailRoot { detailScreen(root) }
         }
         #endif
-        // The player takes the whole screen on every platform. On a Mac that is
-        // a sheet the window can still be resized behind; on iOS and tvOS it is
-        // a full-screen cover, which is also what enables the system's own
-        // gesture handling and Picture in Picture hand-off.
+        // On iOS and tvOS the player is a full-screen cover, which is also
+        // what enables the system's own gesture handling and Picture in Picture
+        // hand-off. On a Mac it is a window of its own, opened here when
+        // something starts and closing itself when it stops — see
+        // `PlayerWindow`.
         #if os(macOS)
-        .sheet(isPresented: playerBinding) { PlayerScreen() }
+        .onChange(of: player.isActive, initial: true) { _, active in
+            if active { openWindow(id: PlayerWindow.id) }
+        }
         #else
         .fullScreenCover(isPresented: playerBinding) { PlayerScreen() }
         #endif
@@ -314,10 +320,14 @@ struct RootView: View {
         @Bindable var app = app
         return NavigationSplitView(columnVisibility: $sidebarVisibility) {
             List(selection: sidebarSelection) {
+                #if os(macOS)
+                MacSidebarRows()
+                #else
                 ForEach(app.sections) { section in
                     Label(section.title, systemImage: section.symbol)
                         .tag(section)
                 }
+                #endif
             }
             .navigationTitle("Aquarium")
             // On an iPad as well as a Mac. Left to itself an iPad's sidebar is
@@ -421,8 +431,19 @@ struct RootView: View {
     }
     #endif
 
-    @ViewBuilder
     private func destination(_ route: Route) -> some View {
+        RouteDestination(route: route)
+    }
+}
+
+/// The page a route opens. Shared by every navigation stack there is — each
+/// tab's, the television's title screen, and on a Mac each title window's (see
+/// `ItemWindow`).
+struct RouteDestination: View {
+    let route: Route
+    @Environment(AppModel.self) private var app
+
+    var body: some View {
         switch route {
         case .item(let id):
             ZoomedDestination(itemId: id, source: app.pendingZoomSource) {
@@ -611,6 +632,15 @@ private struct SidebarFooter: View {
     @Environment(JellyfinClient.self) private var client
 
     var body: some View {
+        #if os(macOS)
+        MacSidebarFooter(status: status)
+        #else
+        status
+        #endif
+    }
+
+    @ViewBuilder
+    private var status: some View {
         #if !os(tvOS)
         let running = DownloadManager.shared.records.lazy.filter { $0.status == .downloading }.count
         let pending = DownloadManager.shared.pendingSyncCount
@@ -618,19 +648,25 @@ private struct SidebarFooter: View {
         let running = 0
         let pending = 0
         #endif
+        let line = HStack(spacing: 6) {
+            Circle()
+                .fill(tone(running: running, pending: pending))
+                .frame(width: 7, height: 7)
+            Text(text(running: running, pending: pending))
+                .font(.caption)
+                .foregroundStyle(Theme.textDim)
+        }
+        #if os(macOS)
+        // Under the account's name in `MacSidebarFooter`, which draws the rule.
+        line
+        #else
         VStack(alignment: .leading, spacing: 4) {
             Divider()
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(tone(running: running, pending: pending))
-                    .frame(width: 7, height: 7)
-                Text(text(running: running, pending: pending))
-                    .font(.caption)
-                    .foregroundStyle(Theme.textDim)
-            }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 10)
+            line
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
         }
+        #endif
     }
 
     private func tone(running: Int, pending: Int) -> Color {

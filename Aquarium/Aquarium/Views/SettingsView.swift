@@ -23,10 +23,73 @@ struct SettingNote: Identifiable {
     let text: String
 
     var id: String { text }
+
+    /// The first sentence: what the Mac shows under a control, with the rest
+    /// of `text` on hover.
+    var summary: String {
+        var first = text
+        text.enumerateSubstrings(in: text.startIndex..., options: .bySentences) { sub, _, _, stop in
+            if let sub { first = sub.trimmingCharacters(in: .whitespaces) }
+            stop = true
+        }
+        return first
+    }
 }
 
 #if os(macOS)
+/// The tabs of the Settings window, in the order they appear.
+enum MacSettingsPane: String, CaseIterable, Identifiable {
+    case general, account, playback, subtitles, liveTV, downloads
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .account: "Account"
+        case .playback: "Playback"
+        case .subtitles: "Subtitles"
+        case .liveTV: "Live TV"
+        case .downloads: "Downloads"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: "gearshape"
+        case .account: "person.crop.circle"
+        case .playback: "play.rectangle"
+        case .subtitles: "captions.bubble"
+        case .liveTV: "antenna.radiowaves.left.and.right"
+        case .downloads: "arrow.down.circle"
+        }
+    }
+}
+
+/// The Settings window (⌘,): one tab per group, the way Mac apps lay out their
+/// preferences, rather than one long page in the sidebar.
+struct MacSettingsWindow: View {
+    @AppStorage("settingsPane") private var pane: MacSettingsPane = .general
+
+    var body: some View {
+        TabView(selection: $pane) {
+            ForEach(MacSettingsPane.allCases) { pane in
+                SettingsView(pane: pane)
+                    .tabItem { Label(pane.title, systemImage: pane.symbol) }
+                    .tag(pane)
+            }
+        }
+        .frame(width: 620, height: 560)
+    }
+}
+#endif
+
+#if os(macOS)
 struct SettingsView: View {
+    /// Which tab of the Settings window this is; nil draws every group, for
+    /// anywhere the whole page is still wanted.
+    var pane: MacSettingsPane? = nil
+
     @Environment(AppModel.self) private var app
     @Environment(JellyfinClient.self) private var client
     @Environment(Preferences.self) private var prefs
@@ -40,12 +103,15 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var prefs = prefs
         Form {
-            serverSection
-            if client.session != nil {
-                AccountsSection()
-                QuickConnectApproveSection()
+            if shows(.account) {
+                serverSection
+                if client.session != nil {
+                    AccountsSection()
+                    QuickConnectApproveSection()
+                }
             }
 
+            if shows(.general) {
             Section("Appearance") {
                 Picker(Copy.theme.name ?? "", selection: $prefs.theme) {
                     ForEach(ThemePref.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -53,6 +119,9 @@ struct SettingsView: View {
                 .note(Copy.theme)
             }
 
+            }
+
+            if shows(.playback) {
             Section("Playback") {
                 Toggle(Copy.adaptiveQuality.name ?? "", isOn: $prefs.adaptiveQuality)
                     .note(Copy.adaptiveQuality)
@@ -78,6 +147,9 @@ struct SettingsView: View {
                 .note(Copy.audioDelay)
             }
 
+            }
+
+            if shows(.subtitles) {
             Section("Languages") {
                 Picker(Copy.audioLanguage.name ?? "", selection: $prefs.audioLanguage) {
                     Text("Whatever the file lists first").tag("")
@@ -115,6 +187,9 @@ struct SettingsView: View {
                 .note(Copy.subtitleBackground)
             }
 
+            }
+
+            if shows(.liveTV) {
             Section("Live TV source") {
                 Picker(Copy.liveTVSource.name ?? "", selection: $prefs.liveTVSource) {
                     ForEach(LiveTVSource.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -158,6 +233,8 @@ struct SettingsView: View {
                 }
             }
 
+            }
+
             #if os(iOS)
             if app.hasAudio {
                 Section("Music and audiobooks") {
@@ -171,6 +248,7 @@ struct SettingsView: View {
             }
             #endif
 
+            if shows(.playback) {
             Section("Picture") {
                 Picker(Copy.framing.name ?? "", selection: $prefs.fillScreen) {
                     Text("Fit — show the whole frame").tag(false)
@@ -179,6 +257,9 @@ struct SettingsView: View {
                 .note(Copy.framing, Copy.pictureControls)
             }
 
+            }
+
+            if shows(.downloads) {
             Section("Downloads") {
                 Picker("Default quality", selection: $prefs.downloadQuality) {
                     ForEach(DownloadQualities.all) { Text($0.label).tag($0.label) }
@@ -190,13 +271,14 @@ struct SettingsView: View {
                 Toggle(Copy.wifiOnly.name ?? "", isOn: $prefs.downloadsWiFiOnly)
                     .note(Copy.wifiOnly)
                 LabeledContent("Kept in") {
-                    Text(DownloadManager.root.path)
-                        .font(.caption)
-                        .foregroundStyle(Theme.textDim)
-                        .textSelection(.enabled)
+                    Button("Show in Finder") { DownloadManager.revealInFinder() }
+                        .help(DownloadManager.root.path)
                 }
             }
 
+            }
+
+            if shows(.general) {
             Section("Library copy") {
                 Toggle(Copy.libraryCopy.name ?? "", isOn: $prefs.keepsLibraryCopy)
                     .onChange(of: prefs.keepsLibraryCopy) { _, on in LibraryIndex.shared.setEnabled(on) }
@@ -225,7 +307,7 @@ struct SettingsView: View {
             }
 
             Section("This iCloud account") {
-                Toggle(Copy.cloudSync.name ?? "", isOn: $prefs.syncsAcrossDevices)
+                Toggle(Copy.cloudSync.name ?? "", isOn: cloudSyncBinding)
                     .disabled(!prefs.cloudIsAvailable)
                     .note(Copy.cloudSync)
                 if !prefs.cloudIsAvailable {
@@ -240,9 +322,11 @@ struct SettingsView: View {
                 LabeledContent("Playback engine", value: "AVFoundation")
                     .note(Copy.about)
             }
+            }
+
         }
         .formStyle(.grouped)
-        .screenTitle("Settings")
+        .screenTitle(pane?.title ?? "Settings")
         .paletteBar()
         .confirmationDialog("Sign out of \(client.session?.server ?? "this server")?",
                             isPresented: $confirmSignOut, titleVisibility: .visible) {
@@ -255,6 +339,10 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    private func shows(_ group: MacSettingsPane) -> Bool {
+        pane == nil || pane == group
     }
 
     // MARK: - Server
@@ -429,7 +517,7 @@ struct SettingsView: View {
             }
 
             Section("General") {
-                Toggle(isOn: $prefs.syncsAcrossDevices) { SettingLabel(Copy.cloudSync) }
+                Toggle(isOn: cloudSyncBinding) { SettingLabel(Copy.cloudSync) }
                     .disabled(!prefs.cloudIsAvailable)
                 if !prefs.cloudIsAvailable {
                     Text(Copy.cloudUnavailable.text)
@@ -836,13 +924,34 @@ private extension View {
     /// own directly under it.
     func note(_ notes: SettingNote...) -> some View {
         Group {
-            self
+            #if os(macOS)
+            // One sentence under the control, the rest on hover. The full
+            // paragraphs under every row made the window a wall of grey text
+            // and pushed the controls themselves apart.
+            self.help(notes.map(\.text).joined(separator: "\n\n"))
             ForEach(notes) { note in
-                Text(note.text)
+                Text(note.summary)
+                    .help(note.text)
                     .font(.caption)
                     .foregroundStyle(Theme.textDim)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            #else
+            // In the cell with the control it describes, not a row of its
+            // own. As separate rows, a control and its sentence sat either
+            // side of a divider with a full row's padding between them, and
+            // read as two unrelated settings rather than one and its
+            // explanation.
+            VStack(alignment: .leading, spacing: 6) {
+                self
+                ForEach(notes) { note in
+                    Text(note.text)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            #endif
         }
     }
 }
@@ -1107,7 +1216,7 @@ enum SettingsCopy {
     )
     static let audioDelay = SettingNote(
         name: "Audio delay",
-        text: "How far the sound is moved against the picture — the lag a television or soundbar adds, which is the same for everything watched through it. Easier to set from inside the player: Audio sync in the player's settings puts the controls over whatever is playing, so the sound can be nudged while watching a line of dialogue. Whatever is settled on is saved here and applied to everything you play. The sound can be moved earlier on any stream; moving it later needs a file the server can send untouched."
+        text: "How far the sound is moved against the picture — the lag a television or soundbar adds, which is the same for everything watched through it. " + audioDelayPlayerHint + "Whatever is settled on is saved here and applied to everything you play. The sound can be moved earlier on any stream; moving it later needs a file the server can send untouched."
     )
     static let frameRateMatch = SettingNote(
         name: "Match Frame Rate offset",
@@ -1169,7 +1278,7 @@ enum SettingsCopy {
         text: "Fill is how you put a 2.35:1 film on a 16:9 screen without watching it between black bars. It does cut the edges of the frame off. Also reachable from the player itself, so it can be judged against what's on screen."
     )
     static let pictureControls = SettingNote(
-        text: "Brightness, contrast, saturation, gamma and an aspect-ratio override are in the Linux build but not here: AVFoundation offers no way to adjust the picture of a stream, and four sliders that quietly did nothing would be worse than their absence."
+        text: "There are no brightness, contrast or colour controls: Apple's video player has no way to adjust the picture of a stream."
     )
     static let concurrency = SettingNote(
         name: "Parallel downloads",
@@ -1181,7 +1290,7 @@ enum SettingsCopy {
     )
     static let cloudSync = SettingNote(
         name: "Share settings across my devices",
-        text: "Your server, your sign-in and everything on this screen follow you to your other Apple TVs, iPhones and iPads through iCloud. Signing out anywhere signs out everywhere. Volume, the audio delay and this device's identity to the server stay where they are — those describe the room, not the account."
+        text: "Your server, your sign-in and everything on this screen follow you to your other Apple TVs, iPhones, iPads and Macs through iCloud. Signing out anywhere signs out everywhere. Volume, the audio delay and this device's identity to the server stay where they are — those describe the room, not the account."
     )
     static let libraryCopy: SettingNote = {
         var text = "Saves the details of every film, show, season and episode on this device, with their posters, logos and episode stills. After the first sync, opening the app only fetches what changed: library pages open straight away, and can still be browsed when the server can't be reached. Backdrops are saved as you come across them. Turning this off deletes the copy."
@@ -1206,6 +1315,16 @@ enum SettingsCopy {
         name: "Delete the copy",
         text: "Removes the saved details and artwork from this device. With the setting still on, the next sync downloads everything again."
     )
+    /// The player's own audio-sync controls exist only on Apple TV; elsewhere
+    /// the footer pointed at a panel that isn't there.
+    private static var audioDelayPlayerHint: String {
+        #if os(tvOS)
+        "Easier to set from inside the player: Audio sync in the player's settings puts the controls over whatever is playing, so the sound can be nudged while watching a line of dialogue. "
+        #else
+        ""
+        #endif
+    }
+
     static let cloudUnavailable = SettingNote(
         text: "Not signed in to iCloud on this device, or this build isn't set up for it."
     )
@@ -1253,3 +1372,14 @@ struct StationSettingsPage: View {
     }
 }
 #endif
+
+extension SettingsView {
+    /// Off whenever iCloud can't be used, whatever was chosen before. A
+    /// disabled switch still drawn *on* read as a feature that was working.
+    fileprivate var cloudSyncBinding: Binding<Bool> {
+        Binding(
+            get: { Preferences.shared.syncsAcrossDevices && Preferences.shared.cloudIsAvailable },
+            set: { Preferences.shared.syncsAcrossDevices = $0 }
+        )
+    }
+}

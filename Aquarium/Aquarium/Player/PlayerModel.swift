@@ -191,6 +191,9 @@ final class PlayerModel {
     /// plays regardless; this is what tells the screen to explain the black
     /// picture rather than leave it looking like a hang.
     private(set) var noVideoTrack = false
+    /// The size of the picture being shown, once there is one. The Mac's
+    /// player window takes its shape from it; zero until the first frame.
+    private(set) var pictureSize: CGSize = .zero
     /// What the stream turned out to contain, once it has been looked at — see
     /// `StreamDiagnosis`. Replaces the general explanation on the banner with
     /// the actual codec whenever it can be read.
@@ -2420,6 +2423,7 @@ final class PlayerModel {
                 MainActor.assumeIsolated {
                     guard let self, self.playerItem === avItem else { return }
                     if size != .zero {
+                        if self.pictureSize != size { self.pictureSize = size }
                         self.pictureWatchdog?.cancel()
                         self.pictureWatchdog = nil
                         self.noVideoTrack = false

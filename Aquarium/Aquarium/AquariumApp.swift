@@ -9,6 +9,9 @@ import SwiftUI
 #if os(iOS) || os(macOS)
 import CoreSpotlight
 #endif
+#if os(macOS)
+import AppKit
+#endif
 
 @main
 struct AquariumApp: App {
@@ -17,6 +20,15 @@ struct AquariumApp: App {
     @State private var prefs = Preferences.shared
     @State private var player = PlayerModel.shared
     @State private var music = MusicPlayer.shared
+
+    #if os(macOS)
+    init() {
+        // No window tabs: a tab is a second main window, and with one app
+        // model, one player and one set of navigation paths it could only
+        // mirror the first. See `MacCommands`, which drops New Window too.
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
+    #endif
 
     #if os(iOS)
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
@@ -59,22 +71,52 @@ struct AquariumApp: App {
         .commands {
             // The Mac expects its transport on the keyboard, not only in the
             // player's own controls.
-            CommandMenu("Playback") {
-                Button("Play / Pause") { PlayerModel.shared.togglePlayPause() }
-                    .keyboardShortcut(.space, modifiers: [])
-                Button("Back 10 seconds") { PlayerModel.shared.seek(by: -10) }
-                    .keyboardShortcut(.leftArrow, modifiers: [])
-                Button("Forward 10 seconds") { PlayerModel.shared.seek(by: 10) }
-                    .keyboardShortcut(.rightArrow, modifiers: [])
-                Divider()
-                Button("Slower") { PlayerModel.shared.stepSpeed(-1) }
-                    .keyboardShortcut("[", modifiers: [])
-                Button("Faster") { PlayerModel.shared.stepSpeed(1) }
-                    .keyboardShortcut("]", modifiers: [])
-                Divider()
-                Button("Stop") { PlayerModel.shared.stop() }
-            }
+            PlaybackCommands(player: player)
+            MacCommands(app: app)
         }
+        #endif
+
+        #if os(macOS)
+        Settings {
+            MacSettingsWindow()
+                .environment(app)
+                .environment(client)
+                .environment(prefs)
+                .environment(player)
+                .environment(music)
+                .themed(prefs.theme)
+                .tint(Theme.accent)
+        }
+
+        // A title in a window of its own — see `ItemWindow`.
+        WindowGroup("Title", id: ItemWindow.id, for: String.self) { $itemId in
+            ItemWindow(itemId: itemId)
+                .environment(app)
+                .environment(client)
+                .environment(prefs)
+                .environment(player)
+                .environment(music)
+                .themed(prefs.theme)
+                .tint(Theme.accent)
+        }
+        .defaultSize(width: 1040, height: 780)
+        .commandsRemoved()
+
+        // The player, in a window of its own — see `PlayerWindow`.
+        Window("Player", id: PlayerWindow.id) {
+            PlayerWindow()
+                .environment(app)
+                .environment(client)
+                .environment(prefs)
+                .environment(player)
+                .environment(music)
+                .themed(prefs.theme)
+                .tint(Theme.accent)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1280, height: 720)
+        .defaultPosition(.center)
+        .windowResizability(.contentMinSize)
         #endif
     }
 }

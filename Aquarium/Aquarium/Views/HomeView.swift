@@ -184,6 +184,26 @@ struct HomeView: View {
         }
     }
 
+    #if os(macOS)
+    @ToolbarContentBuilder
+    private var macToolbar: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                Task { await reload(fresh: true) }
+            } label: {
+                if isRefreshing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+            }
+            .keyboardShortcut("r", modifiers: .command)
+            .disabled(isRefreshing)
+            .help("Refresh Home (⌘R)")
+        }
+    }
+    #endif
+
     /// True only where the button floats over the media bar's backdrop.
     private var isOverArtwork: Bool {
         #if os(tvOS)
@@ -317,6 +337,9 @@ struct HomeView: View {
             }
         }
         .reloadWhenPlaybackEnds { await reload() }
+        #if os(macOS)
+        .toolbar { macToolbar }
+        #endif
         // A press-and-hold menu anywhere can change what these shelves say —
         // Continue Watching and Next Up are both derived from watched state.
         //
@@ -386,14 +409,10 @@ struct HomeView: View {
     /// order the server keeps them. See `sections`.
     @ViewBuilder
     private var shelves: some View {
-        // A phone puts this in its top bar and a television over the corner of
-        // the media bar; a Mac window has neither, so here it leads the page at
-        // the trailing edge, where "See all" already sits on the shelves below.
-        #if os(macOS)
-        refreshControl
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.horizontal, Metrics.gutter)
-        #endif
+        // A phone puts refresh in its top bar and a television over the corner
+        // of the media bar. A Mac puts it in the window's toolbar, with ⌘R —
+        // see `macToolbar` — rather than a row of its own here, which left a
+        // band of empty page between the media bar and the first shelf.
         ForEach(sections, id: \.self) { section in
             shelf(section)
         }
@@ -1019,7 +1038,13 @@ struct HeroHeader: View {
             RemoteImage(
                 url: logo,
                 contentMode: .fit,
-                onResolved: { ok in logoUnavailable = !ok }
+                onResolved: { ok in logoUnavailable = !ok },
+                // A wordmark is wider than it is tall. One that isn't is
+                // almost always a stray canvas the logo sits in a corner of —
+                // American Horror Story's is 800×3904, lettering in the top
+                // seventh — and fitted to this frame it shrinks to a speck, so
+                // the title is typeset instead.
+                accepts: { $0.width >= $0.height }
             )
             #if os(tvOS)
             .frame(maxWidth: 520, maxHeight: 150, alignment: .leading)
@@ -1111,9 +1136,26 @@ struct HeroHeader: View {
                 Label(item.progressFraction != nil ? "Resume" : "Play", systemImage: "play.fill")
                     .font(.subheadline.weight(.semibold))
                     .frame(minWidth: 92)
+                    #if os(macOS)
+                    // Drawn here rather than by `.borderedProminent`: AppKit
+                    // takes the fill off a prominent button whenever its window
+                    // isn't the key one, and what's left — a clear bezel with
+                    // the label in the text colour — disappears into a dark
+                    // backdrop. Click into another app and the hero had a
+                    // Details button and nothing else.
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Theme.accentStrong, in: Capsule())
+                    .contentShape(Capsule())
+                    #endif
             }
+            #if os(macOS)
+            .buttonStyle(.plain)
+            #else
             .buttonStyle(.borderedProminent)
             .tint(Theme.accentStrong)
+            #endif
 
             // Not `.bordered`: its fill is drawn for a page background, and over
             // a photograph it is a grey smear with the accent colour written on

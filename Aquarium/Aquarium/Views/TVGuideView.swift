@@ -49,6 +49,11 @@ struct TVGuideView: View {
     /// from it, so a guide come back to after a few hours was still drawing
     /// this morning's schedule until the app was force-quit.
     @State private var nowTick = Date()
+    /// Whether the window is tracking the clock. It stops the moment a Mac's
+    /// arrows move it, and starts again on "Now" or any of the ways back to
+    /// now — without it the half-minute tick put the window back at the
+    /// current half hour and a press of ▶ undid itself within thirty seconds.
+    @State private var followsNow = true
     @State private var programsByChannel: [String: [BaseItem]] = [:]
     /// What `programsByChannel` covers, so that a window which has only grown
     /// later asks for the new hours and nothing else.
@@ -258,7 +263,19 @@ struct TVGuideView: View {
         HStack(spacing: 10) {
             #if os(macOS)
             GuideNavButton(symbol: "chevron.left") { shiftWindow(by: -shiftSeconds) }
+                .help("Earlier")
             GuideNavButton(symbol: "chevron.right") { shiftWindow(by: shiftSeconds) }
+                .help("Later")
+            // Only once the arrows have taken the guide away from now; while
+            // it opens on the current half hour it would only repeat what the
+            // red line already says.
+            if !followsNow {
+                Button("Now") { resetToNow() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Back to what's on now")
+                    .transition(.opacity)
+            }
             #endif
             Spacer(minLength: 0)
             if isLoadingPrograms {
@@ -293,7 +310,9 @@ struct TVGuideView: View {
     private var shiftSeconds: TimeInterval { Double(Self.baseWindowHours) / 2 * 3600 }
 
     private func shiftWindow(by seconds: TimeInterval) {
-        windowStart = windowStart.addingTimeInterval(seconds)
+        let shifted = windowStart.addingTimeInterval(seconds)
+        windowStart = shifted
+        withAnimation(.easeOut(duration: 0.15)) { followsNow = shifted == Self.roundedNow() }
     }
     #endif
 
@@ -585,6 +604,7 @@ struct TVGuideView: View {
     /// Put the guide back where it opens: the current half hour at the leading
     /// edge, the base window length, and whatever was scrolled to forgotten.
     private func resetToNow() {
+        withAnimation(.easeOut(duration: 0.15)) { followsNow = true }
         nowTick = Date()
         let start = Self.roundedNow()
         if start != windowStart {
@@ -613,7 +633,7 @@ struct TVGuideView: View {
             // and is what stops a guide left open overnight from drawing
             // yesterday.
             let start = Self.roundedNow()
-            if start != windowStart { windowStart = start }
+            if followsNow, start != windowStart { windowStart = start }
         }
     }
 
@@ -896,6 +916,11 @@ private struct GuideCell: View {
         }
         .buttonStyle(GuideCellButtonStyle())
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 0.5) }
+        #if os(macOS)
+        // The whole title and its times on hover, for the cells the window
+        // has cut short at either end.
+        .help([title, timeLabel].compactMap { $0 }.joined(separator: "\n"))
+        #endif
     }
 }
 

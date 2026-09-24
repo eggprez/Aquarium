@@ -105,6 +105,9 @@ struct ItemMenu: View {
     @Environment(AppModel.self) private var app
     @Environment(JellyfinClient.self) private var client
     @Environment(PlayerModel.self) private var player
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
 
     /// A channel is a stream and nothing else: no progress, no watched state,
     /// nothing to download. It gets the one action that means anything.
@@ -216,6 +219,14 @@ struct ItemMenu: View {
                 Label(item.isEpisode ? "Episode details" : "Details", systemImage: "info.circle")
             }
         }
+        #if os(macOS)
+        // Its own window, with its own Back — see `ItemWindow`.
+        Button {
+            openWindow(id: ItemWindow.id, value: item.Id)
+        } label: {
+            Label("Open in New Window", systemImage: "macwindow.badge.plus")
+        }
+        #endif
         if item.isEpisode {
             if let seriesId = item.SeriesId, !seriesId.isEmpty {
                 // The name goes underneath as the menu's subtitle, which

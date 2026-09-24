@@ -106,8 +106,36 @@ struct ItemDetailView: View {
         #else
         scroll()
             .screenTitle(navigationTitle)
+            // The hero runs under the toolbar otherwise, and the window's title
+            // and back button end up grey on a photograph.
+            .toolbarBackground(Theme.background, for: .windowToolbar)
+            .focusedSceneValue(\.itemMenuActions, menuActions)
         #endif
     }
+
+    #if os(macOS)
+    /// This page's actions, for the Item menu while it is in front.
+    private var menuActions: ItemMenuActions? {
+        guard let item else { return nil }
+        let playable = playable(for: item)
+        return ItemMenuActions(
+            title: item.title,
+            canPlay: playable != nil,
+            playLabel: playable.map { playLabel($0) } ?? "Play",
+            isFavorite: item.userData.isFavorite,
+            isWatched: item.isSeries ? nil : item.userData.played,
+            play: {
+                guard let playable else { return }
+                Task { await player.play(item: playable) }
+            },
+            toggleFavorite: { Task { await toggleFavourite(item) } },
+            toggleWatched: { Task { await toggleWatched(item) } },
+            openInNewWindow: { openWindow(id: ItemWindow.id, value: item.Id) }
+        )
+    }
+
+    @Environment(\.openWindow) private var openWindow
+    #endif
 
     #if os(tvOS)
     /// Which control is worth landing on, once the page knows enough to have
@@ -1036,11 +1064,7 @@ struct ItemDetailView: View {
         let next = !item.userData.isFavorite
         do {
             try await client.setFavorite(item.Id, favorite: next)
-            var updated = item
-            var data = updated.userData
-            data.IsFavorite = next
-            updated.UserData = data
-            self.item = updated
+            updateUserData(of: item.Id) { $0.IsFavorite = next }
         } catch {
             app.toast("Couldn't update favorites", tone: .error)
         }
@@ -1050,15 +1074,26 @@ struct ItemDetailView: View {
         let next = !item.userData.played
         do {
             try await client.markPlayed(item.Id, played: next)
-            var updated = item
-            var data = updated.userData
-            data.Played = next
-            data.PlaybackPositionTicks = 0
-            updated.UserData = data
-            self.item = updated
+            updateUserData(of: item.Id) {
+                $0.Played = next
+                $0.PlaybackPositionTicks = 0
+            }
         } catch {
             app.toast("Couldn't update watched state", tone: .error)
         }
+    }
+
+    /// Applies a change to the page's item as it is *now*, not as it was when
+    /// the button was pressed. Each toggle awaits the server; one that wrote
+    /// back the copy it started with undid whatever the other had finished in
+    /// the meantime — Favorite then Mark watched in quick succession left the
+    /// page showing only one of them, although the server had both.
+    private func updateUserData(of id: String, _ change: (inout UserData) -> Void) {
+        guard var current = self.item, current.Id == id else { return }
+        var data = current.userData
+        change(&data)
+        current.UserData = data
+        self.item = current
     }
 
     // MARK: - Downloads

@@ -586,6 +586,10 @@ struct RemoteImage: View {
     /// there isn't — a hero whose title art is missing still has to say what the
     /// title is — rather than leaving a hole where the artwork would have been.
     var onResolved: ((Bool) -> Void)?
+    /// A last say over a picture that did arrive, by its size. An image this
+    /// turns down is treated as one the server doesn't have: nothing is drawn
+    /// and `onResolved` hears `false`, so the caller's fallback takes over.
+    var accepts: ((CGSize) -> Bool)?
 
     @State private var image: PlatformImage?
     @State private var placeholder: CGImage?
@@ -695,6 +699,7 @@ struct RemoteImage: View {
         }
         for candidate in urls {
             if let hit = await ImageLoader.shared.cached(candidate) {
+                guard isAcceptable(hit) else { return reject() }
                 image = hit
                 loadedURL = primary
                 isFetching = false
@@ -732,6 +737,7 @@ struct RemoteImage: View {
                 switch await ImageLoader.shared.fetch(candidate) {
                 case .image(let loaded):
                     guard !Task.isCancelled else { return }
+                    guard isAcceptable(loaded) else { return reject() }
                     withAnimation(.easeOut(duration: 0.25)) {
                         image = loaded
                     }
@@ -750,6 +756,16 @@ struct RemoteImage: View {
             // come back for.
             guard anyFailed else { break }
         }
+        onResolved?(false)
+    }
+
+    private func isAcceptable(_ picture: PlatformImage) -> Bool {
+        accepts?(picture.size) ?? true
+    }
+
+    private func reject() {
+        image = nil
+        isFetching = false
         onResolved?(false)
     }
 

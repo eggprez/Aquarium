@@ -397,6 +397,17 @@ struct DownloadsView: View {
                     .buttonStyle(.bordered)
                     .disabled(isSyncing || client.isOffline)
                 }
+                #if os(macOS)
+                Button {
+                    DownloadManager.revealInFinder()
+                } label: {
+                    Label("Show in Finder", systemImage: "folder")
+                        .labelStyle(.iconOnly)
+                        .font(.title3)
+                }
+                .buttonStyle(.borderless)
+                .help("Show the downloads folder in Finder")
+                #endif
                 manageMenu
             }
 
@@ -481,6 +492,9 @@ struct DownloadsView: View {
                 .labelStyle(.iconOnly)
                 .font(.title3)
         }
+        #if os(macOS)
+        .help("Manage downloads")
+        #endif
         .disabled(downloads.records.isEmpty && !offersAllMusic)
     }
 

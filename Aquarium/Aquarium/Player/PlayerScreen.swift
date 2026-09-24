@@ -486,6 +486,10 @@ struct PlayerScreen: View {
             .background(.black.opacity(0.4), in: Capsule())
         }
         .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        // A borderless menu draws its label in the tint, whatever the label
+        // asked for — the accent purple, over a picture.
+        .tint(.white)
         .fixedSize()
         .accessibilityLabel("Stream quality")
     }
@@ -498,6 +502,42 @@ struct PlayerScreen: View {
     /// appears in the system's own speed control on iOS and macOS alike.
     private var extrasMenu: some View {
         Menu {
+            // The file's own tracks, from what the server says it contains —
+            // AVKit's menu only knows the one a transcode carried. See
+            // `PlayerModel.audioOptions`.
+            let audio = player.audioOptions
+            if audio.count > 1 {
+                Menu {
+                    ForEach(audio) { option in
+                        Toggle(option.label, isOn: Binding(
+                            get: { player.selectedAudioOption == option.id },
+                            set: { if $0 { player.selectAudio(option) } }
+                        ))
+                    }
+                } label: {
+                    Label("Audio", systemImage: "waveform")
+                }
+            }
+            let subtitles = player.subtitleOptions
+            if !subtitles.isEmpty {
+                Menu {
+                    Toggle("Off", isOn: Binding(
+                        get: { player.selectedSubtitleOption == nil },
+                        set: { if $0 { player.selectSubtitles(nil) } }
+                    ))
+                    Divider()
+                    ForEach(subtitles) { option in
+                        Toggle(option.isForced ? "\(option.label) (Forced)" : option.label, isOn: Binding(
+                            get: { player.selectedSubtitleOption == option.id },
+                            set: { if $0 { player.selectSubtitles(option) } }
+                        ))
+                    }
+                } label: {
+                    Label("Subtitles", systemImage: "captions.bubble")
+                }
+            }
+            if audio.count > 1 || !subtitles.isEmpty { Divider() }
+
             Menu {
                 if let left = player.sleepMinutesRemaining {
                     Button("Cancel sleep timer (\(left) min left)") { player.cancelSleepTimer() }
@@ -531,6 +571,10 @@ struct PlayerScreen: View {
                 .background(.black.opacity(0.4), in: Circle())
         }
         .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        // A borderless menu draws its label in the tint, whatever the label
+        // asked for — the accent purple, over a picture.
+        .tint(.white)
         .fixedSize()
         .accessibilityLabel("More playback options")
     }
@@ -549,6 +593,8 @@ struct VideoSurface: NSViewRepresentable {
         view.player = player.player
         view.controlsStyle = .floating
         view.showsFullScreenToggleButton = true
+        // Off by default on AppKit's player view, unlike UIKit's controller.
+        view.allowsPictureInPicturePlayback = true
         view.videoGravity = Preferences.shared.fillScreen ? .resizeAspectFill : .resizeAspect
         // Speed belongs to AVKit's own control, on the Mac as on the phone.
         view.speeds = PlayerModel.speeds.map {
