@@ -1,14 +1,21 @@
 # FellyJin
 
-## iPhone, iPad and Apple TV
+## iPhone, iPad and Apple TV: Aquarium
 
-FellyJin is also on the App Store for iPhone, iPad and Apple TV, as a native
-SwiftUI app that shares its behaviour with this Linux build but not its code.
-It was written with AI assistance (Anthropic's Claude), directed and tested by
-the developer, and is shared as-is. **Support:** open an issue on this
-repository. **Privacy policy:** [PRIVACY.md](PRIVACY.md) — the app collects
-nothing and talks only to your own Jellyfin server (plus your own iCloud, if
-you enable sync).
+The Apple app is called **Aquarium** (on the App Store as "Aquarium Media") —
+it was FellyJin until September 2026. It is a native SwiftUI app for iPhone,
+iPad, Apple TV and Mac that shares its behaviour with this Linux build but not
+its code; the source is in [`Aquarium/`](Aquarium/) (see its
+[README](Aquarium/README.md)). It was written with AI assistance (Anthropic's
+Claude), directed and tested by the developer, and is shared as-is.
+**Support:** open an issue on this repository. **Privacy policy:**
+[PRIVACY.md](PRIVACY.md) — the app collects nothing and talks only to your own
+Jellyfin server (plus your own iCloud, if you enable sync).
+
+Aquarium is an independent app and is not affiliated with or endorsed by the
+Jellyfin project.
+
+## Linux
 
 A lightweight, modern Jellyfin client for Linux, packaged as a Debian package.
 

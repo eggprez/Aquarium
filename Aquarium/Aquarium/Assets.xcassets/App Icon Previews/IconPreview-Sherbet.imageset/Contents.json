@@ -1,0 +1,24 @@
+{
+  "images": [
+    {
+      "filename": "sherbet.png",
+      "idiom": "universal",
+      "scale": "3x"
+    },
+    {
+      "filename": "sherbet-dark.png",
+      "idiom": "universal",
+      "scale": "3x",
+      "appearances": [
+        {
+          "appearance": "luminosity",
+          "value": "dark"
+        }
+      ]
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

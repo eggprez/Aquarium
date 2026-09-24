@@ -11,3 +11,9 @@ src-tauri/gen/
 .claude/
 *.deb
 wayland-spike/
+
+# Apple app (Aquarium/)
+xcuserdata/
+*.xcarchive
+DerivedData/
+.DS_Store

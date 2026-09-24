@@ -1,0 +1,127 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "linear-gradient": [
+          "srgb:0.65882,0.78431,0.10196,1.00000",
+          "srgb:0.49804,0.62745,0.04706,1.00000"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.5,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.5,
+            "y": 1
+          }
+        }
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "linear-gradient": [
+          "srgb:0.07059,0.18824,0.05882,1.00000",
+          "srgb:0.01961,0.07843,0.01961,1.00000"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.5,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.5,
+            "y": 1
+          }
+        }
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "name": "bubbles",
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "bubbles.svg"
+            },
+            {
+              "appearance": "dark",
+              "value": "bubbles-dark.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "bubbles-tinted.svg"
+            }
+          ]
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.35
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.5
+      }
+    },
+    {
+      "layers": [
+        {
+          "name": "mark",
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "mark.svg"
+            },
+            {
+              "appearance": "dark",
+              "value": "mark-dark.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "mark-tinted.svg"
+            }
+          ]
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.4
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "shade.svg",
+          "name": "shade",
+          "glass": false
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

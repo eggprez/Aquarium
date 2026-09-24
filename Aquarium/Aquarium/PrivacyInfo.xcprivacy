@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App Store submissions must carry this file when the binary uses any
+	     of the "required reason" APIs, and reject with ITMS-91053 when it is
+	     missing. It lives in the synchronised Aquarium/ group, so Xcode copies
+	     it as a resource without a pbxproj entry. The TopShelf extension uses
+	     none of the listed APIs (it reads a JSON file and some JPEGs from the
+	     app group and nothing else) and so needs no manifest of its own. -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<!-- Nothing leaves the device except to the server the user signed in
+	     to; the app has no analytics, no crash reporter and no account of its
+	     own. -->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!-- Core/Preferences.swift, Core/Downloads.swift: session, settings and
+		     the download queue. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<!-- Core/Downloads.swift `freeSpace()`: checks a season will fit
+		     before queueing it (E174.1) and shows the numbers to the user when
+		     it will not (85F4.1). -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>E174.1</string>
+				<string>85F4.1</string>
+			</array>
+		</dict>
+		<!-- Core/Downloads.swift: `attributesOfItem(atPath:)` on a finished
+		     download inside the app's own container, for its size. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
