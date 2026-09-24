@@ -550,7 +550,7 @@ async function updateSidebarFooter(): Promise<void> {
   clear(foot);
   foot.append(
     el("div", { class: "foot-version" }, [
-      el("img", { src: "/aquarium-logo.png", alt: "" }),
+      el("img", { src: "/aquarium-logo.svg", alt: "" }),
       el("span", {}, [`Aquarium ${info.version ? `v${info.version}` : ""}`.trim()]),
     ]),
     el("div", { class: `foot-line ${cls}` }, [

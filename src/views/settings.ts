@@ -678,7 +678,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     el("div", { class: "settings-block about-block" }, [
       el("h3", {}, ["About"]),
       el("div", { class: "about-row" }, [
-        el("img", { src: "/aquarium-logo.png", alt: "", width: "48", height: "48" }),
+        el("img", { src: "/aquarium-logo.svg", alt: "", width: "48", height: "48" }),
         el("div", {}, [
           el("div", { class: "about-name" }, [
             el("span", { class: "wordmark" }, [el("span", {}, ["Aqua"]), el("b", {}, ["rium"])]),

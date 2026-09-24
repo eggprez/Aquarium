@@ -34,7 +34,7 @@ export function renderLogin(root: HTMLElement, onSuccess: () => void): void {
 
   const form = el("form", { class: "login-card" }, [
     el("div", { class: "login-brand" }, [
-      el("img", { src: "/aquarium-logo.png", alt: "", width: "56", height: "56" }),
+      el("img", { src: "/aquarium-logo.svg", alt: "", width: "56", height: "56" }),
       el("span", { class: "wordmark" }, [el("span", {}, ["Aqua"]), el("b", {}, ["rium"])]),
     ]),
     el("h1", {}, ["Connect to Jellyfin"]),
