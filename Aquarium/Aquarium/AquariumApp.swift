@@ -37,6 +37,9 @@ struct AquariumApp: App {
         // Here rather than in a view: a button on a Live Activity can start
         // the app with no window at all — see Core/LiveActivities.swift.
         LiveActivityCenter.shared.start()
+        // And the watch, which may be sending listening to a phone in a
+        // pocket — see Core/WatchLink.swift.
+        WatchLink.shared.start()
     }
     #endif
 
@@ -137,6 +140,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // returning, so the session's "finished" can't arrive ahead of it.
         MainActor.assumeIsolated {
             DownloadManager.shared.setBackgroundCompletionHandler(completionHandler, for: identifier)
+        }
+    }
+
+    /// Coming forward: the watch gets a fresh sign-in and plan — a book
+    /// started last night is in progress now — and whatever it handed over
+    /// while the phone was asleep goes on to the server.
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        MainActor.assumeIsolated {
+            WatchLink.shared.sendContext()
+            WatchLink.shared.forward()
         }
     }
 

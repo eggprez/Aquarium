@@ -516,6 +516,18 @@ struct SettingsView: View {
                 }
             }
 
+            #if os(iOS)
+            Section {
+                NavigationLink {
+                    WatchSettingsView()
+                } label: {
+                    LabeledContent("Apple Watch", value: watchSummary)
+                }
+            } footer: {
+                Text("Audiobooks and music on the watch, and what it reports back.")
+            }
+            #endif
+
             Section("General") {
                 Toggle(isOn: cloudSyncBinding) { SettingLabel(Copy.cloudSync) }
                     .disabled(!prefs.cloudIsAvailable)
@@ -546,6 +558,16 @@ struct SettingsView: View {
         guard let session = client.session else { return "Not connected" }
         return "\(session.userName) · \(client.isOffline ? "Offline" : "Connected")"
     }
+
+    #if os(iOS)
+    private var watchSummary: String {
+        let link = WatchLink.shared
+        guard link.isPaired else { return "Not paired" }
+        guard link.isWatchAppInstalled else { return "Not installed" }
+        guard let inventory = link.inventory else { return "Installed" }
+        return inventory.itemCount == 0 ? "Nothing on it" : "\(inventory.itemCount) item\(inventory.itemCount == 1 ? "" : "s") · \(Format.bytes(inventory.totalBytes))"
+    }
+    #endif
 
     /// What is set beyond the defaults, or nothing: the languages, a downmix,
     /// a delay.

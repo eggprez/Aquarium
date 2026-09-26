@@ -171,6 +171,7 @@ struct DownloadsView: View {
 
                 #if os(iOS)
                 audioDoors
+                watchDoor
                 #endif
 
                 // Grouped once rather than once per reference: every read walks
@@ -327,6 +328,41 @@ struct DownloadsView: View {
                     )
                 }
             }
+            .padding(.horizontal, Metrics.gutter)
+        }
+    }
+
+    /// What is on the Apple Watch, and the page that manages it.
+    @ViewBuilder
+    private var watchDoor: some View {
+        let link = WatchLink.shared
+        if link.isAvailable {
+            NavigationLink {
+                WatchSettingsView()
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "applewatch")
+                        .font(.title3)
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 30)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Apple Watch").font(.body.weight(.medium)).foregroundStyle(Theme.text)
+                        Text(link.inventory.map {
+                            $0.itemCount == 0 ? "Nothing on the watch yet" : "\($0.itemCount.formatted()) item\($0.itemCount == 1 ? "" : "s") · \(Format.bytes($0.totalBytes))"
+                        } ?? "Waiting for the watch")
+                            .font(.caption).foregroundStyle(Theme.textDim)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.textDim)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
             .padding(.horizontal, Metrics.gutter)
         }
     }

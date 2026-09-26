@@ -21,6 +21,12 @@ for (name, px) in [("mac-16x16@1x", 16), ("mac-16x16@2x", 32),
     savePNG(roundedTile(size: px, tileFraction: macGrid, shadow: px >= 64), "\(appIcon)/\(name).png")
 }
 
+// ---------------------------------------------------------------- Apple Watch
+
+// One size: watchOS 10 and later take a single 1024 image and derive the rest.
+// Opaque and full-bleed, composed for the circle the system masks it to.
+savePNGOpaque(circleIcon(size: 1024), "\(stage)/Watch/AppIcon.appiconset/watch-1024.png")
+
 // ---------------------------------------------------------------- in-app logo
 
 for (name, px) in [("logo", 88), ("logo@2x", 176), ("logo@3x", 264)] {
@@ -115,7 +121,7 @@ savePNG(topShelf(w: 2320, h: 720, scale: 2), "\(brand)/Top Shelf Image Wide.imag
 // ---------------------------------------------------------------- proof sheet
 
 func proof() {
-    let W = 1500, H = 1260
+    let W = 1600, H = 1260
     let ctx = ctxMake(W, H)
     ctx.setFillColor(rgb(0x16161C))
     ctx.fill(CGRect(x: 0, y: 0, width: W, height: H))
@@ -159,6 +165,11 @@ func proof() {
         macX += shown + 26
     }
     label("macOS 128 / 64 / 32 pt", CGPoint(x: 1090, y: 344))
+
+    // Apple Watch, under the circle the watch shows it in
+    let watchRect = CGRect(x: 1260, y: 120, width: 200, height: 200)
+    place(circleIcon(size: 800).makeImage()!, watchRect, mask: CGPath(ellipseIn: watchRect, transform: nil), backdrop: rgb(0x000000))
+    label("watchOS", CGPoint(x: watchRect.midX, y: 344))
 
     // tvOS: the three layers stacked, and pulled apart as the parallax does
     let tvW = 400, tvH = 240
