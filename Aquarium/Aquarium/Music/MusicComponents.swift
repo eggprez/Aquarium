@@ -918,6 +918,18 @@ struct MusicItemMenu: View {
                 Label("Download", systemImage: "arrow.down.circle")
             }
         }
+        #if os(iOS)
+        // The watch fetches it from the server itself, so this needs the
+        // server too.
+        if WatchLink.shared.isAvailable, !client.showsOffline, !item.isMusicGenre {
+            Button {
+                WatchLink.shared.download(item)
+                app.toast("Sending \(item.title) to the watch", tone: .ok)
+            } label: {
+                Label("Download to Apple Watch", systemImage: "applewatch")
+            }
+        }
+        #endif
     }
 }
 

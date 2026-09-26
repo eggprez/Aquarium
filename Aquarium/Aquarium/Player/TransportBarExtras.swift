@@ -49,6 +49,11 @@ final class TransportBarExtras {
     var onReencodeForSync: () -> Void = {}
     /// Shift the sound against the picture, in milliseconds.
     var onAudioDelay: (Int) -> Void = { _ in }
+    /// Play another of the file's audio tracks, by `TrackOption.id`.
+    var onAudio: (Int) -> Void = { _ in }
+    /// Show one of the file's subtitle tracks, by `TrackOption.id`; nil for
+    /// none.
+    var onSubtitles: (Int?) -> Void = { _ in }
 
     private let quality = UIButton(type: .system)
     private let extras = UIButton(type: .system)
@@ -62,6 +67,11 @@ final class TransportBarExtras {
     /// two places.
     private enum Placement { case none, bar, corner }
     private var placement: Placement = .none
+
+    /// The two ways the row can sit in the bar, built together when the row
+    /// is put there and swapped by `relayout`.
+    private var besideConstraints: [NSLayoutConstraint] = []
+    private var belowConstraints: [NSLayoutConstraint] = []
 
     /// The view the row follows: the group it sits beside when it is in the bar,
     /// and AVKit's whole controls view when it is over the corner instead.
@@ -87,6 +97,21 @@ final class TransportBarExtras {
         var canReencodeForSync = false
         var canDelayAudio = false
         var audioDelayMilliseconds = 0
+        /// Every audio and subtitle track the *file* has, and which of each is
+        /// on — see `PlayerModel.audioOptions` for why that is more than the
+        /// stream carries.
+        var audio: [Track] = []
+        var subtitles: [Track] = []
+        /// Whether no subtitle is showing.
+        var subtitlesOff = true
+
+        struct Track {
+            var id: Int
+            var title: String
+            /// Choosing it means asking the server for the stream again.
+            var needsNewStream: Bool
+            var isOn: Bool
+        }
     }
 
     /// Asked for the state rather than told it, because the menus are built at
@@ -119,13 +144,23 @@ final class TransportBarExtras {
            let parent = group.superview {
             scans = 0
             placement = .bar
-            attach(to: parent) { row in
-                [
-                    row.leadingAnchor.constraint(equalTo: group.trailingAnchor, constant: 8),
-                    row.centerYAnchor.constraint(equalTo: group.centerYAnchor),
-                    row.heightAnchor.constraint(equalTo: group.heightAnchor),
-                ]
-            }
+            row.removeFromSuperview()
+            parent.addSubview(row)
+            // Beside the group, on its line: the ordinary arrangement.
+            besideConstraints = [
+                row.leadingAnchor.constraint(equalTo: group.trailingAnchor, constant: 8),
+                row.centerYAnchor.constraint(equalTo: group.centerYAnchor),
+                row.heightAnchor.constraint(equalTo: group.heightAnchor),
+            ]
+            // Under it, on a line of its own. The group's frame is a few
+            // points wider than the glass it draws, so the row is inset to
+            // line its first capsule up with the close button's.
+            belowConstraints = [
+                row.leadingAnchor.constraint(equalTo: group.leadingAnchor, constant: 4),
+                row.topAnchor.constraint(equalTo: group.bottomAnchor, constant: 12),
+                row.heightAnchor.constraint(equalTo: group.heightAnchor),
+            ]
+            relayout()
             follow(group)
             return
         }
@@ -145,12 +180,14 @@ final class TransportBarExtras {
         // moved into the bar: clear of the transport controls, at the trailing
         // edge, above the safe area.
         placement = .corner
-        attach(to: root) { row in
-            [
-                row.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor, constant: -22),
-                root.safeAreaLayoutGuide.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: 84),
-            ]
-        }
+        besideConstraints = []
+        belowConstraints = []
+        row.removeFromSuperview()
+        root.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor, constant: -22),
+            root.safeAreaLayoutGuide.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: 84),
+        ])
         follow(Self.firstView(under: root, named: "Controls"))
     }
 
@@ -161,10 +198,28 @@ final class TransportBarExtras {
         placement = .none
     }
 
-    private func attach(to parent: UIView, constraints: (UIStackView) -> [NSLayoutConstraint]) {
-        row.removeFromSuperview()
-        parent.addSubview(row)
-        NSLayoutConstraint.activate(constraints(row))
+    /// Beside the group or under it, by the room there is.
+    ///
+    /// A phone held upright is the one shape where the band across the top is
+    /// already full: the close button and AirPlay at one end, the mute button
+    /// at the other, and something under two hundred points between them —
+    /// into which two pills and their gaps went, and read as one crowd with
+    /// nothing to separate this app's controls from the system's. So there the
+    /// row drops to a line of its own under the close button and AirPlay,
+    /// where there is nothing but black: the picture is letterboxed well
+    /// below. A phone on its side and any iPad have most of the band empty,
+    /// and the row stays in it beside the group as before.
+    ///
+    /// Upright-phone is compact width with regular height. Called when the
+    /// row is put in the bar and again whenever those traits change; AVKit
+    /// also rebuilds its controls on rotation, which puts the row back
+    /// through `install` and lands here anyway.
+    private func relayout() {
+        guard placement == .bar, !besideConstraints.isEmpty else { return }
+        let traits = row.traitCollection
+        let stacked = traits.horizontalSizeClass == .compact && traits.verticalSizeClass == .regular
+        NSLayoutConstraint.deactivate(stacked ? besideConstraints : belowConstraints)
+        NSLayoutConstraint.activate(stacked ? belowConstraints : besideConstraints)
     }
 
     /// Show the row exactly when the view it belongs to is shown.
@@ -250,6 +305,11 @@ final class TransportBarExtras {
         row.axis = .horizontal
         row.spacing = 8
         row.alignment = .fill
+        row.registerForTraitChanges(
+            [UITraitHorizontalSizeClass.self, UITraitVerticalSizeClass.self]
+        ) { [weak self] (_: UIStackView, _) in
+            self?.relayout()
+        }
 
         quality.configuration = Self.pill(symbol: "slider.horizontal.3", title: "Auto")
         shownLabel = nil
@@ -400,6 +460,52 @@ final class TransportBarExtras {
         return UIMenu(title: "Audio delay", image: image, children: children)
     }
 
+    /// The file's audio tracks, each one, with the one playing ticked.
+    ///
+    /// Beside AVKit's own audio-and-subtitles menu rather than instead of it,
+    /// because that one lists what the *stream* carries — which on a
+    /// transcode is a single soundtrack for a film with four, and no subtitles
+    /// at all for one with six. These list what the server says the file has,
+    /// and choosing a track the stream doesn't carry asks for the stream again
+    /// with that track in it — which the row says, so the moment of black is
+    /// not a surprise. See `PlayerModel.audioOptions`.
+    private func audioMenu(_ state: State) -> UIMenu? {
+        // One track is not a choice.
+        guard state.audio.count > 1 else { return nil }
+        return UIMenu(
+            title: "Audio", image: UIImage(systemName: "speaker.wave.2"),
+            children: state.audio.map { track in
+                UIAction(
+                    title: track.title,
+                    subtitle: track.needsNewStream ? "Reopens the stream" : nil,
+                    state: track.isOn ? .on : .off
+                ) { [weak self] _ in
+                    self?.onAudio(track.id)
+                }
+            }
+        )
+    }
+
+    /// Off, then the file's subtitle tracks. Absent when the file has none.
+    private func subtitlesMenu(_ state: State) -> UIMenu? {
+        guard !state.subtitles.isEmpty else { return nil }
+        var children: [UIMenuElement] = [
+            UIAction(title: "Off", state: state.subtitlesOff ? .on : .off) { [weak self] _ in
+                self?.onSubtitles(nil)
+            }
+        ]
+        children += state.subtitles.map { track in
+            UIAction(
+                title: track.title,
+                subtitle: track.needsNewStream ? "Reopens the stream" : nil,
+                state: track.isOn ? .on : .off
+            ) { [weak self] _ in
+                self?.onSubtitles(track.id)
+            }
+        }
+        return UIMenu(title: "Subtitles", image: UIImage(systemName: "captions.bubble"), children: children)
+    }
+
     private func extrasItems() -> [UIMenuElement] {
         let state = state()
 
@@ -445,6 +551,10 @@ final class TransportBarExtras {
         })
 
         var items: [UIMenuElement] = []
+        // Tracks first: the thing people open this menu for most often, and
+        // the one AVKit's own menu answers wrongly on a transcode.
+        if let audio = audioMenu(state) { items.append(audio) }
+        if let subtitles = subtitlesMenu(state) { items.append(subtitles) }
         if !sync.isEmpty {
             items.append(UIMenu(
                 title: "Audio sync", image: UIImage(systemName: "waveform"), children: sync

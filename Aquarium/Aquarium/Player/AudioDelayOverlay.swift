@@ -213,3 +213,151 @@ struct AudioDelayOverlay: View {
 }
 
 #endif
+
+#if os(macOS)
+
+import SwiftUI
+
+/// The same control on a Mac: a popover over the picture with a stepper and
+/// the number, opened from Playback ▸ Audio Sync ▸ Adjust Audio Delay… and
+/// from the picture's context menu. Ten milliseconds a click, the presets'
+/// half-second reach, and the same short settle before the stream is
+/// rebuilt — see the note at the top of this file. ⌥[ and ⌥] do the same
+/// from the keyboard without opening this; see `PlaybackCommands`.
+struct AudioDelayPopover: View {
+    let player: PlayerModel
+
+    @Environment(\.dismiss) private var dismiss
+
+    /// The number on screen. Ahead of the model by the settle time, and the
+    /// thing the stepper moves.
+    @State private var milliseconds: Int
+    @State private var commit: Task<Void, Never>?
+
+    private static let fineStep = 10
+    private static let coarseStep = 50
+    private static let reach = PlayerMacState.delayReach
+    private static let settle: Duration = .milliseconds(350)
+
+    init(player: PlayerModel) {
+        self.player = player
+        _milliseconds = State(initialValue: player.audioDelayMilliseconds)
+    }
+
+    /// Whether the sound can be moved *later* on this stream — only a file
+    /// can, by composition; an HLS stream has its picture held instead, which
+    /// only goes one way.
+    private var offersLater: Bool { player.canDelayAudioLater }
+
+    private var range: ClosedRange<Int> { -Self.reach...(offersLater ? Self.reach : 0) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Audio Delay")
+                    .font(.headline)
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 12) {
+                Text(PlayerModel.audioDelayName(milliseconds))
+                    .monospacedDigit()
+                    .frame(minWidth: 150, alignment: .leading)
+                Spacer(minLength: 0)
+                Stepper(
+                    "Audio delay",
+                    value: Binding(get: { milliseconds }, set: { set($0) }),
+                    in: range,
+                    step: Self.fineStep
+                )
+                .labelsHidden()
+                .disabled(!player.canDelayAudio)
+                .help("10 ms a step (⌥[ and ⌥])")
+            }
+
+            HStack(spacing: 8) {
+                nudge(-Self.coarseStep)
+                nudge(Self.coarseStep)
+                Spacer(minLength: 0)
+                Button("In Step") { set(0) }
+                    .disabled(milliseconds == 0 || !player.canDelayAudio)
+                    .help("Put the sound back in step with the picture (⌥0)")
+                Button("Done") { close() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .controlSize(.small)
+
+            ForEach(notes, id: \.self) { note in
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(width: 320)
+        // Whatever has been clicked and not yet built goes when the popover
+        // is put away, however it is put away.
+        .onDisappear { flush() }
+    }
+
+    /// "−50", "+50": what the button does to the number beside it. The sign
+    /// is the sign of the delay, positive being later.
+    private func nudge(_ delta: Int) -> some View {
+        Button(delta > 0 ? "+\(delta)" : "−\(-delta)") { set(milliseconds + delta) }
+            .monospacedDigit()
+            .disabled(!canReach(milliseconds + delta))
+            .help(delta > 0 ? "Sound \(delta) ms later" : "Sound \(-delta) ms earlier")
+    }
+
+    private var status: String {
+        if !player.canDelayAudio {
+            return player.isActive && player.isOpening
+                ? "Once the stream has opened"
+                : "Only on a direct-played file"
+        }
+        if player.isBuffering { return "Reopening at the new offset…" }
+        return "Saved for everything you play on this Mac"
+    }
+
+    private var notes: [String] {
+        var out: [String] = []
+        if player.canDelayAudio, !offersLater {
+            out.append("The sound can only be moved earlier on this stream. Later needs a file the server can send untouched.")
+        }
+        return out
+    }
+
+    private func canReach(_ value: Int) -> Bool {
+        player.canDelayAudio && range.contains(value)
+    }
+
+    private func set(_ value: Int) {
+        let clamped = min(max(value, range.lowerBound), range.upperBound)
+        guard clamped != milliseconds else { return }
+        milliseconds = clamped
+        commit?.cancel()
+        commit = Task {
+            try? await Task.sleep(for: Self.settle)
+            guard !Task.isCancelled else { return }
+            player.setAudioDelay(milliseconds: clamped)
+        }
+    }
+
+    private func flush() {
+        commit?.cancel()
+        commit = nil
+        if milliseconds != player.audioDelayMilliseconds {
+            player.setAudioDelay(milliseconds: milliseconds)
+        }
+    }
+
+    private func close() {
+        flush()
+        dismiss()
+    }
+}
+
+#endif

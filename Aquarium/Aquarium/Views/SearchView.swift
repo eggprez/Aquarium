@@ -25,8 +25,38 @@ struct SearchView: View {
     @State private var searchedTerm: String?
     /// A further page is on its way; the end of the grid can ask more than once.
     @State private var isLoadingPage = false
+    #if os(macOS)
+    /// Return was pressed in the sidebar's field: once the results for that
+    /// term land, a title that matches it exactly is opened — the Mac's
+    /// "Return opens the top hit", without opening a guess.
+    @State private var openExactMatchWhenReady = false
+    #endif
 
     private static let debounce = Duration.milliseconds(320)
+
+    /// What kind of thing to look for — the Mac's scope bar under the field.
+    /// Everywhere else it stays on `.all`.
+    enum Scope: String, CaseIterable, Identifiable {
+        case all, films, shows, episodes
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .all: "All"
+            case .films: "Films"
+            case .shows: "Shows"
+            case .episodes: "Episodes"
+            }
+        }
+        var types: String {
+            switch self {
+            case .all: "Movie,Series,Episode"
+            case .films: "Movie"
+            case .shows: "Series"
+            case .episodes: "Episode"
+            }
+        }
+    }
+    @State private var scope: Scope = .all
 
     var body: some View {
         ScrollView {
@@ -66,7 +96,15 @@ struct SearchView: View {
                 if term.trimmingCharacters(in: .whitespaces).isEmpty {
                     recents
                 } else if isSearching || isPending, results.isEmpty {
+                    #if os(macOS)
+                    // The toolbar's spinner says a search is running; the page
+                    // itself stays empty rather than flashing nine grey
+                    // posters per keystroke. Results already on screen are
+                    // kept until the new ones land — see `run`.
+                    Color.clear.frame(height: 1)
+                    #else
                     SkeletonGrid(count: 9)
+                    #endif
                 } else if let error, !isPending {
                     ErrorState(error: error) { schedule(immediate: true) }
                 } else if results.isEmpty, music.isEmpty {
@@ -79,12 +117,23 @@ struct SearchView: View {
                     #if os(iOS)
                     musicResults
                     #endif
+                    // On a Mac the count is the window's subtitle, not a line
+                    // on the page.
+                    #if !os(macOS)
                     if !results.isEmpty {
                     Text("\(total) result\(total == 1 ? "" : "s")")
                         .font(.caption)
                         .foregroundStyle(Theme.textDim)
                         .padding(.horizontal, Metrics.gutter)
                     }
+                    #endif
+                    #if os(macOS)
+                    if !results.isEmpty, scope == .all {
+                        groupedResults
+                    } else if !results.isEmpty {
+                        resultGrid(results, pages: true)
+                    }
+                    #else
                     if !results.isEmpty {
                     MediaGrid(items: results) { item in
                         // Opening a result is the one unambiguous sign that a
@@ -98,6 +147,7 @@ struct SearchView: View {
                     }
                     .padding(.bottom, 24)
                     }
+                    #endif
                 }
             }
             .padding(.top, 8)
@@ -115,10 +165,44 @@ struct SearchView: View {
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: app.hasAudio ? "Movies, shows, music, books" : "Movies, shows, episodes"
         )
-        #elseif !os(tvOS)
-        .searchable(text: $term, placement: .toolbar, prompt: app.hasAudio ? "Movies, shows, music, books" : "Movies, shows, episodes")
+        #elseif os(macOS)
+        // The field is the sidebar's — see `RootView` — and this page mirrors
+        // its text. Typing there, whatever section was showing, lands here
+        // once Return is pressed; the scopes are a toolbar picker, where a
+        // Mac window keeps its filters.
+        .onChange(of: app.sidebarSearchTerm, initial: true) { _, new in
+            if term != new { term = new }
+        }
+        // `initial` because the page is usually built *by* the submit — the
+        // section wasn't showing until Return brought it up — and a counter
+        // bumped before the page existed is one it would never see change.
+        // A page reappearing later (⌘3 back to Search) sees a stale stamp
+        // and does nothing.
+        .onChange(of: app.sidebarSearchSubmitted, initial: true) { _, _ in
+            guard let at = app.sidebarSearchSubmittedAt, Date().timeIntervalSince(at) < 1 else { return }
+            submittedFromSidebar()
+        }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Show", selection: $scope) {
+                    ForEach(Scope.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .help("Which kind of title to search for")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                if isSearching {
+                    ProgressView().controlSize(.small)
+                }
+            }
+        }
+        .navigationSubtitle(subtitle)
+        .onChange(of: scope) { _, _ in
+            // The old scope's results stay up until the new ones land.
+            schedule(immediate: true)
+        }
         #endif
-        #if !os(tvOS)
+        #if os(iOS)
         .onSubmit(of: .search) {
             prefs.rememberSearch(term)
             schedule(immediate: true)
@@ -155,13 +239,108 @@ struct SearchView: View {
         .onAppear {
             if term.isEmpty, !initialTerm.isEmpty {
                 term = initialTerm
+                #if os(macOS)
+                // The sidebar's field shows what this page is searching for.
+                app.sidebarSearchTerm = initialTerm
+                #endif
                 schedule(immediate: true)
             }
         }
     }
 
+    #if os(macOS)
+    /// The window's subtitle: how many the term found, while it has found any.
+    private var subtitle: String {
+        guard !results.isEmpty, searchedTerm != nil else { return "" }
+        return "\(total.formatted()) result\(total == 1 ? "" : "s")"
+    }
+
+    /// Return in the sidebar's field. The term is searched for at once, and
+    /// a title that matches it exactly is opened — now, if the results on
+    /// screen already answer this term, or once they land.
+    private func submittedFromSidebar() {
+        // The field's text, not this page's copy of it: the copy follows a
+        // step behind, and a submit that arrives with the page's first draw
+        // finds it still empty.
+        let query = app.sidebarSearchTerm.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return }
+        if term != app.sidebarSearchTerm { term = app.sidebarSearchTerm }
+        if searchedTerm == query, !isPending {
+            openExactMatchWhenReady = false
+            openExactMatch(for: query)
+            return
+        }
+        openExactMatchWhenReady = true
+        schedule(immediate: true)
+    }
+
+    /// One result whose title is the term itself, and no other: two titles
+    /// called the same thing — a film and its remake — are a choice to make,
+    /// not one to have made.
+    private func openExactMatch(for query: String) {
+        let hits = results.filter { $0.title.caseInsensitiveCompare(query) == .orderedSame }
+        guard hits.count == 1, let hit = hits.first else { return }
+        prefs.rememberSearch(query)
+        app.push(.item(hit.Id))
+    }
+    #endif
+
+    #if os(macOS)
+    /// Films, then shows, then episodes, each under its own heading, so a
+    /// search reads the way the TV app's does rather than as one grid of
+    /// everything the term touched. Paging carries on off the end of the last
+    /// group.
+    @ViewBuilder
+    private var groupedResults: some View {
+        let groups: [(String, [BaseItem])] = [
+            ("Films", results.filter { $0.kind == "Movie" }),
+            ("Shows", results.filter { $0.kind == "Series" }),
+            ("Episodes", results.filter { $0.isEpisode }),
+        ].filter { !$0.1.isEmpty }
+        ForEach(Array(groups.enumerated()), id: \.element.0) { index, group in
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(group.0)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                    Text("\(group.1.count)")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textDim)
+                    Spacer()
+                    if group.1.count > 6, let scope = Scope.allCases.first(where: { $0.title == group.0 }) {
+                        Button("Show Only \(group.0)") { self.scope = scope }
+                            .buttonStyle(.link)
+                            .font(.subheadline)
+                    }
+                }
+                .padding(.horizontal, Metrics.gutter)
+                resultGrid(group.1, pages: index == groups.count - 1)
+            }
+        }
+    }
+
+    private func resultGrid(_ items: [BaseItem], pages: Bool) -> some View {
+        MediaGrid(items: items) { item in
+            prefs.rememberSearch(term)
+            app.push(.item(item.Id))
+        } onReachEnd: {
+            if pages { Task { await loadMore() } }
+        }
+        .padding(.bottom, 24)
+    }
+    #endif
+
     @ViewBuilder
     private var recents: some View {
+        #if os(macOS)
+        // The recent terms drop down from the sidebar's field (see
+        // `RootView`); the page under an empty field just says what it is for.
+        EmptyState(
+            symbol: "magnifyingglass",
+            title: "Search Your Libraries",
+            message: "Type a film, show or episode name in the sidebar's search field and press Return."
+        )
+        #else
         if prefs.recentSearches.isEmpty {
             EmptyState(
                 symbol: "magnifyingglass",
@@ -200,6 +379,7 @@ struct SearchView: View {
             }
             .padding(.horizontal, Metrics.gutter)
         }
+        #endif
     }
 
     #if os(iOS)
@@ -292,14 +472,30 @@ struct SearchView: View {
         // A search overtaken by the next one leaves the flag to that one.
         defer { if !Task.isCancelled { isSearching = false } }
         do {
+            // Music is asked for only where there is somewhere to show it —
+            // the phone's Music tab. Asked for elsewhere it came back and was
+            // counted as a match, and a term that matched nothing but an
+            // album drew a page with nothing on it.
+            #if os(iOS)
             async let musicTask: JellyfinClient.MusicSearchResults? = app.hasAudio ? client.searchMusic(query, limit: 12) : nil
-            let response = try await client.search(query)
+            #endif
+            let response = try await client.search(query, types: scope.types)
+            #if os(iOS)
             let found = (try? await musicTask) ?? nil
+            #else
+            let found: JellyfinClient.MusicSearchResults? = nil
+            #endif
             guard !Task.isCancelled else { return }
-            results = response.items
+            results = Self.ranked(response.items, for: query)
             total = response.total
             music = found ?? .init()
             searchedTerm = query
+            #if os(macOS)
+            if openExactMatchWhenReady {
+                openExactMatchWhenReady = false
+                openExactMatch(for: query)
+            }
+            #endif
         } catch is CancellationError {
             // Overtaken by the next keystroke; that search will answer.
         } catch {
@@ -316,11 +512,57 @@ struct SearchView: View {
               !isSearching, !isLoadingPage else { return }
         isLoadingPage = true
         defer { isLoadingPage = false }
-        guard let response = try? await client.search(query, startIndex: results.count) else { return }
+        guard let response = try? await client.search(query, startIndex: results.count, types: scope.types) else { return }
         // The term may have changed while this page was on its way, and these
         // would be the old term's results.
         guard term.trimmingCharacters(in: .whitespaces) == query, searchedTerm == query else { return }
         let known = Set(results.map(\.Id))
-        results += response.items.filter { !known.contains($0.Id) }
+        // Ranked within the page only: re-sorting everything would move the
+        // cards already on screen out from under the pointer.
+        results += Self.ranked(response.items.filter { !known.contains($0.Id) }, for: query)
+    }
+
+    /// The server's order, made to read like a search. Jellyfin answers
+    /// `searchTerm` in no order worth keeping — "star" put South Park's
+    /// "Starvin' Marvin" ahead of Star Wars — so: the title itself, then titles
+    /// that start with the term as a word, then a word inside the title, then
+    /// the term inside a word, then anything the server matched some other way
+    /// (a show's name on one of its episodes). Films and shows go ahead of
+    /// episodes within each tier, and the server's order breaks the ties.
+    static func ranked(_ items: [BaseItem], for query: String) -> [BaseItem] {
+        let term = query.lowercased()
+        func isWordStart(_ name: String, at range: Range<String.Index>) -> Bool {
+            range.lowerBound == name.startIndex
+                || !name[name.index(before: range.lowerBound)].isLetter
+        }
+        func isWordEnd(_ name: String, at range: Range<String.Index>) -> Bool {
+            range.upperBound == name.endIndex || !name[range.upperBound].isLetter
+        }
+        func tier(_ item: BaseItem) -> Int {
+            let name = item.title.lowercased()
+            if name == term { return 0 }
+            var best = 5
+            var from = name.startIndex
+            while let r = name.range(of: term, range: from..<name.endIndex) {
+                let start = isWordStart(name, at: r), end = isWordEnd(name, at: r)
+                let rank = switch (r.lowerBound == name.startIndex, start && end, start) {
+                case (true, true, _): 1
+                case (_, true, _): 2
+                case (_, _, true): 3
+                default: 4
+                }
+                best = min(best, rank)
+                from = name.index(after: r.lowerBound)
+            }
+            return best
+        }
+        return items.enumerated()
+            .map { (offset: $0.offset, item: $0.element, key: (tier($0.element), $0.element.isEpisode ? 1 : 0)) }
+            .sorted { a, b in
+                if a.key.0 != b.key.0 { return a.key.0 < b.key.0 }
+                if a.key.1 != b.key.1 { return a.key.1 < b.key.1 }
+                return a.offset < b.offset
+            }
+            .map(\.item)
     }
 }

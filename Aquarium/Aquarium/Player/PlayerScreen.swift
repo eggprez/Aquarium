@@ -22,7 +22,11 @@
 //
 //  macOS is the exception: AppKit's floating controls are a panel that follows
 //  the pointer, with no band to put anything in, so the quality and extras
-//  buttons stay in this app's own row there.
+//  buttons stay in this app's own row there — fading with the pointer the way
+//  the panel does — and the same choices live where a Mac user looks for
+//  them: the Playback menu, a right-click on the picture, and AVKit's own
+//  action button. See `PlayerMacMenus`. What is drawn over the picture there
+//  sits on a material, like the panel, and keeps clear of it by its height.
 
 import AVKit
 import Observation
@@ -32,6 +36,10 @@ import SwiftUI
 struct PlayerScreen: View {
     @Environment(PlayerModel.self) private var player
     @Environment(AppModel.self) private var app
+
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
 
     #if !os(tvOS)
     /// Bumped by Skip intro / Skip credits, purely so the haptic has something
@@ -49,6 +57,16 @@ struct PlayerScreen: View {
     /// disappearance that turns out to be a flicker can call it off — see
     /// `onDisappear` below.
     @State private var pendingStop: Task<Void, Never>?
+
+    #if os(macOS)
+    /// The picture's size, for keeping the overlays clear of AVKit's floating
+    /// panel by an amount that grows with the window rather than a phone's
+    /// constant.
+    @State private var surfaceSize: CGSize = .zero
+    /// The pointer is on the app's own row, which keeps it from fading.
+    @State private var hoveringRow = false
+    private var mac: PlayerMacState { PlayerMacState.shared }
+    #endif
 
     #if os(tvOS)
     /// Whether the metadata ribbon is pulled down. Owned here and handed to the
@@ -142,14 +160,35 @@ struct PlayerScreen: View {
         // where the ribbon and the close are handled. See
         // `playerViewControllerShouldDismiss` and `PlayerModel.handleExit`.
         #endif
-        #if !os(tvOS)
+        #if os(iOS)
         // Skipping a segment and changing rung are the two things that happen
         // here with nothing under the finger to acknowledge them: the picture
-        // jumps somewhere else, or it carries on looking identical.
+        // jumps somewhere else, or it carries on looking identical. A Mac has
+        // no finger on it.
         .sensoryFeedback(.impact(weight: .medium), trigger: skips)
         .sensoryFeedback(trigger: player.currentBitrate) { was, _ in
             was == nil ? nil : .selection
         }
+        #endif
+        #if os(macOS)
+        // The picture's right-click menu: the transport and every setting the
+        // Playback menu has, in the place a Mac user asks for them.
+        .contextMenu { PlayerContextMenu(player: player) }
+        // The app's own row fades with the pointer, on the same clock as
+        // AVKit's floating panel: back on a move, gone a couple of seconds
+        // after the last one, and gone at once when the pointer leaves.
+        .onContinuousHover { phase in
+            switch phase {
+            case .active: mac.noteActivity()
+            case .ended: mac.pointerLeft()
+            }
+        }
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: SurfaceSizeKey.self, value: geo.size)
+            }
+        )
+        .onPreferenceChange(SurfaceSizeKey.self) { surfaceSize = $0 }
         #endif
         .onAppear { pendingStop?.cancel(); pendingStop = nil }
         .onDisappear {
@@ -249,10 +288,16 @@ struct PlayerScreen: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.black.opacity(0.6), in: Capsule())
+        .overlayBackdrop(Capsule(), opacity: 0.6)
         .frame(maxWidth: 420)
         .padding(.horizontal, 24)
+        #if os(macOS)
+        // Nothing of AVKit's sits in the middle of the picture on a Mac —
+        // its panel is along the bottom — so the capsule stays centred.
+        .playerOverlayScheme()
+        #else
         .offset(y: -92)
+        #endif
         .allowsHitTesting(false)
     }
     #endif
@@ -282,28 +327,36 @@ struct PlayerScreen: View {
                 // that failed outright, and one the stall watchdog gave up on
                 // — both want.
                 if player.canRetry {
-                    Button("Try again") {
+                    Button(Self.label(mac: "Try Again", elsewhere: "Try again")) {
                         Task { await player.retry() }
                     }
                     .appButtonStyle(prominent: true)
+                    .playerDefaultAction()
                 }
                 // Only for a stream the server is choosing a bitrate for.
                 // `switchQuality` needs a Jellyfin item; on a channel that came
                 // from a playlist there is nothing to switch, and this was a
                 // button that quietly did nothing at all.
                 if player.item != nil {
-                    Button("Try a smaller stream") {
+                    Button(Self.label(mac: "Try a Smaller Stream", elsewhere: "Try a smaller stream")) {
                         Task { await player.switchQuality(to: 4_000_000) }
                     }
                     .appButtonStyle(prominent: !player.canRetry)
                 }
                 Button("Close") { player.stop(reason: "error card closed") }
                     .appButtonStyle()
+                    .playerCancelAction()
             }
         }
         .padding(28)
-        .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        #if !os(tvOS)
+        .overlayBackdrop(RoundedRectangle(cornerRadius: Self.overlayCorner, style: .continuous), opacity: 0.75)
+        #if os(macOS)
+        // Centred: AVKit's panel is along the bottom of a Mac window and the
+        // card is above it, so the card need not keep clear of two bands
+        // the way it does on a phone.
+        .zIndex(2)
+        .playerOverlayScheme()
+        #elseif !os(tvOS)
         // AVKit's own transport chrome (the top icon row, the bottom
         // scrubber/transport bar) lives in a native view AVKit manages
         // itself — this app never re-toggles `showsPlaybackControls` to
@@ -359,16 +412,44 @@ struct PlayerScreen: View {
             Button {
                 dismissedNoVideoNotice = true
             } label: {
+                #if os(macOS)
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+                #else
                 Image(systemName: "xmark")
                     .foregroundStyle(.white.opacity(0.8))
+                #endif
             }
             .buttonStyle(.plain)
+            .help("Dismiss")
+            .accessibilityLabel("Dismiss")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlayBackdrop(RoundedRectangle(cornerRadius: Self.overlayCorner, style: .continuous), opacity: 0.6)
         .padding(.horizontal, 16)
         .padding(.top, 16)
+        #if os(macOS)
+        .playerOverlayScheme()
+        #endif
+    }
+
+    /// Mac corners are tighter than a phone's cards.
+    private static var overlayCorner: CGFloat {
+        #if os(macOS)
+        10
+        #else
+        12
+        #endif
+    }
+
+    /// Buttons are Title Case on a Mac and stay as they were elsewhere.
+    private static func label(mac: String, elsewhere: String) -> String {
+        #if os(macOS)
+        mac
+        #else
+        elsewhere
+        #endif
     }
 
     // MARK: - Overlay (iOS, iPadOS, macOS)
@@ -395,26 +476,31 @@ struct PlayerScreen: View {
                 upNextCard(next)
             }
             if player.activeSegment != nil {
+                let isOutro = player.activeSegment?.isOutro == true
                 Button {
                     skips += 1
                     player.skipSegment()
                 } label: {
                     Label(
-                        player.activeSegment?.isOutro == true ? "Skip credits" : "Skip intro",
+                        Self.label(mac: isOutro ? "Skip Credits" : "Skip Intro", elsewhere: isOutro ? "Skip credits" : "Skip intro"),
                         systemImage: "forward.end.fill"
                     )
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
-                    .background(.black.opacity(0.6), in: Capsule())
+                    .overlayBackdrop(Capsule(), opacity: 0.6)
                     .foregroundStyle(.white)
                 }
                 .buttonStyle(.plain)
+                .help(isOutro ? "Skip the credits (S)" : "Skip the intro (S)")
             }
 
             #if os(macOS)
             // Quality keeps a button of its own showing the rung it is on: it is
             // the one people reach for, and it was two taps deep in an anonymous
-            // "…" before.
+            // "…" before. The row comes and goes with the pointer, like AVKit's
+            // panel under it — see `PlayerMacState.noteActivity` — and stays
+            // while the pointer is on it or the delay popover hangs off it.
+            let rowVisible = mac.controlsVisible || hoveringRow || mac.showsAudioDelay
             HStack(spacing: 10) {
                 Spacer(minLength: 0)
                 if !player.isLocal, !player.isLive {
@@ -422,14 +508,45 @@ struct PlayerScreen: View {
                 }
                 extrasMenu
             }
+            .onHover { hoveringRow = $0 }
+            .opacity(rowVisible ? 1 : 0)
+            .allowsHitTesting(rowVisible)
+            .animation(.easeOut(duration: 0.25), value: rowVisible)
+            // Playback ▸ Audio Sync ▸ Adjust Audio Delay… — see
+            // `AudioDelayPopover`.
+            .popover(isPresented: Binding(
+                get: { mac.showsAudioDelay },
+                set: { mac.showsAudioDelay = $0 }
+            ), arrowEdge: .top) {
+                AudioDelayPopover(player: player)
+            }
             #endif
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 22)
         // Clear of the system transport bar.
-        .padding(.bottom, 110)
+        .padding(.bottom, hudClearance)
         .animation(.easeOut(duration: 0.2), value: player.activeSegment)
         .animation(.easeOut(duration: 0.2), value: player.shouldShowUpNext)
+        #if os(macOS)
+        .playerOverlayScheme()
+        #endif
+    }
+
+    /// How far above the bottom edge the overlays sit.
+    ///
+    /// On iOS it clears AVKit's transport bar by a constant. On a Mac the
+    /// floating panel is about 64 points tall and sits a little way up from
+    /// the edge, and a constant tuned for it either overflows the smallest
+    /// window or floats mid-picture in a big one — so it scales with the
+    /// height, from just clear of the panel to a little more room on a
+    /// display-sized window.
+    private var hudClearance: CGFloat {
+        #if os(macOS)
+        min(max(surfaceSize.height * 0.15, 96), 128)
+        #else
+        110
+        #endif
     }
 
     private func upNextCard(_ title: String) -> some View {
@@ -444,18 +561,35 @@ struct PlayerScreen: View {
                 .foregroundStyle(.white)
                 .lineLimit(2)
             HStack(spacing: 10) {
-                Button("Play now") { Task { await player.playNextNow() } }
+                // Return plays, Escape declines: the card is a question, and a
+                // Mac answers questions from the keyboard.
+                Button(Self.label(mac: "Play Now", elsewhere: "Play now")) { Task { await player.playNextNow() } }
                     .buttonStyle(.borderedProminent)
+                    #if !os(macOS)
                     .tint(Theme.accentStrong)
+                    #endif
                     .controlSize(.small)
-                Button("Not now") { player.cancelAutoplay() }
+                    .playerDefaultAction()
+                Button(Self.label(mac: "Not Now", elsewhere: "Not now")) { player.cancelAutoplay() }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .playerCancelAction()
             }
         }
         .padding(14)
-        .frame(maxWidth: 320, alignment: .leading)
-        .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .frame(maxWidth: upNextWidth, alignment: .leading)
+        .overlayBackdrop(RoundedRectangle(cornerRadius: Self.overlayCorner, style: .continuous), opacity: 0.65)
+    }
+
+    /// Narrower on a phone held upright. There the card shares its line with
+    /// AVKit's "…" button in the bottom corner, and at the full width the two
+    /// met on the smallest phones.
+    private var upNextWidth: CGFloat {
+        #if os(iOS)
+        sizeClass == .compact ? 250 : 320
+        #else
+        320
+        #endif
     }
 
     #if os(macOS)
@@ -463,16 +597,17 @@ struct PlayerScreen: View {
     /// rung so the button answers the question without being opened.
     private var qualityButton: some View {
         Menu {
-            ForEach(Quality.choices) { choice in
-                Button {
-                    Task { await player.switchQuality(to: choice.maxBitrate) }
-                } label: {
-                    Label(
-                        choice.label,
-                        systemImage: choice.maxBitrate == player.currentBitrate ? "checkmark" : ""
-                    )
+            // A real radio group: the rung in use carries the system's check
+            // mark rather than a symbol drawn by hand.
+            Picker("Quality", selection: Binding(
+                get: { player.currentBitrate },
+                set: { bitrate in Task { await player.switchQuality(to: bitrate) } }
+            )) {
+                ForEach(Quality.choices) { choice in
+                    Text(choice.label).tag(choice.maxBitrate)
                 }
             }
+            .pickerStyle(.inline)
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "slider.horizontal.3")
@@ -483,10 +618,15 @@ struct PlayerScreen: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
-            .background(.black.opacity(0.4), in: Capsule())
+            .background(.regularMaterial, in: Capsule())
         }
         .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        // A borderless menu draws its label in the tint, whatever the label
+        // asked for — the accent, over a picture.
+        .tint(.white)
         .fixedSize()
+        .help("Stream Quality")
         .accessibilityLabel("Stream quality")
     }
 
@@ -498,44 +638,89 @@ struct PlayerScreen: View {
     /// appears in the system's own speed control on iOS and macOS alike.
     private var extrasMenu: some View {
         Menu {
-            Menu {
-                if let left = player.sleepMinutesRemaining {
-                    Button("Cancel sleep timer (\(left) min left)") { player.cancelSleepTimer() }
-                } else {
-                    ForEach([15, 30, 60, 90], id: \.self) { minutes in
-                        Button("Stop in \(minutes) minutes") { player.setSleepTimer(minutes: minutes) }
-                    }
-                }
-                Button(player.autoplayCancelled ? "Keep playing after this" : "Stop after this episode") {
-                    if player.autoplayCancelled { player.resumeAutoplay() } else { player.cancelAutoplay() }
-                }
-            } label: {
-                Label("Sleep", systemImage: "moon")
-            }
-
-            Button {
-                Preferences.shared.fillScreen.toggle()
-            } label: {
-                Label(
-                    Preferences.shared.fillScreen ? "Fit to screen" : "Fill the screen",
-                    systemImage: "rectangle.arrowtriangle.2.outward"
-                )
-            }
+            // The same items as Playback in the menu bar and the picture's
+            // context menu — one list, written once. See `PlayerMenuItems`.
+            PlayerMenuItems(player: player)
+            Divider()
+            Toggle("Stream Info", isOn: Binding(
+                get: { mac.showsStreamInfo },
+                set: { mac.showsStreamInfo = $0 }
+            ))
         } label: {
-            Image(systemName: "ellipsis")
-                .font(.footnote.weight(.bold))
+            // A gear rather than an ellipsis: AVKit draws an ellipsis of its
+            // own in the floating panel, and two identical glyphs opening
+            // different menus is a coin toss every time.
+            Image(systemName: "gearshape")
+                .font(.footnote.weight(.semibold))
                 .foregroundStyle(.white)
                 // Sized to match the quality capsule beside it rather than to
                 // the glyph, so the two sit as one pair of controls.
                 .frame(width: 34, height: 34)
-                .background(.black.opacity(0.4), in: Circle())
+                .background(.regularMaterial, in: Circle())
         }
         .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        // A borderless menu draws its label in the tint, whatever the label
+        // asked for — the accent, over a picture.
+        .tint(.white)
         .fixedSize()
+        .help("Playback Options")
         .accessibilityLabel("More playback options")
     }
     #endif
     #endif
+}
+
+#if os(macOS)
+/// The picture's size, read off the surface for `hudClearance`.
+private struct SurfaceSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
+}
+#endif
+
+// MARK: - Overlay styling, per platform
+
+extension View {
+    /// What the overlays sit on. On a Mac, a material in the dark scheme, so
+    /// they match AVKit's floating panel; elsewhere the black wash the
+    /// phone's and the television's controls use.
+    func overlayBackdrop<S: InsettableShape>(_ shape: S, opacity: Double) -> some View {
+        #if os(macOS)
+        background(.regularMaterial, in: shape)
+        #else
+        background(.black.opacity(opacity), in: shape)
+        #endif
+    }
+
+    /// The overlays read as part of the dark HUD whatever the app's theme.
+    @ViewBuilder
+    func playerOverlayScheme() -> some View {
+        #if os(macOS)
+        environment(\.colorScheme, .dark)
+        #else
+        self
+        #endif
+    }
+
+    /// Return and Escape, on the platforms with a keyboard to press them on.
+    @ViewBuilder
+    func playerDefaultAction() -> some View {
+        #if os(macOS)
+        keyboardShortcut(.defaultAction)
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func playerCancelAction() -> some View {
+        #if os(macOS)
+        keyboardShortcut(.cancelAction)
+        #else
+        self
+        #endif
+    }
 }
 
 // MARK: - The AVKit surface
@@ -549,16 +734,228 @@ struct VideoSurface: NSViewRepresentable {
         view.player = player.player
         view.controlsStyle = .floating
         view.showsFullScreenToggleButton = true
+        // Off by default on AppKit's player view, unlike UIKit's controller.
+        view.allowsPictureInPicturePlayback = true
         view.videoGravity = Preferences.shared.fillScreen ? .resizeAspectFill : .resizeAspect
         // Speed belongs to AVKit's own control, on the Mac as on the phone.
         view.speeds = PlayerModel.speeds.map {
             AVPlaybackSpeed(rate: Float($0), localizedName: PlayerModel.speedName($0))
         }
+        // Pinch to look closer at the picture, which AVKit leaves off unless
+        // asked for; Live Text over a paused frame is on by default and is
+        // said so here rather than left to the default.
+        view.allowsMagnification = true
+        view.allowsVideoFrameAnalysis = true
+        // Picture in Picture takes the window away and brings it back — see
+        // the delegate methods below.
+        view.pictureInPictureDelegate = context.coordinator
+        context.coordinator.attach(view, player: player)
+        context.coordinator.applyLiveChrome(for: player, to: view)
         return view
     }
 
     func updateNSView(_ view: AVPlayerView, context: Context) {
         view.videoGravity = Preferences.shared.fillScreen ? .resizeAspectFill : .resizeAspect
+        context.coordinator.attach(view, player: player)
+        context.coordinator.applyLiveChrome(for: player, to: view)
+    }
+
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    /// The AppKit half: what AVKit calls back about, and the events a Mac
+    /// player answers that SwiftUI has no modifier for.
+    @MainActor
+    final class Coordinator: NSObject, AVPlayerViewPictureInPictureDelegate {
+        private weak var view: AVPlayerView?
+        private weak var player: PlayerModel?
+
+        /// AVKit's action button, when its control style draws one, opens
+        /// the same menu the Playback menu and the right-click carry. See
+        /// `PlayerActionMenu`.
+        private let actionMenu = PlayerActionMenu()
+
+        private var monitor: Any?
+
+        /// What `applyLiveChrome` last set, so the control style is only
+        /// assigned when the answer changes: assigning it rebuilds AVKit's
+        /// controls, and a channel plays for hours through an unbounded
+        /// number of SwiftUI updates.
+        private var lastLive: Bool?
+
+        /// Seconds of sideways scroll not yet turned into a seek — see
+        /// `scroll`.
+        private var pendingSeek: Double = 0
+
+        /// Whether the window was put away for Picture in Picture and owes a
+        /// return.
+        private var hiddenForPiP = false
+
+        func attach(_ view: AVPlayerView, player: PlayerModel) {
+            self.view = view
+            self.player = player
+            actionMenu.player = player
+            if view.actionPopUpButtonMenu !== actionMenu.menu {
+                view.actionPopUpButtonMenu = actionMenu.menu
+            }
+            guard monitor == nil else { return }
+            // A local monitor rather than an NSView subclass under the
+            // player view: AVKit's view takes the events first, and what it
+            // does not use — scrolls, a double-click on the picture, the
+            // pointer moving — still passes through here on the way.
+            monitor = NSEvent.addLocalMonitorForEvents(
+                matching: [.scrollWheel, .mouseMoved, .leftMouseUp]
+            ) { [weak self] event in
+                MainActor.assumeIsolated { self?.handle(event) ?? event }
+            }
+        }
+
+        func detach() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        /// What a live channel gets of the controls: the minimal style,
+        /// which is play/pause and nothing to scrub. A channel has no
+        /// timeline, and AVKit's floating panel on a Mac draws one
+        /// regardless — there is no `requiresLinearPlayback` here to take
+        /// only the scrubber away. Volume, tracks and the rest are on the
+        /// keyboard, the scroll wheel and the menus.
+        func applyLiveChrome(for player: PlayerModel, to view: AVPlayerView) {
+            let isLive = player.isLive
+            guard lastLive != isLive else { return }
+            lastLive = isLive
+            view.controlsStyle = isLive ? .minimal : .floating
+        }
+
+        // MARK: Events
+
+        private func handle(_ event: NSEvent) -> NSEvent? {
+            guard let view, let window = view.window, event.window === window else { return event }
+            let point = view.convert(event.locationInWindow, from: nil)
+            guard view.bounds.contains(point) else { return event }
+            switch event.type {
+            case .mouseMoved:
+                PlayerMacState.shared.noteActivity()
+                return event
+            case .scrollWheel:
+                guard let player, player.isActive else { return event }
+                return scroll(event, player: player)
+            case .leftMouseUp:
+                // Double-click on the picture — not on the panel's buttons —
+                // is full screen, as in QuickTime Player.
+                guard event.clickCount == 2, !isOverControl(event, in: view) else { return event }
+                window.toggleFullScreen(nil)
+                return event
+            default:
+                return event
+            }
+        }
+
+        /// Whether the click landed on one of AVKit's controls rather than
+        /// the picture: any control, or anything inside a view AVKit names
+        /// as its controls.
+        private func isOverControl(_ event: NSEvent, in view: AVPlayerView) -> Bool {
+            guard let superview = view.superview else { return false }
+            var hit = view.hitTest(superview.convert(event.locationInWindow, from: nil))
+            while let current = hit, current !== view {
+                if current is NSControl { return true }
+                if String(describing: type(of: current)).localizedCaseInsensitiveContains("control") { return true }
+                hit = current.superview
+            }
+            return false
+        }
+
+        /// Vertical scroll is volume and two fingers sideways is a scrub, the
+        /// way IINA and mpv behave. Either physical direction is read the
+        /// way the trackpad is set — fingers up is louder, fingers right is
+        /// forward — and momentum is ignored so a flick does not run on.
+        private func scroll(_ event: NSEvent, player: PlayerModel) -> NSEvent? {
+            guard event.momentumPhase == [] else { return nil }
+            if event.phase == .ended || event.phase == .cancelled {
+                flushSeek(player)
+                return nil
+            }
+            let inverted = event.isDirectionInvertedFromDevice
+            let precise = event.hasPreciseScrollingDeltas
+            let dx = event.scrollingDeltaX
+            let dy = event.scrollingDeltaY
+            if abs(dx) > abs(dy) {
+                guard !player.isLive else { return nil }
+                let forward = inverted ? dx : -dx
+                // A tenth of a second a point, five seconds a wheel notch:
+                // a hand's width of trackpad is about twenty seconds.
+                pendingSeek += forward * (precise ? 0.1 : 5)
+                // Settled in whole seconds as the gesture runs, rather than
+                // one seek per event, which the player would have to queue.
+                if abs(pendingSeek) >= 2 || event.phase == [] { flushSeek(player) }
+                return nil
+            }
+            if dy != 0 {
+                let up = inverted ? -dy : dy
+                PlayerMacState.shared.stepVolume(player, by: up * (precise ? 0.004 : 0.05))
+            }
+            return nil
+        }
+
+        private func flushSeek(_ player: PlayerModel) {
+            guard abs(pendingSeek) >= 0.5 else { return }
+            let delta = pendingSeek
+            pendingSeek = 0
+            player.seek(by: delta)
+        }
+
+        // MARK: Picture in Picture
+
+        /// Never: the window is this app's to put away, and putting it away
+        /// through AVKit would take the player with it.
+        nonisolated func playerViewShouldAutomaticallyDismissAtPicture(
+            inPictureStart playerView: AVPlayerView
+        ) -> Bool {
+            false
+        }
+
+        /// The picture is in its own floating window now; the player window
+        /// behind it would be a black rectangle, so it goes away until the
+        /// picture comes back. A full-screen window is left where it is —
+        /// there is no hiding one gracefully.
+        nonisolated func playerViewDidStartPicture(inPicture playerView: AVPlayerView) {
+            MainActor.assumeIsolated {
+                guard let window = playerView.window, !window.styleMask.contains(.fullScreen) else { return }
+                hiddenForPiP = true
+                window.orderOut(nil)
+            }
+        }
+
+        /// The button in the floating window that means "back to the app".
+        nonisolated func playerView(
+            _ playerView: AVPlayerView,
+            restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
+        ) {
+            MainActor.assumeIsolated {
+                restoreWindow(playerView)
+                completionHandler(true)
+            }
+        }
+
+        /// Picture in Picture ended some other way — its close button, or the
+        /// stream ending. A window still hidden with a stream still playing
+        /// is a player nobody can reach, so it comes back here too.
+        nonisolated func playerViewDidStopPicture(inPicture playerView: AVPlayerView) {
+            MainActor.assumeIsolated { restoreWindow(playerView) }
+        }
+
+        private func restoreWindow(_ playerView: AVPlayerView) {
+            guard hiddenForPiP else { return }
+            hiddenForPiP = false
+            guard let window = playerView.window ?? PlayerMacState.shared.window,
+                  player?.isActive == true else { return }
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 }
 #else
@@ -698,9 +1095,36 @@ struct VideoSurface: UIViewControllerRepresentable {
                         canResync: player.canResync,
                         canReencodeForSync: player.canReencodeForSync,
                         canDelayAudio: player.canDelayAudio,
-                        audioDelayMilliseconds: player.audioDelayMilliseconds
+                        audioDelayMilliseconds: player.audioDelayMilliseconds,
+                        audio: player.audioOptions.map { option in
+                            TransportBarExtras.State.Track(
+                                id: option.id, title: option.label,
+                                needsNewStream: option.needsNewStream,
+                                isOn: option.id == player.selectedAudioOption
+                            )
+                        },
+                        subtitles: player.subtitleOptions.map { option in
+                            TransportBarExtras.State.Track(
+                                id: option.id, title: option.label,
+                                needsNewStream: option.needsNewStream,
+                                isOn: option.id == player.selectedSubtitleOption
+                            )
+                        },
+                        subtitlesOff: player.selectedSubtitleOption == nil
                     )
                 }
+            }
+            extras.onAudio = { id in
+                guard let option = player.audioOptions.first(where: { $0.id == id }) else { return }
+                player.selectAudio(option)
+            }
+            extras.onSubtitles = { id in
+                guard let id else {
+                    player.selectSubtitles(nil)
+                    return
+                }
+                guard let option = player.subtitleOptions.first(where: { $0.id == id }) else { return }
+                player.selectSubtitles(option)
             }
             extras.onQuality = { bitrate in
                 Task { @MainActor in await player.switchQuality(to: bitrate) }
@@ -1030,8 +1454,12 @@ struct BitrateBadge: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(.black.opacity(0.62), in: Capsule())
+        .overlayBackdrop(Capsule(), opacity: 0.62)
+        #if os(macOS)
+        .playerOverlayScheme()
+        #else
         .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
+        #endif
         .accessibilityElement(children: .combine)
     }
 }

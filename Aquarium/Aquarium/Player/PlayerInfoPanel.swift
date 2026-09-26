@@ -561,66 +561,42 @@ struct PlayerInfoPanel: View {
     }
 }
 
+#endif
+
 // MARK: - Stream
 
-/// What is actually arriving, in three columns: the file the server holds, the
-/// stream this device is being sent, and where playback has got to.
+#if os(tvOS) || os(macOS)
+
+import Foundation
+
+/// What is actually arriving, as rows of label and value: the file the server
+/// holds, the stream this device is being sent, and where playback has got
+/// to. The tvOS ribbon lays them out in three columns and the Mac inspector
+/// in a `Form`; the numbers are the same, read here once.
 ///
-/// Redraws on `player.position`, which moves every half second. That is the
-/// only clock this tab has: none of the numbers below `streamFacts` is a
-/// property anything writes, so observation has nothing to notice about them —
-/// they are read out of the player item each time the body runs.
-struct PlayerStreamPanel: View {
+/// None of the numbers below `streamFacts` is a property anything writes, so
+/// observation has nothing to notice about them — they are read out of the
+/// player item each time a body that uses these runs, and the panels redraw
+/// on `player.position`, which moves every half second.
+@MainActor
+struct PlayerStreamRows {
     let player: PlayerModel
+
+    typealias Row = (label: String, value: String)
 
     private var item: BaseItem? { player.infoItem }
     private var source: MediaSource? { item?.MediaSources?.first }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 60) {
-            if !fileRows.isEmpty {
-                column("On the server", fileRows)
-            }
-            column("Coming down", streamRows)
-            column("Right now", nowRows)
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private func column(_ heading: String, _ rows: [(String, String)]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(heading.uppercased())
-                .font(.caption.weight(.semibold))
-                .kerning(1.2)
-                .foregroundStyle(Theme.accent)
-                .padding(.bottom, 2)
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(row.0)
-                        .font(.caption2)
-                        .foregroundStyle(Theme.textDim)
-                        .lineLimit(1)
-                        .frame(width: 150, alignment: .leading)
-                    Text(row.1)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(Theme.text)
-                        .lineLimit(1)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
 
     // MARK: The file
 
     /// Empty for a channel and for a download: neither has a Jellyfin media
     /// source behind it, and a column of blanks says less than no column.
-    private var fileRows: [(String, String)] {
+    var file: [Row] {
         guard let source else { return [] }
         let video = source.streams.first { $0.type == "Video" }
         let audio = source.streams.first { $0.type == "Audio" }
         let subtitles = source.streams.filter { $0.type == "Subtitle" }
-        var rows: [(String, String)] = []
+        var rows: [Row] = []
         if let container = source.Container, !container.isEmpty {
             rows.append(("Container", container.uppercased()))
         }
@@ -654,9 +630,9 @@ struct PlayerStreamPanel: View {
 
     // MARK: The stream
 
-    private var streamRows: [(String, String)] {
+    var stream: [Row] {
         let facts = player.streamFacts
-        var rows: [(String, String)] = []
+        var rows: [Row] = []
         rows.append(("Delivery", delivery))
         if let resolution = facts.resolution { rows.append(("Arriving at", resolution)) }
         if let indicated = facts.indicatedBitrate {
@@ -688,8 +664,8 @@ struct PlayerStreamPanel: View {
 
     // MARK: Where playback is
 
-    private var nowRows: [(String, String)] {
-        var rows: [(String, String)] = []
+    var now: [Row] {
+        var rows: [Row] = []
         if player.isLive {
             rows.append(("Position", "Live"))
         } else if player.duration > 0 {
@@ -736,11 +712,57 @@ struct PlayerStreamPanel: View {
         return rows
     }
 
-    private static func mbps(_ bitsPerSecond: Double) -> String {
+    static func mbps(_ bitsPerSecond: Double) -> String {
         let mbps = bitsPerSecond / 1_000_000
         return mbps >= 10
             ? String(format: "%.0f Mbps", mbps)
             : String(format: "%.1f Mbps", mbps)
+    }
+}
+
+#endif
+
+#if os(tvOS)
+
+/// The rows above, in three columns across the ribbon.
+struct PlayerStreamPanel: View {
+    let player: PlayerModel
+
+    var body: some View {
+        let rows = PlayerStreamRows(player: player)
+        let file = rows.file
+        HStack(alignment: .top, spacing: 60) {
+            if !file.isEmpty {
+                column("On the server", file)
+            }
+            column("Coming down", rows.stream)
+            column("Right now", rows.now)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func column(_ heading: String, _ rows: [PlayerStreamRows.Row]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(heading.uppercased())
+                .font(.caption.weight(.semibold))
+                .kerning(1.2)
+                .foregroundStyle(Theme.accent)
+                .padding(.bottom, 2)
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(row.label)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.textDim)
+                        .lineLimit(1)
+                        .frame(width: 150, alignment: .leading)
+                    Text(row.value)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 

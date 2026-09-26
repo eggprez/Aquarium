@@ -222,9 +222,10 @@ let bubbles: [(CGFloat, CGFloat, CGFloat)] = [
 /// rim, a bright rim, a specular highlight top-left and a faint bounce
 /// bottom-right. `minPixels` drops any bubble that would render smaller than
 /// that, so tiny icons don't fill with specks.
-func paintBubbles(_ ctx: CGContext, box: CGRect, minPixels: CGFloat = 5) {
+func paintBubbles(_ ctx: CGContext, box: CGRect, minPixels: CGFloat = 5,
+                  list: [(CGFloat, CGFloat, CGFloat)]? = nil) {
     let s = box.width / 1024
-    for (x, y, r) in bubbles {
+    for (x, y, r) in list ?? bubbles {
         let c = CGPoint(x: box.minX + x * s, y: box.minY + y * s)
         let R = r * s
         guard R * 2 >= minPixels else { continue }
@@ -344,4 +345,33 @@ func textWidth(_ runs: [(String, NSFont.Weight, NSColor)], size: CGFloat) -> CGF
         ]))
     }
     return CGFloat(CTLineGetTypographicBounds(CTLineCreateWithAttributedString(attributed), nil, nil, nil))
+}
+
+// ---------------------------------------------------------------- Apple Watch
+
+/// The bubble trail laid out for a disc rather than a square: up the right of
+/// the circle and a few breaking away top-left, all inside the part of the
+/// tile the circle shows. 1024 space, like BUBBLES.
+let watchBubbles: [(CGFloat, CGFloat, CGFloat)] = [
+    (790, 840, 62), (880, 690, 38), (836, 570, 24), (896, 470, 16), (850, 392, 10),
+    (214, 214, 38), (296, 140, 20), (154, 322, 13),
+]
+
+/// The Apple Watch icon. watchOS shows every icon inside a circle, so the
+/// mark is composed for the inscribed disc: the tile is still full-bleed and
+/// opaque like the iOS one — the system does the masking — but the ring is
+/// pulled in until it sits inside the circle with a little air, and the
+/// bubbles are placed around the disc instead of the corner.
+func circleIcon(size: Int) -> CGContext {
+    let ctx = ctxMake(size, size)
+    let s = CGFloat(size)
+    let r = CGRect(x: 0, y: 0, width: s, height: s)
+    paintBackground(ctx, r, .bright)
+    // The squircle's corners are the first thing a circle cuts: at 0.74 of
+    // the tile the ring's corner sits just inside the circumference.
+    let side = s * 0.74
+    let box = CGRect(x: (s - side) / 2, y: (s - side) / 2, width: side, height: side)
+    paintMark(ctx, ringMark(weight: 1.0), box: box, .bright)
+    paintBubbles(ctx, box: r, list: watchBubbles)
+    return ctx
 }

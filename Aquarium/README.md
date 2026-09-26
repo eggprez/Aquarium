@@ -1,4 +1,4 @@
-# Aquarium for iOS, iPadOS, tvOS and macOS
+# Aquarium for iOS, iPadOS, tvOS, macOS and watchOS
 
 A native SwiftUI port of [Aquarium](../README.md), the Linux Jellyfin client.
 Everything under this directory belongs to the Apple build; nothing in it is
@@ -12,7 +12,9 @@ One Xcode target builds all four systems (`SDKROOT = auto` with a multiplatform
 a tab bar on iPhone, a sidebar on iPad and Mac, and the top tab strip on Apple
 TV. A second target, `TopShelf`, is the Apple TV home screen extension; it is
 built and embedded on tvOS only, through a platform filter on the dependency,
-so an iPhone or Mac build never sees it.
+so an iPhone or Mac build never sees it. The Apple Watch app is a target of
+its own, `AquariumWatch` (with `WatchWidgets` for its Smart Stack card),
+embedded in the iPhone build the same way — see *Apple Watch* below.
 
 ## Building
 
@@ -24,7 +26,7 @@ xcodebuild -project Aquarium.xcodeproj -scheme Aquarium \
   -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```
 
-Deployment targets are iOS/iPadOS 17, tvOS 17 and macOS 14.
+Deployment targets are iOS/iPadOS 17, tvOS 17, macOS 14 and watchOS 10.
 
 **Apple TV note:** compiling the tvOS asset catalogue needs a tvOS simulator
 runtime matching the SDK installed, even for device builds. If the build stops
@@ -204,6 +206,72 @@ With both libraries the tab bar becomes Home, Music, Audiobooks, Search, More;
 the video Library, Live TV and Downloads move into More. With one of the two
 the Library keeps its place. The Mac and Apple TV hide the tabs until they get
 a pass of their own.
+
+## Apple Watch
+
+Audiobooks and music on the wrist, from the same server, with the phone doing
+the signing in. `Watch/` is the app and `WatchWidgets/` its Smart Stack card;
+`Shared/WatchSyncTypes.swift` is what the two devices say to each other and is
+compiled into both the iPhone app and the watch app.
+
+- **Signing in is nothing.** The iPhone hands the watch the server, the
+  account and the token over WatchConnectivity (`Core/WatchLink.swift` on the
+  phone, `Watch/WatchLink.swift` on the watch) as the application context, so
+  it is waiting for the watch whenever it next wakes. Signing out on the phone
+  signs the watch out too. The watch keeps the token in its own keychain and
+  uses a device id of its own, so the server sees it as its own session.
+- **It talks to the server itself.** With Wi‑Fi, cellular or the phone's
+  connection, the watch browses the library — audiobooks; music by playlist,
+  album, artist, song and genre; search — and streams from it, through a
+  `PlaybackInfo` with a watch-sized profile: MP3, AAC and ALAC as they are,
+  anything else as an AAC transcode over HLS. `Watch/WatchClient.swift` is
+  the client, small on purpose; it shares only `Core/Models.swift` and
+  `Core/Formatting.swift` with the phone.
+- **Downloads are AAC at 128 kbps**, one file per song or book. On Wi‑Fi of
+  its own the watch fetches on a background `URLSession`, so a book keeps
+  arriving with the wrist down. Through the phone's Bluetooth link a
+  background session is throttled to a crawl, so there the watch asks the
+  phone instead: the phone fetches the file on a background session of its
+  own (`WatchLink`'s relay), measures it, and hands it across as a
+  WatchConnectivity file transfer, which runs in the background on both ends
+  whether or not they are in reach at the time. The server's progressive
+  transcode has no length it can promise, so every file that lands is opened
+  and measured against the item's runtime before it is believed, and asked
+  for again if it came up short. Songs, albums, playlists and audiobooks can
+  each be kept; a playlist kept is saved with its order.
+- **Two things are kept on the watch without asking**: audiobooks the account
+  is part-way through, and the playlists picked for the watch on the phone
+  under Settings → Apple Watch. The phone sends the ids; the watch fetches
+  the rest, and the phone carries them when the watch has no Wi‑Fi. Nothing
+  is ever removed automatically.
+- **Listening goes back the way the phone's offline sync goes.** Where a book
+  was left, and each song heard to its end, is queued on the watch
+  (`WatchSyncQueue`) and sent to the phone when it is in reach, which tells
+  the server — a stopped report for a position, the played-items route with a
+  date for a play, so play counts and "recently played" move. With the phone
+  away and a network of its own, the watch tells the server directly. A
+  streamed play was counted by the server when the stream started and is only
+  told where it stopped.
+- **Storage is managed from either end.** On the watch, On Watch lists what
+  is there by book, playlist and album with a swipe to remove, and the room
+  left. On the phone, Settings → Apple Watch shows the same list as the watch
+  last reported it, removes any of it, and can clear the watch. Every
+  album, playlist, song and book in the phone's press-and-hold menu has a
+  *Download to Apple Watch*.
+- **Now Playing** is the system's: the crown, the Now Playing app on the
+  watch face, AirPods. Books get 15 back and 30 forward, a speed and their
+  chapters; songs get previous and next. A Smart Stack widget shows what is
+  playing or the book last left, and opens it.
+- **Siri**, on the watch and on the phone alike: "Resume my audiobook in
+  Aquarium", "Play *book* in Aquarium", "Play *album or playlist* in
+  Aquarium", "Shuffle my music in Aquarium" — and on the phone, iPad and Mac
+  also "Play some *genre*". `Core/MusicIntents.swift` has the phone's,
+  `Watch/WatchIntents.swift` the watch's.
+- **The icon** is the same mark composed for a circle — `circleIcon` in
+  `Tools/IconGenerator/brand.swift` — since watchOS masks every icon into one.
+
+The watch app is `WKRunsIndependentlyWithCompanionApp`: it runs, browses and
+plays with the phone switched off, as long as it has been signed in once.
 
 ## What did not carry over, and why
 

@@ -1446,12 +1446,17 @@ final class JellyfinClient {
         return try await get(ItemsResponse.self, path).items
     }
 
-    func search(_ term: String, startIndex: Int = 0, limit: Int = 48) async throws -> ItemsResponse {
+    func search(
+        _ term: String,
+        startIndex: Int = 0,
+        limit: Int = 48,
+        types: String = "Movie,Series,Episode"
+    ) async throws -> ItemsResponse {
         guard let s = prefs.session else { throw APIError.notConfigured }
         let q = [
             URLQueryItem(name: "searchTerm", value: term),
             URLQueryItem(name: "Recursive", value: "true"),
-            URLQueryItem(name: "IncludeItemTypes", value: "Movie,Series,Episode"),
+            URLQueryItem(name: "IncludeItemTypes", value: types),
             URLQueryItem(name: "Fields", value: Self.listFields),
             URLQueryItem(name: "StartIndex", value: String(startIndex)),
             URLQueryItem(name: "Limit", value: String(limit)),
@@ -1511,8 +1516,20 @@ final class JellyfinClient {
     // MARK: - Watch state
 
     func markPlayed(_ itemId: String, played: Bool) async throws {
+        try await markPlayed(itemId, played: played, at: nil)
+    }
+
+    /// The same, with a date: given one, the server adds a play to the
+    /// count and sets "last played" to it, which is how a song heard on the
+    /// Apple Watch from the watch's own copy gets counted. Without one it
+    /// only marks the item played.
+    func markPlayed(_ itemId: String, played: Bool, at date: Date?) async throws {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        try await request("/Users/\(s.userId)/PlayedItems/\(Self.pathId(itemId))", method: played ? "POST" : "DELETE")
+        var path = "/Users/\(s.userId)/PlayedItems/\(Self.pathId(itemId))"
+        if played, let date {
+            path += "?datePlayed=\(ISO8601DateFormatter().string(from: date))"
+        }
+        try await request(path, method: played ? "POST" : "DELETE")
         LibraryIndex.shared.patchUserData(itemId) {
             $0.Played = played
             $0.PlaybackPositionTicks = 0

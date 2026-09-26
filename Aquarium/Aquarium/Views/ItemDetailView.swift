@@ -5,6 +5,9 @@
 //  "More like this" is the server's own recommendation.
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 #if os(iOS)
 /// How far the detail page has been scrolled.
@@ -106,8 +109,100 @@ struct ItemDetailView: View {
         #else
         scroll()
             .screenTitle(navigationTitle)
+            // A season's own name goes in the subtitle, under the show's in
+            // the title bar — the level and the level above it, the way a
+            // document window names the file and the folder. The page itself
+            // no longer repeats it; see `details`.
+            .navigationSubtitle(navigationSubtitle)
+            // The hero runs up under the title bar, the way the TV app's
+            // does: the toolbar keeps its controls and loses its background,
+            // and the artwork's own scrim keeps the title legible. Painting
+            // the bar a colour instead put a hard edge across the top of
+            // every photograph.
+            .toolbarBackground(.hidden, for: .windowToolbar)
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    if let item { toolbarActions(item) }
+                }
+            }
+            .focusedSceneValue(\.itemMenuActions, menuActions)
         #endif
     }
+
+    #if os(macOS)
+    /// The season on a season page; nothing anywhere else. The window title
+    /// carries the show — see `navigationTitle`.
+    private var navigationSubtitle: String {
+        guard let item, item.isSeason, let series = item.SeriesName, !series.isEmpty else { return "" }
+        return item.title
+    }
+
+    /// What the toolbar holds, once there is an item to hold it for: the
+    /// state toggles, the download, and the window. Play stays in the page —
+    /// it is the one action the page is *for*, and a prominent button beside
+    /// the artwork is where the eye expects it. Everything else is a toggle or
+    /// a menu, which is what a toolbar is made of.
+    @ViewBuilder
+    private func toolbarActions(_ item: BaseItem) -> some View {
+        Toggle(isOn: Binding(
+            get: { item.userData.isFavorite },
+            set: { _ in Task { await toggleFavourite(item) } }
+        )) {
+            Label(
+                item.userData.isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                systemImage: item.userData.isFavorite ? "star.fill" : "star"
+            )
+        }
+        .toggleStyle(.button)
+        .help(item.userData.isFavorite ? "Remove from Favorites (⌘D)" : "Add to Favorites (⌘D)")
+
+        // A show is marked a season at a time — see `ItemMenuActions.isWatched`.
+        if !item.isSeries {
+            Toggle(isOn: Binding(
+                get: { item.userData.played },
+                set: { _ in Task { await toggleWatched(item) } }
+            )) {
+                Label(
+                    item.userData.played ? "Mark as Unwatched" : "Mark as Watched",
+                    systemImage: item.userData.played ? "checkmark.circle.fill" : "checkmark.circle"
+                )
+            }
+            .toggleStyle(.button)
+            .help(item.userData.played ? "Mark as Unwatched (⇧⌘U)" : "Mark as Watched (⇧⌘U)")
+        }
+
+        downloadMenu(item)
+            .help("Download")
+
+        Button {
+            openWindow(id: ItemWindow.id, value: item.Id)
+        } label: {
+            Label("Open in New Window", systemImage: "macwindow.badge.plus")
+        }
+        .help("Open in New Window (⌥⌘O)")
+    }
+    /// This page's actions, for the Item menu while it is in front.
+    private var menuActions: ItemMenuActions? {
+        guard let item else { return nil }
+        let playable = playable(for: item)
+        return ItemMenuActions(
+            title: item.title,
+            canPlay: playable != nil,
+            playLabel: playable.map { playLabel($0) } ?? "Play",
+            isFavorite: item.userData.isFavorite,
+            isWatched: item.isSeries ? nil : item.userData.played,
+            play: {
+                guard let playable else { return }
+                Task { await player.play(item: playable) }
+            },
+            toggleFavorite: { Task { await toggleFavourite(item) } },
+            toggleWatched: { Task { await toggleWatched(item) } },
+            openInNewWindow: { openWindow(id: ItemWindow.id, value: item.Id) }
+        )
+    }
+
+    @Environment(\.openWindow) private var openWindow
+    #endif
 
     #if os(tvOS)
     /// Which control is worth landing on, once the page knows enough to have
@@ -187,6 +282,18 @@ struct ItemDetailView: View {
                     // throw the request away before the season it points at has
                     // its episodes.
                     app.pendingEpisodeHighlight = nil
+                    #if os(macOS)
+                    // A Mac list has a selection, so the row is simply
+                    // selected — and stays so, the way a file you were sent
+                    // to in Finder stays selected. The list sits inside this
+                    // page's scroll view (see `MacEpisodeList`), so the page
+                    // brings the list's top into view and the selection does
+                    // the pointing.
+                    episodeSelection = [target]
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        proxy.scrollTo(Self.episodesAnchor, anchor: .top)
+                    }
+                    #else
                     withAnimation(.easeInOut(duration: 0.35)) {
                         episodeHighlight = target
                         proxy.scrollTo(target, anchor: .center)
@@ -198,10 +305,22 @@ struct ItemDetailView: View {
                         try? await Task.sleep(for: .seconds(5))
                         withAnimation(.easeOut(duration: 0.6)) { episodeHighlight = nil }
                     }
+                    #endif
                 }
         }
         #endif
     }
+
+    #if os(macOS)
+    /// The episode rows the pointer or the keyboard has picked out. Next Up
+    /// arrives as one of these; the context menu acts on all of them.
+    @State private var episodeSelection: Set<String> = []
+    /// Where the page scrolls to for an arrival — the list's heading, which
+    /// is in this scroll view; the rows are in the list's own.
+    private static let episodesAnchor = "episodes"
+    /// The trailer's address goes to whatever the system opens links with.
+    @Environment(\.openURL) private var openURL
+    #endif
 
     #if !os(tvOS)
     /// The episode this page was opened for, once the list it is in has
@@ -267,6 +386,10 @@ struct ItemDetailView: View {
         }
         .reloadWhenPlaybackEnds { await load() }
         .reloadWhenItemsChange { await load() }
+        #if !os(macOS)
+        // A tap that changed something gets a tick in the hand. A Mac has no
+        // hand to tick; the toggle in the toolbar changes state and that is
+        // the whole of the feedback.
         .sensoryFeedback(trigger: item?.userData.isFavorite) { was, now in
             guard let was, let now, was != now else { return nil }
             return now ? .success : .impact(weight: .light)
@@ -275,7 +398,14 @@ struct ItemDetailView: View {
             guard let was, let now, was != now else { return nil }
             return .impact(weight: .light)
         }
-        #if !os(tvOS)
+        #endif
+        #if os(macOS)
+        // An alert, with the rungs that would fit as its buttons: the first
+        // of them is the default, Escape cancels. See `SpaceAlert`.
+        .spaceAlert($spacePrompt) { prompt, chosen in
+            queue(prompt.items, quality: chosen)
+        }
+        #elseif !os(tvOS)
         .sheet(item: $spacePrompt) { prompt in
             SpacePromptView(prompt: prompt) { chosen in
                 spacePrompt = nil
@@ -319,7 +449,7 @@ struct ItemDetailView: View {
         if item.isSeries { seasonsSection }
         if item.isSeason { episodesSection }
         castSection(item)
-        MediaShelf(title: "More like this", items: similar) { app.push(.item($0.Id)) }
+        MediaShelf(title: "More Like This", items: similar) { app.push(.item($0.Id)) }
     }
 
     private static let scrollSpace = "itemDetailScroll"
@@ -357,7 +487,7 @@ struct ItemDetailView: View {
             // a backdrop the studio never made one for — a show's name too. A
             // film is the one thing that doesn't get it: its hero is its title
             // and its poster, and there is no level below it to name.
-            if item.isEpisode || item.isSeason || item.isSeries {
+            if showsHeading(item) {
                 VStack(alignment: .leading, spacing: 4) {
                     // The way up, above the name of where you are — the levels
                     // read downwards, and this is the level above whatever the
@@ -375,8 +505,10 @@ struct ItemDetailView: View {
                 Text(tagline)
                     .font(.subheadline.italic())
                     .foregroundStyle(Theme.textDim)
+                    .macSelectable()
             }
             FactsLine(item: item)
+                .macSelectable()
 
             // Which episode Play would start, where that isn't this page's own
             // item — a show plays whatever is next, a season the first thing in
@@ -409,6 +541,7 @@ struct ItemDetailView: View {
                     .font(.body)
                     .foregroundStyle(Theme.textBody)
                     .fixedSize(horizontal: false, vertical: true)
+                    .macSelectable()
             }
 
             // Genres, the studios and the description of the file were three
@@ -417,26 +550,56 @@ struct ItemDetailView: View {
             // as the same kind of fact. Genres are chips because that is what
             // they are, and the studios get a word for themselves.
             if let genres = item.Genres, !genres.isEmpty {
+                #if os(macOS)
+                // One line of secondary text, the way the TV app lists them.
+                // There is no library route that filters by genre, so they
+                // are reading matter rather than links.
+                Text(genres.prefix(6).joined(separator: " · "))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .macSelectable()
+                #else
                 WrappingRow(spacing: 8, rowSpacing: 8) {
                     ForEach(genres.prefix(6), id: \.self) { genre in
                         MetaChip(text: genre)
                     }
                 }
+                #endif
             }
             if let studios = item.Studios?.compactMap(\.Name).filter({ !$0.isEmpty }), !studios.isEmpty {
                 Label(studios.joined(separator: " · "), systemImage: "building.2")
                     .font(.caption)
                     .foregroundStyle(Theme.textDim)
+                    .macSelectable()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Metrics.gutter)
     }
 
+    /// Whether the page repeats its own name under the artwork. An episode's
+    /// own name, a season's number, and — since the hero above may be showing
+    /// nothing but a wordmark — a show's name too. A film doesn't: its hero is
+    /// its title. On the Mac a season doesn't either, because the window's
+    /// title and subtitle already say "The Bear — Season 2" and a third copy
+    /// under the artwork is the duplicate the review objected to.
+    private func showsHeading(_ item: BaseItem) -> Bool {
+        #if os(macOS)
+        if item.isSeason, let series = item.SeriesName, !series.isEmpty { return false }
+        #endif
+        return item.isEpisode || item.isSeason || item.isSeries
+    }
+
     /// How far through this one is, in the page's own colours — the hero's bar
     /// was white-on-artwork and this one sits on the page.
     private func resumeLine(_ progress: Double, of item: BaseItem) -> some View {
         HStack(spacing: 10) {
+            #if os(macOS)
+            // The system's bar, at the system's height.
+            ProgressView(value: progress)
+                .progressViewStyle(.linear)
+                .frame(width: 168)
+            #else
             ZStack(alignment: .leading) {
                 Capsule().fill(Theme.border)
                 GeometryReader { geo in
@@ -446,10 +609,12 @@ struct ItemDetailView: View {
                 }
             }
             .frame(width: 168, height: 4)
+            #endif
 
             Text(remainingText(progress, of: item))
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Theme.textDim)
+                .macSelectable()
         }
     }
 
@@ -469,6 +634,38 @@ struct ItemDetailView: View {
     /// onto a second line if the window is narrowed.
     @ViewBuilder
     private func actionRow(_ item: BaseItem) -> some View {
+        #if os(macOS)
+        // Two buttons at most, so nothing ever wraps: Play, as a split button
+        // whose menu holds the quality rungs, and the trailer. Favorite,
+        // Watched and Download live in the toolbar — see `toolbarActions`.
+        HStack(spacing: 10) {
+            if let playable = playable(for: item) {
+                Menu {
+                    Section("Play At") {
+                        qualityMenu(playable)
+                    }
+                } label: {
+                    Label(playLabel(playable), systemImage: "play.fill")
+                } primaryAction: {
+                    Task { await player.play(item: playable) }
+                }
+                .menuStyle(.button)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .help("\(playLabel(playable)) (⌘↩)")
+            }
+            if Trailers.has(item) {
+                Button {
+                    Task { await playTrailer(item) }
+                } label: {
+                    Label("Play Trailer", systemImage: "film")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .help("Play Trailer")
+            }
+        }
+        #else
         WrappingRow(spacing: 10, rowSpacing: 10) {
             if isCompact {
                 compactActions(item, playable: playable(for: item))
@@ -480,6 +677,7 @@ struct ItemDetailView: View {
         // can hold, and it sits well below the artwork above it — see
         // `focusRegion`.
         .focusRegion()
+        #endif
     }
 
     /// What Play starts. A series plays whatever the server says is next; a
@@ -494,6 +692,7 @@ struct ItemDetailView: View {
         return item
     }
 
+    #if !os(macOS)
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     private var isCompact: Bool { sizeClass == .compact }
@@ -513,6 +712,7 @@ struct ItemDetailView: View {
         .focused($focus, equals: .play)
         #endif
     }
+    #endif
 
     @ViewBuilder
     private func qualityMenu(_ playable: BaseItem) -> some View {
@@ -528,6 +728,9 @@ struct ItemDetailView: View {
         }
     }
 
+    // The row of buttons the phone and the television draw. The Mac's
+    // are in `actionRow` and `toolbarActions`.
+    #if !os(macOS)
     @ViewBuilder
     private func actionButtons(_ item: BaseItem, playable: BaseItem?) -> some View {
         if let playable {
@@ -669,6 +872,7 @@ struct ItemDetailView: View {
             .buttonStyle(.bordered)
         }
     }
+    #endif
 
     private func playLabel(_ item: BaseItem) -> String {
         item.progressFraction != nil ? "Resume" : "Play"
@@ -707,7 +911,7 @@ struct ItemDetailView: View {
                         }
                     }
                 } label: {
-                    Label("Whole series", systemImage: "square.stack.3d.down.right")
+                    Label("Whole Series", systemImage: "square.stack.3d.down.right")
                 }
                 // A season at a time is what most people actually want, and
                 // going one level down to the season page to get it is a
@@ -725,13 +929,22 @@ struct ItemDetailView: View {
                 }
             } else if item.isSeason {
                 ForEach(DownloadQualities.all) { quality in
-                    Button("This season · \(quality.label)") {
+                    Button("This Season · \(quality.label)") {
                         Task { await requestDownload(episodes, quality: quality) }
                     }
                 }
             } else {
                 if existing?.status == .complete {
-                    Button("Delete download", role: .destructive) {
+                    #if os(macOS)
+                    if let existing, let url = DownloadManager.shared.mediaURL(for: existing) {
+                        Button {
+                            NSWorkspace.shared.activateFileViewerSelecting([url])
+                        } label: {
+                            Label("Show in Finder", systemImage: "folder")
+                        }
+                    }
+                    #endif
+                    Button("Delete Download", role: .destructive) {
                         DownloadManager.shared.delete(item.Id)
                         app.toast("Download deleted", tone: .ok)
                     }
@@ -744,7 +957,24 @@ struct ItemDetailView: View {
                 }
             }
         } label: {
+            #if os(macOS)
+            // While a transfer runs the button is its progress, the way
+            // Safari's downloads button fills up: a determinate ring in place
+            // of the glyph, and the words in the tooltip.
+            if existing?.status == .downloading, let fraction = existing?.fraction {
+                Label {
+                    Text("Downloading…")
+                } icon: {
+                    ProgressView(value: fraction)
+                        .progressViewStyle(.circular)
+                        .controlSize(.small)
+                }
+            } else {
+                Label(downloadLabel(existing), systemImage: downloadSymbol(existing))
+            }
+            #else
             Label(downloadLabel(existing), systemImage: downloadSymbol(existing))
+            #endif
         }
     }
 
@@ -752,7 +982,7 @@ struct ItemDetailView: View {
         switch record?.status {
         case .complete: "Downloaded"
         case .downloading: "Downloading…"
-        case .error: "Download failed"
+        case .error: "Download Failed"
         default: "Download"
         }
     }
@@ -782,7 +1012,7 @@ struct ItemDetailView: View {
                     .foregroundStyle(Theme.text)
                     .padding(.horizontal, Metrics.gutter)
 
-                ScrollView(.horizontal, showsIndicators: false) {
+                ScrollView(.horizontal, showsIndicators: Self.showsShelfIndicators) {
                     LazyHStack(alignment: .top, spacing: Metrics.rowSpacing) {
                         ForEach(seasons) { season in
                             Button {
@@ -796,6 +1026,8 @@ struct ItemDetailView: View {
                             }
                             .buttonStyle(PosterButtonStyle())
                             .itemContextMenu(season)
+                            .macOpensOnReturn { app.push(.item(season.Id)) }
+                            .help(season.title)
                         }
                     }
                     .padding(.horizontal, Metrics.gutter)
@@ -808,6 +1040,26 @@ struct ItemDetailView: View {
 
     @ViewBuilder
     private var episodesSection: some View {
+        #if os(macOS)
+        // A list, with everything a list has — see `MacEpisodeList`.
+        if !episodes.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Episodes")
+                    .font(shelfTitleFont)
+                    .foregroundStyle(Theme.text)
+                    .padding(.horizontal, Metrics.gutter)
+                    .id(Self.episodesAnchor)
+                MacEpisodeList(episodes: episodes, selection: $episodeSelection) { episode in
+                    Task { await player.play(item: episode) }
+                } onOpen: { episode in
+                    app.push(.item(episode.Id))
+                } onMarkWatched: { ids, played in
+                    Task { await markWatched(ids, played: played) }
+                }
+            }
+            .focusRegion()
+        }
+        #else
         episodeStack {
             if !episodes.isEmpty {
                 Text("Episodes")
@@ -835,6 +1087,40 @@ struct ItemDetailView: View {
         }
         .padding(.horizontal, Metrics.gutter)
         .focusRegion()
+        #endif
+    }
+
+    #if os(macOS)
+    /// The list's context menu acting on a selection: every row it names,
+    /// then one reload for the lot. `toggleWatched` is for the page's own
+    /// item and rewrites its copy; the rows are the server's to correct.
+    private func markWatched(_ ids: Set<String>, played: Bool) async {
+        var failed = false
+        for id in ids {
+            do {
+                try await client.markPlayed(id, played: played)
+            } catch {
+                failed = true
+            }
+        }
+        if failed {
+            app.presentAlert(
+                title: "Couldn't Update Watched State",
+                message: "The server didn't accept the change for every episode."
+            )
+        }
+        ItemMutations.shared.changed()
+    }
+    #endif
+
+    /// The Mac shows a shelf's scroller, because a pointer has nothing to
+    /// drag with otherwise; a finger and a remote don't need one.
+    private static var showsShelfIndicators: Bool {
+        #if os(macOS)
+        true
+        #else
+        false
+        #endif
     }
 
     /// Lazy off the television: a season can be twenty-odd rows, each with a
@@ -871,24 +1157,17 @@ struct ItemDetailView: View {
         let cast = mergedCast(item.People ?? []).prefix(24)
         if !cast.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Cast & crew")
+                Text("Cast & Crew")
                     .font(.title3.weight(.semibold))
                     .padding(.horizontal, Metrics.gutter)
-                ScrollView(.horizontal, showsIndicators: false) {
+                ScrollView(.horizontal, showsIndicators: Self.showsShelfIndicators) {
                     // Lazy, like the season row above it: a film's cast is
                     // two dozen headshots, and only the first few are on
                     // screen until the row is scrolled.
                     LazyHStack(alignment: .top, spacing: 16) {
                         ForEach(Array(cast)) { person in
                             Button {
-                                // Their own page where the server knows who
-                                // they are; a name with no id behind it can
-                                // still search for itself, as on Linux.
-                                if let id = person.Id, !id.isEmpty {
-                                    app.push(.person(id: id, name: person.Name ?? ""))
-                                } else {
-                                    app.push(.search(person.Name ?? ""))
-                                }
+                                openPerson(person)
                             } label: {
                                 VStack(spacing: 6) {
                                     RemoteImage(url: Artwork.person(person, width: 200))
@@ -906,13 +1185,36 @@ struct ItemDetailView: View {
                                 .frame(width: 96)
                             }
                             .rowButtonStyle()
+                            .macOpensOnReturn { openPerson(person) }
+                            .help(castHelp(person))
                         }
                     }
                     .padding(.horizontal, Metrics.gutter)
+                    #if os(macOS)
+                    // Room for the hover fill to sit outside the tile.
+                    .padding(.vertical, Metrics.shelfCardPadding)
+                    #endif
                 }
                 .focusRegion()
             }
         }
+    }
+
+    /// Their own page where the server knows who they are; a name with no id
+    /// behind it can still search for itself, as on Linux.
+    private func openPerson(_ person: Person) {
+        if let id = person.Id, !id.isEmpty {
+            app.push(.person(id: id, name: person.Name ?? ""))
+        } else {
+            app.push(.search(person.Name ?? ""))
+        }
+    }
+
+    /// "Jeremy Allen White — Carmy", whole, for the tile that truncates both.
+    private func castHelp(_ person: Person) -> String {
+        let name = person.Name ?? ""
+        guard let role = person.Role ?? person.type, !role.isEmpty else { return name }
+        return "\(name) — \(role)"
     }
 
     /// One entry per person. The same person can be both director and actor,
@@ -949,7 +1251,11 @@ struct ItemDetailView: View {
         scrolledPastHero = false
         #if !os(tvOS)
         episodeHighlight = nil
-        #else
+        #endif
+        #if os(macOS)
+        episodeSelection = []
+        #endif
+        #if os(tvOS)
         qualityChoice = nil
         placedFocus = false
         #endif
@@ -1027,20 +1333,23 @@ struct ItemDetailView: View {
             app.toast("That trailer couldn't be found", tone: .error)
             return
         }
+        #if os(macOS)
+        // The environment's opener rather than NSWorkspace directly: it is
+        // what the rest of SwiftUI's links go through, and a window that
+        // wants to intercept links can.
+        openURL(url)
+        #else
         if await !Trailers.open(url) {
             app.toast("This trailer is on YouTube, and there is nothing here to open it with", tone: .error)
         }
+        #endif
     }
 
     private func toggleFavourite(_ item: BaseItem) async {
         let next = !item.userData.isFavorite
         do {
             try await client.setFavorite(item.Id, favorite: next)
-            var updated = item
-            var data = updated.userData
-            data.IsFavorite = next
-            updated.UserData = data
-            self.item = updated
+            updateUserData(of: item.Id) { $0.IsFavorite = next }
         } catch {
             app.toast("Couldn't update favorites", tone: .error)
         }
@@ -1050,15 +1359,26 @@ struct ItemDetailView: View {
         let next = !item.userData.played
         do {
             try await client.markPlayed(item.Id, played: next)
-            var updated = item
-            var data = updated.userData
-            data.Played = next
-            data.PlaybackPositionTicks = 0
-            updated.UserData = data
-            self.item = updated
+            updateUserData(of: item.Id) {
+                $0.Played = next
+                $0.PlaybackPositionTicks = 0
+            }
         } catch {
             app.toast("Couldn't update watched state", tone: .error)
         }
+    }
+
+    /// Applies a change to the page's item as it is *now*, not as it was when
+    /// the button was pressed. Each toggle awaits the server; one that wrote
+    /// back the copy it started with undid whatever the other had finished in
+    /// the meantime — Favorite then Mark watched in quick succession left the
+    /// page showing only one of them, although the server had both.
+    private func updateUserData(of id: String, _ change: (inout UserData) -> Void) {
+        guard var current = self.item, current.Id == id else { return }
+        var data = current.userData
+        change(&data)
+        current.UserData = data
+        self.item = current
     }
 
     // MARK: - Downloads

@@ -2,57 +2,29 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- A Jellyfin server on the LAN is very often plain HTTP, and refusing to
-	     talk to it would make the app useless on exactly the setup it is most
-	     often used with. The sign-in screen says so in as many words, and
-	     Settings keeps an HTTPS/HTTP pill visible for the life of the session. -->
-	<!-- NSAllowsArbitraryLoads and nothing else. NSAllowsLocalNetworking used
-	     to sit beside it and looked like belt and braces; it is the opposite.
-	     Naming any of the narrower keys — NSAllowsLocalNetworking,
-	     NSAllowsArbitraryLoadsInWebContent, NSAllowsArbitraryLoadsForMedia —
-	     makes the system *ignore* NSAllowsArbitraryLoads entirely and honour
-	     only the narrow ones. So the app allowed plain HTTP on the local
-	     network and refused it everywhere else, which is a policy nobody chose
-	     and one that stays invisible until something off-LAN is tried: a Live
-	     TV channel whose playlist hands back an http:// address for the stream
-	     failed with NSURLErrorDomain -1022 while its https:// artwork loaded
-	     perfectly, on the same screen, at the same moment. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>aquarium</string>
+				<string>fellyjin</string>
+			</array>
+		</dict>
+	</array>
+	<key>FJCarPlayVideo</key>
+	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
-	<!-- Finding a server by hostname on the local network needs this on iOS 14+. -->
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Aquarium connects to your Jellyfin server, which is usually on your own network.</string>
-	<!-- Audio keeps running when the screen locks or the app is backgrounded.
-	     Downloads do not need a mode of their own: they run on background
-	     URLSessions, which the system keeps alive without one. `fetch` used to
-	     be listed here too, but nothing schedules a BGAppRefreshTask, and a
-	     declared mode with no implementation behind it is a review question. -->
-	<key>UIBackgroundModes</key>
+	<key>NSUserActivityTypes</key>
 	<array>
-		<string>audio</string>
+		<string>app.aquarium.playing</string>
 	</array>
-	<!-- The sleep timer / audiobook chapter activity and the download one —
-	     see Shared/LiveActivityTypes.swift. Neither is updated by push, so
-	     there is no frequent-updates key beside this. -->
-	<key>NSSupportsLiveActivities</key>
-	<true/>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
-	<!-- The CarPlay Video tab (films on the car's screen while parked, iOS
-	     26.4+). Off until Apple grants the CarPlay *video* entitlement and it
-	     is in the entitlements file and the profile: using a video feature of
-	     the templates without it is an exception, which in a car is a crash.
-	     Turn this on in the same change that adds the entitlement. -->
-	<key>FJCarPlayVideo</key>
-	<false/>
-	<!-- CarPlay. The music player's scene on a car's screen — see
-	     Music/CarPlayScene.swift. The main window is SwiftUI's own and
-	     needs no entry here; this manifest only adds the second role. It
-	     does nothing at all until the com.apple.developer.carplay-audio
-	     entitlement is granted and added to the profile. -->
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -72,30 +44,9 @@
 			</array>
 		</dict>
 	</dict>
-	<!-- How the Apple TV home screen gets back into the app. A poster on the
-	     top shelf is a `aquarium://item/<id>` link, and the Play button on a
-	     focused poster is `aquarium://play/<id>`; AppModel.handle is the far
-	     end of both. An iPhone's home screen quick actions come in the same
-	     way (Core/QuickActions.swift), plus `aquarium://search`. No part of
-	     the scheme carries anything but an item id. -->
-	<!-- Handoff. While something plays, an activity of this type is current
-	     and another device on the same iCloud account can pick the film up
-	     where it is — see Player/PlaybackHandoff.swift. -->
-	<key>NSUserActivityTypes</key>
+	<key>UIBackgroundModes</key>
 	<array>
-		<string>app.aquarium.playing</string>
-	</array>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLName</key>
-			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>aquarium</string>
-				<string>fellyjin</string>
-			</array>
-		</dict>
+		<string>audio</string>
 	</array>
 </dict>
 </plist>

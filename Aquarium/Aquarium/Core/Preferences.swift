@@ -281,6 +281,10 @@ final class Preferences {
             }
             if let session { remember(session) }
             publishSessionToCloud()
+            #if os(iOS)
+            // The watch signs in with whatever this phone is signed in to.
+            Task { @MainActor in WatchLink.shared.sendContext() }
+            #endif
         }
     }
 
@@ -635,6 +639,19 @@ final class Preferences {
         didSet { write(tabBarOrder, forKey: "tab_bar_order") }
     }
 
+    /// The playlists the Apple Watch keeps a copy of — see `WatchLink`. This
+    /// phone's, not the account's: the watch is paired with one phone.
+    var watchPlaylistIds: [String] {
+        didSet { defaults.set(watchPlaylistIds, forKey: "watch_playlists") }
+    }
+
+    /// Send the audiobooks this account is part-way through to the watch
+    /// without being asked. Off unless chosen: a download the wearer did not
+    /// ask for is a mystery on a small screen.
+    var watchKeepsBooks: Bool {
+        didSet { defaults.set(watchKeepsBooks, forKey: "watch_keeps_books") }
+    }
+
     // ---- iCloud ----
 
     /// Whether this device joins the shared settings.
@@ -712,6 +729,8 @@ final class Preferences {
         lastRoute = d.string(forKey: "last_route") ?? ""
         recentSearches = d.stringArray(forKey: "recent_searches") ?? []
         tabBarOrder = d.stringArray(forKey: "tab_bar_order") ?? []
+        watchPlaylistIds = d.stringArray(forKey: "watch_playlists") ?? []
+        watchKeepsBooks = d.bool(forKey: "watch_keeps_books")
         syncsAcrossDevices = d.object(forKey: "cloud_sync") == nil ? true : d.bool(forKey: "cloud_sync")
         losslessOnCellular = d.bool(forKey: "music_lossless_cellular")
         musicAutoplay = d.object(forKey: "music_autoplay") == nil ? true : d.bool(forKey: "music_autoplay")

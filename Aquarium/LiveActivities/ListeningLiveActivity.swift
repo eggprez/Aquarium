@@ -1,11 +1,13 @@
-//  What is being listened to: a sleep timer's countdown, an audiobook's place
-//  in its chapter, or both at once.
+//  What is being listened to, and when the sleep timer will stop it.
 //
 //  Everything that moves here moves by itself. The countdown is a
-//  `Text(timerInterval:)` and the chapter bar a `ProgressView(timerInterval:)`,
-//  both of which the system animates from two dates without asking anyone —
-//  the app says something only when those dates change: a seek, a pause, a
-//  new chapter, a different speed.
+//  `Text(timerInterval:)`, which the system animates from a date without
+//  asking anyone — the app says something only when that date changes, or
+//  when playback pauses or resumes.
+//
+//  An audiobook's place in its chapter used to be drawn here as well. It was
+//  taken out: the bar had to be re-anchored by the app after every stall,
+//  seek, speed change and pause, and it never stayed honest for long.
 
 import ActivityKit
 import AppIntents
@@ -26,18 +28,18 @@ struct ListeningLiveActivity: Widget {
         } dynamicIsland: { context in
             let state = context.state
             // Stale means the app stopped speaking while something was
-            // playing; its dates have run out, and would say 0:00.
+            // playing; the deadline has passed, and would say 0:00.
             let clocks = !context.isStale
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Image(systemName: state.symbol)
+                    Image(systemName: State.symbol)
                         .font(.title2)
                         .foregroundStyle(ActivityPalette.accentText)
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    if clocks, let deadline = state.sleepDeadline {
-                        SleepCountdown(deadline: deadline)
+                    if clocks {
+                        SleepCountdown(deadline: state.sleepDeadline)
                             .font(.title3.weight(.semibold))
                             .frame(maxWidth: 76, alignment: .trailing)
                             .padding(.trailing, 4)
@@ -52,28 +54,20 @@ struct ListeningLiveActivity: Widget {
                     }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(spacing: 10) {
-                        if let chapter = state.chapter { ChapterProgress(chapter: chapter, clocks: clocks) }
-                        if clocks, state.sleepDeadline != nil { SleepButtons() }
+                    if clocks {
+                        SleepButtons().padding(.top, 4)
                     }
-                    .padding(.top, 4)
                 }
             } compactLeading: {
-                Image(systemName: state.symbol).foregroundStyle(ActivityPalette.accentText)
+                Image(systemName: State.symbol).foregroundStyle(ActivityPalette.accentText)
             } compactTrailing: {
-                if clocks, let deadline = state.sleepDeadline {
-                    SleepCountdown(deadline: deadline)
+                if clocks {
+                    SleepCountdown(deadline: state.sleepDeadline)
                         .font(.caption.weight(.semibold))
                         .frame(maxWidth: 48)
-                } else if let chapter = state.chapter {
-                    ChapterRing(chapter: chapter, clocks: clocks)
                 }
             } minimal: {
-                if !clocks || state.sleepDeadline == nil, let chapter = state.chapter {
-                    ChapterRing(chapter: chapter, clocks: clocks)
-                } else {
-                    Image(systemName: state.symbol).foregroundStyle(ActivityPalette.accentText)
-                }
+                Image(systemName: State.symbol).foregroundStyle(ActivityPalette.accentText)
             }
             .keylineTint(ActivityPalette.accent)
             .widgetURL(Self.link(state))
@@ -89,10 +83,7 @@ struct ListeningLiveActivity: Widget {
 }
 
 extension ListeningActivityAttributes.ContentState {
-    var symbol: String {
-        if sleepDeadline != nil { return "moon.zzz.fill" }
-        return chapter != nil ? "book.fill" : "music.note"
-    }
+    static let symbol = "moon.zzz.fill"
 }
 
 // MARK: - Lock Screen
@@ -104,7 +95,7 @@ private struct ListeningLockScreen: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
-                Image(systemName: state.symbol)
+                Image(systemName: ListeningActivityAttributes.ContentState.symbol)
                     .font(.title2)
                     .foregroundStyle(ActivityPalette.accentText)
                     .frame(width: 30)
@@ -115,24 +106,23 @@ private struct ListeningLockScreen: View {
                     }
                 }
                 Spacer(minLength: 8)
-                if !isStale, let deadline = state.sleepDeadline {
+                if !isStale {
                     VStack(alignment: .trailing, spacing: 0) {
-                        SleepCountdown(deadline: deadline)
+                        SleepCountdown(deadline: state.sleepDeadline)
                             .font(.title2.weight(.semibold))
                             .frame(maxWidth: 96, alignment: .trailing)
                         Text("until sleep").font(.caption2).foregroundStyle(ActivityPalette.dim)
                     }
-                } else if !state.isPlaying || isStale {
+                } else {
                     Text("Paused").font(.subheadline.weight(.semibold)).foregroundStyle(ActivityPalette.dim)
                 }
             }
-            // A book left paused for a quarter of an hour keeps its name on
+            // Something left paused for a quarter of an hour keeps its name on
             // the Lock Screen and gives the rest of the space back. So does
-            // one whose app stopped speaking mid-chapter: its dates have run
-            // out, and the countdown would sit at 0:00.
+            // one whose app stopped speaking: its deadline has passed, and
+            // the countdown would sit at 0:00.
             if !isStale {
-                if let chapter = state.chapter { ChapterProgress(chapter: chapter) }
-                if state.sleepDeadline != nil { SleepButtons() }
+                SleepButtons()
             }
         }
         .foregroundStyle(.white)
@@ -152,7 +142,7 @@ private struct ListeningSmall: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
-                Image(systemName: state.symbol)
+                Image(systemName: ListeningActivityAttributes.ContentState.symbol)
                     .font(.footnote.weight(.bold))
                     .foregroundStyle(ActivityPalette.accentText)
                 Text(state.title)
@@ -160,9 +150,9 @@ private struct ListeningSmall: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
-            if !isStale, let deadline = state.sleepDeadline {
+            if !isStale {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    SleepCountdown(deadline: deadline, alignment: .leading)
+                    SleepCountdown(deadline: state.sleepDeadline, alignment: .leading)
                         .font(.system(.title2, design: .rounded).weight(.bold))
                         .frame(maxWidth: 110, alignment: .leading)
                         .fixedSize(horizontal: true, vertical: false)
@@ -171,77 +161,13 @@ private struct ListeningSmall: View {
                         .foregroundStyle(ActivityPalette.smallDim)
                         .lineLimit(1)
                 }
-            } else if !isStale, let chapter = state.chapter {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    ChapterLeft(chapter: chapter)
-                        .font(.system(.title3, design: .rounded).weight(.bold))
-                    Text(state.isPlaying ? chapter.shortPlace : "Paused")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(ActivityPalette.smallDim)
-                        .lineLimit(1)
-                }
-            } else if !state.isPlaying || isStale {
+            } else {
                 Text("Paused")
                     .font(.system(.title3, design: .rounded).weight(.bold))
                     .foregroundStyle(ActivityPalette.smallDim)
-            } else if let subtitle = state.subtitle {
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(ActivityPalette.smallDim)
-                    .lineLimit(1)
-            }
-            if !isStale, let chapter = state.chapter {
-                ChapterBar(chapter: chapter)
-                    .tint(state.isPlaying ? ActivityPalette.accentText : ActivityPalette.smallDim)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-    }
-}
-
-/// Time left in the chapter: counting while the book plays, standing still
-/// while it doesn't.
-private struct ChapterLeft: View {
-    let chapter: ListeningActivityAttributes.Chapter
-
-    var body: some View {
-        if let span = chapter.span {
-            Text(timerInterval: span, countsDown: true)
-                .monospacedDigit()
-                .frame(maxWidth: 100, alignment: .leading)
-                .fixedSize(horizontal: true, vertical: false)
-        } else {
-            Text(ListeningActivityAttributes.Chapter.clock(chapter.remaining))
-                .monospacedDigit()
-        }
-    }
-}
-
-private struct ChapterBar: View {
-    let chapter: ListeningActivityAttributes.Chapter
-
-    var body: some View {
-        Group {
-            if let span = chapter.span {
-                ProgressView(timerInterval: span, countsDown: false, label: { EmptyView() }, currentValueLabel: { EmptyView() })
-            } else {
-                ProgressView(value: chapter.fraction)
-            }
-        }
-        .progressViewStyle(.linear)
-    }
-}
-
-extension ListeningActivityAttributes.Chapter {
-    /// "4:07", "1:02:09" — how `Text(timerInterval:)` draws the same span.
-    static func clock(_ seconds: TimeInterval) -> String {
-        let pattern: Duration.TimeFormatStyle.Pattern = seconds >= 3600 ? .hourMinuteSecond : .minuteSecond
-        return Duration.seconds(max(0, seconds).rounded()).formatted(.time(pattern: pattern))
-    }
-
-    /// "ch. 4 of 31", or "left" for a book that is one piece.
-    var shortPlace: String {
-        count > 1 ? "ch. \(number) of \(count)" : "left"
     }
 }
 
@@ -273,77 +199,5 @@ private struct SleepButtons: View {
             }
         }
         .buttonStyle(.plain)
-    }
-}
-
-private struct ChapterProgress: View {
-    let chapter: ListeningActivityAttributes.Chapter
-    var clocks = true
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(heading).font(.caption.weight(.semibold)).lineLimit(1)
-                Spacer(minLength: 8)
-                Group {
-                    if clocks, let span = chapter.span {
-                        Text(timerInterval: span, countsDown: true)
-                            .monospacedDigit()
-                            .multilineTextAlignment(.trailing)
-                            .frame(maxWidth: 64, alignment: .trailing)
-                    } else {
-                        Text(Self.left(chapter.remaining))
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(ActivityPalette.dim)
-            }
-            Group {
-                if clocks, let span = chapter.span {
-                    ProgressView(timerInterval: span, countsDown: false, label: { EmptyView() }, currentValueLabel: { EmptyView() })
-                } else {
-                    ProgressView(value: chapter.fraction)
-                }
-            }
-            .progressViewStyle(.linear)
-            .tint(ActivityPalette.accent)
-        }
-    }
-
-    /// "Chapter 4 of 31 · The Letter", or just the name when the book is one
-    /// piece and the count would say nothing.
-    private var heading: String {
-        guard chapter.count > 1 else { return chapter.name }
-        let place = "Chapter \(chapter.number) of \(chapter.count)"
-        // A chapter called "Chapter 4" doesn't need saying twice.
-        if chapter.name.isEmpty || chapter.name.localizedCaseInsensitiveContains("chapter \(chapter.number)") {
-            return place
-        }
-        return "\(place) · \(chapter.name)"
-    }
-
-    /// The same clock the running countdown shows, standing still — "1 min
-    /// left" was said of a chapter with fifteen seconds to go.
-    private static func left(_ seconds: TimeInterval) -> String {
-        "\(ListeningActivityAttributes.Chapter.clock(seconds)) left"
-    }
-}
-
-/// The chapter as a ring, for the corner of the Dynamic Island.
-private struct ChapterRing: View {
-    let chapter: ListeningActivityAttributes.Chapter
-    var clocks = true
-
-    var body: some View {
-        Group {
-            if clocks, let span = chapter.span {
-                ProgressView(timerInterval: span, countsDown: false, label: { EmptyView() }, currentValueLabel: { EmptyView() })
-            } else {
-                ProgressView(value: chapter.fraction)
-            }
-        }
-        .progressViewStyle(.circular)
-        .tint(ActivityPalette.accent)
-        .frame(width: 22, height: 22)
     }
 }

@@ -191,6 +191,9 @@ final class PlayerModel {
     /// plays regardless; this is what tells the screen to explain the black
     /// picture rather than leave it looking like a hang.
     private(set) var noVideoTrack = false
+    /// The size of the picture being shown, once there is one. The Mac's
+    /// player window takes its shape from it; zero until the first frame.
+    private(set) var pictureSize: CGSize = .zero
     /// What the stream turned out to contain, once it has been looked at — see
     /// `StreamDiagnosis`. Replaces the general explanation on the banner with
     /// the actual codec whenever it can be read.
@@ -1202,6 +1205,19 @@ final class PlayerModel {
         if opts.maxBitrate == nil, !opts.bitrateIsChosen, !opts.live, prefs.defaultBitrate != nil,
            !meta.inherited {
             opts.maxBitrate = prefs.defaultBitrate
+        }
+
+        // Which of the file's tracks to ask for, settled here from the file's
+        // own list rather than left to the server's defaults — see
+        // `preferredStreams`. For a different file than the last one, always:
+        // indexes carried over from the previous episode number *its* tracks.
+        // For the same file, only when nothing has been chosen for it; a
+        // reopen that names a track is that choice, and keeps it.
+        if !opts.live, let source = item.MediaSources?.first, !source.streams.isEmpty,
+           self.item?.Id != item.Id || (opts.audioStreamIndex == nil && opts.subtitleStreamIndex == nil) {
+            let wanted = preferredStreams(in: source, seriesId: item.SeriesId)
+            opts.audioStreamIndex = wanted.audio
+            opts.subtitleStreamIndex = wanted.subtitle
         }
 
         let startSeconds: Double = {
@@ -2420,6 +2436,7 @@ final class PlayerModel {
                 MainActor.assumeIsolated {
                     guard let self, self.playerItem === avItem else { return }
                     if size != .zero {
+                        if self.pictureSize != size { self.pictureSize = size }
                         self.pictureWatchdog?.cancel()
                         self.pictureWatchdog = nil
                         self.noVideoTrack = false
@@ -3408,6 +3425,80 @@ final class PlayerModel {
             selectedSubtitleTrack = index
             rememberTrackChoice()
         }
+    }
+
+    /// The tracks Settings would pick from the file's own list, as the server
+    /// numbers them — what to ask for, so the stream arrives carrying them.
+    ///
+    /// `applyPreferredTracks` makes the same choice once the stream is open,
+    /// from what AVFoundation can see; and on a transcode that is one audio
+    /// track and no subtitles, whichever the file has, so a preference applied
+    /// only there was never applied to a transcode at all — the film opened in
+    /// whatever language the file leads with, every time. Asked for up front,
+    /// the track is in the stream when it opens.
+    ///
+    /// Only where it would make a difference. A track that is the file's own
+    /// default is left unnamed: the server sends it anyway, the stream is the
+    /// one it would have been, and a direct play stays a direct play. Naming
+    /// a subtitle is what turns a direct play into a stream the server builds
+    /// (see `DeviceProfile.requestedSubtitleProfiles`), which is the price of
+    /// the words being there when the picture is — the same price choosing
+    /// the track from the menu pays.
+    ///
+    /// What was chosen for this series last time wins over Settings, as it
+    /// does below. `nil` leaves a choice to the server; `-1` for the subtitle
+    /// is Jellyfin's spelling of none.
+    private func preferredStreams(in source: MediaSource, seriesId: String?) -> (audio: Int?, subtitle: Int?) {
+        let audioStreams = source.audioStreams
+        let subtitleStreams = source.subtitleStreams
+        let saved = seriesId.flatMap { prefs.trackChoice(seriesId: $0) }
+
+        // The track the server sends when nothing is asked for.
+        let defaultAudio = audioStreams.first { $0.Index == source.DefaultAudioStreamIndex }
+            ?? audioStreams.first { $0.IsDefault ?? false }
+            ?? audioStreams.first
+
+        var audio: MediaStream?
+        for want in [saved?.audio, prefs.audioLanguage] {
+            guard let want, !want.isEmpty else { continue }
+            if let match = audioStreams.first(where: { Languages.matches(preference: want, tag: $0.Language) }) {
+                audio = match
+                break
+            }
+        }
+        let audioIndex = audio?.Index == defaultAudio?.Index ? nil : audio?.Index
+
+        // The same rule as `applyPreferredTracks`: with the sound already in
+        // the preferred language, "forced only" means the track that
+        // translates signs and the odd foreign line, or nothing.
+        let audioMatches = Languages.matches(
+            preference: prefs.audioLanguage, tag: (audio ?? defaultAudio)?.Language
+        )
+        var subtitle: Int?
+        for (want, fromSettings) in [(saved?.sub, false), (prefs.subtitleLanguage, true)] {
+            guard let want, !want.isEmpty else { continue }
+            if want == "off" {
+                // Only worth saying when the file has something to turn on.
+                subtitle = subtitleStreams.isEmpty ? nil : -1
+                break
+            }
+            let candidates = subtitleStreams.filter { Languages.matches(preference: want, tag: $0.Language) }
+            if fromSettings, prefs.forcedSubtitlesOnly, audioMatches {
+                subtitle = candidates.first(where: \.isForced)?.Index ?? (subtitleStreams.isEmpty ? nil : -1)
+                break
+            }
+            if let pick = candidates.first(where: { !$0.isForced }) ?? candidates.first {
+                subtitle = pick.Index
+                break
+            }
+            // A saved language the file doesn't have falls through to
+            // Settings, as it does once the stream is open.
+        }
+        if let subtitle, subtitle >= 0, subtitle == source.DefaultSubtitleStreamIndex {
+            // Already what the server would send.
+            return (audioIndex, nil)
+        }
+        return (audioIndex, subtitle)
     }
 
     /// The first track list of a file is AVFoundation's own choice, and it is

@@ -83,6 +83,12 @@ actor ImageLoader {
     /// fetched and decoded a second time.
     private var widestInMemory: [String: (tag: String, width: Int, url: URL)] = [:]
 
+    #if os(macOS)
+    /// The Mac's word that memory is short. Kept, because a dispatch source
+    /// nobody holds is cancelled.
+    private let memoryPressure: DispatchSourceMemoryPressure
+    #endif
+
     private init() {
         #if canImport(UIKit)
         // `purge()` used to be defined and never called, so the cache relied on
@@ -93,7 +99,32 @@ actor ImageLoader {
         ) { _ in
             Task { await ImageLoader.shared.purge() }
         }
+        #else
+        // A Mac has no memory warning notification; the kernel's pressure
+        // level is the same signal. Warning as well as critical, since by
+        // critical the app is already being swapped.
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .global(qos: .utility))
+        source.setEventHandler {
+            Task { await ImageLoader.shared.purge() }
+        }
+        source.resume()
+        memoryPressure = source
         #endif
+    }
+
+    /// How many pixels to ask the server for, for a picture drawn `points`
+    /// wide on a screen of `displayScale` — the value of
+    /// `@Environment(\.displayScale)` where the picture is drawn.
+    ///
+    /// Rounded up to a step of eighty, and not because the arithmetic needs
+    /// it: a Mac shelf sizes its cards from the window, so every resize would
+    /// otherwise be a new width, a new URL, a new resize on the server and a
+    /// new download. Eighty pixels of step is at most a few percent of blur on
+    /// the widest card and a cache that survives dragging a window edge.
+    nonisolated static func requestWidth(points: CGFloat, displayScale: CGFloat) -> Int {
+        let pixels = points * max(1, displayScale)
+        let step: CGFloat = 80
+        return Int((pixels / step).rounded(.up) * step)
     }
 
     private lazy var session: URLSession = {
@@ -300,7 +331,6 @@ actor ImageLoader {
     /// had: a 2000-pixel PNG unpacks to 16 MB for a 160-point tile, so a web
     /// picture with no width asked of the server is scaled down as it is read.
     private static func decode(_ data: Data, for url: URL) -> PlatformImage? {
-        #if canImport(UIKit)
         // A URL that asks for a width is taken to have been given one — but
         // only up to a point. "maxwidth=" in a query is something any host can
         // write, and a logo address carrying it used to skip the scaling
@@ -309,10 +339,18 @@ actor ImageLoader {
         if url.scheme?.hasPrefix("http") == true, let small = downsample(data, maxPixel: ceiling) {
             return small
         }
+        #if canImport(UIKit)
         guard let image = UIImage(data: data) else { return nil }
         return image.preparingForDisplay() ?? image
         #else
-        return NSImage(data: data)
+        // `NSImage(data:)` is as lazy as `UIImage(data:)`: the JPEG is
+        // unpacked by the first draw, on the main thread, one tile at a time
+        // as the grid scrolls. Decoding through the image source here, with
+        // caching on, hands the view a bitmap that is already pixels.
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let cgImage = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+        else { return NSImage(data: data) }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         #endif
     }
 
@@ -330,10 +368,9 @@ actor ImageLoader {
         return query.contains("maxwidth=") || query.contains("fillwidth=")
     }
 
-    #if canImport(UIKit)
     /// Nil when the picture is already small enough, and the ordinary decode
     /// will do.
-    private static func downsample(_ data: Data, maxPixel: Int) -> UIImage? {
+    private static func downsample(_ data: Data, maxPixel: Int) -> PlatformImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -348,9 +385,14 @@ actor ImageLoader {
             kCGImageSourceThumbnailMaxPixelSize: maxPixel,
         ] as CFDictionary
         guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else { return nil }
+        #if canImport(UIKit)
         return UIImage(cgImage: thumbnail)
+        #else
+        // Sized in pixels, so a point is a pixel and the view scales it to the
+        // frame it is given, the same as the UIKit path.
+        return NSImage(cgImage: thumbnail, size: NSSize(width: thumbnail.width, height: thumbnail.height))
+        #endif
     }
-    #endif
 
     // MARK: - Artwork kept on disk
 
@@ -586,6 +628,10 @@ struct RemoteImage: View {
     /// there isn't — a hero whose title art is missing still has to say what the
     /// title is — rather than leaving a hole where the artwork would have been.
     var onResolved: ((Bool) -> Void)?
+    /// A last say over a picture that did arrive, by its size. An image this
+    /// turns down is treated as one the server doesn't have: nothing is drawn
+    /// and `onResolved` hears `false`, so the caller's fallback takes over.
+    var accepts: ((CGSize) -> Bool)?
 
     @State private var image: PlatformImage?
     @State private var placeholder: CGImage?
@@ -695,6 +741,7 @@ struct RemoteImage: View {
         }
         for candidate in urls {
             if let hit = await ImageLoader.shared.cached(candidate) {
+                guard isAcceptable(hit) else { return reject() }
                 image = hit
                 loadedURL = primary
                 isFetching = false
@@ -732,7 +779,8 @@ struct RemoteImage: View {
                 switch await ImageLoader.shared.fetch(candidate) {
                 case .image(let loaded):
                     guard !Task.isCancelled else { return }
-                    withAnimation(.easeOut(duration: 0.25)) {
+                    guard isAcceptable(loaded) else { return reject() }
+                    withAnimation(.easeOut(duration: Self.fadeIn)) {
                         image = loaded
                     }
                     loadedURL = primary
@@ -753,6 +801,29 @@ struct RemoteImage: View {
         onResolved?(false)
     }
 
+    private func isAcceptable(_ picture: PlatformImage) -> Bool {
+        accepts?(picture.size) ?? true
+    }
+
+    private func reject() {
+        image = nil
+        isFetching = false
+        onResolved?(false)
+    }
+
+    /// How long a picture that came off the network takes to resolve out of
+    /// its placeholder. One that was already in memory doesn't fade at all —
+    /// see the cached branch of `refresh`. A quarter of a second reads as a
+    /// flicker on a Mac grid scrolled with a wheel, where a row of tiles
+    /// arrives at once; a tenth is the artwork settling.
+    private static var fadeIn: Double {
+        #if os(macOS)
+        0.12
+        #else
+        0.25
+        #endif
+    }
+
     /// How many times a pass that only ever *failed* is repeated, and how long
     /// is left between them.
     private static let attempts = 3
@@ -766,6 +837,10 @@ struct RemoteImage: View {
 /// out of step is more distracting than the empty tiles were — and Apple's own
 /// grids use a moving sheen over the eventual shape instead. It respects Reduce
 /// Motion, where the placeholder simply stays still.
+///
+/// Nothing on the Mac, where a sheen sweeping across a page of tiles is a
+/// web loading idiom: the placeholder stays a still quaternary fill, and the
+/// screens put a small `ProgressView` in the toolbar for "still loading".
 struct ShimmerOverlay: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
@@ -779,6 +854,14 @@ struct ShimmerOverlay: View {
     }
 
     var body: some View {
+        #if os(macOS)
+        Color.clear.allowsHitTesting(false)
+        #else
+        sweep
+        #endif
+    }
+
+    private var sweep: some View {
         GeometryReader { geo in
             let width = geo.size.width
             let band = max(width * 0.55, 48)

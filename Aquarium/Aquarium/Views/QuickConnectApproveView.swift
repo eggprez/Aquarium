@@ -19,8 +19,13 @@ struct QuickConnectApproveSection: View {
     var body: some View {
         Section {
             HStack(spacing: 12) {
-                TextField("6-digit code", text: $code)
+                TextField("Code", text: $code, prompt: Text("6-digit code"))
                     .font(.body.monospacedDigit())
+                    #if os(macOS)
+                    .frame(maxWidth: 160)
+                    #else
+                    .labelsHidden()
+                    #endif
                     // A number pad and nothing more. Marked as a one-time
                     // code, the keyboard offered whatever six digits had last
                     // arrived by text message — and this code signs someone
@@ -38,6 +43,15 @@ struct QuickConnectApproveSection: View {
                         if outcome != nil { outcome = nil }
                     }
                     .onSubmit { if code.count == 6 { isConfirming = true } }
+                #if os(macOS)
+                // The spinner sits beside the button rather than in it, so
+                // the button keeps its width; Return is the button, and the
+                // "…" says a confirmation comes first.
+                if isApproving { ProgressView().controlSize(.small) }
+                Button("Approve…") { isConfirming = true }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(code.count != 6 || isApproving || client.isOffline)
+                #else
                 Button {
                     isConfirming = true
                 } label: {
@@ -50,6 +64,7 @@ struct QuickConnectApproveSection: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accentStrong)
                 .disabled(code.count != 6 || isApproving || client.isOffline)
+                #endif
             }
             .confirmationDialog(
                 "Sign another device in as \(client.session?.userName ?? "you")?",
@@ -62,17 +77,34 @@ struct QuickConnectApproveSection: View {
                 Text("Only approve a code you can see on your own device's screen right now. Whoever holds the device showing it gets full access to your account.")
             }
             if let outcome {
+                #if os(macOS)
+                Label {
+                    Text(outcome.text)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: outcome.tone == .ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(outcome.tone == .ok ? Color.green : (outcome.tone == .bad ? Color.red : Color.orange))
+                }
+                .font(.callout)
+                #else
                 HStack(spacing: 8) {
                     StatusPill(text: outcome.tone == .ok ? "Approved" : "Not approved", tone: outcome.tone)
                     Text(outcome.text)
                         .font(.caption)
                         .foregroundStyle(Theme.textDim)
                 }
+                #endif
             }
         } header: {
             Text("Quick Connect")
         } footer: {
+            #if os(macOS)
             Text("Another device signing in to this server — an Apple TV, say — can show a code instead of asking for a password. Enter the code here and it is signed in as you.")
+                .foregroundStyle(.secondary)
+            #else
+            Text("Another device signing in to this server — an Apple TV, say — can show a code instead of asking for a password. Enter the code here and it is signed in as you.")
+            #endif
         }
     }
 

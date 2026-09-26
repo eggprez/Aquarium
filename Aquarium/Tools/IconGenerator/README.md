@@ -20,6 +20,12 @@ That writes a staging tree whose layout mirrors `Aquarium/Assets.xcassets`:
   the colour.
 - `Logo.imageset/` — the same tile with its corners baked in, for `Image("Logo")`
   on the sign-in screen and in `BrandMark`.
+- `Watch/AppIcon.appiconset/watch-1024.png` — the Apple Watch icon, for
+  `Watch/Assets.xcassets`. watchOS masks every icon into a circle, so this one
+  is composed for the inscribed disc: full-bleed and opaque like the iOS tile,
+  but the ring is pulled in until its corners clear the circumference and the
+  bubbles are laid out around the disc rather than the corner (`circleIcon`
+  and `watchBubbles` in `brand.swift`).
 - `App Icon.brandassets/` — the tvOS layered icon as four parallax layers
   (Back gradient, Middle shadow, Front mark, Bubbles on top) at 400×240 and at the 1280×768 App
   Store size, plus the two top shelf images.

@@ -2,16 +2,14 @@
 //
 //  A Live Activity is drawn by a separate process from a small Codable value
 //  the app hands the system; the extension never sees the player or the
-//  download manager, only what is written here. Two activities: what is being
-//  listened to (a sleep timer's countdown, an audiobook's place in its
-//  chapter) and what is being downloaded.
+//  download manager, only what is written here. Two activities: a sleep
+//  timer's countdown over whatever is playing, and what is being downloaded.
 //
 //  Neither is told the time. Nothing can push to a Jellyfin client — there is
 //  no server of ours for a push to come from — so an activity is only ever
 //  updated while the app is running, and anything that moves between updates
 //  has to move by itself. That is why the state below carries *dates*: the
-//  system draws a countdown to a deadline, or a bar filling between two
-//  moments, with no further word from the app.
+//  system draws a countdown to a deadline with no further word from the app.
 //
 //  The buttons are App Intents, and the system runs an intent's `perform` in
 //  the app's process, not the extension's. The extension still has to compile
@@ -36,28 +34,13 @@ struct ListeningActivityAttributes: ActivityAttributes {
         /// The author or artist, when there is one.
         var subtitle: String?
         var isPlaying: Bool
-        /// When the sleep timer stops playback; nil when none is set.
-        var sleepDeadline: Date?
-        /// Where an audiobook is in its chapter; nil for anything else.
-        var chapter: Chapter?
+        /// When the sleep timer stops playback.
+        var sleepDeadline: Date
         /// A film rather than something in the music player. Tapping the
         /// activity opens Now Playing, which a film doesn't have.
         var isVideo = false
     }
 
-    struct Chapter: Codable, Hashable, Sendable {
-        var name: String
-        /// One-based, for "Chapter 4 of 31".
-        var number: Int
-        var count: Int
-        /// The chapter's start and end as moments on the wall clock, at the
-        /// speed being listened at — so the bar fills on its own. Only while
-        /// playing: a paused book's chapter ends at no particular time.
-        var span: ClosedRange<Date>?
-        /// The same two facts standing still, for when it is paused.
-        var fraction: Double
-        var remaining: TimeInterval
-    }
 }
 
 // MARK: - Downloads
