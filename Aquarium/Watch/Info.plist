@@ -11,8 +11,10 @@
 	<!-- The watch talks to the server itself when the phone is away. -->
 	<key>WKRunsIndependentlyWithCompanionApp</key>
 	<true/>
-	<!-- Keeps playing with the wrist down. -->
-	<key>WKBackgroundModes</key>
+	<!-- Keeps playing with the wrist down. UIBackgroundModes, not
+	     WKBackgroundModes: on watchOS the WK key only takes the workout and
+	     session kinds, and an "audio" under it is refused at install. -->
+	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
 	</array>
