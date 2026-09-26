@@ -50,6 +50,18 @@ struct DownloadsView: View {
     @State private var freeSpace: Int64?
 
     var body: some View {
+        #if os(macOS)
+        // A list, a grid and a toolbar — see `DownloadsView+Mac.swift`. The
+        // records, the grouping, the tiles and the confirmation below are
+        // shared with it.
+        MacDownloadsView()
+        #else
+        phoneBody
+        #endif
+    }
+
+    #if !os(macOS)
+    private var phoneBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 summary
@@ -433,17 +445,6 @@ struct DownloadsView: View {
                     .buttonStyle(.bordered)
                     .disabled(isSyncing || client.isOffline)
                 }
-                #if os(macOS)
-                Button {
-                    DownloadManager.revealInFinder()
-                } label: {
-                    Label("Show in Finder", systemImage: "folder")
-                        .labelStyle(.iconOnly)
-                        .font(.title3)
-                }
-                .buttonStyle(.borderless)
-                .help("Show the downloads folder in Finder")
-                #endif
                 manageMenu
             }
 
@@ -528,9 +529,6 @@ struct DownloadsView: View {
                 .labelStyle(.iconOnly)
                 .font(.title3)
         }
-        #if os(macOS)
-        .help("Manage downloads")
-        #endif
         .disabled(downloads.records.isEmpty && !offersAllMusic)
     }
 
@@ -606,6 +604,7 @@ struct DownloadsView: View {
             .padding(.horizontal, Metrics.gutter)
         }
     }
+    #endif
 }
 
 // MARK: - Download All Music
@@ -673,6 +672,28 @@ extension View {
         _ pending: Binding<DownloadDeletion?>,
         onConfirm: @escaping ([String]) -> Void
     ) -> some View {
+        #if os(macOS)
+        // An alert, the way Finder asks before emptying the Trash: the
+        // deletion is the default button, Cancel beside it.
+        alert(
+            pending.wrappedValue?.title ?? "",
+            isPresented: Binding(
+                get: { pending.wrappedValue != nil },
+                set: { if !$0 { pending.wrappedValue = nil } }
+            ),
+            presenting: pending.wrappedValue
+        ) { deletion in
+            Button(deletion.confirmLabel.capitalized, role: .destructive) {
+                if deletion.clearsQueue { DownloadManager.shared.clearQueue() }
+                onConfirm(deletion.ids)
+                pending.wrappedValue = nil
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("Cancel", role: .cancel) { pending.wrappedValue = nil }
+        } message: { deletion in
+            Text(deletion.message)
+        }
+        #else
         confirmationDialog(
             pending.wrappedValue?.title ?? "",
             isPresented: Binding(
@@ -691,6 +712,7 @@ extension View {
         } message: { deletion in
             Text(deletion.message)
         }
+        #endif
     }
 }
 
@@ -917,13 +939,67 @@ struct DownloadedRow: View {
             url: record.artURL.flatMap(URL.init(string:)),
             fallbackURL: fallback
         )
+        #if os(macOS)
+        // A list row's height, not a cell's: the row is one line of title and
+        // one of detail.
+        if record.isEpisode {
+            picture.frame(width: 80, height: 45).cardChrome(radius: 4)
+        } else {
+            picture.frame(width: 34, height: 51).cardChrome(radius: 4)
+        }
+        #else
         if record.isEpisode {
             picture.frame(width: 104, height: 59).cardChrome(radius: 6)
         } else {
             picture.frame(width: 52, height: 78).cardChrome(radius: 6)
         }
+        #endif
     }
 
+    #if os(macOS)
+    @State private var isHovering = false
+
+    /// A row in a list that selects and double-clicks: no button of its own,
+    /// no menu of its own — the list supplies both, on the selection — and a
+    /// play button that appears under the pointer, the way Music's does.
+    var body: some View {
+        HStack(spacing: 10) {
+            thumbnail
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayTitle)
+                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    Text(record.quality)
+                    if record.played {
+                        Label("Watched", systemImage: "checkmark.circle.fill")
+                    } else if record.positionTicks > 0, record.runTimeTicks > 0 {
+                        Text("\(Format.clock(Double(record.positionTicks) / 10_000_000)) in")
+                    }
+                    if !record.progressSynced {
+                        StatusPill(text: "To Sync", tone: .warn)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+            Button(action: onPlay) {
+                Image(systemName: "play.circle.fill")
+                    .font(.title3)
+            }
+            .buttonStyle(.borderless)
+            .help("Play")
+            .accessibilityLabel("Play \(displayTitle)")
+            .opacity(isHovering ? 1 : 0)
+        }
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
+        .macHover(cornerRadius: 6, inset: 4)
+    }
+    #else
     var body: some View {
         // The row proper and its menu are siblings rather than one inside the
         // other: a Menu nested in a Button's label never gets the tap, which is
@@ -998,6 +1074,7 @@ struct DownloadedRow: View {
             Label("Delete this episode", systemImage: "trash")
         }
     }
+    #endif
 }
 
 #endif

@@ -74,7 +74,7 @@ final class WatchSyncQueue {
                 return
             } catch {
                 // Whatever stopped this one stops the rest for now.
-                WatchLink.log.error("direct sync failed: \(error.localizedDescription, privacy: .public)")
+                WatchLink.log.error("direct sync failed: \(error.localizedDescription)")
                 return
             }
         }
@@ -137,12 +137,13 @@ final class WatchLink: NSObject {
             guard let answer = WatchSync.unpack(WatchReply.self, from: reply), let context = answer.context else { return }
             Task { @MainActor in self.apply(context) }
         }, errorHandler: { error in
-            Self.log.error("context request failed: \(error.localizedDescription, privacy: .public)")
+            WatchLog.error("link", "context request failed: \(error.localizedDescription)")
         })
     }
 
     private func apply(_ context: PhoneContext) {
         lastPhoneContextAt = Date()
+        WatchLog.note("link", "context from the phone: revision \(context.revision), \(context.credentials == nil ? "signed out" : "signed in"), \(context.mirror.bookIds.count) books, \(context.mirror.playlistIds.count) playlists")
         let client = JellyfinClient.shared
         if let credentials = context.credentials {
             client.install(credentials)
@@ -165,13 +166,68 @@ final class WatchLink: NSObject {
             Task { await downloads.download(request) }
         case .requestInventory:
             publishInventory(now: true)
+        case .requestLogs:
+            Task { await sendLogs() }
         case .fetchProgress(let itemId, let fraction):
             downloads.notePhoneProgress(itemId: itemId, fraction: fraction)
         case .fetchFailed(let itemId, let reason):
             downloads.phoneFailed(itemId: itemId, reason: reason)
-        case .progress, .fetch, .cancelFetch, .requestContext:
+        case .progress, .fetch, .fetchMany, .cancelFetch, .requestContext, .logs:
             break
         }
+    }
+
+    /// The watch's log, as a file transfer: it goes in the background, in
+    /// reach or not, and the phone keeps it under Settings → Apple Watch.
+    private(set) var logsSentAt: Date?
+    private(set) var logsSending = false
+
+    func sendLogs() async {
+        guard WCSession.isSupported(), WCSession.default.activationState == .activated, !logsSending else { return }
+        logsSending = true
+        defer { logsSending = false }
+        WatchLog.note("link", "sending the log to the phone")
+        guard let file = await WatchLog.export() else { return }
+        // In reach, the log goes now, in pieces, and the phone answers each
+        // one; away, or if a piece is refused, it goes as a file transfer,
+        // which waits for the phone.
+        if WCSession.default.isReachable, await sendLogsInline(file) {
+            logsSentAt = Date()
+            return
+        }
+        WCSession.default.transferFile(file, metadata: [WatchFileTransfer.kindKey: WatchFileTransfer.logsKind])
+        logsSentAt = Date()
+    }
+
+    private func sendLogsInline(_ file: URL) async -> Bool {
+        guard let raw = try? Data(contentsOf: file),
+              let packed = try? (raw as NSData).compressed(using: .lzfse) as Data else { return false }
+        let piece = 40 * 1024
+        let count = max(1, (packed.count + piece - 1) / piece)
+        let id = UUID().uuidString
+        for index in 0..<count {
+            let slice = packed.subdata(in: index * piece ..< min((index + 1) * piece, packed.count))
+            let chunk = WatchLogChunk(id: id, name: file.lastPathComponent, index: index, count: count, data: slice)
+            let ok = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                let done = OSAllocatedUnfairLock(initialState: false)
+                func finish(_ ok: Bool) {
+                    if done.withLock({ was in if was { return false }; was = true; return true }) { continuation.resume(returning: ok) }
+                }
+                WCSession.default.sendMessage(WatchSync.pack(WatchMessage.logs(chunk)), replyHandler: { reply in
+                    finish(WatchSync.unpack(WatchReply.self, from: reply)?.ok ?? false)
+                }, errorHandler: { error in
+                    WatchLog.error("link", "log piece \(index + 1) of \(count) refused: \(error.localizedDescription)")
+                    finish(false)
+                })
+                Task {
+                    try? await Task.sleep(for: .seconds(20))
+                    finish(false)
+                }
+            }
+            guard ok else { return false }
+        }
+        WatchLog.note("link", "log sent in \(count) piece\(count == 1 ? "" : "s"), \(packed.count / 1024)KB packed from \(raw.count / 1024)KB")
+        return true
     }
 
     /// A message for the phone: now when it is in reach, queued for its
@@ -210,7 +266,7 @@ final class WatchLink: NSObject {
                 try WCSession.default.updateApplicationContext(WatchSync.pack(context))
                 lastInventorySentAt = Date()
             } catch {
-                Self.log.error("inventory not sent: \(error.localizedDescription, privacy: .public)")
+                WatchLog.error("link", "inventory not sent: \(error.localizedDescription)")
             }
         }
     }
@@ -232,7 +288,7 @@ final class WatchLink: NSObject {
             WCSession.default.sendMessage(payload, replyHandler: { reply in
                 finish(WatchSync.unpack(WatchReply.self, from: reply)?.ok ?? false)
             }, errorHandler: { error in
-                Self.log.error("phone did not take events: \(error.localizedDescription, privacy: .public)")
+                WatchLog.error("link", "phone did not take events: \(error.localizedDescription)")
                 finish(false)
             })
             // WatchConnectivity times a reply out on its own, but not quickly.
@@ -249,6 +305,7 @@ extension WatchLink: WCSessionDelegate {
         let context = session.receivedApplicationContext
         let reachable = session.isReachable
         let companion = session.isCompanionAppInstalled
+        WatchLog.note("link", "session \(activationState == .activated ? "activated" : "not activated (\(activationState.rawValue))")\(error.map { ": \($0.localizedDescription)" } ?? ""), phone \(reachable ? "in reach" : "away"), companion \(companion ? "installed" : "missing")")
         Task { @MainActor in
             isActivated = activationState == .activated
             isPhoneReachable = reachable
@@ -273,10 +330,10 @@ extension WatchLink: WCSessionDelegate {
     /// returns — and then measured before it is believed.
     nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
         guard let itemId = file.metadata?[WatchFileTransfer.itemKey] as? String else {
-            Self.log.error("a file with no item id arrived from the phone: \(String(describing: file.metadata), privacy: .public)")
+            WatchLog.error("link", "a file with no item id arrived from the phone: \(String(describing: file.metadata))")
             return
         }
-        Self.log.notice("file for \(itemId, privacy: .public) arrived from the phone")
+        WatchLog.note("link", "file for \(itemId) arrived from the phone")
         let folder = WatchDownloads.folder(itemId)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let destination = folder.appendingPathComponent("audio.m4a")
@@ -284,7 +341,7 @@ extension WatchLink: WCSessionDelegate {
         do {
             try FileManager.default.moveItem(at: file.fileURL, to: destination)
         } catch {
-            Self.log.error("couldn't keep the phone's file: \(error.localizedDescription, privacy: .public)")
+            WatchLog.error("link", "couldn't keep the phone's file: \(error.localizedDescription)")
             return
         }
         let bytes = ((try? FileManager.default.attributesOfItem(atPath: destination.path))?[.size] as? NSNumber)?.int64Value ?? 0

@@ -23,6 +23,8 @@ struct PlayerWindow: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var window: NSWindow?
 
+    private var state: PlayerMacState { PlayerMacState.shared }
+
     var body: some View {
         Group {
             if player.isActive {
@@ -33,6 +35,12 @@ struct PlayerWindow: View {
         }
         .frame(minWidth: 480, minHeight: 270)
         .background(WindowReader(window: $window))
+        // Playback ▸ Stream Info (⌘I): what is actually arriving, beside the
+        // picture rather than over it — see `StreamInfoInspector`.
+        .inspector(isPresented: streamInfoBinding) {
+            StreamInfoInspector(player: player)
+                .inspectorColumnWidth(min: 260, ideal: 300, max: 440)
+        }
         .navigationTitle(player.isActive ? player.title : "Player")
         // Space, [ and ] belong to the player while this window is in front,
         // and to whatever is being typed into anywhere else — see
@@ -44,13 +52,34 @@ struct PlayerWindow: View {
             if !player.isActive { dismissWindow(id: Self.id) }
         }
         .onChange(of: player.isActive) { _, active in
-            if !active { dismissWindow(id: Self.id) }
+            if !active {
+                state.showsAudioDelay = false
+                dismissWindow(id: Self.id)
+            }
         }
         .onChange(of: window) { _, window in
             window?.backgroundColor = .black
+            // Full Screen (F) and Picture in Picture act on the window from
+            // the menu bar and from AVKit's delegate, neither of which has a
+            // view to ask — see `PlayerMacState`.
+            state.window = window
             fit(to: player.pictureSize)
         }
         .onChange(of: player.pictureSize) { _, size in fit(to: size) }
+        // The inspector adds a column beside the picture, and a window held
+        // to the picture's shape can't fit both: the ratio is let go while it
+        // is open and put back when it closes.
+        .onChange(of: state.showsStreamInfo) { _, shown in
+            if shown {
+                window?.contentAspectRatio = .zero
+            } else {
+                fit(to: player.pictureSize)
+            }
+        }
+    }
+
+    private var streamInfoBinding: Binding<Bool> {
+        Binding(get: { state.showsStreamInfo }, set: { state.showsStreamInfo = $0 })
     }
 
     /// Escape: out of full screen if it is in it, otherwise done watching.
@@ -67,7 +96,8 @@ struct PlayerWindow: View {
     /// follows, unless that would run off the screen, in which case both shrink.
     private func fit(to size: CGSize) {
         guard let window, size.width > 0, size.height > 0,
-              !window.styleMask.contains(.fullScreen) else { return }
+              !window.styleMask.contains(.fullScreen),
+              !state.showsStreamInfo else { return }
         window.contentAspectRatio = size
 
         let content = window.contentRect(forFrameRect: window.frame)
@@ -127,15 +157,22 @@ extension FocusedValues {
 
 /// The Playback menu.
 ///
-/// The keys with no modifier — Space, [ and ] — are only bound while the player
-/// window is in front. A menu's key equivalents are looked at before the view
-/// that has focus, so bound everywhere they took the space bar from every text
-/// field in the app: typing "star wars" into Search paused the film instead.
-/// Skipping and stopping carry ⌘, the TV app's keys for them, and work from any
-/// window while something is playing.
+/// The keys with no modifier — Space, [ and ], the arrows, M, F, S and C — are
+/// only bound while the player window is in front. A menu's key equivalents
+/// are looked at before the view that has focus, so bound everywhere they took
+/// the space bar from every text field in the app: typing "star wars" into
+/// Search paused the film instead. The same goes for ⌥[ and ⌥], which type
+/// quotation marks on a US keyboard. Skipping and stopping carry ⌘, the TV
+/// app's keys for them, and work from any window while something is playing.
+///
+/// The settings — Quality, Audio, Subtitles, Audio Sync, Audio Delay, Sleep,
+/// Fill Screen — are `PlayerMenuItems`, shared with the picture's context menu
+/// and with AVKit's action button.
 struct PlaybackCommands: Commands {
     let player: PlayerModel
     @FocusedValue(\.playerWindowFocused) private var inPlayer
+
+    private var state: PlayerMacState { PlayerMacState.shared }
 
     var body: some Commands {
         CommandMenu("Playback") {
@@ -148,12 +185,39 @@ struct PlaybackCommands: Commands {
             Button("Forward 10 Seconds") { player.seek(by: 10) }
                 .keyboardShortcut(.rightArrow, modifiers: .command)
                 .disabled(!player.isActive)
+            Button(player.activeSegment?.isOutro == true ? "Skip Credits" : "Skip Intro") {
+                player.skipSegment()
+            }
+            .keyboardShortcut(bare("s"))
+            .disabled(player.activeSegment == nil)
             Divider()
             Button("Slower") { player.stepSpeed(-1) }
                 .keyboardShortcut(bare("["))
-                .disabled(!player.isActive)
+                .disabled(!player.isActive || player.isLive)
             Button("Faster") { player.stepSpeed(1) }
                 .keyboardShortcut(bare("]"))
+                .disabled(!player.isActive || player.isLive)
+            Divider()
+            Button("Volume Up") { state.stepVolume(player, by: 0.05) }
+                .keyboardShortcut(bare(.upArrow))
+                .disabled(!player.isActive)
+            Button("Volume Down") { state.stepVolume(player, by: -0.05) }
+                .keyboardShortcut(bare(.downArrow))
+                .disabled(!player.isActive)
+            Toggle("Mute", isOn: Binding(get: { player.isMuted }, set: { player.isMuted = $0 }))
+                .keyboardShortcut(bare("m"))
+                .disabled(!player.isActive)
+            Divider()
+            PlayerMenuItems(player: player, shortcut: gated)
+            Divider()
+            Toggle("Stream Info", isOn: Binding(
+                get: { state.showsStreamInfo },
+                set: { state.showsStreamInfo = $0 }
+            ))
+            .keyboardShortcut("i", modifiers: .command)
+            .disabled(!player.isActive)
+            Button("Full Screen") { state.toggleFullScreen() }
+                .keyboardShortcut(bare("f"))
                 .disabled(!player.isActive)
             Divider()
             Button("Stop") { player.stop() }
@@ -163,7 +227,12 @@ struct PlaybackCommands: Commands {
     }
 
     private func bare(_ key: KeyEquivalent) -> KeyboardShortcut? {
-        inPlayer == true ? KeyboardShortcut(key, modifiers: []) : nil
+        gated(key, [])
+    }
+
+    /// Any key equivalent, bound only while the player window is in front.
+    private func gated(_ key: KeyEquivalent, _ modifiers: EventModifiers) -> KeyboardShortcut? {
+        inPlayer == true ? KeyboardShortcut(key, modifiers: modifiers) : nil
     }
 }
 #endif

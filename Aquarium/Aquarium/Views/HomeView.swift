@@ -55,6 +55,12 @@ struct HomeView: View {
     /// handler below.
     @State private var wasBackgrounded = false
     @State private var error: String?
+    #if os(macOS)
+    /// The title the media bar is showing right now, which is what the
+    /// toolbar's Play Featured starts. The carousel keeps it current as it
+    /// turns; see `HeroCarousel` in HomeView+Mac.swift.
+    @State private var featured: BaseItem?
+    #endif
 
     private var hero: BaseItem? { heroItems.first ?? resume.first ?? nextUp.first }
     private var isBare: Bool {
@@ -170,18 +176,16 @@ struct HomeView: View {
         }
         .ignoresSafeArea()
         #else
+        // The media bar runs up under the window's toolbar, the way the TV
+        // app's does: the toolbar keeps its title and its buttons but loses
+        // its own surface, and the top of the hero fades in from the window
+        // colour beneath them (see `HeroHeader.toolbarBlend`) so the controls
+        // stay legible in either appearance and there is no hard edge where
+        // the chrome used to stop and the picture used to start.
         scroll()
             .screenTitle("Home")
+            .toolbarBackground(.hidden, for: .windowToolbar)
         #endif
-    }
-
-    private var refreshControl: some View {
-        RefreshButton(
-            isRefreshing: isRefreshing,
-            overArtwork: isOverArtwork
-        ) {
-            Task { await reload(fresh: true) }
-        }
     }
 
     #if os(macOS)
@@ -197,23 +201,34 @@ struct HomeView: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
             }
-            .keyboardShortcut("r", modifiers: .command)
+            // No key equivalent of its own: View ▸ Refresh owns ⌘R, and this
+            // page answers it through `MacCommandRequests.refresh` below.
             .disabled(isRefreshing)
-            .help("Refresh Home (⌘R)")
+            .help("Refresh (⌘R)")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                guard let featured else { return }
+                Task { await HeroHeader.start(featured, app: app, player: player, client: client) }
+            } label: {
+                Label("Play Featured", systemImage: "play.fill")
+            }
+            .disabled(featured == nil)
+            .help(featured.map { "Play \(HeroHeader.displayTitle(of: $0))" } ?? "Play Featured")
         }
     }
     #endif
 
-    /// True only where the button floats over the media bar's backdrop.
-    private var isOverArtwork: Bool {
-        #if os(tvOS)
-        return !heroItems.isEmpty
-        #else
-        return false
-        #endif
+    #if os(tvOS)
+    private var refreshControl: some View {
+        RefreshButton(
+            isRefreshing: isRefreshing,
+            overArtwork: !heroItems.isEmpty
+        ) {
+            Task { await reload(fresh: true) }
+        }
     }
 
-    #if os(tvOS)
     /// The refresh button in the media bar's top corner: over the artwork,
     /// inside the title-safe area, clear of the tab strip the bar reaches up
     /// behind.
@@ -300,8 +315,12 @@ struct HomeView: View {
                             .overlay(alignment: .top) { refreshOverHero(bleed) }
                     }
                     #else
-                    if let hero {
+                    if !heroItems.isEmpty {
+                        HeroCarousel(items: heroItems, featured: $featured)
+                    } else if let hero {
                         HeroHeader(item: hero)
+                            .onAppear { featured = hero }
+                            .onChange(of: hero.Id) { _, _ in featured = hero }
                     }
                     #endif
                     // Eager rather than lazy on a television, and inset back
@@ -339,6 +358,14 @@ struct HomeView: View {
         .reloadWhenPlaybackEnds { await reload() }
         #if os(macOS)
         .toolbar { macToolbar }
+        // View ▸ Refresh (⌘R), the sidebar row's Refresh, and the app coming
+        // back to the front after a while away all arrive here as one
+        // counter — see `MacCommandRequests.refresh`. Only while Home is the
+        // page in front: a title pushed over it answers its own ⌘R.
+        .onChange(of: MacCommandRequests.shared.refresh) { _, _ in
+            guard isFrontmost else { return }
+            Task { await reload(fresh: true) }
+        }
         #endif
         // A press-and-hold menu anywhere can change what these shelves say —
         // Continue Watching and Next Up are both derived from watched state.
@@ -410,12 +437,17 @@ struct HomeView: View {
     @ViewBuilder
     private var shelves: some View {
         // A phone puts refresh in its top bar and a television over the corner
-        // of the media bar. A Mac puts it in the window's toolbar, with ⌘R —
-        // see `macToolbar` — rather than a row of its own here, which left a
-        // band of empty page between the media bar and the first shelf.
+        // of the media bar. A Mac puts it in the window's toolbar, answering
+        // View ▸ Refresh — see `macToolbar` — rather than a row of its own
+        // here, which left a band of empty page between the media bar and the
+        // first shelf.
         ForEach(sections, id: \.self) { section in
             shelf(section)
         }
+        // The music rows are the phone's for now: `AlbumShelf` and everything
+        // it opens into live inside the Music tab's `#if os(iOS)`, and
+        // `AppModel.hasMusic` is false on the Mac until that tab is built for
+        // it. Nothing to enable here until then.
         #if os(iOS)
         if app.hasMusic {
             AlbumShelf(title: "Recently Played", items: musicRecent) { album in
@@ -611,6 +643,10 @@ struct HomeView: View {
         // The home screen icon's press-and-hold menu leads with the same
         // title this page does.
         if failure == nil { QuickActions.update(resume: resume, nextUp: nextUp) }
+        #elseif os(macOS)
+        // The Dock icon's menu is the same list: what was left part-watched,
+        // then what is next.
+        if failure == nil { app.updateDockMenu(resume: resume, nextUp: nextUp) }
         #endif
 
         // The Apple TV home screen shows the same list, and this is the only
@@ -787,6 +823,15 @@ struct HeroHeader: View {
     /// the screen rather than below the chrome — the amount of safe area it is
     /// reaching up through. See `HomeView.scroll`.
     var topBleed: CGFloat = 0
+    /// How tall to draw this one. The platform's fixed `height` unless the
+    /// caller knows better — the Mac carousel derives it from the window's
+    /// width, so a wide window gets a taller picture rather than a strip.
+    var heroHeight: CGFloat = Self.height
+    /// The width the hero has been given, where the caller has measured it;
+    /// zero means "unknown", and the fixed sizes below stand in. On the Mac
+    /// the wordmark, the text column and the pixels asked of the server all
+    /// follow it.
+    var availableWidth: CGFloat = 0
 
     @Environment(AppModel.self) private var app
     @Environment(PlayerModel.self) private var player
@@ -803,6 +848,12 @@ struct HeroHeader: View {
     #if os(tvOS)
     private enum Focus: Hashable { case play, details }
     @FocusState private var focus: Focus?
+    #endif
+
+    #if os(macOS)
+    @Environment(\.displayScale) private var displayScale
+    /// The pointer resting on the picture, which is a button on the Mac.
+    @State private var isHoveringBackdrop = false
     #endif
 
     /// How tall the hero is on this platform. Shared so the skeleton that
@@ -829,7 +880,14 @@ struct HeroHeader: View {
 
     /// The picture is taller by whatever it is bleeding through; the text block
     /// is pinned to the bottom, so it stays exactly where it was.
-    private var artHeight: CGFloat { Self.height + topBleed }
+    private var artHeight: CGFloat { heroHeight + topBleed }
+
+    /// The name the hero leads with: the show's for an episode or a season,
+    /// the title's own for anything else. Shared with the toolbar's Play
+    /// Featured, whose tooltip names the same thing.
+    static func displayTitle(of item: BaseItem) -> String {
+        item.isEpisode || item.isSeason ? (item.SeriesName ?? item.title) : item.title
+    }
 
     /// What the text sits on, and the reason it can be read.
     ///
@@ -924,18 +982,27 @@ struct HeroHeader: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            RemoteImage(
-                url: Artwork.url(item, type: "Backdrop", width: Self.backdropWidth)
-                    ?? Artwork.url(item, type: "Primary", width: Self.backdropWidth),
-                blurHash: Artwork.hash(item, type: "Backdrop") ?? Artwork.hash(item),
-                placeholderFill: Theme.heroPlaceholderFill
-            )
-            .frame(height: artHeight)
-            .frame(maxWidth: .infinity)
-
-            edgeScrim.frame(height: artHeight)
-            legibilityScrim.frame(height: artHeight)
-            pageBlend.frame(height: artHeight)
+            #if os(macOS)
+            // The picture is the page's way into the title, as a poster is:
+            // click it and the title opens, hold it and the title's menu comes
+            // up. The scrims ride inside the button so the whole band answers
+            // the pointer, brightening a shade under it the way a tile does.
+            Button {
+                app.push(.item(item.Id))
+            } label: {
+                backdrop
+                    .brightness(isHoveringBackdrop ? 0.05 : 0)
+                    .animation(.easeOut(duration: 0.15), value: isHoveringBackdrop)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isHoveringBackdrop = $0 }
+            .itemContextMenu(item, allowsOpen: true)
+            .accessibilityLabel(Self.displayTitle(of: item))
+            .accessibilityHint("Opens the title")
+            #else
+            backdrop
+            #endif
 
             content
                 .padding(.horizontal, Metrics.gutter)
@@ -949,6 +1016,28 @@ struct HeroHeader: View {
         .onChange(of: item.Id) { _, _ in logoUnavailable = false }
     }
 
+    /// The artwork and everything that darkens it, at the hero's full size.
+    private var backdrop: some View {
+        ZStack {
+            RemoteImage(
+                url: Artwork.url(item, type: "Backdrop", width: backdropWidth)
+                    ?? Artwork.url(item, type: "Primary", width: backdropWidth),
+                blurHash: Artwork.hash(item, type: "Backdrop") ?? Artwork.hash(item),
+                placeholderFill: Theme.heroPlaceholderFill
+            )
+            .frame(height: artHeight)
+            .frame(maxWidth: .infinity)
+
+            edgeScrim
+            legibilityScrim
+            pageBlend
+            #if os(macOS)
+            toolbarBlend
+            #endif
+        }
+        .frame(height: artHeight)
+    }
+
     /// What to ask the server for. A television is a 1920-point canvas, so a
     /// 1600-wide backdrop was being stretched across it before anything cropped
     /// it.
@@ -960,17 +1049,68 @@ struct HeroHeader: View {
         #endif
     }
 
+    /// The pixels this particular hero needs. On the Mac that is the measured
+    /// width times the screen's scale — a 1600-pixel picture across a Retina
+    /// window twelve hundred points wide was the blur the review found — and
+    /// capped at 4K, past which the server is resizing for nothing. Elsewhere
+    /// it is the platform's fixed number.
+    private var backdropWidth: Int {
+        #if os(macOS)
+        guard availableWidth > 0 else { return Self.backdropWidth }
+        return min(3840, ImageLoader.requestWidth(points: availableWidth, displayScale: displayScale))
+        #else
+        return Self.backdropWidth
+        #endif
+    }
+
+    #if os(macOS)
+    /// The join to the toolbar, which has no surface of its own over this page
+    /// (see `HomeView.body`): the top of the picture rises out of the window
+    /// colour, so the title and the buttons in the toolbar sit on something
+    /// that is nearly the window in either appearance, and the picture is
+    /// fully itself by the time the toolbar ends. Measured in points from the
+    /// top rather than as a fraction, because the toolbar is the same height
+    /// whatever the hero is.
+    private var toolbarBlend: LinearGradient {
+        let reach: CGFloat = 96 / max(artHeight, 1)
+        return LinearGradient(
+            stops: [
+                .init(color: Theme.background.opacity(0.92), location: 0.00),
+                .init(color: Theme.background.opacity(0.55), location: reach * 0.45),
+                .init(color: Theme.background.opacity(0.18), location: reach * 0.75),
+                .init(color: .clear, location: reach),
+            ],
+            startPoint: .top, endPoint: .bottom
+        )
+    }
+    #endif
+
     /// How wide the text block is allowed to get before it wraps. Two-thirds of
     /// the screen on a television — 620 points there is a column narrow enough
     /// to break a film's title across three lines in the middle of a very wide
-    /// picture.
+    /// picture. On the Mac it follows the window: just over half of it, within
+    /// reason, so a title on a small window wraps before it reaches the far
+    /// side and one on a big window doesn't crowd a column meant for a phone.
     private var textWidth: CGFloat {
         #if os(tvOS)
         return 1000
+        #elseif os(macOS)
+        guard availableWidth > 0 else { return 620 }
+        return min(760, max(440, availableWidth * 0.55))
         #else
         return 620
         #endif
     }
+
+    #if os(macOS)
+    /// The wordmark's box, from the window: about a quarter of the width,
+    /// and never so small that a wide logo turns into a smudge.
+    private var logoBox: CGSize {
+        guard availableWidth > 0 else { return CGSize(width: 300, height: 76) }
+        let width = min(440, max(260, availableWidth * 0.26))
+        return CGSize(width: width, height: width * 0.26)
+    }
+    #endif
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -983,22 +1123,32 @@ struct HeroHeader: View {
 
                 if item.isEpisode, let label = item.episodeLabel {
                     Text(label)
-                        .font(.subheadline.weight(.semibold))
+                        .font(metaFont(strong: true))
                         .foregroundStyle(.white.opacity(0.9))
                         .lineLimit(1)
                 }
 
                 if !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.subheadline.weight(.medium))
+                        .font(metaFont(strong: false))
                         .foregroundStyle(.white.opacity(0.82))
                         .lineLimit(1)
                 }
             }
+            #if os(macOS)
+            // Words over the picture, not a control in front of it: a click
+            // on the title goes through to the backdrop underneath, which is
+            // the button that opens the title. The buttons below keep their
+            // own clicks.
+            .allowsHitTesting(false)
+            #endif
 
             if style == .home {
                 if let progress = item.progressFraction {
                     resumeBar(progress)
+                        #if os(macOS)
+                        .allowsHitTesting(false)
+                        #endif
                 }
                 actions
             }
@@ -1048,6 +1198,8 @@ struct HeroHeader: View {
             )
             #if os(tvOS)
             .frame(maxWidth: 520, maxHeight: 150, alignment: .leading)
+            #elseif os(macOS)
+            .frame(maxWidth: logoBox.width, maxHeight: logoBox.height, alignment: .leading)
             #else
             .frame(maxWidth: 300, maxHeight: 76, alignment: .leading)
             #endif
@@ -1055,7 +1207,7 @@ struct HeroHeader: View {
             // An episode and a season both belong to a show, and the show is
             // what the wordmark would have said; "Season 2" printed over the
             // artwork and again under it says nothing the second time.
-            Text(item.isEpisode || item.isSeason ? (item.SeriesName ?? item.title) : item.title)
+            Text(Self.displayTitle(of: item))
                 .font(.system(.largeTitle, design: .default, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(2)
@@ -1063,6 +1215,17 @@ struct HeroHeader: View {
                 // line and pushing the buttons off the artwork.
                 .minimumScaleFactor(0.75)
         }
+    }
+
+    /// The lines under the title. `.subheadline` was tuned for a phone and is
+    /// eleven points on a Mac, which over a photograph is a caption nobody
+    /// reads; the Mac gets body text, semibold where the phone was.
+    private func metaFont(strong: Bool) -> Font {
+        #if os(macOS)
+        return strong ? .body.weight(.semibold) : .callout.weight(.medium)
+        #else
+        return strong ? .subheadline.weight(.semibold) : .subheadline.weight(.medium)
+        #endif
     }
 
     /// The line under the title, for anything that isn't an episode: the year,
@@ -1088,6 +1251,15 @@ struct HeroHeader: View {
     /// cards below use.
     private func resumeBar(_ progress: Double) -> some View {
         HStack(spacing: 10) {
+            #if os(macOS)
+            // The system's own bar on the Mac, tinted: it is the same control
+            // the rest of the window uses for progress, and it sits in the
+            // accent colour like everything else that is "yours".
+            ProgressView(value: progress)
+                .progressViewStyle(.linear)
+                .tint(Color.accentColor)
+                .frame(width: 168)
+            #else
             ZStack(alignment: .leading) {
                 Capsule().fill(.white.opacity(0.28))
                 GeometryReader { geo in
@@ -1101,9 +1273,14 @@ struct HeroHeader: View {
             #else
             .frame(width: 168, height: 4)
             #endif
+            #endif
 
             Text(remainingText(progress))
+                #if os(macOS)
+                .font(.callout.weight(.medium))
+                #else
                 .font(.caption.weight(.medium))
+                #endif
                 .foregroundStyle(.white.opacity(0.82))
         }
         .padding(.top, 2)
@@ -1129,33 +1306,42 @@ struct HeroHeader: View {
             Button("Details") { app.push(.item(item.Id)) }
                 .appButtonStyle()
                 .focused($focus, equals: .details)
+            #elseif os(macOS)
+            // A Mac button, in the accent colour, with the hover and the press
+            // a Mac button has. Its own style rather than `.borderedProminent`:
+            // AppKit takes the fill off a prominent button whenever its window
+            // isn't the key one, and what's left — a clear bezel with the label
+            // in the text colour — disappears into a dark backdrop. Click into
+            // another app and the hero had a Details button and nothing else.
+            // See `MacHeroButtonStyle`.
+            //
+            // No `.keyboardShortcut(.defaultAction)`: this is a page, not a
+            // dialog, and Return anywhere in the window starting a film is not
+            // what Return means on a page. The Playback menu has Play.
+            Button {
+                Task { await start() }
+            } label: {
+                Label(playLabel, systemImage: "play.fill")
+                    .frame(minWidth: 84)
+            }
+            .buttonStyle(MacHeroButtonStyle())
+            .controlSize(.large)
+            .help("\(playLabel) \(Self.displayTitle(of: item))")
+
+            Button("Details") { app.push(.item(item.Id)) }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .help("Show details for \(Self.displayTitle(of: item))")
             #else
             Button {
                 Task { await start() }
             } label: {
-                Label(item.progressFraction != nil ? "Resume" : "Play", systemImage: "play.fill")
+                Label(playLabel, systemImage: "play.fill")
                     .font(.subheadline.weight(.semibold))
                     .frame(minWidth: 92)
-                    #if os(macOS)
-                    // Drawn here rather than by `.borderedProminent`: AppKit
-                    // takes the fill off a prominent button whenever its window
-                    // isn't the key one, and what's left — a clear bezel with
-                    // the label in the text colour — disappears into a dark
-                    // backdrop. Click into another app and the hero had a
-                    // Details button and nothing else.
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Theme.accentStrong, in: Capsule())
-                    .contentShape(Capsule())
-                    #endif
             }
-            #if os(macOS)
-            .buttonStyle(.plain)
-            #else
             .buttonStyle(.borderedProminent)
             .tint(Theme.accentStrong)
-            #endif
 
             // Not `.bordered`: its fill is drawn for a page background, and over
             // a photograph it is a grey smear with the accent colour written on
@@ -1175,12 +1361,17 @@ struct HeroHeader: View {
         }
         .padding(.top, 2)
         // The buttons are the one thing here that is meant to look like it sits
-        // on top of the picture rather than in it.
+        // on top of the picture rather than in it. Not on the Mac, where a
+        // button with a drop shadow is a button from somewhere else.
+        #if !os(macOS)
         .shadow(color: .black.opacity(0.28), radius: 8, y: 3)
+        #endif
         #if os(tvOS)
         .onChange(of: focus) { _, now in onFocusChange?(now != nil) }
         #endif
     }
+
+    private var playLabel: String { item.progressFraction != nil ? "Resume" : "Play" }
 
     /// What pressing Play starts.
     ///
@@ -1190,12 +1381,20 @@ struct HeroHeader: View {
     /// button, and the reason a series in the media bar isn't a dead end.
     private func start() async {
         guard !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
+        await Self.start(item, app: app, player: player, client: client)
+    }
+
+    /// The same road, for anything else that means "play what the hero is
+    /// showing" — the Mac toolbar's Play Featured, which has no hero of its
+    /// own to press.
+    @MainActor
+    static func start(_ item: BaseItem, app: AppModel, player: PlayerModel, client: JellyfinClient) async {
         guard item.isSeries else {
             await player.play(item: item)
             return
         }
-        isStarting = true
-        defer { isStarting = false }
 
         if let next = try? await client.seriesNextUp(seriesId: item.Id) {
             await player.play(item: next)

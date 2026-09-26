@@ -1,5 +1,6 @@
 //  A title in a window of its own, on a Mac — "Open in New Window" from any
-//  poster's menu.
+//  poster's menu — and, the same way, a library or a section from the
+//  sidebar's row menu.
 //
 //  The window has its own navigation: a season, an episode or a cast member
 //  opened from it opens in it, and its Back goes back through its own pages.
@@ -9,8 +10,8 @@
 //  `AppModel.keyNavigator`) — the window being worked in, which is the one
 //  that was clicked.
 //
-//  Windows are keyed by the title they opened on, so asking for the same one
-//  again brings its window forward rather than opening a second copy, and the
+//  Windows are keyed by what they opened on, so asking for the same one again
+//  brings its window forward rather than opening a second copy, and the
 //  system reopens them at launch the way it reopens a document.
 
 #if os(macOS)
@@ -61,10 +62,24 @@ final class ItemWindowNavigator {
     }
 }
 
+/// A title, by id. The window group the poster menus open into; kept keyed
+/// by the id so those callers don't change.
 struct ItemWindow: View {
     static let id = "item"
 
     let itemId: String?
+
+    var body: some View {
+        RouteWindow(route: itemId.map { Route.item($0) })
+    }
+}
+
+/// Any route in a window of its own — a library, Favorites, a search. The
+/// sidebar's "Open in New Window" opens these; see `MacSidebarRows`.
+struct RouteWindow: View {
+    static let id = "route"
+
+    let route: Route?
 
     @Environment(AppModel.self) private var app
     @Environment(JellyfinClient.self) private var client
@@ -74,17 +89,18 @@ struct ItemWindow: View {
 
     var body: some View {
         Group {
-            if let itemId, client.isSignedIn {
+            if let route, client.isSignedIn {
                 NavigationStack(path: navigator.pathBinding) {
-                    RouteDestination(route: .item(itemId))
+                    RouteDestination(route: route)
                         .navigationDestination(for: Route.self) { RouteDestination(route: $0) }
                 }
             } else {
-                EmptyState(symbol: "film", title: "Nothing to show", message: "This window's title isn't available.")
+                EmptyState(symbol: "film", title: "Nothing to Show", message: "This window's page isn't available.")
             }
         }
         .frame(minWidth: 720, minHeight: 520)
-        .background(Theme.background)
+        // No painted background: the window's own, so the toolbar's material
+        // and the page's hero read as one surface.
         .overlay(alignment: .bottom) { ToastOverlay() }
         .background(WindowReader(window: $window))
         // Whose pages a click opens into — see `AppModel.keyNavigator`. The
@@ -104,7 +120,7 @@ struct ItemWindow: View {
             }
         }
         .onDisappear { release() }
-        // A title window belongs to the account it was opened under.
+        // A window belongs to the account it was opened under.
         .onChange(of: client.session?.accountKey) { _, _ in dismissWindow() }
     }
 

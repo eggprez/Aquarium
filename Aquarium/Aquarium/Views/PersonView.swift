@@ -39,11 +39,20 @@ struct PersonView: View {
                         message: "No other film or show in your libraries credits \(displayName)."
                     )
                 } else {
+                    #if os(macOS)
+                    // A grid under each heading: a filmography is a list to
+                    // scan and select from, and a Mac window is wide enough
+                    // to show it whole rather than a row at a time. The grid
+                    // brings the Mac's own selection, arrows and menu with it.
+                    filmographyGrid(title: films.count == 1 ? "Film" : "Films", items: films)
+                    filmographyGrid(title: shows.count == 1 ? "Show" : "Shows", items: shows)
+                    #else
                     // Shelves, not one grid: "was in these films" and "was in
                     // these shows" are two answers, and a television can walk
                     // a shelf without a page of tiles between it and the top.
                     MediaShelf(title: films.count == 1 ? "Film" : "Films", items: films) { app.push(.item($0.Id)) }
                     MediaShelf(title: shows.count == 1 ? "Show" : "Shows", items: shows) { app.push(.item($0.Id)) }
+                    #endif
                 }
             }
             .padding(.top, 12)
@@ -52,7 +61,41 @@ struct PersonView: View {
         .screenTitle(displayName)
         .paletteBar()
         .task(id: personId) { await load() }
+        #if os(macOS)
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if isLoading {
+                    // Still asking, without a skeleton over what is already
+                    // shown: the credits arrive before the biography does.
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                Button {
+                    openWindow(id: RouteWindow.id, value: Route.person(id: personId, name: displayName))
+                } label: {
+                    Label("Open in New Window", systemImage: "macwindow.badge.plus")
+                }
+                .help("Open in New Window")
+            }
+        }
+        #endif
     }
+
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+
+    @ViewBuilder
+    private func filmographyGrid(title: String, items: [BaseItem]) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
+                Text(title)
+                    .font(.title3.weight(.semibold))
+                    .padding(.horizontal, Metrics.gutter)
+                MediaGrid(items: items) { app.push(.item($0.Id)) }
+            }
+        }
+    }
+    #endif
 
     private var displayName: String { person?.Name ?? (name.isEmpty ? "Person" : name) }
 
@@ -63,14 +106,23 @@ struct PersonView: View {
             // Plenty of people in a cast list have no picture on the server;
             // an empty dark slab said "still loading" for ever.
             ZStack {
+                #if os(macOS)
+                // The system's fill for a well with nothing in it, at the
+                // Mac's corner radius, which is smaller than a phone's.
+                Rectangle().fill(.quaternary)
+                Image(systemName: "person.fill")
+                    .font(.system(size: portraitSize.width * 0.4))
+                    .foregroundStyle(.tertiary)
+                #else
                 Theme.raised
                 Image(systemName: "person.fill")
                     .font(.system(size: portraitSize.width * 0.4))
                     .foregroundStyle(Theme.textDim.opacity(0.5))
+                #endif
                 RemoteImage(url: portraitURL, placeholderFill: Self.clear)
             }
             .frame(width: portraitSize.width, height: portraitSize.height)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: portraitRadius, style: .continuous))
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 8) {
                 #if os(tvOS)
@@ -84,6 +136,7 @@ struct PersonView: View {
                         .font(.subheadline)
                         .foregroundStyle(Theme.textDim)
                         .fixedSize(horizontal: false, vertical: true)
+                        .macSelectable()
                 }
                 if let bio = person?.Overview, !bio.isEmpty {
                     Text(bio)
@@ -91,16 +144,22 @@ struct PersonView: View {
                         .foregroundStyle(Theme.textBody)
                         .lineLimit(showsWholeBio ? nil : bioLines)
                         .fixedSize(horizontal: false, vertical: true)
+                        .macSelectable()
                     // A button rather than a tap on the text: a television can
                     // only scroll to what can take focus, and a biography that
                     // runs off the screen would otherwise be out of reach.
                     if bio.count > 320 {
-                        Button(showsWholeBio ? "Show less" : "Read more") {
+                        Button(showsWholeBio ? "Show Less" : "Read More") {
                             withAnimation(.easeOut(duration: 0.2)) { showsWholeBio.toggle() }
                         }
                         .font(.subheadline.weight(.medium))
                         #if os(tvOS)
                         .appButtonStyle()
+                        #elseif os(macOS)
+                        // A link, which is what a "Read More" is: words that
+                        // do something, in the colour the system gives them.
+                        .buttonStyle(.link)
+                        .help(showsWholeBio ? "Show Less" : "Read More")
                         #else
                         .buttonStyle(.plain)
                         .foregroundStyle(Theme.accent)
@@ -121,6 +180,14 @@ struct PersonView: View {
         CGSize(width: 220, height: 330)
         #else
         CGSize(width: 110, height: 165)
+        #endif
+    }
+
+    private var portraitRadius: CGFloat {
+        #if os(macOS)
+        8
+        #else
+        12
         #endif
     }
 

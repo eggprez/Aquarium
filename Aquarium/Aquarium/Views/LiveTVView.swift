@@ -17,6 +17,10 @@ struct LiveTVView: View {
 
     #if os(macOS)
     @State private var filter = ""
+    /// How many times Refresh has been asked for. Handed to the guide so
+    /// that it fetches its programmes again even when the channel list comes
+    /// back with the same ids — see `TVGuideView.reloadToken`.
+    @State private var refreshCount = 0
     #endif
 
     private var channels: [BaseItem] { store.channels }
@@ -54,9 +58,51 @@ struct LiveTVView: View {
         // that.
         core.toolbar(.hidden, for: .navigationBar)
         #else
-        core.searchable(text: $filter, prompt: "Filter channels")
+        // The Mac's furniture is the window's: the filter in the toolbar's
+        // search field, Refresh beside it, and the day and the line-up in the
+        // subtitle under the title. The guide's own controls — earlier, now,
+        // later, the date — are added to the same toolbar by `TVGuideView`.
+        core
+            .searchable(text: $filter, placement: .toolbar, prompt: "Filter Channels")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { refresh() } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .help("Fetch the channels and guide again (⌘R)")
+                    .disabled(store.isLoading)
+                }
+            }
+            // View ▸ Refresh, ⌘R. A counter from the menu rather than a
+            // shortcut on the button, so the key is bound in one place.
+            .onChange(of: MacCommandRequests.shared.refresh) { _, _ in refresh() }
         #endif
     }
+
+    #if os(macOS)
+    /// Fetch the line-up again, then tell the guide to ask for its programmes
+    /// again too: a Jellyfin refresh brings back the same channel ids, which
+    /// the guide would otherwise take as nothing having changed.
+    private func refresh() {
+        Task {
+            await store.refresh()
+            refreshCount += 1
+        }
+    }
+
+    /// What the subtitle says after the day: how many channels, of how many
+    /// when the filter is narrowing them, and where they come from.
+    private var sourceSummary: String {
+        let source = prefs.liveTVSource == .custom ? "Custom playlist" : "Jellyfin"
+        let count: String
+        if shown.count == channels.count {
+            count = "\(channels.count) channel\(channels.count == 1 ? "" : "s")"
+        } else {
+            count = "\(shown.count) of \(channels.count) channels"
+        }
+        return "\(count) · \(source)"
+    }
+    #endif
 
     #if os(iOS)
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -140,7 +186,9 @@ struct LiveTVView: View {
             TVGuideView(
                 channels: shown,
                 programsProvider: store.programsProvider,
-                noMatches: shown.isEmpty ? filter : nil
+                noMatches: shown.isEmpty ? filter : nil,
+                sourceSummary: sourceSummary,
+                reloadToken: refreshCount
             )
             #else
             TVGuideView(

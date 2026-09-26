@@ -11,6 +11,7 @@ import SwiftUI
 /// binding works exactly as it does for a flat list.
 struct MacSidebarRows: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         ForEach(MacSidebarGroup.grouped(app.sections)) { group in
@@ -27,6 +28,45 @@ struct MacSidebarRows: View {
             Label(section.title, systemImage: section.symbol)
                 .badge(badge(for: section))
                 .tag(section)
+                .contextMenu { menu(for: section) }
+        }
+    }
+
+    /// A row's menu: the section in a window of its own, and a fresh answer
+    /// from the server, where either makes sense. Home, Live TV and Downloads
+    /// have no second window — Home publishes to the Dock and assumes it is
+    /// the one in front, the guide's menu commands go to the main window's
+    /// guide, and Downloads is the device's queue.
+    @ViewBuilder
+    private func menu(for section: AppSection) -> some View {
+        if let route = windowRoute(for: section) {
+            Button("Open in New Window") { openWindow(id: RouteWindow.id, value: route) }
+        }
+        switch section {
+        case .library, .libraries, .favorites, .home:
+            Button(section == .home ? "Refresh" : "Refresh Library") {
+                app.selection = section
+                MacCommandRequests.shared.refresh += 1
+                // The saved library copy is what the library pages read first,
+                // so it is brought up to date along with the page.
+                Task { await LibraryIndex.shared.sync(force: true) }
+            }
+        case .liveTV:
+            Button("Refresh Guide") {
+                app.selection = section
+                MacCommandRequests.shared.refresh += 1
+                Task { await LiveTVStore.shared.refresh() }
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    private func windowRoute(for section: AppSection) -> Route? {
+        switch section {
+        case .library(let id, let name, let type): .library(id: id, name: name, collectionType: type)
+        case .favorites, .libraries: .section(section)
+        default: nil
         }
     }
 
@@ -46,8 +86,9 @@ struct MacSidebarGroup: Identifiable {
     let sections: [AppSection]
     var id: String { title ?? "top" }
 
-    /// Home and Search on their own at the top; then the libraries and what is
-    /// kept from them; then Live TV; then what is on this Mac.
+    /// Home on its own at the top (Search is the field above the rows, not a
+    /// row); then the libraries and what is kept from them; then Live TV; then
+    /// what is on this Mac.
     static func grouped(_ sections: [AppSection]) -> [MacSidebarGroup] {
         var top: [AppSection] = []
         var library: [AppSection] = []
@@ -131,10 +172,11 @@ struct MacSidebarFooter<Status: View>: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Now Playing")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(Theme.textDim)
+                    .foregroundStyle(.secondary)
                 Text(player.title)
                     .font(.caption.weight(.medium))
                     .lineLimit(1)
+                    .help(player.title)
             }
             Spacer(minLength: 4)
             Button {
@@ -147,10 +189,13 @@ struct MacSidebarFooter<Status: View>: View {
             .help(player.isPaused ? "Play" : "Pause")
         }
         .padding(8)
-        .background(Theme.raised, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        // A quaternary fill rather than a painted card: on the sidebar's
+        // material the strip stays vibrant, and reads as part of the sidebar
+        // rather than as a widget set on it.
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture { openWindow(id: PlayerWindow.id) }
-        .help("Show the player")
+        .help("Show the Player")
     }
 
     @ViewBuilder
@@ -159,8 +204,8 @@ struct MacSidebarFooter<Status: View>: View {
             RemoteImage(url: Artwork.still(for: item, width: 120))
         } else {
             ZStack {
-                Theme.accent.opacity(0.25)
-                Image(systemName: "play.rectangle.fill").foregroundStyle(Theme.accent)
+                Color.accentColor.opacity(0.25)
+                Image(systemName: "play.rectangle.fill").foregroundStyle(Color.accentColor)
             }
         }
     }
@@ -199,14 +244,14 @@ struct MacSidebarFooter<Status: View>: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(client.session?.userName ?? "Not signed in")
                         .font(.callout.weight(.medium))
-                        .foregroundStyle(Theme.text)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                     status
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2)
-                    .foregroundStyle(Theme.textDim)
+                    .foregroundStyle(.secondary)
             }
             .contentShape(Rectangle())
         }
@@ -216,7 +261,7 @@ struct MacSidebarFooter<Status: View>: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .help("Account, Settings and sign-out")
+        .help("Account, Settings and Sign Out")
     }
 
     private func host(_ server: String) -> String {

@@ -199,6 +199,9 @@ final class WatchDownloads: NSObject {
     /// which transfer the session's events are about. Behind a lock: the
     /// session's delegate asks from its own queue.
     @ObservationIgnored nonisolated private let taskMap = OSAllocatedUnfairLock(initialState: [Int: String]())
+    /// Bytes last passed on for each transfer, so the session's stream of
+    /// reports is thinned before it reaches the main thread.
+    @ObservationIgnored nonisolated private let lastReported = OSAllocatedUnfairLock(initialState: [String: Int64]())
     private var tasks: [Int: String] {
         get { taskMap.withLock { $0 } }
         set { taskMap.withLock { $0 = newValue } }
@@ -237,7 +240,7 @@ final class WatchDownloads: NSObject {
             // has no such thing, so it costs nothing to count it.
             let wifi = (path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet)) && !path.isExpensive
             let up = path.status == .satisfied
-            Self.log.notice("network: \(up ? "up" : "down", privacy: .public) via \(path.availableInterfaces.map { "\($0.type)" }.joined(separator: ","), privacy: .public) expensive=\(path.isExpensive)")
+            WatchLog.note("downloads", "network: \(up ? "up" : "down") via \(path.availableInterfaces.map { "\($0.type)" }.joined(separator: ",")) expensive=\(path.isExpensive)")
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let gained = up && !self.hasNetwork
@@ -392,24 +395,53 @@ final class WatchDownloads: NSObject {
     /// what a later delete of that thing takes with it.
     @discardableResult
     func enqueue(_ items: [BaseItem], reason: String, automatic: Bool = false) -> Int {
+        // One pass, one index rebuild, one note to the phone, and the
+        // records' files written off the main thread: a playlist of
+        // fifteen hundred songs queued one save at a time held the main
+        // thread long enough for the watch to kill the app part-way.
         var queued = 0
-        for item in items where item.isAudio {
+        var fresh: [WatchRecord] = []
+        var touched: [WatchRecord] = []
+        var seen = Set<String>()
+        for item in items where item.isAudio && seen.insert(item.Id).inserted {
             if var existing = record(for: item.Id) {
-                var touched = false
-                if !existing.reasons.contains(reason) { existing.reasons.insert(reason); touched = true }
-                if existing.automatic, !automatic { existing.automatic = false; touched = true }
-                if existing.status == .error { existing.status = .queued; existing.errorMessage = nil; existing.attempts = 0; touched = true; queued += 1 }
-                if existing.chapters == nil, let chapters = item.Chapters { existing.chapters = chapters; touched = true }
-                if touched { save(existing) }
+                var changed = false
+                if !existing.reasons.contains(reason) { existing.reasons.insert(reason); changed = true }
+                if existing.automatic, !automatic { existing.automatic = false; changed = true }
+                if existing.status == .error { existing.status = .queued; existing.errorMessage = nil; existing.attempts = 0; changed = true; queued += 1 }
+                if existing.chapters == nil, let chapters = item.Chapters { existing.chapters = chapters; changed = true }
+                if changed { records[byId[item.Id]!] = existing; touched.append(existing) }
                 continue
             }
             let record = WatchRecord(item: item, reasons: [reason], automatic: automatic)
             pendingItems[item.Id] = item
-            save(record)
+            fresh.append(record)
             queued += 1
         }
+        if !fresh.isEmpty {
+            records.insert(contentsOf: fresh, at: 0)
+            reindex()
+        }
+        if !fresh.isEmpty || !touched.isEmpty {
+            Self.writeMeta(fresh + touched)
+            changed()
+        }
+        WatchLog.note("downloads", "queued \(queued) of \(items.count) as \(reason)\(automatic ? " (automatic)" : ""), \(records.count) records, \(WatchLog.memory)")
         pump()
         return queued
+    }
+
+    /// Each record to its folder, in the background: the caller has already
+    /// put them in `records`, which is what the app reads.
+    private nonisolated static func writeMeta(_ list: [WatchRecord]) {
+        let encoded: [(String, Data)] = list.compactMap { r in (try? JSONEncoder().encode(r)).map { (r.itemId, $0) } }
+        Task.detached(priority: .utility) {
+            for (itemId, data) in encoded {
+                let folder = folder(itemId)
+                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try? data.write(to: folder.appendingPathComponent("meta.json"), options: .atomic)
+            }
+        }
     }
 
     func retry(_ itemId: String) {
@@ -428,6 +460,7 @@ final class WatchDownloads: NSObject {
 
     /// Cancel and forget a download that hasn't finished.
     func cancel(_ itemId: String) {
+        WatchLog.note("downloads", "cancel \(itemId)")
         if active == itemId { cancelActiveTask() }
         if record(for: itemId)?.relayAskedAt != nil { WatchLink.shared.send(.cancelFetch(itemId: itemId)) }
         removeFolder(itemId)
@@ -508,6 +541,7 @@ final class WatchDownloads: NSObject {
         try? FileManager.default.removeItem(at: Self.folder(itemId))
         pendingItems[itemId] = nil
         liveBytes[itemId] = nil
+        lastReported.withLock { $0[itemId] = nil }
         WatchImages.forget(itemId)
         guard !quiet else { return }
         if let i = byId[itemId] {
@@ -587,14 +621,27 @@ final class WatchDownloads: NSObject {
             }
         if phone {
             // Every queued item goes to the phone at once: its queue is the
-            // reliable one, and it downloads one at a time on its own.
+            // reliable one, and it downloads one at a time on its own. One
+            // message carries them all, a few hundred at a time.
+            var asked: [WatchRecord] = []
             for var r in candidates where r.relayAskedAt == nil {
                 r.status = .downloading
                 r.relayAskedAt = Date()
-                save(r)
-                link.send(.fetch(itemId: r.itemId))
-                Self.log.notice("asked the phone for \(r.itemId, privacy: .public)")
+                records[byId[r.itemId]!] = r
+                asked.append(r)
             }
+            guard !asked.isEmpty else { return }
+            Self.writeMeta(asked)
+            changed()
+            let ids = asked.map(\.itemId)
+            if ids.count == 1 {
+                link.send(.fetch(itemId: ids[0]))
+            } else {
+                for start in stride(from: 0, to: ids.count, by: 200) {
+                    link.send(.fetchMany(itemIds: Array(ids[start..<min(start + 200, ids.count)])))
+                }
+            }
+            WatchLog.note("downloads", "asked the phone for \(ids.count) items")
             return
         }
         guard active == nil, hasNetwork else { return }
@@ -612,9 +659,11 @@ final class WatchDownloads: NSObject {
     /// The phone gave up on an item. The watch tries itself when it can,
     /// and otherwise says why.
     func phoneFailed(itemId: String, reason: String) {
+        WatchLog.error("downloads", "phone gave up on \(itemId): \(reason)")
         guard var r = record(for: itemId), r.relayAskedAt != nil else { return }
         r.relayAskedAt = nil
         liveBytes[itemId] = nil
+        lastReported.withLock { $0[itemId] = nil }
         if hasNetwork, isOnWiFi || !r.automatic {
             r.status = .queued
             save(r)
@@ -673,7 +722,7 @@ final class WatchDownloads: NSObject {
         persistTasks()
         liveBytes[rec.itemId] = (0, rec.estimatedBytes)
         task.resume()
-        Self.log.notice("downloading \(rec.itemId, privacy: .public) attempt \(rec.attempts)")
+        WatchLog.note("downloads", "downloading \(rec.itemId) attempt \(rec.attempts)")
     }
 
     private func cancelActiveTask() {
@@ -734,7 +783,7 @@ final class WatchDownloads: NSObject {
         let whole = seconds.isFinite && seconds > 0 && (expected <= 0 || seconds >= expected * 0.97)
         if !whole {
             try? FileManager.default.removeItem(at: url)
-            Self.log.error("\(itemId, privacy: .public) arrived short: \(seconds)s of \(expected)s")
+            WatchLog.error("downloads", "\(itemId) arrived short: \(seconds)s of \(expected)s")
             rec.relayAskedAt = nil
             rec.attempts += 1
             if rec.attempts < 3 {
@@ -748,6 +797,7 @@ final class WatchDownloads: NSObject {
             finishActive(itemId)
             return
         }
+        WatchLog.note("downloads", "\(itemId) landed: \(Int(seconds))s, \(bytes / 1024)KB")
         rec.status = .complete
         rec.bytes = bytes
         rec.relayAskedAt = nil
@@ -765,6 +815,7 @@ final class WatchDownloads: NSObject {
 
     private func failed(itemId: String, message: String) {
         guard var rec = record(for: itemId) else { finishActive(itemId); return }
+        WatchLog.error("downloads", "\(itemId) failed (attempt \(rec.attempts + 1)): \(message)")
         rec.attempts += 1
         if rec.attempts < 3, hasNetwork {
             rec.status = .queued
@@ -779,6 +830,7 @@ final class WatchDownloads: NSObject {
     private func finishActive(_ itemId: String) {
         if active == itemId { active = nil }
         liveBytes[itemId] = nil
+        lastReported.withLock { $0[itemId] = nil }
         tasks = tasks.filter { $0.value != itemId }
         persistTasks()
         pump()
@@ -806,6 +858,12 @@ final class WatchDownloads: NSObject {
         if plan != self.plan {
             self.plan = plan
             UserDefaults.standard.set(try? JSONEncoder().encode(plan), forKey: "watch_plan")
+        }
+        // What the phone asked for by itself and no longer does is dropped
+        // from the queue; what already arrived stays until removed by hand.
+        let wanted = Set(plan.bookIds + playlists.filter { plan.playlistIds.contains($0.id) }.flatMap(\.itemIds))
+        for r in inFlight where r.automatic && !wanted.contains(r.itemId) && r.reasons.allSatisfy({ $0 == "book" || $0.hasPrefix("playlist:") }) {
+            cancel(r.itemId)
         }
         mirror()
     }
@@ -970,6 +1028,23 @@ extension WatchDownloads: URLSessionDownloadDelegate {
         didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
     ) {
         guard let itemId = taskItem(downloadTask) else { return }
+        // The session reports every chunk; the rings and bars need a step
+        // of half a percent or so, and every report redraws the pages.
+        let step = max(Int64(65_536), totalBytesExpectedToWrite / 200)
+        let due = lastReported.withLock { last -> Bool in
+            let previous = last[itemId] ?? 0
+            let finished = totalBytesExpectedToWrite > 0 && totalBytesWritten >= totalBytesExpectedToWrite
+            guard finished || totalBytesWritten - previous >= step else { return false }
+            last[itemId] = totalBytesWritten
+            return true
+        }
+        guard due else { return }
+        // A line every tenth of the way, with the memory left: the number
+        // a download that died part-way is judged by.
+        let tenth = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite / 10 : Int64(8 * 1024 * 1024)
+        if tenth > 0, (totalBytesWritten - bytesWritten) / tenth != totalBytesWritten / tenth {
+            WatchLog.note("downloads", "\(itemId) at \(totalBytesWritten / 1024)KB of \(totalBytesExpectedToWrite / 1024)KB, \(WatchLog.memory)")
+        }
         Task { @MainActor in
             let expected = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : (self.liveBytes[itemId]?.expected ?? 0)
             self.liveBytes[itemId] = (totalBytesWritten, expected)
@@ -993,6 +1068,7 @@ extension WatchDownloads: URLSessionDownloadDelegate {
             moved = (try? FileManager.default.moveItem(at: location, to: destination)) != nil
         }
         let bytes = ((try? FileManager.default.attributesOfItem(atPath: destination.path))?[.size] as? NSNumber)?.int64Value ?? 0
+        WatchLog.note("downloads", "\(itemId) finished: HTTP \(status), \(bytes / 1024)KB, moved=\(moved), \(WatchLog.memory)")
         Task { @MainActor in
             if moved {
                 await self.landed(itemId: itemId, at: destination, bytes: bytes)
@@ -1006,6 +1082,7 @@ extension WatchDownloads: URLSessionDownloadDelegate {
         guard let error else { return }
         guard let itemId = taskItem(task) else { return }
         let code = (error as? URLError)?.code
+        WatchLog.error("downloads", "\(itemId) task ended: \(error.localizedDescription) (\(code.map { String($0.rawValue) } ?? "?"))")
         Task { @MainActor in
             if code == .cancelled { self.finishActive(itemId); return }
             self.failed(itemId: itemId, message: error.localizedDescription)

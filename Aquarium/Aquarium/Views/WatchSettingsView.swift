@@ -45,12 +45,14 @@ struct WatchSettingsView: View {
                 mirrorSection
                 storageSection
                 syncSection
+                diagnosticsSection
             }
         }
         .screenTitle("Apple Watch")
         .task {
             await playlists.ensureLoaded()
             link.requestInventory()
+            link.reloadWatchLogs()
         }
     }
 
@@ -58,9 +60,16 @@ struct WatchSettingsView: View {
 
     private var mirrorSection: some View {
         Section {
-            Text("Audiobooks you're part-way through are sent to the watch automatically.")
-                .font(.callout)
-                .foregroundStyle(Theme.textDim)
+            Toggle(isOn: Binding(
+                get: { prefs.watchKeepsBooks },
+                set: { on in prefs.watchKeepsBooks = on; link.sendContext() }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Audiobooks in progress")
+                    Text("Every book you're part-way through, sent as you start it")
+                        .font(.caption).foregroundStyle(Theme.textDim)
+                }
+            }
             if playlists.playlists.isEmpty {
                 Text(playlists.isLoading ? "Loading playlists…" : "No playlists on this server.")
                     .foregroundStyle(Theme.textDim)
@@ -78,7 +87,7 @@ struct WatchSettingsView: View {
         } header: {
             Text("Kept on the watch")
         } footer: {
-            Text("A playlist picked here is downloaded to the watch over Wi‑Fi and kept up to date as it changes. Turning one off leaves what is already on the watch; remove it below.")
+            Text("What is picked here is downloaded to the watch by itself and kept up to date. Everything else is fetched only when you ask for it on the watch. Turning something off leaves what is already on the watch; remove it below.")
         }
     }
 
@@ -188,6 +197,61 @@ struct WatchSettingsView: View {
             parts.append("arriving")
         }
         return parts.joined(separator: " · ")
+    }
+
+    // MARK: Diagnostics
+
+    @State private var exportingPhone = false
+
+    private var diagnosticsSection: some View {
+        Section {
+            Button {
+                link.requestWatchLogs()
+            } label: {
+                Label("Fetch Log from Watch", systemImage: "applewatch.radiowaves.left.and.right")
+            }
+            if let at = link.logsRequestedAt, !link.watchLogs.contains(where: { logDate($0) > at }) {
+                Text("Asked \(at.formatted(.relative(presentation: .named))). The watch sends it in the background; it can take a minute, longer when the watch is away.")
+                    .font(.caption).foregroundStyle(Theme.textDim)
+            }
+            Button {
+                exportingPhone = true
+                Task { _ = await link.exportPhoneLog(); exportingPhone = false }
+            } label: {
+                if exportingPhone { ProgressView() } else { Label("Save This iPhone's Log", systemImage: "iphone") }
+            }
+            .disabled(exportingPhone)
+            ForEach(link.watchLogs, id: \.self) { url in
+                ShareLink(item: url) {
+                    HStack {
+                        Image(systemName: url.lastPathComponent.hasPrefix("AquariumPhone") ? "iphone" : "applewatch")
+                            .foregroundStyle(Theme.textDim)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(url.lastPathComponent.hasPrefix("AquariumPhone") ? "iPhone log" : "Watch log")
+                            Text("\(logDate(url).formatted(date: .abbreviated, time: .shortened)) · \(Format.bytes(logSize(url)))")
+                                .font(.caption).foregroundStyle(Theme.textDim)
+                        }
+                        Spacer()
+                        Image(systemName: "square.and.arrow.up").foregroundStyle(Theme.accent)
+                    }
+                }
+                .swipeActions {
+                    Button(role: .destructive) { link.deleteWatchLog(url) } label: { Label("Delete", systemImage: "trash") }
+                }
+            }
+        } header: {
+            Text("Diagnostics")
+        } footer: {
+            Text("The watch keeps a log of what it does: sign-in, downloads, playback, and anything the system reported, with the memory it had left. Fetch it here or send it from the watch under Settings → Send Log to iPhone, then share the file from this list.")
+        }
+    }
+
+    private func logDate(_ url: URL) -> Date {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+    }
+
+    private func logSize(_ url: URL) -> Int64 {
+        Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
     }
 
     // MARK: Sync

@@ -18,6 +18,7 @@ import Foundation
 import Observation
 import WatchConnectivity
 import os
+import OSLog
 
 @MainActor
 @Observable
@@ -130,7 +131,9 @@ final class WatchLink: NSObject {
         }
         var plan = WatchMirrorPlan()
         plan.playlistIds = Preferences.shared.watchPlaylistIds
-        if credentials != nil, !client.isOffline {
+        if !Preferences.shared.watchKeepsBooks {
+            plan.bookIds = []
+        } else if credentials != nil, !client.isOffline {
             let books = (try? await client.resumeAudio(limit: 12)) ?? []
             plan.bookIds = books.filter(\.isAudiobook).map(\.Id)
         } else if let last = lastPlan {
@@ -192,6 +195,69 @@ final class WatchLink: NSObject {
 
     func requestInventory() { send(.requestInventory) }
 
+    // MARK: - Logs from the watch
+
+    /// Logs the watch has sent, newest first. Kept in Documents/WatchLogs;
+    /// the share sheet is how they leave.
+    private(set) var watchLogs: [URL] = []
+    private(set) var logsRequestedAt: Date?
+
+    nonisolated static var logsFolder: URL {
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("WatchLogs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    func requestWatchLogs() {
+        logsRequestedAt = Date()
+        send(.requestLogs)
+    }
+
+    func reloadWatchLogs() {
+        let files = (try? FileManager.default.contentsOfDirectory(at: Self.logsFolder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        watchLogs = files
+            .filter { $0.pathExtension == "log" }
+            .sorted { a, b in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                return da > db
+            }
+    }
+
+    func deleteWatchLog(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
+        reloadWatchLogs()
+    }
+
+    /// This phone's own side of the story — what it logged about the watch
+    /// since launch — as a file beside the watch's, so both halves of a
+    /// transfer can be read together.
+    func exportPhoneLog() async -> URL? {
+        let subsystem = Bundle.main.bundleIdentifier ?? "Aquarium"
+        let lines: [String] = await Task.detached(priority: .utility) {
+            guard let store = try? OSLogStore(scope: .currentProcessIdentifier),
+                  let entries = try? store.getEntries(at: store.position(timeIntervalSinceLatestBoot: 0)) else { return [] }
+            let stamp = ISO8601DateFormatter()
+            stamp.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            var out: [String] = []
+            for case let entry as OSLogEntryLog in entries {
+                let ours = entry.subsystem == subsystem
+                guard ours || entry.level.rawValue >= OSLogEntryLog.Level.error.rawValue else { continue }
+                let level = entry.level == .fault ? "F" : (entry.level == .error ? "E" : "N")
+                out.append("\(stamp.string(from: entry.date)) \(level) [\(entry.subsystem):\(entry.category)] \(entry.composedMessage)")
+            }
+            return out
+        }.value
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd-HHmmss"
+        let url = Self.logsFolder.appendingPathComponent("AquariumPhone-\(f.string(from: Date())).log")
+        let head = "Aquarium iPhone log (this launch), exported \(Date().ISO8601Format())\n\n"
+        guard (try? (head + lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)) != nil else { return nil }
+        reloadWatchLogs()
+        return url
+    }
+
     // MARK: - Watch → phone
 
     private func apply(_ dictionary: [String: Any]) {
@@ -207,9 +273,36 @@ final class WatchLink: NSObject {
         switch message {
         case .progress(let events): take(events)
         case .fetch(let itemId): enqueueFetch(itemId)
+        case .fetchMany(let itemIds): for id in itemIds { enqueueFetch(id, pumping: false) }; persistFetches(); pumpFetches()
         case .cancelFetch(let itemId): cancelFetch(itemId)
+        case .logs(let chunk): take(chunk)
         default: break
         }
+    }
+
+    /// Pieces of a log on their way, by export id.
+    private var logPieces: [String: [Int: Data]] = [:]
+
+    private func take(_ chunk: WatchLogChunk) {
+        var pieces = logPieces[chunk.id] ?? [:]
+        pieces[chunk.index] = chunk.data
+        guard pieces.count == chunk.count else { logPieces[chunk.id] = pieces; return }
+        logPieces[chunk.id] = nil
+        var packed = Data()
+        for i in 0..<chunk.count { packed.append(pieces[i] ?? Data()) }
+        guard let raw = try? (packed as NSData).decompressed(using: .lzfse) as Data else {
+            Self.log.error("the watch's log would not unpack")
+            return
+        }
+        let safeName = chunk.name.components(separatedBy: "/").last ?? "AquariumWatch.log"
+        let destination = Self.logsFolder.appendingPathComponent(safeName)
+        do {
+            try raw.write(to: destination, options: .atomic)
+            Self.log.notice("the watch's log arrived in \(chunk.count) pieces: \(safeName, privacy: .public)")
+        } catch {
+            Self.log.error("couldn't keep the watch's log: \(error.localizedDescription, privacy: .public)")
+        }
+        reloadWatchLogs()
     }
 
     // MARK: - Fetching for the watch
@@ -231,7 +324,7 @@ final class WatchLink: NSObject {
         UserDefaults.standard.set(try? JSONEncoder().encode(taskMap.withLock { $0 }), forKey: "watch_fetch_tasks")
     }
 
-    private func enqueueFetch(_ itemId: String) {
+    private func enqueueFetch(_ itemId: String, pumping: Bool = true) {
         guard !fetchQueue.contains(itemId), fetching != itemId, !transferring.contains(itemId) else {
             Self.log.notice("fetch of \(itemId, privacy: .public) already under way")
             return
@@ -243,8 +336,10 @@ final class WatchLink: NSObject {
             return
         }
         fetchQueue.append(itemId)
-        persistFetches()
-        pumpFetches()
+        if pumping {
+            persistFetches()
+            pumpFetches()
+        }
     }
 
     private func cancelFetch(_ itemId: String) {
@@ -469,6 +564,24 @@ extension WatchLink: WCSessionDelegate {
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         let reachable = session.isReachable
         Task { @MainActor in isReachable = reachable }
+    }
+
+    /// A file from the watch: its log. Moved at once — the system deletes
+    /// it when this returns — into Documents/WatchLogs under its own name.
+    nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
+        guard file.metadata?[WatchFileTransfer.kindKey] as? String == WatchFileTransfer.logsKind else {
+            Self.log.error("a file of no known kind arrived from the watch: \(String(describing: file.metadata), privacy: .public)")
+            return
+        }
+        let destination = Self.logsFolder.appendingPathComponent(file.fileURL.lastPathComponent)
+        try? FileManager.default.removeItem(at: destination)
+        do {
+            try FileManager.default.moveItem(at: file.fileURL, to: destination)
+            Self.log.notice("the watch's log arrived: \(destination.lastPathComponent, privacy: .public)")
+        } catch {
+            Self.log.error("couldn't keep the watch's log: \(error.localizedDescription, privacy: .public)")
+        }
+        Task { @MainActor in reloadWatchLogs() }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {

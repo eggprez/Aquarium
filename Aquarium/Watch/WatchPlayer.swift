@@ -50,6 +50,8 @@ final class WatchPlayer: NSObject {
     private(set) var queueTitle: String?
     private(set) var chapters: [ChapterInfo] = []
     private(set) var isShuffled = false
+    /// Bumped by every `play`, so the shell can bring the player page up.
+    private(set) var playRequests = 0
 
     /// Playback rate. Kept at 1 for music and remembered for books.
     var speed: Double = 1 {
@@ -128,6 +130,7 @@ final class WatchPlayer: NSObject {
         queue = entries
         currentIndex = start
         queueTitle = title
+        playRequests &+= 1
         startCurrent(startAt: position)
     }
 
@@ -257,6 +260,7 @@ final class WatchPlayer: NSObject {
         stream = nil
         startedReport = false
 
+        WatchLog.note("player", "opening \(entry.item.Id) \"\(entry.item.title)\" \(entry.item.isAudiobook ? "book" : "song") at \(Int(startAt ?? 0))s, queue \(queue.count), \(WatchLog.memory)")
         isActive = true
         isBuffering = true
         isPlaying = false
@@ -349,7 +353,7 @@ final class WatchPlayer: NSObject {
         isBuffering = false
         isPlaying = false
         errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
-        Self.log.error("open failed: \(self.errorMessage ?? "", privacy: .public)")
+        WatchLog.error("player", "open failed: \(self.errorMessage ?? "")")
         updateNowPlaying()
     }
 
@@ -508,7 +512,7 @@ final class WatchPlayer: NSObject {
             try session.setCategory(.playback, mode: .default, policy: .longFormAudio)
             return try await session.activate(options: [])
         } catch {
-            Self.log.error("audio session: \(error.localizedDescription, privacy: .public)")
+            WatchLog.error("player", "audio session: \(error.localizedDescription)")
             return false
         }
     }

@@ -7,6 +7,11 @@
 //  at a library meant pressing down past four controls nobody had asked for.
 //  The state behind it stays where it is, defaulted, so `filterKey` and
 //  `query` are unchanged and the bar can come back a chip at a time.
+//
+//  On the Mac the controls are the window's toolbar, the filters are
+//  remembered per library, the toolbar's search field narrows the library,
+//  and the grid is a selection that the toolbar can act on — see
+//  `LibraryView+Mac.swift` for the parts that only exist there.
 
 import SwiftUI
 
@@ -37,6 +42,15 @@ struct LibraryView: View {
     #if os(macOS)
     /// Posters or a list; remembered across libraries and launches.
     @AppStorage("libraryLayout") private var layout: LibraryLayout = .grid
+    /// What is typed in the toolbar's search field, and the copy of it the
+    /// query is made from: the field changes on every keystroke, the query
+    /// a moment after the last one, so a name typed out is one request and
+    /// not one per letter.
+    @State private var searchTerm = ""
+    @State private var activeSearchTerm = ""
+    /// The tiles or rows selected, shared by the grid and the table so a
+    /// selection survives switching between them. The toolbar acts on it.
+    @State private var selection: Set<String> = []
     #endif
 
     /// Pages asked for so far. This, not the item count, is what ends paging:
@@ -53,15 +67,32 @@ struct LibraryView: View {
 
     private static let pageSize = 60
 
-    enum SortOption: String, CaseIterable, Identifiable {
+    init(parentId: String, title: String, collectionType: String? = nil) {
+        self.parentId = parentId
+        self.title = title
+        self.collectionType = collectionType
+        #if os(macOS)
+        // The controls the library was left on, if it has been visited
+        // before. Set here rather than after the page appears, so the first
+        // request is the right one and not the default followed by a second.
+        let saved = LibraryFilters.load(for: parentId)
+        _sort = State(initialValue: saved.sort)
+        _reversed = State(initialValue: saved.reversed)
+        _unwatchedOnly = State(initialValue: saved.unwatchedOnly)
+        _favouritesOnly = State(initialValue: saved.favouritesOnly)
+        _genre = State(initialValue: saved.genre)
+        #endif
+    }
+
+    enum SortOption: String, CaseIterable, Identifiable, Codable {
         case name, dateAdded, releaseDate, rating, runtime, random
         var id: String { rawValue }
 
         var label: String {
             switch self {
             case .name: "Name"
-            case .dateAdded: "Recently added"
-            case .releaseDate: "Release date"
+            case .dateAdded: "Recently Added"
+            case .releaseDate: "Release Date"
             case .rating: "Rating"
             case .runtime: "Runtime"
             case .random: "Random"
@@ -115,10 +146,39 @@ struct LibraryView: View {
         #if os(macOS)
         .toolbar { macToolbar }
         .navigationSubtitle(total > 0 ? "\(total) item\(total == 1 ? "" : "s")" : "")
+        // The filter, in the toolbar's own search field — a second one beside
+        // the sidebar's, which searches the whole server; this one narrows
+        // the library in front of you. Live TV keeps its channel filter the
+        // same way.
+        .searchable(text: $searchTerm, placement: .toolbar, prompt: "Filter \(title)")
+        .task(id: searchTerm) {
+            // Wait for the typing to pause before asking.
+            if !searchTerm.isEmpty {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+            }
+            activeSearchTerm = searchTerm
+        }
+        // View ▸ Refresh (⌘R), and the app coming back to the front.
+        .onChange(of: MacCommandRequests.shared.refresh) { _, _ in
+            Task { await reload() }
+        }
+        // The controls are the library's to remember — see `LibraryFilters`.
+        .onChange(of: currentFilters) { _, filters in
+            filters.save(for: parentId)
+        }
+        // A page reloaded or filtered: nothing selected that isn't there.
+        // The grid does this for its own selection; the table's is ours.
+        .onChange(of: items.map(\.Id)) { _, ids in
+            let present = Set(ids)
+            if !selection.isSubset(of: present) { selection = selection.intersection(present) }
+        }
         #endif
+        #if os(iOS)
         // The filter bar is the one place in the app where a tap changes what
         // the whole page says without moving anything under your finger.
         .sensoryFeedback(.selection, trigger: filterKey)
+        #endif
         // "Unwatched only" and "Favorites only" are both filters a press-and-
         // hold menu can knock an item out of from the grid itself.
         .reloadWhenItemsChange { await reload() }
@@ -132,25 +192,55 @@ struct LibraryView: View {
             error = nil
             genres = []
             genresType = nil
+            #if os(macOS)
+            // The new library's own controls, not the last one's and not the
+            // defaults. The search is the one thing that starts over.
+            let saved = LibraryFilters.load(for: parentId)
+            genre = saved.genre
+            sort = saved.sort
+            reversed = saved.reversed
+            unwatchedOnly = saved.unwatchedOnly
+            favouritesOnly = saved.favouritesOnly
+            searchTerm = ""
+            activeSearchTerm = ""
+            selection = []
+            #else
             genre = nil
             sort = .name
             reversed = false
             unwatchedOnly = false
             favouritesOnly = false
+            #endif
         }
     }
 
     @ViewBuilder
     private var page: some View {
         #if os(macOS)
-        if layout == .list, !items.isEmpty {
-            LibraryTable(
-                items: items,
-                sort: $sort,
-                reversed: $reversed,
-                onOpen: { app.push(.item($0.Id)) },
-                onReachEnd: { Task { await loadMore() } }
-            )
+        if layout == .list {
+            // A list loads behind a spinner, not behind poster skeletons —
+            // the shape of what is coming is a table, and a spinner in the
+            // toolbar is what a Mac list shows while it fills.
+            if isLoading, items.isEmpty {
+                ProgressView()
+                    .controlSize(.regular)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error, items.isEmpty {
+                ErrorState(error: error) { Task { await reload() } }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if items.isEmpty {
+                emptyState
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                LibraryTable(
+                    items: items,
+                    sort: $sort,
+                    reversed: $reversed,
+                    selection: $selection,
+                    onOpen: { app.push(.item($0.Id)) },
+                    onReachEnd: { Task { await loadMore() } }
+                )
+            }
         } else {
             grid
         }
@@ -181,32 +271,72 @@ struct LibraryView: View {
                 } else if let error, items.isEmpty {
                     ErrorState(error: error) { Task { await reload() } }
                 } else if items.isEmpty {
-                    EmptyState(
-                        symbol: emptySymbol,
-                        title: "Nothing here",
-                        message: emptyMessage,
-                        actionTitle: hasFilters ? "Clear Filters" : nil
-                    ) {
-                        unwatchedOnly = false
-                        favouritesOnly = false
-                        genre = nil
-                    }
+                    emptyState
                 } else {
-                    MediaGrid(items: items, pendingCount: isPaging ? pendingTileCount : 0) { item in
-                        app.push(.item(item.Id))
-                    } onReachEnd: {
-                        Task { await loadMore() }
-                    }
+                    MediaGrid(
+                        items: items,
+                        pendingCount: isPaging ? pendingTileCount : 0,
+                        onSelect: { app.push(.item($0.Id)) },
+                        onReachEnd: { Task { await loadMore() } },
+                        selection: gridSelection
+                    )
+                    #if os(macOS)
+                    // The window's subtitle already says how many there are.
+                    Color.clear.frame(height: 24)
+                    #else
                     Text("\(items.count) of \(total)")
                         .font(.caption)
                         .foregroundStyle(Theme.textDim)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 4)
                         .padding(.bottom, 24)
+                    #endif
                 }
             }
             .padding(.top, 8)
         }
+    }
+
+    /// The grid's selection is the page's on the Mac, so the toolbar can act
+    /// on it; elsewhere the grid has none.
+    private var gridSelection: Binding<Set<String>>? {
+        #if os(macOS)
+        $selection
+        #else
+        nil
+        #endif
+    }
+
+    /// An empty library, or filters and a search that left nothing of it —
+    /// two different pages, since one has a way out and the other hasn't.
+    @ViewBuilder
+    private var emptyState: some View {
+        #if os(macOS)
+        if hasFilters || !activeSearchTerm.isEmpty {
+            LibraryNoResults(searchTerm: activeSearchTerm, hasFilters: hasFilters) {
+                clearFilters()
+                searchTerm = ""
+                activeSearchTerm = ""
+            }
+        } else {
+            EmptyState(symbol: "film.stack", title: "Nothing Here", message: emptyMessage)
+        }
+        #else
+        EmptyState(
+            symbol: emptySymbol,
+            title: "Nothing here",
+            message: emptyMessage,
+            actionTitle: hasFilters ? "Clear Filters" : nil
+        ) {
+            clearFilters()
+        }
+        #endif
+    }
+
+    private func clearFilters() {
+        unwatchedOnly = false
+        favouritesOnly = false
+        genre = nil
     }
 
     /// A filter glyph would be pointing at a bar that isn't drawn on a
@@ -222,7 +352,7 @@ struct LibraryView: View {
     /// What an empty grid says. There is no filter bar on a television to point
     /// at, so it can't be blamed for the library being empty there.
     private var emptyMessage: String {
-        #if os(tvOS)
+        #if os(tvOS) || os(macOS)
         "This library has nothing in it yet."
         #else
         // Only blamed on the filters when one is on; an empty library with
@@ -244,7 +374,11 @@ struct LibraryView: View {
     /// in it because it can arrive late — the shell may still be fetching the
     /// libraries when this screen first asks.
     private var filterKey: String {
-        "\(parentId)|\(includeTypes ?? "")|\(sort.rawValue)|\(reversed)|\(unwatchedOnly)|\(favouritesOnly)|\(genre ?? "")"
+        var key = "\(parentId)|\(includeTypes ?? "")|\(sort.rawValue)|\(reversed)|\(unwatchedOnly)|\(favouritesOnly)|\(genre ?? "")"
+        #if os(macOS)
+        key += "|\(activeSearchTerm)"
+        #endif
+        return key
     }
 
     private var hasFilters: Bool { unwatchedOnly || favouritesOnly || genre != nil }
@@ -252,10 +386,42 @@ struct LibraryView: View {
     #if os(macOS)
     enum LibraryLayout: String { case grid, list }
 
-    /// The filter bar, as the window's toolbar: the view switch, sorting, the
-    /// two filters as toggles, and the genre menu.
+    /// The controls as one value, for remembering — see `LibraryFilters`.
+    private var currentFilters: LibraryFilters {
+        LibraryFilters(
+            sort: sort, reversed: reversed, unwatchedOnly: unwatchedOnly,
+            favouritesOnly: favouritesOnly, genre: genre
+        )
+    }
+
+    /// The View menu's thumbnail size, as a slider for the toolbar. Same
+    /// value, so Bigger and Smaller in the menu bar move the slider too.
+    private var thumbnailSize: Binding<Double> {
+        Binding(
+            get: { MacViewOptions.shared.thumbnailSize },
+            set: { MacViewOptions.shared.thumbnailSize = $0 }
+        )
+    }
+
+    /// The filter bar, as the window's toolbar: the view switch, the
+    /// thumbnail size, sorting, the two filters as toggles, the genre menu,
+    /// and — while anything is selected — what can be done to the selection.
     @ToolbarContentBuilder
     private var macToolbar: some ToolbarContent {
+        if isLoading || isPaging, !items.isEmpty {
+            // Asking again with the page still up: the small spinner a Mac
+            // toolbar shows, rather than replacing the page with skeletons.
+            ToolbarItem(placement: .status) {
+                ProgressView()
+                    .controlSize(.small)
+                    .help("Loading…")
+            }
+        }
+        if !selection.isEmpty {
+            ToolbarItem(placement: .primaryAction) {
+                LibrarySelectionToolbarMenu(items: items, selection: selection)
+            }
+        }
         ToolbarItem(placement: .primaryAction) {
             Picker("View", selection: $layout) {
                 Label("Grid", systemImage: "square.grid.2x2").tag(LibraryLayout.grid)
@@ -263,6 +429,24 @@ struct LibraryView: View {
             }
             .pickerStyle(.segmented)
             .help("Show as posters or as a list")
+        }
+        if layout == .grid {
+            ToolbarItem(placement: .primaryAction) {
+                Slider(value: thumbnailSize, in: MacViewOptions.range) {
+                    Text("Thumbnail Size")
+                } minimumValueLabel: {
+                    Image(systemName: "photo")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                } maximumValueLabel: {
+                    Image(systemName: "photo")
+                        .imageScale(.large)
+                        .foregroundStyle(.secondary)
+                }
+                .labelsHidden()
+                .frame(width: 130)
+                .help("Thumbnail Size")
+            }
         }
         ToolbarItem(placement: .primaryAction) {
             Menu {
@@ -293,14 +477,16 @@ struct LibraryView: View {
         if !genres.isEmpty {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button("All Genres") { genre = nil }
-                    Divider()
-                    ForEach(genres, id: \.self) { name in
-                        Toggle(name, isOn: Binding(
-                            get: { genre == name },
-                            set: { genre = $0 ? name : nil }
-                        ))
+                    // One genre at a time, so a picker and not a row of
+                    // toggles: the check moves rather than adding up.
+                    Picker("Genre", selection: $genre) {
+                        Text("All Genres").tag(String?.none)
+                        Divider()
+                        ForEach(genres, id: \.self) { name in
+                            Text(name).tag(String?.some(name))
+                        }
                     }
+                    .pickerStyle(.inline)
                 } label: {
                     Label(genre ?? "Genre", systemImage: genre == nil ? "tag" : "tag.fill")
                 }
@@ -383,9 +569,7 @@ struct LibraryView: View {
             var knownTotal: Int?
             if sort == .random {
                 // The shuffled page sequence needs the page count up front.
-                knownTotal = try await client.libraryItems(
-                    parentId: parentId, query: query(startIndex: 0, limit: 1)
-                ).total
+                knownTotal = try await fetch(query(startIndex: 0, limit: 1)).total
             }
             let response = try await fetchPage(0, total: knownTotal)
             guard mine == generation, !Task.isCancelled else { return }
@@ -421,9 +605,7 @@ struct LibraryView: View {
     /// skips anything.
     private func fetchPage(_ page: Int, total: Int?) async throws -> (items: [BaseItem], total: Int) {
         guard sort == .random, let total else {
-            let response = try await client.libraryItems(
-                parentId: parentId, query: query(startIndex: page * Self.pageSize)
-            )
+            let response = try await fetch(query(startIndex: page * Self.pageSize))
             return (response.items, response.total)
         }
         let pageCount = max(1, (total + Self.pageSize - 1) / Self.pageSize)
@@ -433,9 +615,20 @@ struct LibraryView: View {
         var q = query(startIndex: source * Self.pageSize)
         q.sortBy = SortOption.name.field
         q.sortOrder = SortOption.name.order
-        let response = try await client.libraryItems(parentId: parentId, query: q)
+        let response = try await fetch(q)
         var within = SeededGenerator(seed: shuffleSeed &+ UInt64(source) &+ 1)
         return (response.items.shuffled(using: &within), response.total)
+    }
+
+    /// The one place the server is asked for a page, so the Mac's search term
+    /// rides along with every query — the first page, the later ones, and the
+    /// count "Random" needs up front.
+    private func fetch(_ q: JellyfinClient.LibraryQuery) async throws -> ItemsResponse {
+        #if os(macOS)
+        try await client.libraryItems(parentId: parentId, query: q, searchTerm: activeSearchTerm)
+        #else
+        try await client.libraryItems(parentId: parentId, query: q)
+        #endif
     }
 
     private func query(startIndex: Int, limit: Int = LibraryView.pageSize) -> JellyfinClient.LibraryQuery {

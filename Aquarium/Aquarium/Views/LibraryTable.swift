@@ -6,6 +6,10 @@
 //  the library's own sort option (and a direction), and the page asks again, so
 //  a sorted list of a few thousand films is sorted as a whole and not just the
 //  pages that happen to have loaded.
+//
+//  The selection is the page's, not the table's: the poster grid shares it, so
+//  what was selected in one view is still selected in the other, and the
+//  toolbar can act on it whichever is showing.
 
 #if os(macOS)
 import SwiftUI
@@ -16,10 +20,9 @@ struct LibraryTable: View {
     /// Whether the column's direction is the opposite of the sort's natural
     /// one — ascending for a name, descending for a rating.
     @Binding var reversed: Bool
+    @Binding var selection: Set<BaseItem.ID>
     let onOpen: (BaseItem) -> Void
     let onReachEnd: () -> Void
-
-    @State private var selection = Set<BaseItem.ID>()
 
     var body: some View {
         Table(items, selection: $selection, sortOrder: sortOrder) {
@@ -30,6 +33,10 @@ struct LibraryTable: View {
                         .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                     Text(item.title)
                         .lineLimit(1)
+                        // A narrow column cuts a long title short; the
+                        // tooltip has the whole of it, and the show an
+                        // episode belongs to.
+                        .help(item.SeriesName.map { "\(item.title) — \($0)" } ?? item.title)
                     if item.userData.isFavorite {
                         Image(systemName: "star.fill")
                             .font(.caption2)
@@ -59,7 +66,9 @@ struct LibraryTable: View {
 
             TableColumn("Rated") { item in
                 Text(item.OfficialRating ?? "")
+                    .lineLimit(1)
                     .foregroundStyle(Theme.textDim)
+                    .help(item.OfficialRating ?? "")
             }
             .width(min: 50, ideal: 64, max: 90)
 
@@ -84,8 +93,14 @@ struct LibraryTable: View {
             }
             .width(min: 56, ideal: 64, max: 80)
         }
+        .alternatingRowBackgrounds()
         .contextMenu(forSelectionType: BaseItem.ID.self) { ids in
-            if let item = items.first(where: { ids.contains($0.Id) }) {
+            if ids.count > 1 {
+                // Several rows: what can be done to all of them at once.
+                // The single-item menu would act on whichever came first,
+                // which is not what a right-click on a selection means.
+                LibrarySelectionMenu(items: items, selection: ids)
+            } else if let item = items.first(where: { ids.contains($0.Id) }) {
                 ItemMenu(item: item, allowsOpen: true)
             }
         } primaryAction: { ids in

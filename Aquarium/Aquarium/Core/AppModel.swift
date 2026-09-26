@@ -10,7 +10,11 @@ import Observation
 import SwiftUI
 
 /// A destination that can be pushed onto a navigation stack.
-enum Route: Hashable, Sendable {
+///
+/// `Codable` so a route can key a window on a Mac — "Open in New Window" on a
+/// sidebar row opens the route in a window of its own, and the system
+/// restores such windows at launch from what was encoded. See `RouteWindow`.
+enum Route: Hashable, Sendable, Codable {
     case item(String)
     /// `collectionType` decides what a library lists — a television library
     /// shows series, not the seasons and episodes underneath them — so it
@@ -34,7 +38,7 @@ enum Route: Hashable, Sendable {
 /// Where the Music tab can go. Its own enum rather than more cases on
 /// `Route`, because there are a dozen of them and none of them means anything
 /// to the video side of the app.
-enum MusicRoute: Hashable, Sendable {
+enum MusicRoute: Hashable, Sendable, Codable {
     case artist(String)
     case album(String)
     case genre(id: String, name: String)
@@ -66,7 +70,7 @@ enum MusicRoute: Hashable, Sendable {
     case search
 
     /// Which songs a `songList` page shows.
-    enum SongListKind: Hashable, Sendable {
+    enum SongListKind: Hashable, Sendable, Codable {
         case recentlyPlayed, mostPlayed, favorites
     }
 }
@@ -74,7 +78,7 @@ enum MusicRoute: Hashable, Sendable {
 /// The top-level sections. Which of them exist depends on the platform and on
 /// what the server actually has — a Live TV entry on a server with no tuner can
 /// never say anything but "no channels".
-enum AppSection: Hashable, Identifiable, Sendable {
+enum AppSection: Hashable, Identifiable, Sendable, Codable {
     case home
     /// Music: Discover, the library, search. Only where the server has a
     /// music or audiobook library, and only on iPhone and iPad for now.
@@ -128,20 +132,44 @@ enum AppSection: Hashable, Identifiable, Sendable {
         }
     }
 
+    /// The Mac's differ where the phone's read wrong at sidebar size: a book
+    /// for Audiobooks says "books", the antenna is wide and busy beside
+    /// eleven-point text, a stack of books for Libraries is a library of
+    /// books, and a folder says nothing about what a home-video or music-video
+    /// library holds.
     var symbol: String {
         switch self {
         case .home: "house"
         case .music: "music.note"
-        case .books: "book"
-        case .libraries: "books.vertical"
+        case .books:
+            #if os(macOS)
+            "headphones"
+            #else
+            "book"
+            #endif
+        case .libraries:
+            #if os(macOS)
+            "rectangle.stack"
+            #else
+            "books.vertical"
+            #endif
         case .library(_, _, let type):
             switch type {
             case "movies": "film"
             case "tvshows": "tv"
+            #if os(macOS)
+            case "homevideos": "video"
+            case "musicvideos": "music.note.tv"
+            #endif
             default: "folder"
             }
         case .favorites: "star"
-        case .liveTV: "antenna.radiowaves.left.and.right"
+        case .liveTV:
+            #if os(macOS)
+            "play.tv"
+            #else
+            "antenna.radiowaves.left.and.right"
+            #endif
         case .downloads: "arrow.down.circle"
         case .search: "magnifyingglass"
         case .settings: "gearshape"
@@ -156,6 +184,27 @@ struct Toast: Identifiable, Equatable, Sendable {
     var text: String
     var tone: Tone = .info
 }
+
+/// Something that has to be answered before going on — on a Mac, what an
+/// error toast becomes. Presented by `RootView` as an alert on the main window.
+struct AppAlert: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    var title: String
+    var message: String
+}
+
+#if os(macOS)
+/// One entry of the Dock icon's menu: a title Continue Watching would lead
+/// with. Home fills the list as it loads its rows — see `AppModel.updateDockMenu`
+/// — and `MacAppDelegate.applicationDockMenu` reads it when the icon is held.
+struct DockMenuItem: Identifiable, Equatable, Sendable {
+    /// The Jellyfin id the entry plays.
+    let id: String
+    var title: String
+    /// The episode under a show's name; nil for a film.
+    var subtitle: String?
+}
+#endif
 
 @MainActor
 @Observable
@@ -380,6 +429,58 @@ final class AppModel {
 
     var toasts: [Toast] = []
 
+    /// An alert waiting for the main window — see `toast` and `presentAlert`.
+    /// One at a time: a second raised while the first is up replaces it, which
+    /// is what an alert queue on a Mac amounts to in practice.
+    var pendingAlert: AppAlert?
+
+    #if os(macOS)
+    /// What the sidebar's search field holds. The field belongs to the shell
+    /// rather than to the Search page — it is there whichever section is
+    /// showing, as in Music — so its text lives here, where both can reach it.
+    var sidebarSearchTerm = ""
+
+    /// Bumped when the sidebar field is submitted, so the Search page can tell
+    /// Return apart from a keystroke: a submitted term whose results hold an
+    /// exact title match opens that title.
+    private(set) var sidebarSearchSubmitted = 0
+    /// When, so a Search page built by that very submit — the section wasn't
+    /// showing until Return brought it up — can tell it from an old one.
+    @ObservationIgnored private(set) var sidebarSearchSubmittedAt: Date?
+
+    /// The Dock menu's Continue Watching entries — see `DockMenuItem`.
+    private(set) var dockMenuItems: [DockMenuItem] = []
+
+    /// Show Search with a term — the sidebar field's Return.
+    func showSearch(_ term: String) {
+        sidebarSearchTerm = term
+        selection = .search
+        sidebarSearchSubmittedAt = Date()
+        sidebarSearchSubmitted += 1
+    }
+
+    /// The Dock menu's entries, from what Home would put first: what was left
+    /// part-watched, then what is next up. The same list, in the same order,
+    /// as the iPhone's home screen quick actions.
+    func updateDockMenu(resume: [BaseItem], nextUp: [BaseItem]) {
+        var seen: Set<String> = []
+        var out: [DockMenuItem] = []
+        for item in resume + nextUp where seen.insert(item.Id).inserted {
+            let title = item.isEpisode ? (item.SeriesName ?? item.Name ?? "Continue Watching") : (item.Name ?? "Continue Watching")
+            let subtitle = item.isEpisode
+                ? [item.episodeLabel, item.Name].compactMap { $0 }.joined(separator: " · ")
+                : nil
+            out.append(DockMenuItem(id: item.Id, title: title, subtitle: subtitle.flatMap { $0.isEmpty ? nil : $0 }))
+            if out.count == 5 { break }
+        }
+        if out != dockMenuItems { dockMenuItems = out }
+    }
+
+    func clearDockMenu() {
+        if !dockMenuItems.isEmpty { dockMenuItems = [] }
+    }
+    #endif
+
     /// Raised when something needs the whole screen to explain itself — a
     /// server identity change, an expired session.
     var blockingMessage: String?
@@ -453,11 +554,15 @@ final class AppModel {
             switch kind {
             case .search:
                 // A phone never lists it here: there Search is a tab or it is
-                // in More — see `overflowSections`. A sidebar does. It once
-                // left Search out on the grounds that each page had a field
-                // of its own, and the library pages don't: on an iPad there
-                // was no way to search films and shows at all.
+                // in More — see `overflowSections`. An iPad's sidebar does. It
+                // once left Search out on the grounds that each page had a
+                // field of its own, and the library pages don't: on an iPad
+                // there was no way to search films and shows at all. A Mac's
+                // sidebar has the field itself, at its top, the way Music's
+                // does — see `sidebarSearchTerm` — so it has no row either.
+                #if !os(macOS)
                 if Self.usesSidebar { out.append(.search) }
+                #endif
             case .libraries:
                 for library in libraries {
                     out.append(.library(id: library.Id, name: library.title, collectionType: library.CollectionType))
@@ -553,6 +658,10 @@ final class AppModel {
             if overflowSections.contains(selection) { show(selection) } else { selection = .home }
             return
         }
+        #endif
+        #if os(macOS)
+        // Search has no row on a Mac but is a section all the same.
+        if selection == .search { return }
         #endif
         if !sections.contains(selection), selection != .more { selection = .home }
         #endif
@@ -721,6 +830,13 @@ final class AppModel {
             selection = section
             return
         }
+        #if os(macOS)
+        // No row, but a section of its own: the sidebar field's results.
+        if section == .search {
+            selection = .search
+            return
+        }
+        #endif
         var path = NavigationPath()
         path.append(Route.section(section))
         paths[AppSection.more.id] = path
@@ -1250,7 +1366,26 @@ final class AppModel {
 
     // MARK: - Toasts
 
+    /// Say something in passing. Everything the app reports in words comes
+    /// through here, and on a Mac a good deal of it is not said at all: a
+    /// toast is a phone's idiom, and the Mac has an alert for what must be
+    /// answered, a footer for what is ongoing, and the list itself for what
+    /// just changed.
+    ///
+    /// On a Mac an `.error` becomes an alert on the main window; "can't be
+    /// reached" and "back online" are dropped because the sidebar footer
+    /// already shows the connection; and switching or signing out an account
+    /// is its own evidence — the sidebar's account row changes. What is left
+    /// (queued downloads, a deleted file) stays a toast, with the Mac's own
+    /// manners applied in `ToastOverlay`.
     func toast(_ text: String, tone: Toast.Tone = .info) {
+        #if os(macOS)
+        if Self.isSilentOnMac(text) { return }
+        if tone == .error {
+            presentAlert(title: Self.alertTitle(for: text), message: text)
+            return
+        }
+        #endif
         let toast = Toast(text: text, tone: tone)
         toasts.append(toast)
         Task {
@@ -1258,6 +1393,42 @@ final class AppModel {
             toasts.removeAll { $0.id == toast.id }
         }
     }
+
+    /// An alert, from anywhere, without going through `toast`'s sorting. On
+    /// iOS and tvOS it is shown as an error toast, which is what those shells
+    /// have for it.
+    func presentAlert(title: String, message: String) {
+        #if os(macOS)
+        pendingAlert = AppAlert(title: title, message: message)
+        #else
+        toast(message, tone: .error)
+        #endif
+    }
+
+    #if os(macOS)
+    /// The messages the sidebar footer already carries, or that the sidebar's
+    /// account row makes visible on its own.
+    private static func isSilentOnMac(_ text: String) -> Bool {
+        let lowered = text.lowercased()
+        if lowered.contains("can't be reached") || lowered.contains("can’t be reached") { return true }
+        if lowered.hasPrefix("back online") { return true }
+        if lowered.hasPrefix("switched to ") { return true }
+        if lowered.hasPrefix("signed ") && lowered.contains(" out") && !lowered.contains("could not") { return true }
+        return false
+    }
+
+    /// A short title over the message an error toast carried, so the alert
+    /// reads as an alert rather than as a sentence with a title missing.
+    private static func alertTitle(for text: String) -> String {
+        let lowered = text.lowercased()
+        if lowered.contains("session expired") { return "Session Expired" }
+        if lowered.contains("download") { return "Download Problem" }
+        if lowered.contains("signed out") { return "Account Signed Out" }
+        if lowered.contains("favorite") || lowered.contains("watched") { return "Couldn’t Update" }
+        if lowered.contains("nothing to play") { return "Nothing to Play" }
+        return "Something Went Wrong"
+    }
+    #endif
 
     func dismiss(_ toast: Toast) {
         toasts.removeAll { $0.id == toast.id }
@@ -1396,5 +1567,9 @@ final class AppModel {
         selection = .home
         LiveTVStore.shared.reset()
         Preferences.shared.clearRecentSearches()
+        #if os(macOS)
+        sidebarSearchTerm = ""
+        clearDockMenu()
+        #endif
     }
 }

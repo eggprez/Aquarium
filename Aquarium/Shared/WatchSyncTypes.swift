@@ -155,6 +155,8 @@ enum WatchMessage: Codable, Sendable {
     case deleteAll
     case download(WatchDownloadRequest)
     case requestInventory
+    /// Send the watch's log over as a file — see `WatchFileTransfer.logsKind`.
+    case requestLogs
     /// How far the phone has got fetching an item for the watch, 0...1.
     case fetchProgress(itemId: String, fraction: Double)
     /// The phone could not fetch this; the watch may try itself.
@@ -165,14 +167,33 @@ enum WatchMessage: Codable, Sendable {
     /// only reaches the server over Wi‑Fi; through the phone it goes as a
     /// file transfer, which runs in the background on both ends.
     case fetch(itemId: String)
+    /// The same for a whole list at once: a playlist's worth of songs asked
+    /// for one message at a time swamps the link.
+    case fetchMany(itemIds: [String])
     case cancelFetch(itemId: String)
     /// Send me the sign-in and the plan now, in the reply. The application
     /// context is the usual way; this is for a watch that missed it.
     case requestContext
+    /// A slice of the watch's log, sent while the phone is in reach: the
+    /// whole file, LZFSE-compressed, cut into pieces small enough for a
+    /// message. A file transfer carries it when the phone is away.
+    case logs(WatchLogChunk)
+}
+
+struct WatchLogChunk: Codable, Sendable {
+    /// One export; every chunk of it carries the same id.
+    var id: String
+    var name: String
+    var index: Int
+    var count: Int
+    var data: Data
 }
 
 /// The metadata on a file the phone hands the watch.
 enum WatchFileTransfer {
+    /// What a file is: absent for an audio item, `logsKind` for a log.
+    static let kindKey = "kind"
+    static let logsKind = "logs"
     static let itemKey = "item"
     static let bytesKey = "bytes"
     static let secondsKey = "seconds"

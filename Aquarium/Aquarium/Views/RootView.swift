@@ -14,6 +14,8 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
+    /// For the sidebar field's recent-terms drop-down.
+    @Environment(Preferences.self) private var prefs
     #endif
 
     /// Shared by every poster tile and every title page, so a page can zoom
@@ -50,7 +52,12 @@ struct RootView: View {
         #if !os(tvOS)
         .environment(\.posterZoomNamespace, posterZoom)
         #endif
+        // Not on a Mac: painted over the whole window it covered the sidebar's
+        // material and the toolbar's, and the window has a background of its
+        // own that follows the appearance.
+        #if !os(macOS)
         .background(Theme.background)
+        #endif
         // Keyed on the session, so a sign-in — typed here, or adopted from
         // iCloud after launch (see `Preferences.adoptCloudSession`) — gets the
         // same setup as a launch that found one already saved. Without it an
@@ -99,7 +106,9 @@ struct RootView: View {
         // the shell rather than instead of it.
         #if os(macOS)
         .sheet(isPresented: addingAccountBinding) {
-            LoginView(addingAccount: true).frame(minWidth: 520, minHeight: 620)
+            // The Mac login content sizes itself (see `LoginView`); a fixed
+            // minimum here would only pad the sheet out to iPad proportions.
+            LoginView(addingAccount: true)
         }
         #else
         .fullScreenCover(isPresented: addingAccountBinding) {
@@ -149,7 +158,7 @@ struct RootView: View {
                 set: { if !$0 { app.blockingMessage = nil } }
             )
         ) {
-            Button("Sign out", role: .destructive) {
+            Button("Sign Out", role: .destructive) {
                 Task {
                     await app.signOut()
                     client.clearIdentityProblem()
@@ -158,6 +167,20 @@ struct RootView: View {
             }
         } message: {
             Text(app.blockingMessage ?? "")
+        }
+        // What an error toast becomes on a Mac — see `AppModel.toast` and
+        // `presentAlert`. On the main window, whichever page is in front.
+        .alert(
+            app.pendingAlert?.title ?? "",
+            isPresented: Binding(
+                get: { app.pendingAlert != nil },
+                set: { if !$0 { app.pendingAlert = nil } }
+            ),
+            presenting: app.pendingAlert
+        ) { _ in
+            Button("OK") {}
+        } message: { alert in
+            Text(alert.message)
         }
         // A title opens as its own screen on a television rather than as a page
         // pushed under the tab strip — see `AppModel.detailRoot`.
@@ -373,6 +396,30 @@ struct RootView: View {
             }
             #endif
         }
+        #if os(macOS)
+        // Search is the field at the top of the sidebar, as in Music, rather
+        // than a row in it. Typing there and pressing Return shows the Search
+        // section with the term; the field's text is the app's, so the page
+        // and the field agree whichever section was showing when it was
+        // typed. Recent terms drop down from the field — the Mac's place for
+        // them, in front of the page rather than on it.
+        .searchable(text: $app.sidebarSearchTerm, placement: .sidebar, prompt: "Search")
+        .searchSuggestions {
+            if app.sidebarSearchTerm.isEmpty {
+                ForEach(prefs.recentSearches, id: \.self) { recent in
+                    Label(recent, systemImage: "clock.arrow.circlepath")
+                        .searchCompletion(recent)
+                }
+            }
+        }
+        .onSubmit(of: .search) {
+            let term = app.sidebarSearchTerm.trimmingCharacters(in: .whitespaces)
+            guard !term.isEmpty else { return }
+            prefs.rememberSearch(term)
+            app.showSearch(term)
+        }
+        .modifier(FocusSearchOnRequest())
+        #endif
         .nowPlayingSheet()
     }
     #endif
@@ -518,7 +565,10 @@ struct SectionView: View {
                 content
             }
         }
+        // The window's own background on a Mac — see `RootView.body`.
+        #if !os(macOS)
         .background(Theme.background)
+        #endif
     }
 
     @ViewBuilder

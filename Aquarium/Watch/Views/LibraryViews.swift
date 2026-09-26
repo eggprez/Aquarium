@@ -26,12 +26,12 @@ struct BooksView: View {
                 let local = downloads.books.map(\.asItem)
                 if local.isEmpty { StatusRow(empty: "No audiobooks on the watch yet") }
                 ForEach(local) { book in
-                    NavigationLink { BookDetail(item: book) } label: { BookRow(item: book) }
+                    NavigationLink(value: WatchRoute.book(book)) { BookRow(item: book) }
                 }
             } else {
                 StatusRow(loading: loading && books.isEmpty, error: error, empty: !loading && books.isEmpty && error == nil ? "No audiobooks on this server" : nil)
                 ForEach(books) { book in
-                    NavigationLink { BookDetail(item: book) } label: { BookRow(item: book) }
+                    NavigationLink(value: WatchRoute.book(book)) { BookRow(item: book) }
                 }
             }
         }
@@ -39,7 +39,9 @@ struct BooksView: View {
         .toolbar {
             if !offline {
                 // No menus on a watch: the button steps through the orders.
-                ToolbarItem(placement: .topBarTrailing) {
+                // It sits in the bottom bar: a top-bar item on a pushed page
+                // inside the vertical TabView pops the page straight back.
+                ToolbarItem(placement: .bottomBar) {
                     Button {
                         let all = Sort.allCases
                         sort = all[(all.firstIndex(of: sort)! + 1) % all.count]
@@ -124,11 +126,11 @@ struct BookDetail: View {
                 }
             }
 
-            KeepButton(item: book) { [book] }
-
-            if let record, record.status == .error, let message = record.errorMessage {
-                Text(message).font(.caption2).foregroundStyle(.orange)
-                Button("Try Again") { downloads.retry(item.Id) }
+            Section("On Watch") {
+                DownloadControl(item: book, members: [book])
+                if let record, record.status == .error, let message = record.errorMessage {
+                    Text(message).font(.caption2).foregroundStyle(.orange)
+                }
             }
 
             if !chapters.isEmpty {
@@ -174,12 +176,12 @@ struct MusicMenu: View {
 
     var body: some View {
         List {
-            NavigationLink { PlaylistsView() } label: { Label("Playlists", systemImage: "music.note.list") }
-            NavigationLink { AlbumsView() } label: { Label("Albums", systemImage: "square.stack") }
-            NavigationLink { ArtistsView() } label: { Label("Artists", systemImage: "music.mic") }
-            NavigationLink { SongsView() } label: { Label("Songs", systemImage: "music.note") }
+            NavigationLink(value: WatchRoute.playlists) { Label("Playlists", systemImage: "music.note.list") }
+            NavigationLink(value: WatchRoute.albums) { Label("Albums", systemImage: "square.stack") }
+            NavigationLink(value: WatchRoute.artists) { Label("Artists", systemImage: "music.mic") }
+            NavigationLink(value: WatchRoute.songs) { Label("Songs", systemImage: "music.note") }
             if !offline {
-                NavigationLink { GenresView() } label: { Label("Genres", systemImage: "guitars") }
+                NavigationLink(value: WatchRoute.genres) { Label("Genres", systemImage: "guitars") }
             }
             Button {
                 Task {
@@ -213,14 +215,14 @@ struct PlaylistsView: View {
                 if downloads.playlists.isEmpty { StatusRow(empty: "No playlists on the watch yet") }
                 ForEach(downloads.playlists) { list in
                     let item = list.asItem
-                    NavigationLink { CollectionDetail(item: item) } label: {
+                    NavigationLink(value: WatchRoute.collection(item)) {
                         CollectionRow(item: item, subtitle: "\(list.itemIds.count) songs")
                     }
                 }
             } else {
                 StatusRow(loading: loading && lists.isEmpty, error: error, empty: !loading && lists.isEmpty && error == nil ? "No playlists" : nil)
                 ForEach(lists) { list in
-                    NavigationLink { CollectionDetail(item: list) } label: {
+                    NavigationLink(value: WatchRoute.collection(list)) {
                         CollectionRow(item: list, subtitle: list.ChildCount.map { "\($0) songs" } ?? "Playlist")
                     }
                 }
@@ -267,12 +269,12 @@ struct AlbumsView: View {
                 let local = downloads.albums
                 if local.isEmpty { StatusRow(empty: "No albums on the watch yet") }
                 ForEach(local) { album in
-                    NavigationLink { CollectionDetail(item: album) } label: { CollectionRow(item: album) }
+                    NavigationLink(value: WatchRoute.collection(album)) { CollectionRow(item: album) }
                 }
             } else {
                 StatusRow(loading: loading && albums.isEmpty, error: error, empty: !loading && albums.isEmpty && error == nil ? "No albums" : nil)
                 ForEach(albums) { album in
-                    NavigationLink { CollectionDetail(item: album) } label: { CollectionRow(item: album) }
+                    NavigationLink(value: WatchRoute.collection(album)) { CollectionRow(item: album) }
                 }
                 if albums.count < total {
                     Button { Task { await load(more: true) } } label: {
@@ -284,7 +286,7 @@ struct AlbumsView: View {
         .navigationTitle("Albums")
         .toolbar {
             if !offline {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .bottomBar) {
                     Button { recentFirst.toggle() } label: {
                         Image(systemName: recentFirst ? "clock" : "textformat.abc")
                     }
@@ -327,12 +329,12 @@ struct ArtistsView: View {
                 let local = downloads.songs.map(\.asItem).localArtists()
                 if local.isEmpty { StatusRow(empty: "No music on the watch yet") }
                 ForEach(local) { artist in
-                    NavigationLink { ArtistDetail(artist: artist) } label: { Text(artist.title).font(.footnote) }
+                    NavigationLink(value: WatchRoute.artist(artist)) { Text(artist.title).font(.footnote) }
                 }
             } else {
                 StatusRow(loading: loading && artists.isEmpty, error: error, empty: !loading && artists.isEmpty && error == nil ? "No artists" : nil)
                 ForEach(artists) { artist in
-                    NavigationLink { ArtistDetail(artist: artist) } label: { Text(artist.title).font(.footnote) }
+                    NavigationLink(value: WatchRoute.artist(artist)) { Text(artist.title).font(.footnote) }
                 }
             }
         }
@@ -385,12 +387,14 @@ struct ArtistDetail: View {
                 play: { Task { await play(shuffle: false) } },
                 shuffle: { Task { await play(shuffle: true) } }
             )
-            if !offline { KeepButton(item: artist) { await WatchActions.songs(of: artist) } }
+            Section("On Watch") {
+                DownloadControl(item: artist, fetch: { await WatchActions.songs(of: artist) })
+            }
             Section("Albums") {
                 let shown = offline ? localAlbums : albums
                 if loading, shown.isEmpty { StatusRow(loading: true) }
                 ForEach(shown) { album in
-                    NavigationLink { CollectionDetail(item: album) } label: {
+                    NavigationLink(value: WatchRoute.collection(album)) {
                         CollectionRow(item: album, subtitle: album.ProductionYear.map(String.init) ?? "")
                     }
                 }
@@ -496,7 +500,7 @@ struct GenresView: View {
         List {
             if loading, genres.isEmpty { StatusRow(loading: true) }
             ForEach(genres) { genre in
-                NavigationLink { CollectionDetail(item: genre) } label: { Text(genre.title).font(.footnote) }
+                NavigationLink(value: WatchRoute.collection(genre)) { Text(genre.title).font(.footnote) }
             }
         }
         .navigationTitle("Genres")
@@ -545,11 +549,9 @@ struct CollectionDetail: View {
                 shuffle: { player.play(shown, shuffle: true, title: item.title) }
             )
 
-            if item.isAlbum || item.isPlaylist {
-                KeepButton(item: item) { shown }
-            } else if !offline, item.isMusicGenre {
-                Button { downloads.enqueue(shown, reason: "song") } label: {
-                    Label("Download These", systemImage: "arrow.down.circle")
+            if !shown.isEmpty {
+                Section("On Watch") {
+                    DownloadControl(item: item, members: shown)
                 }
             }
 
@@ -599,21 +601,21 @@ struct SearchView: View {
             if !results.books.isEmpty {
                 Section("Audiobooks") {
                     ForEach(results.books) { book in
-                        NavigationLink { BookDetail(item: book) } label: { BookRow(item: book) }
+                        NavigationLink(value: WatchRoute.book(book)) { BookRow(item: book) }
                     }
                 }
             }
             if !results.albums.isEmpty {
                 Section("Albums") {
                     ForEach(results.albums) { album in
-                        NavigationLink { CollectionDetail(item: album) } label: { CollectionRow(item: album) }
+                        NavigationLink(value: WatchRoute.collection(album)) { CollectionRow(item: album) }
                     }
                 }
             }
             if !results.playlists.isEmpty {
                 Section("Playlists") {
                     ForEach(results.playlists) { list in
-                        NavigationLink { CollectionDetail(item: list) } label: { CollectionRow(item: list, subtitle: "Playlist") }
+                        NavigationLink(value: WatchRoute.collection(list)) { CollectionRow(item: list, subtitle: "Playlist") }
                     }
                 }
             }

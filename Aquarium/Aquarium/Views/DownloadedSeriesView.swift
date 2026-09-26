@@ -24,6 +24,17 @@ struct DownloadedSeriesView: View {
     }
 
     var body: some View {
+        #if os(macOS)
+        // A list under season headers, with the actions in the toolbar — see
+        // `DownloadsView+Mac.swift`.
+        MacDownloadedSeriesView(seriesKey: seriesKey)
+        #else
+        phoneBody
+        #endif
+    }
+
+    #if !os(macOS)
+    private var phoneBody: some View {
         ScrollView {
             if let show {
                 LazyVStack(alignment: .leading, spacing: 22) {
@@ -204,6 +215,7 @@ struct DownloadedSeriesView: View {
         }
         .padding(.horizontal, Metrics.gutter)
     }
+    #endif
 }
 
 #endif

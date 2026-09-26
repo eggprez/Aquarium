@@ -25,6 +25,12 @@ struct SearchView: View {
     @State private var searchedTerm: String?
     /// A further page is on its way; the end of the grid can ask more than once.
     @State private var isLoadingPage = false
+    #if os(macOS)
+    /// Return was pressed in the sidebar's field: once the results for that
+    /// term land, a title that matches it exactly is opened — the Mac's
+    /// "Return opens the top hit", without opening a guess.
+    @State private var openExactMatchWhenReady = false
+    #endif
 
     private static let debounce = Duration.milliseconds(320)
 
@@ -90,7 +96,15 @@ struct SearchView: View {
                 if term.trimmingCharacters(in: .whitespaces).isEmpty {
                     recents
                 } else if isSearching || isPending, results.isEmpty {
+                    #if os(macOS)
+                    // The toolbar's spinner says a search is running; the page
+                    // itself stays empty rather than flashing nine grey
+                    // posters per keystroke. Results already on screen are
+                    // kept until the new ones land — see `run`.
+                    Color.clear.frame(height: 1)
+                    #else
                     SkeletonGrid(count: 9)
+                    #endif
                 } else if let error, !isPending {
                     ErrorState(error: error) { schedule(immediate: true) }
                 } else if results.isEmpty, music.isEmpty {
@@ -103,12 +117,16 @@ struct SearchView: View {
                     #if os(iOS)
                     musicResults
                     #endif
+                    // On a Mac the count is the window's subtitle, not a line
+                    // on the page.
+                    #if !os(macOS)
                     if !results.isEmpty {
                     Text("\(total) result\(total == 1 ? "" : "s")")
                         .font(.caption)
                         .foregroundStyle(Theme.textDim)
                         .padding(.horizontal, Metrics.gutter)
                     }
+                    #endif
                     #if os(macOS)
                     if !results.isEmpty, scope == .all {
                         groupedResults
@@ -147,18 +165,44 @@ struct SearchView: View {
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: app.hasAudio ? "Movies, shows, music, books" : "Movies, shows, episodes"
         )
-        #elseif !os(tvOS)
-        .searchable(text: $term, placement: .toolbar, prompt: app.hasAudio ? "Movies, shows, music, books" : "Movies, shows, episodes")
-        .modifier(FocusSearchOnRequest())
-        .searchScopes($scope) {
-            ForEach(Scope.allCases) { Text($0.title).tag($0) }
+        #elseif os(macOS)
+        // The field is the sidebar's — see `RootView` — and this page mirrors
+        // its text. Typing there, whatever section was showing, lands here
+        // once Return is pressed; the scopes are a toolbar picker, where a
+        // Mac window keeps its filters.
+        .onChange(of: app.sidebarSearchTerm, initial: true) { _, new in
+            if term != new { term = new }
         }
+        // `initial` because the page is usually built *by* the submit — the
+        // section wasn't showing until Return brought it up — and a counter
+        // bumped before the page existed is one it would never see change.
+        // A page reappearing later (⌘3 back to Search) sees a stale stamp
+        // and does nothing.
+        .onChange(of: app.sidebarSearchSubmitted, initial: true) { _, _ in
+            guard let at = app.sidebarSearchSubmittedAt, Date().timeIntervalSince(at) < 1 else { return }
+            submittedFromSidebar()
+        }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Show", selection: $scope) {
+                    ForEach(Scope.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .help("Which kind of title to search for")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                if isSearching {
+                    ProgressView().controlSize(.small)
+                }
+            }
+        }
+        .navigationSubtitle(subtitle)
         .onChange(of: scope) { _, _ in
-            results = []
+            // The old scope's results stay up until the new ones land.
             schedule(immediate: true)
         }
         #endif
-        #if !os(tvOS)
+        #if os(iOS)
         .onSubmit(of: .search) {
             prefs.rememberSearch(term)
             schedule(immediate: true)
@@ -195,10 +239,51 @@ struct SearchView: View {
         .onAppear {
             if term.isEmpty, !initialTerm.isEmpty {
                 term = initialTerm
+                #if os(macOS)
+                // The sidebar's field shows what this page is searching for.
+                app.sidebarSearchTerm = initialTerm
+                #endif
                 schedule(immediate: true)
             }
         }
     }
+
+    #if os(macOS)
+    /// The window's subtitle: how many the term found, while it has found any.
+    private var subtitle: String {
+        guard !results.isEmpty, searchedTerm != nil else { return "" }
+        return "\(total.formatted()) result\(total == 1 ? "" : "s")"
+    }
+
+    /// Return in the sidebar's field. The term is searched for at once, and
+    /// a title that matches it exactly is opened — now, if the results on
+    /// screen already answer this term, or once they land.
+    private func submittedFromSidebar() {
+        // The field's text, not this page's copy of it: the copy follows a
+        // step behind, and a submit that arrives with the page's first draw
+        // finds it still empty.
+        let query = app.sidebarSearchTerm.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return }
+        if term != app.sidebarSearchTerm { term = app.sidebarSearchTerm }
+        if searchedTerm == query, !isPending {
+            openExactMatchWhenReady = false
+            openExactMatch(for: query)
+            return
+        }
+        openExactMatchWhenReady = true
+        schedule(immediate: true)
+    }
+
+    /// One result whose title is the term itself, and no other: two titles
+    /// called the same thing — a film and its remake — are a choice to make,
+    /// not one to have made.
+    private func openExactMatch(for query: String) {
+        let hits = results.filter { $0.title.caseInsensitiveCompare(query) == .orderedSame }
+        guard hits.count == 1, let hit = hits.first else { return }
+        prefs.rememberSearch(query)
+        app.push(.item(hit.Id))
+    }
+    #endif
 
     #if os(macOS)
     /// Films, then shows, then episodes, each under its own heading, so a
@@ -223,7 +308,7 @@ struct SearchView: View {
                         .foregroundStyle(Theme.textDim)
                     Spacer()
                     if group.1.count > 6, let scope = Scope.allCases.first(where: { $0.title == group.0 }) {
-                        Button("Show only \(group.0.lowercased())") { self.scope = scope }
+                        Button("Show Only \(group.0)") { self.scope = scope }
                             .buttonStyle(.link)
                             .font(.subheadline)
                     }
@@ -247,6 +332,15 @@ struct SearchView: View {
 
     @ViewBuilder
     private var recents: some View {
+        #if os(macOS)
+        // The recent terms drop down from the sidebar's field (see
+        // `RootView`); the page under an empty field just says what it is for.
+        EmptyState(
+            symbol: "magnifyingglass",
+            title: "Search Your Libraries",
+            message: "Type a film, show or episode name in the sidebar's search field and press Return."
+        )
+        #else
         if prefs.recentSearches.isEmpty {
             EmptyState(
                 symbol: "magnifyingglass",
@@ -285,6 +379,7 @@ struct SearchView: View {
             }
             .padding(.horizontal, Metrics.gutter)
         }
+        #endif
     }
 
     #if os(iOS)
@@ -377,14 +472,30 @@ struct SearchView: View {
         // A search overtaken by the next one leaves the flag to that one.
         defer { if !Task.isCancelled { isSearching = false } }
         do {
+            // Music is asked for only where there is somewhere to show it —
+            // the phone's Music tab. Asked for elsewhere it came back and was
+            // counted as a match, and a term that matched nothing but an
+            // album drew a page with nothing on it.
+            #if os(iOS)
             async let musicTask: JellyfinClient.MusicSearchResults? = app.hasAudio ? client.searchMusic(query, limit: 12) : nil
+            #endif
             let response = try await client.search(query, types: scope.types)
+            #if os(iOS)
             let found = (try? await musicTask) ?? nil
+            #else
+            let found: JellyfinClient.MusicSearchResults? = nil
+            #endif
             guard !Task.isCancelled else { return }
             results = Self.ranked(response.items, for: query)
             total = response.total
             music = found ?? .init()
             searchedTerm = query
+            #if os(macOS)
+            if openExactMatchWhenReady {
+                openExactMatchWhenReady = false
+                openExactMatch(for: query)
+            }
+            #endif
         } catch is CancellationError {
             // Overtaken by the next keystroke; that search will answer.
         } catch {

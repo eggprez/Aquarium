@@ -19,8 +19,10 @@ struct AquariumWatchApp: App {
     @State private var player = WatchPlayer.shared
     @State private var link = WatchLink.shared
     @State private var sync = WatchSyncQueue.shared
+    @State private var navigator = WatchNavigator()
 
     init() {
+        WatchLog.launched()
         WatchLink.shared.start()
     }
 
@@ -32,12 +34,14 @@ struct AquariumWatchApp: App {
                 .environment(player)
                 .environment(link)
                 .environment(sync)
+                .environment(navigator)
                 .tint(WatchTheme.accent)
                 .onOpenURL { WatchActions.handle($0) }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
+                WatchLog.foregrounded()
                 link.requestContext()
                 Task {
                     await client.checkOnline()
@@ -47,6 +51,7 @@ struct AquariumWatchApp: App {
                     await WatchActions.refreshBookPositions()
                 }
             case .background:
+                WatchLog.backgrounded()
                 player.writeSnapshot()
                 WatchDelegate.scheduleRefresh()
             default:

@@ -77,16 +77,22 @@ enum Metrics {
     static var shelfTitleSpacing: CGFloat {
         #if os(tvOS)
         return 16
+        #elseif os(macOS)
+        return 10
         #else
         return 8
         #endif
     }
 
-    /// Breathing room around a shelf's cards. Only tvOS needs it, where focus
-    /// grows the card and would otherwise clip it against the row above.
+    /// Breathing room around a shelf's cards. tvOS needs it because focus
+    /// grows the card and would otherwise clip it against the row above; the
+    /// Mac because the hover ring sits a few points outside the tile, and a
+    /// scroll view clips at its own edge.
     static var shelfCardPadding: CGFloat {
         #if os(tvOS)
         return 18
+        #elseif os(macOS)
+        return 10
         #else
         return 0
         #endif
@@ -101,16 +107,20 @@ enum Metrics {
     static var cardTextSpacing: CGFloat {
         #if os(tvOS)
         return 22
+        #elseif os(macOS)
+        return 7
         #else
         return 6
         #endif
     }
 
+    /// The page margin. Twenty on the Mac — the inset a system window's
+    /// content sits at — where twenty-eight was a tablet's thumb-room.
     static var gutter: CGFloat {
         #if os(tvOS)
         return 60
         #elseif os(macOS)
-        return 28
+        return 20
         #else
         return 16
         #endif
@@ -223,6 +233,10 @@ enum Metrics {
     static var guideRowHeight: CGFloat {
         #if os(tvOS)
         return 96
+        #elseif os(macOS)
+        // A pointer needs no thumb-height row; forty is a two-line table
+        // cell, which is what a guide cell holds.
+        return 40
         #else
         return 60
         #endif
@@ -278,6 +292,9 @@ struct PosterCard: View {
     var subtitle: String?
     /// Which picture the card draws. See `Art`.
     var art: Art = .automatic
+    /// Drawn as the selected tile — the Mac grid's click-to-select. Nothing
+    /// anywhere else.
+    var isSelected: Bool = false
 
     /// What a card is a picture *of*, where the item alone doesn't settle it.
     enum Art {
@@ -293,10 +310,25 @@ struct PosterCard: View {
 
     /// Settled: the server has no picture for this. See `artwork`.
     @State private var artMissing = false
+    #if os(macOS)
+    @Environment(\.displayScale) private var displayScale
+    #endif
 
     /// What to ask the server for when the card has no width of its own. A
     /// phone column is never far off the shelf size.
-    private var requestWidth: Int { Int((width ?? Metrics.posterWidth) * 2) }
+    ///
+    /// On the Mac the width in points is the shelf's or the column's, and the
+    /// pixels are that times the screen's scale: a Retina grid used to ask
+    /// for 336 pixels and draw them across 420, which is the blur the review
+    /// found on every Mac grid. See `ImageLoader.requestWidth`.
+    private var requestWidth: Int {
+        #if os(macOS)
+        let points = width ?? PosterGrid.columnMaximum(wide: wide)
+        return ImageLoader.requestWidth(points: points, displayScale: displayScale)
+        #else
+        return Int((width ?? Metrics.posterWidth) * 2)
+        #endif
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.cardTextSpacing) {
@@ -306,29 +338,64 @@ struct PosterCard: View {
                 // The focus lift belongs to the artwork alone. Applied to the
                 // whole tile it clips the two lines of text into the poster's
                 // rounded rect, and a focused card reads as its own title
-                // printed over its own picture.
-                .posterFocus()
+                // printed over its own picture. (The Mac's hover is the other
+                // way round — see `macTileState` below.)
+                .artworkFocus()
 
             if showSubtitle {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(cardTitle)
-                        .font(.subheadline.weight(.medium))
+                        .font(titleFont)
                         .lineLimit(1)
                         .foregroundStyle(Theme.text)
                     ForEach(Array(cardLines.enumerated()), id: \.offset) { _, line in
                         Text(line)
-                            .font(.caption)
+                            .font(subtitleFont)
                             .lineLimit(1)
                             // "Season 1: Episode 1" is a few points wider than a
                             // phone's poster column; shrinking it slightly is
-                            // better than ending it in an ellipsis.
-                            .minimumScaleFactor(0.8)
+                            // better than ending it in an ellipsis. Not on the
+                            // Mac, where shrunken type next to unshrunken type
+                            // is the thing that reads as wrong.
+                            .minimumScaleFactor(subtitleScale)
                             .foregroundStyle(Theme.textDim)
                     }
                 }
                 .frame(maxWidth: width ?? .infinity, alignment: .leading)
             }
         }
+        // The Mac's hover and selection enclose the whole tile, name and all:
+        // a tile is a thing you select, and a ring around the picture alone
+        // leaves the name looking like it belongs to the tile above.
+        .macTileState(isSelected: isSelected)
+    }
+
+    /// `.subheadline` and `.caption` were tuned for a phone; on the Mac they
+    /// come out at eleven and ten points, which under a 200-point poster is
+    /// fine print. `.callout` and `.subheadline` there are the sizes the
+    /// system's own media apps set a tile's name and line of facts in.
+    private var titleFont: Font {
+        #if os(macOS)
+        .callout.weight(.medium)
+        #else
+        .subheadline.weight(.medium)
+        #endif
+    }
+
+    private var subtitleFont: Font {
+        #if os(macOS)
+        .subheadline
+        #else
+        .caption
+        #endif
+    }
+
+    private var subtitleScale: CGFloat {
+        #if os(macOS)
+        1
+        #else
+        0.8
+        #endif
     }
 
     /// The picture, what to try when it isn't there, and the blur to paint
@@ -560,6 +627,11 @@ struct RefreshButton: View {
 // MARK: - Rows
 
 /// A horizontally scrolling shelf, the shape Home is built from.
+///
+/// On the Mac it is the TV app's row rather than a touch scroller: the cards
+/// are sized so that a whole number of them fill the width, a ‹ and a › appear
+/// at the edges while the pointer is over the row and page it a screen at a
+/// time, the scroll bar shows, and the scroll snaps to a card.
 struct MediaShelf: View {
     let title: String
     let items: [BaseItem]
@@ -580,54 +652,180 @@ struct MediaShelf: View {
 
     @Environment(AppModel.self) private var app
     @Environment(\.posterZoomNamespace) private var zoomNamespace
+    #if os(macOS)
+    /// The shelf's own width, measured from the heading row, which spans it.
+    @State private var shelfWidth: CGFloat = 0
+    @State private var isHovering = false
+    @State private var isHoveringTitle = false
+    /// The id of the leftmost card, which is what the paging buttons move.
+    @State private var scrolledID: String?
+    #endif
 
     var body: some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(title)
-                        .font(titleFont)
-                        .foregroundStyle(Theme.text)
+                    heading
                     Spacer()
                     if let seeAll {
                         SeeAllButton(action: seeAll)
                     }
                 }
                 .padding(.horizontal, Metrics.gutter)
+                #if os(macOS)
+                .background(WidthReader(width: $shelfWidth))
+                #endif
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: Metrics.rowSpacing) {
-                        ForEach(items) { item in
-                            Button {
-                                // Named for this row as well as the item: the
-                                // same title can sit in two rows of one page.
-                                app.zoomSource = "\(title)/\(item.Id)"
-                                onSelect(item)
-                            } label: {
-                                PosterCard(
-                                    item: item,
-                                    width: wide ? Metrics.stillWidth : Metrics.posterWidth,
-                                    wide: wide,
-                                    subtitle: subtitleFor?(item),
-                                    art: art
-                                )
-                                // See `MediaGrid` — the tile is the target,
-                                // not the parts of it that happen to be drawn.
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(PosterButtonStyle())
-                            .posterZoomSource("\(title)/\(item.Id)", in: zoomNamespace)
-                            .itemContextMenu(item, allowsOpen: menuOpensDetails)
-                        }
-                    }
-                    .padding(.horizontal, Metrics.gutter)
-                    // Focus on tvOS grows the card; without room it clips.
-                    .padding(.vertical, Metrics.shelfCardPadding)
-                }
-                .focusRegion()
+                scroller
+                    .focusRegion()
             }
         }
     }
+
+    /// The heading. On the Mac a shelf with somewhere to go is itself the way
+    /// there — click "Continue Watching" and the row opens as a page, with a
+    /// chevron appearing beside the words under the pointer to say so, the
+    /// way the TV app's rows do.
+    @ViewBuilder
+    private var heading: some View {
+        #if os(macOS)
+        if let seeAll {
+            Button(action: seeAll) {
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(titleFont)
+                        .foregroundStyle(Theme.text)
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .opacity(isHoveringTitle ? 1 : 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isHoveringTitle = $0 }
+            .animation(.easeOut(duration: 0.12), value: isHoveringTitle)
+            .help("See all of \(title)")
+            .accessibilityAddTraits(.isHeader)
+        } else {
+            Text(title)
+                .font(titleFont)
+                .foregroundStyle(Theme.text)
+                .accessibilityAddTraits(.isHeader)
+        }
+        #else
+        Text(title)
+            .font(titleFont)
+            .foregroundStyle(Theme.text)
+            .accessibilityAddTraits(.isHeader)
+        #endif
+    }
+
+    private func card(_ item: BaseItem, width: CGFloat) -> some View {
+        Button {
+            // Named for this row as well as the item: the
+            // same title can sit in two rows of one page.
+            app.zoomSource = "\(title)/\(item.Id)"
+            onSelect(item)
+        } label: {
+            PosterCard(
+                item: item,
+                width: width,
+                wide: wide,
+                subtitle: subtitleFor?(item),
+                art: art
+            )
+            // See `MediaGrid` — the tile is the target,
+            // not the parts of it that happen to be drawn.
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PosterButtonStyle())
+        .posterZoomSource("\(title)/\(item.Id)", in: zoomNamespace)
+        .itemContextMenu(item, allowsOpen: menuOpensDetails)
+        #if os(macOS)
+        .help(item.title)
+        #endif
+    }
+
+    #if os(macOS)
+    /// How many cards fill the row and how wide each one is. Until the width
+    /// is measured the shelf takes the platform's fixed card; one layout pass
+    /// later it has the real number.
+    private var layout: (count: Int, width: CGFloat) {
+        let available = shelfWidth - Metrics.gutter * 2
+        guard available > 0 else {
+            return (1, wide ? Metrics.stillWidth : Metrics.posterWidth)
+        }
+        let minimum = (wide ? 150 * 1.62 : 150) * PosterGrid.thumbnailScale
+        return ShelfLayout.fit(available: available, minimum: minimum, spacing: Metrics.rowSpacing)
+    }
+
+    private var scroller: some View {
+        let layout = self.layout
+        return ScrollView(.horizontal, showsIndicators: true) {
+            LazyHStack(alignment: .top, spacing: Metrics.rowSpacing) {
+                ForEach(items) { item in
+                    card(item, width: layout.width)
+                }
+            }
+            .scrollTargetLayout()
+            // Room for the hover ring, which sits outside the tile.
+            .padding(.vertical, Metrics.shelfCardPadding)
+        }
+        // Margins rather than padding inside the stack, so that "aligned to a
+        // card" means the card's edge lands on the gutter and not on the
+        // window's edge.
+        .contentMargins(.horizontal, Metrics.gutter, for: .scrollContent)
+        .scrollTargetBehavior(.viewAligned)
+        .scrollPosition(id: $scrolledID)
+        .overlay(alignment: .leading) {
+            ShelfPagingButton(direction: .back) { page(by: -layout.count) }
+                .padding(.leading, 4)
+                .opacity(isHovering && canPage(by: -1) ? 1 : 0)
+        }
+        .overlay(alignment: .trailing) {
+            ShelfPagingButton(direction: .forward) { page(by: layout.count) }
+                .padding(.trailing, 4)
+                .opacity(isHovering && canPage(by: layout.count) ? 1 : 0)
+        }
+        .animation(.easeOut(duration: 0.15), value: isHovering)
+        .onHover { isHovering = $0 }
+    }
+
+    /// Where the row is, as an index into `items`. Nothing scrolled yet is
+    /// the first card.
+    private var scrolledIndex: Int {
+        guard let scrolledID, let index = items.firstIndex(where: { $0.Id == scrolledID }) else { return 0 }
+        return index
+    }
+
+    private func canPage(by offset: Int) -> Bool {
+        offset < 0 ? scrolledIndex > 0 : scrolledIndex + offset < items.count
+    }
+
+    /// One screenful along. The target is the card that becomes leftmost;
+    /// past the end it is the last card, and the scroll view stops where the
+    /// content does.
+    private func page(by offset: Int) {
+        let target = min(max(0, scrolledIndex + offset), items.count - 1)
+        withAnimation(.easeInOut(duration: 0.3)) {
+            scrolledID = items[target].Id
+        }
+    }
+    #else
+    private var scroller: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(alignment: .top, spacing: Metrics.rowSpacing) {
+                ForEach(items) { item in
+                    card(item, width: wide ? Metrics.stillWidth : Metrics.posterWidth)
+                }
+            }
+            .padding(.horizontal, Metrics.gutter)
+            // Focus on tvOS grows the card; without room it clips.
+            .padding(.vertical, Metrics.shelfCardPadding)
+        }
+    }
+    #endif
 
     /// A phone fits more rows on screen with a heading the weight of a list
     /// header than with one the weight of a page title.
@@ -639,6 +837,23 @@ struct MediaShelf: View {
         #endif
     }
 }
+
+#if os(macOS)
+/// Reports the width of whatever it is put behind, for the views that size
+/// their children from it: a shelf, a skeleton shelf, a grid working out
+/// which column the selection is in.
+struct WidthReader: View {
+    @Binding var width: CGFloat
+
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { width = geo.size.width }
+                .onChange(of: geo.size.width) { _, new in width = new }
+        }
+    }
+}
+#endif
 
 /// "See all", beside a shelf's heading.
 ///
@@ -673,13 +888,29 @@ struct SeeAllButton: View {
             .background(Theme.raised, in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
             .contentShape(Capsule())
+            #elseif os(macOS)
+            // A link, in Title Case, which is what a Mac calls a small
+            // accent-coloured word that goes somewhere.
+            Text("See All")
+                .font(.subheadline)
             #else
             Text("See all")
                 .font(.subheadline)
                 .foregroundStyle(Theme.accent)
             #endif
         }
-        .chipButtonStyle()
+        .seeAllStyle()
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func seeAllStyle() -> some View {
+        #if os(macOS)
+        buttonStyle(.link)
+        #else
+        chipButtonStyle()
+        #endif
     }
 }
 
@@ -721,33 +952,19 @@ extension View {
     }
 }
 
-#if os(macOS)
-/// The pointer resting on a poster: the artwork lifts a little and throws a
-/// shadow, the way the TV and Music apps answer a hover, so a grid of posters
-/// says which one a click would open before the click.
-struct PosterHover: ViewModifier {
-    var radius: CGFloat = Theme.cornerRadius
-    @State private var isHovering = false
-
-    func body(content: Content) -> some View {
-        content
-            .overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(.white.opacity(isHovering ? 0.35 : 0), lineWidth: 1)
-            )
-            .scaleEffect(isHovering ? 1.035 : 1)
-            .shadow(color: .black.opacity(isHovering ? 0.28 : 0), radius: isHovering ? 10 : 0, y: isHovering ? 6 : 0)
-            .animation(.easeOut(duration: 0.14), value: isHovering)
-            .onHover { isHovering = $0 }
-    }
-}
-#endif
-
 struct PosterButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
+        #if os(macOS)
+        // Nothing on a Mac shrinks when clicked. The press is the tile going
+        // a shade darker, which is what an icon in Finder does.
+        configuration.label
+            .brightness(configuration.isPressed ? -0.1 : 0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+        #else
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+        #endif
     }
 }
 
@@ -796,19 +1013,38 @@ struct RowButtonStyle: ButtonStyle {
 /// This is the fill a system list row draws, in this app's colours, bled past
 /// the row's own bounds so it reads as a band across the page rather than a
 /// rectangle around the text.
+///
+/// On the Mac the same band appears under the pointer, before the press: a
+/// row that only answers a click gives no sign that it takes one.
 struct RowPressStyle: ButtonStyle {
     var inset: CGFloat = 10
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Theme.hover)
-                    .padding(.horizontal, -inset)
-                    .padding(.vertical, -4)
-                    .opacity(configuration.isPressed ? 1 : 0)
-            )
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+        RowPressLabel(configuration: configuration, inset: inset)
+    }
+
+    /// The label in its own view so it can hold the hover state; a style
+    /// isn't a view and has nowhere to keep one.
+    private struct RowPressLabel: View {
+        let configuration: Configuration
+        let inset: CGFloat
+        @State private var isHovering = false
+
+        var body: some View {
+            configuration.label
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Theme.hover)
+                        .padding(.horizontal, -inset)
+                        .padding(.vertical, -4)
+                        .opacity(configuration.isPressed || isHovering ? 1 : 0)
+                )
+                .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+                #if os(macOS)
+                .animation(.easeOut(duration: 0.12), value: isHovering)
+                .onHover { isHovering = $0 }
+                #endif
+        }
     }
 }
 #endif
@@ -950,6 +1186,15 @@ extension View {
     func appButtonStyle(prominent: Bool = false, highlight: Color? = nil) -> some View {
         #if os(tvOS)
         buttonStyle(TVButtonStyle(kind: prominent ? .prominent : .secondary, highlight: highlight))
+        #elseif os(macOS)
+        // No tint: a prominent button is the user's accent colour, whichever
+        // they chose, and a brand purple over a graphite desktop is the one
+        // thing that says the app came from somewhere else.
+        if prominent {
+            buttonStyle(.borderedProminent)
+        } else {
+            buttonStyle(.bordered).tint(highlight)
+        }
         #else
         if prominent {
             buttonStyle(.borderedProminent).tint(Theme.accentStrong)
@@ -960,14 +1205,25 @@ extension View {
     }
 
     /// Artwork that the selector can land on — a poster, a still, a library
-    /// tile. Nothing anywhere but a television, which is the only place with a
-    /// selector to show.
+    /// tile. The television's focus ring, and the Mac's hover ring; nothing
+    /// on a phone, where a finger needs no selector drawn for it.
     @ViewBuilder
     func posterFocus(radius: CGFloat = Theme.cornerRadius) -> some View {
         #if os(tvOS)
         modifier(PosterFocus(radius: radius))
         #elseif os(macOS)
         modifier(PosterHover(radius: radius))
+        #else
+        self
+        #endif
+    }
+
+    /// `posterFocus` for the artwork inside a `PosterCard`, whose Mac hover
+    /// is drawn round the whole tile instead — see `macTileState`.
+    @ViewBuilder
+    func artworkFocus(radius: CGFloat = Theme.cornerRadius) -> some View {
+        #if os(tvOS)
+        modifier(PosterFocus(radius: radius))
         #else
         self
         #endif
@@ -1027,9 +1283,13 @@ extension View {
     /// is what left the guide unreachable and a pushed page with nothing but
     /// the tab strip to move around in. Nothing anywhere else: this is the one
     /// platform with a selector to guide.
+    ///
+    /// The Mac has one too — the Tab key and the arrow keys walk focus
+    /// between controls, and a grid that isn't a section is one the keyboard
+    /// walks past.
     @ViewBuilder
     func focusRegion() -> some View {
-        #if os(tvOS)
+        #if os(tvOS) || os(macOS)
         focusSection()
         #else
         self
@@ -1089,7 +1349,7 @@ enum PosterGrid {
         // A range rather than a fixed width, with the cards filling their
         // column: a window made narrower gets one more, smaller column instead
         // of two fixed posters with a gulf of page between them.
-        return [GridItem(.adaptive(minimum: wide ? 220 : 136, maximum: wide ? 360 : 210),
+        return [GridItem(.adaptive(minimum: columnMinimum(wide: wide), maximum: columnMaximum(wide: wide)),
                          spacing: Metrics.gridSpacing, alignment: .top)]
         #else
         return [GridItem(.adaptive(minimum: wide ? Metrics.stillWidth : Metrics.posterWidth),
@@ -1106,6 +1366,48 @@ enum PosterGrid {
         guard phoneColumns(wide: wide, compact: compact) == nil else { return nil }
         return wide ? Metrics.stillWidth : Metrics.posterWidth
         #endif
+    }
+
+    /// View ▸ Bigger and Smaller on the Mac: what the column bounds and the
+    /// shelf's minimum card are multiplied by. One everywhere else. Read
+    /// through the main actor because that is where `MacViewOptions` lives
+    /// and where every caller — a view's body — already is; reading the
+    /// observable there is what makes a grid redraw when the menu changes it.
+    static var thumbnailScale: CGFloat {
+        #if os(macOS)
+        MainActor.assumeIsolated { CGFloat(MacViewOptions.shared.thumbnailSize) }
+        #else
+        1
+        #endif
+    }
+
+    /// The narrowest and widest a Mac column runs. The widest is also what a
+    /// card in that column asks the server for, since the card itself has no
+    /// width of its own — see `PosterCard.requestWidth`.
+    static func columnMinimum(wide: Bool) -> CGFloat {
+        #if os(macOS)
+        (wide ? 220 : 136) * thumbnailScale
+        #else
+        wide ? Metrics.stillWidth : Metrics.posterWidth
+        #endif
+    }
+
+    static func columnMaximum(wide: Bool) -> CGFloat {
+        #if os(macOS)
+        (wide ? 360 : 210) * thumbnailScale
+        #else
+        wide ? Metrics.stillWidth : Metrics.posterWidth
+        #endif
+    }
+
+    /// How many columns an adaptive grid of these lays out across `width`
+    /// points of page — the grid's own arithmetic, repeated here so the Mac's
+    /// arrow keys know which tile is above and below.
+    static func columnCount(wide: Bool, width: CGFloat) -> Int {
+        let available = width - Metrics.gutter * 2
+        let minimum = columnMinimum(wide: wide)
+        guard available > minimum else { return 1 }
+        return max(1, Int(((available + Metrics.gridSpacing) / (minimum + Metrics.gridSpacing)).rounded(.down)))
     }
 }
 
@@ -1187,8 +1489,8 @@ struct SkeletonHero: View {
                     SkeletonBar(height: 28, width: 230)
                     SkeletonBar(height: 12, width: 150)
                     HStack(spacing: 10) {
-                        Capsule().fill(Theme.skeletonBar).frame(width: 108, height: 34)
-                        Capsule().fill(Theme.skeletonBar).frame(width: 92, height: 34)
+                        skeletonButton(width: 108)
+                        skeletonButton(width: 92)
                     }
                 }
                 .padding(.horizontal, Metrics.gutter)
@@ -1196,31 +1498,65 @@ struct SkeletonHero: View {
             }
             .accessibilityHidden(true)
     }
+
+    /// The shape of the button that is coming: a capsule the height of a
+    /// phone's, a rounded rect the height of the Mac's.
+    private func skeletonButton(width: CGFloat) -> some View {
+        #if os(macOS)
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(Theme.skeletonBar)
+            .frame(width: width * 0.8, height: 24)
+        #else
+        Capsule().fill(Theme.skeletonBar).frame(width: width, height: 34)
+        #endif
+    }
 }
 
 /// A shelf of tiles that haven't arrived — heading included, because a heading
 /// appearing a moment before its row is its own little jump.
+///
+/// On the Mac the count comes from the width, in the same arithmetic as the
+/// shelf it stands in for: four fixed cards and a spacer was four grey
+/// posters and a page of nothing on a wide window.
 struct SkeletonShelf: View {
     var wide: Bool = false
     var count: Int = 4
+    #if os(macOS)
+    @State private var shelfWidth: CGFloat = 0
+    #endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
             SkeletonBar(height: 13, width: 140)
                 .padding(.horizontal, Metrics.gutter)
             HStack(alignment: .top, spacing: Metrics.rowSpacing) {
-                ForEach(0..<count, id: \.self) { _ in
-                    SkeletonCard(
-                        width: wide ? Metrics.stillWidth : Metrics.posterWidth,
-                        wide: wide
-                    )
+                ForEach(0..<cardCount, id: \.self) { _ in
+                    SkeletonCard(width: cardWidth, wide: wide)
                 }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, Metrics.gutter)
+            #if os(macOS)
+            .padding(.vertical, Metrics.shelfCardPadding)
+            .background(WidthReader(width: $shelfWidth))
+            #endif
         }
         .accessibilityHidden(true)
     }
+
+    #if os(macOS)
+    private var layout: (count: Int, width: CGFloat) {
+        let available = shelfWidth - Metrics.gutter * 2
+        guard available > 0 else { return (count, wide ? Metrics.stillWidth : Metrics.posterWidth) }
+        let minimum = (wide ? 150 * 1.62 : 150) * PosterGrid.thumbnailScale
+        return ShelfLayout.fit(available: available, minimum: minimum, spacing: Metrics.rowSpacing)
+    }
+    private var cardCount: Int { layout.count }
+    private var cardWidth: CGFloat { layout.width }
+    #else
+    private var cardCount: Int { count }
+    private var cardWidth: CGFloat { wide ? Metrics.stillWidth : Metrics.posterWidth }
+    #endif
 }
 
 /// A list row that hasn't arrived: a channel, an episode.
@@ -1287,6 +1623,13 @@ struct SkeletonGrid: View {
 
 /// The library and search layout: as many columns as fit, sized from the
 /// poster width so every platform gets a sensible count without hard-coding one.
+///
+/// On the Mac it is a selectable grid, the way Finder's icon view and the TV
+/// app's library are: a click selects a tile and draws the ring, a
+/// double-click or Return opens it, the arrow keys move the selection, ⇧ and
+/// ⌘ extend it, ⌘A takes the lot. The screens that use it don't have to know;
+/// `onSelect` is still called when something opens. A screen that wants to
+/// read the selection — for a toolbar that acts on it — binds `selection`.
 struct MediaGrid: View {
     let items: [BaseItem]
     var wide: Bool = false
@@ -1295,11 +1638,22 @@ struct MediaGrid: View {
     var onSelect: (BaseItem) -> Void
     /// Called when the last row comes into view, for paging.
     var onReachEnd: (() -> Void)?
+    /// The selected item ids, for a caller that wants them. Nil leaves the
+    /// grid to keep its own. Nothing anywhere but the Mac.
+    var selection: Binding<Set<String>>? = nil
 
     @Environment(AppModel.self) private var app
     @Environment(\.posterZoomNamespace) private var zoomNamespace
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
+    #if os(macOS)
+    @State private var ownSelection: Set<String> = []
+    /// The tile the keyboard moves from and ⇧-click extends from: the last
+    /// one clicked or arrowed to.
+    @State private var anchorID: String?
+    @State private var gridWidth: CGFloat = 0
+    @FocusState private var isFocused: Bool
     #endif
 
     private var isCompact: Bool {
@@ -1317,28 +1671,10 @@ struct MediaGrid: View {
     var body: some View {
         LazyVGrid(columns: columns, spacing: Metrics.gridRowSpacing) {
             ForEach(items) { item in
-                Button {
-                    app.zoomSource = "grid/\(item.Id)"
-                    onSelect(item)
-                } label: {
-                    PosterCard(item: item, width: cardWidth, wide: wide)
-                        // The whole tile is the target, not whichever parts of
-                        // it happen to have drawn something. A button's hit
-                        // region is its label's rendered content, and a card is
-                        // artwork over a placeholder with two lines of text
-                        // under it and gaps in between — so a tap that landed
-                        // in a gap, or on a poster whose picture hadn't
-                        // arrived, went nowhere and the item simply didn't
-                        // open. Given a shape it is the same rectangle
-                        // whatever the card is currently showing.
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(PosterButtonStyle())
-                .posterZoomSource("grid/\(item.Id)", in: zoomNamespace)
-                .itemContextMenu(item)
-                .onAppear {
-                    if item.Id == items.last?.Id { onReachEnd?() }
-                }
+                tile(item)
+                    .onAppear {
+                        if item.Id == items.last?.Id { onReachEnd?() }
+                    }
             }
             if pendingCount > 0 {
                 ForEach(0..<pendingCount, id: \.self) { _ in
@@ -1348,8 +1684,125 @@ struct MediaGrid: View {
         }
         .padding(.horizontal, Metrics.gutter)
         .animation(.easeOut(duration: 0.2), value: pendingCount > 0)
+        #if os(macOS)
+        .background(WidthReader(width: $gridWidth))
+        .focusable()
+        .focusEffectDisabled()
+        .focused($isFocused)
+        .onKeyPress(.upArrow) { move(by: -columnCount); return .handled }
+        .onKeyPress(.downArrow) { move(by: columnCount); return .handled }
+        .onKeyPress(.leftArrow) { move(by: -1); return .handled }
+        .onKeyPress(.rightArrow) { move(by: 1); return .handled }
+        .onKeyPress(.return) { openSelection() }
+        .onKeyPress(characters: .init(charactersIn: "aA")) { press in
+            guard press.modifiers.contains(.command) else { return .ignored }
+            selected = Set(items.map(\.Id))
+            return .handled
+        }
+        .onChange(of: items.map(\.Id)) { _, ids in
+            // A page reloaded or filtered: nothing selected that isn't there.
+            let present = Set(ids)
+            if !selected.isSubset(of: present) { selected = selected.intersection(present) }
+        }
+        #endif
         .focusRegion()
     }
+
+    #if os(macOS)
+    /// One tile. Not a button: a button opens on the click, and on the Mac
+    /// the click selects. The double-click and the single are read together
+    /// — a double-click is two clicks, so the tile is selected and then
+    /// opened, which is what Finder does too.
+    private func tile(_ item: BaseItem) -> some View {
+        PosterCard(item: item, width: cardWidth, wide: wide, isSelected: selected.contains(item.Id))
+            .contentShape(Rectangle())
+            .onTapGesture { click(item) }
+            .simultaneousGesture(TapGesture(count: 2).onEnded { open(item) })
+            .itemContextMenu(item)
+            .help(item.title)
+            .accessibilityAddTraits(selected.contains(item.Id) ? .isSelected : [])
+    }
+
+    private var selected: Set<String> {
+        get { selection?.wrappedValue ?? ownSelection }
+        nonmutating set {
+            if let selection { selection.wrappedValue = newValue } else { ownSelection = newValue }
+        }
+    }
+
+    private var columnCount: Int { PosterGrid.columnCount(wide: wide, width: gridWidth) }
+
+    /// The click, read with whatever keys were down: ⌘ toggles the tile,
+    /// ⇧ extends from the anchor, a plain click is the new selection.
+    private func click(_ item: BaseItem) {
+        isFocused = true
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.command) {
+            if selected.contains(item.Id) { selected.remove(item.Id) } else { selected.insert(item.Id) }
+            anchorID = item.Id
+        } else if flags.contains(.shift), let anchorID,
+                  let from = items.firstIndex(where: { $0.Id == anchorID }),
+                  let to = items.firstIndex(where: { $0.Id == item.Id }) {
+            selected.formUnion(items[min(from, to)...max(from, to)].map(\.Id))
+        } else {
+            selected = [item.Id]
+            anchorID = item.Id
+        }
+    }
+
+    private func open(_ item: BaseItem) {
+        app.zoomSource = "grid/\(item.Id)"
+        onSelect(item)
+    }
+
+    /// The arrow keys: from the anchor, by one tile or one row, to a single
+    /// new selection. With nothing selected the first key lands on the first
+    /// tile, as it does in Finder.
+    private func move(by offset: Int) {
+        guard !items.isEmpty else { return }
+        let from = anchorID.flatMap { id in items.firstIndex { $0.Id == id } }
+        let to: Int
+        if let from {
+            to = min(max(0, from + offset), items.count - 1)
+        } else {
+            to = 0
+        }
+        let target = items[to]
+        selected = [target.Id]
+        anchorID = target.Id
+    }
+
+    /// Return: the anchor if it is selected, else the first selected tile.
+    private func openSelection() -> KeyPress.Result {
+        let id = (anchorID.flatMap { selected.contains($0) ? $0 : nil })
+            ?? items.first { selected.contains($0.Id) }?.Id
+        guard let id, let item = items.first(where: { $0.Id == id }) else { return .ignored }
+        open(item)
+        return .handled
+    }
+    #else
+    private func tile(_ item: BaseItem) -> some View {
+        Button {
+            app.zoomSource = "grid/\(item.Id)"
+            onSelect(item)
+        } label: {
+            PosterCard(item: item, width: cardWidth, wide: wide)
+                // The whole tile is the target, not whichever parts of
+                // it happen to have drawn something. A button's hit
+                // region is its label's rendered content, and a card is
+                // artwork over a placeholder with two lines of text
+                // under it and gaps in between — so a tap that landed
+                // in a gap, or on a poster whose picture hadn't
+                // arrived, went nowhere and the item simply didn't
+                // open. Given a shape it is the same rectangle
+                // whatever the card is currently showing.
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PosterButtonStyle())
+        .posterZoomSource("grid/\(item.Id)", in: zoomNamespace)
+        .itemContextMenu(item)
+    }
+    #endif
 }
 
 // MARK: - Wrapping row
@@ -1453,6 +1906,19 @@ struct EmptyState: View {
     var action: (() -> Void)? = nil
 
     var body: some View {
+        #if os(macOS)
+        // The system's own empty page, which every Mac app shows.
+        ContentUnavailableView {
+            Label(title, systemImage: symbol)
+        } description: {
+            Text(message)
+        } actions: {
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 240)
+        #else
         VStack(spacing: 10) {
             Image(systemName: symbol)
                 .font(.system(size: 34))
@@ -1471,6 +1937,7 @@ struct EmptyState: View {
         }
         .frame(maxWidth: .infinity, minHeight: 240)
         .padding(Metrics.gutter)
+        #endif
     }
 }
 
@@ -1480,6 +1947,19 @@ struct ErrorState: View {
     var retry: (() -> Void)?
 
     var body: some View {
+        #if os(macOS)
+        ContentUnavailableView {
+            Label(title, systemImage: "exclamationmark.triangle")
+        } description: {
+            Text(error)
+        } actions: {
+            if let retry {
+                Button("Try Again", action: retry)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 240)
+        #else
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 32))
@@ -1497,6 +1977,7 @@ struct ErrorState: View {
         }
         .frame(maxWidth: .infinity, minHeight: 240)
         .padding(Metrics.gutter)
+        #endif
     }
 }
 
@@ -1506,13 +1987,32 @@ struct OfflineState: View {
     var onDownloads: (() -> Void)?
     @State private var checking = false
 
+    private static let message = "You're signed in, but your Jellyfin server can't be reached right now. Downloaded media is still available, and playback will sync once you're back online."
+
     var body: some View {
+        #if os(macOS)
+        ContentUnavailableView {
+            Label("Server Offline", systemImage: "wifi.slash")
+        } description: {
+            Text(Self.message)
+        } actions: {
+            HStack(spacing: 12) {
+                if let onDownloads {
+                    Button("Go to Downloads", action: onDownloads)
+                        .buttonStyle(.borderedProminent)
+                }
+                Button(checking ? "Checking…" : "Retry Connection", action: retry)
+                    .disabled(checking)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #else
         VStack(spacing: 14) {
             Image(systemName: "wifi.slash")
                 .font(.system(size: 34))
                 .foregroundStyle(Theme.warn)
             Text("Server offline").font(.title2.weight(.semibold))
-            Text("You're signed in, but your Jellyfin server can't be reached right now. Downloaded media is still available, and playback will sync once you're back online.")
+            Text(Self.message)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textDim)
@@ -1522,19 +2022,22 @@ struct OfflineState: View {
                     Button("Go to Downloads", action: onDownloads)
                         .appButtonStyle(prominent: true)
                 }
-                Button(checking ? "Checking…" : "Retry connection") {
-                    Task {
-                        checking = true
-                        await onRetry()
-                        checking = false
-                    }
-                }
-                .appButtonStyle()
-                .disabled(checking)
+                Button(checking ? "Checking…" : "Retry connection", action: retry)
+                    .appButtonStyle()
+                    .disabled(checking)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Metrics.gutter)
+        #endif
+    }
+
+    private func retry() {
+        Task {
+            checking = true
+            await onRetry()
+            checking = false
+        }
     }
 }
 
@@ -1563,17 +2066,10 @@ struct OfflineStrip: View {
             Button(app.isCheckingConnection ? "Checking…" : "Retry") {
                 Task { await app.retryNow() }
             }
-            .font(.subheadline.weight(.semibold))
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.link)
+            .retryStyle()
             .disabled(app.isCheckingConnection)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-        .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5))
-        .padding(.horizontal, Metrics.gutter)
-        .padding(.vertical, 6)
+        .stripChrome()
         .accessibilityElement(children: .combine)
     }
 
@@ -1592,40 +2088,82 @@ struct OfflineStrip: View {
     }
 }
 
+private extension View {
+    /// The strip's box. A floating rounded card above the tab bar on a
+    /// phone; on the Mac there is no tab bar, and a status strip is a
+    /// full-width band of bar material with a separator over it, the way
+    /// Mail's "offline" bar sits under its content.
+    @ViewBuilder
+    func stripChrome() -> some View {
+        #if os(macOS)
+        self
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(.bar)
+            .overlay(alignment: .top) { Divider() }
+        #else
+        self
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 0.5))
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.vertical, 6)
+        #endif
+    }
+
+    @ViewBuilder
+    func retryStyle() -> some View {
+        #if os(macOS)
+        buttonStyle(.link)
+        #else
+        self
+            .font(.subheadline.weight(.semibold))
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.link)
+        #endif
+    }
+}
+
 // MARK: - Toasts
 
 struct ToastOverlay: View {
     @Environment(AppModel.self) private var app
+    #if os(macOS)
+    /// A toast the pointer is over, or was over a moment ago. The shell's
+    /// timer takes a toast out of `app.toasts` on its own schedule; while the
+    /// pointer rests on one it stays here instead, which is what "the timer
+    /// pauses on hover" comes to without a timer of this view's own to pause.
+    @State private var held: Toast?
+    @State private var release: Task<Void, Never>?
+    #endif
+
+    private var shown: [Toast] {
+        #if os(macOS)
+        if let held, !app.toasts.contains(held) { return app.toasts + [held] }
+        #endif
+        return app.toasts
+    }
 
     var body: some View {
         VStack(spacing: 8) {
             Spacer()
-            ForEach(app.toasts) { toast in
-                HStack(spacing: 10) {
-                    Image(systemName: symbol(toast.tone))
-                        .foregroundStyle(colour(toast.tone))
-                    Text(toast.text)
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.text)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .frame(maxWidth: 460, alignment: .leading)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Theme.border, lineWidth: 0.5)
-                )
-                .shadow(radius: 12, y: 6)
-                .onTapGesture { app.dismiss(toast) }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+            ForEach(shown) { toast in
+                ToastCard(toast: toast, dismiss: { dismiss(toast) }, hover: { hover($0, toast) })
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .padding(.bottom, 28)
         .padding(.horizontal, 20)
-        .animation(.spring(duration: 0.3), value: app.toasts)
-        .allowsHitTesting(!app.toasts.isEmpty)
+        .animation(.spring(duration: 0.3), value: shown)
+        .allowsHitTesting(!shown.isEmpty)
+        #if os(macOS)
+        // Escape takes the newest one down.
+        .onExitCommand {
+            if let latest = shown.last { dismiss(latest) }
+        }
+        #elseif os(iOS)
         // Every outcome the app reports in words is reported in the hand at the
         // same moment. Keyed on the newest toast's id so a second one arriving
         // while the first is still up is felt too.
@@ -1637,18 +2175,94 @@ struct ToastOverlay: View {
             default: return .impact(weight: .light)
             }
         }
+        #endif
     }
 
-    private func symbol(_ tone: Toast.Tone) -> String {
-        switch tone {
+    private func dismiss(_ toast: Toast) {
+        app.dismiss(toast)
+        #if os(macOS)
+        if held == toast { held = nil }
+        #endif
+    }
+
+    private func hover(_ isHovering: Bool, _ toast: Toast) {
+        #if os(macOS)
+        release?.cancel()
+        if isHovering {
+            held = toast
+        } else if held == toast {
+            // Gone from the pointer: a moment more, then it goes as it would
+            // have.
+            release = Task {
+                try? await Task.sleep(for: .seconds(1.2))
+                guard !Task.isCancelled else { return }
+                if held == toast { held = nil }
+            }
+        }
+        #endif
+    }
+}
+
+/// One toast. Tapped, it goes; on the Mac a ✕ appears under the pointer to
+/// say so.
+private struct ToastCard: View {
+    let toast: Toast
+    let dismiss: () -> Void
+    let hover: (Bool) -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .foregroundStyle(colour)
+            Text(toast.text)
+                .font(.subheadline)
+                .foregroundStyle(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+            #if os(macOS)
+            Spacer(minLength: 0)
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss")
+            .accessibilityLabel("Dismiss")
+            .opacity(isHovering ? 1 : 0)
+            #endif
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: 460, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.border, lineWidth: 0.5)
+        )
+        .shadow(radius: 12, y: 6)
+        .onTapGesture(perform: dismiss)
+        #if os(macOS)
+        .onHover { hovering in
+            isHovering = hovering
+            hover(hovering)
+        }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+        #endif
+    }
+
+    private var symbol: String {
+        switch toast.tone {
         case .info: "info.circle"
         case .ok: "checkmark.circle"
         case .error: "exclamationmark.triangle"
         }
     }
 
-    private func colour(_ tone: Toast.Tone) -> Color {
-        switch tone {
+    private var colour: Color {
+        switch toast.tone {
         case .info: Theme.accent
         case .ok: Theme.ok
         case .error: Theme.danger
@@ -1841,11 +2455,23 @@ struct PageHeading: View {
 
 /// A fact worth reading as its own thing rather than as another clause in a
 /// grey sentence — a genre, a studio.
+///
+/// A capsule on a phone; on the Mac, where a pill reads as a web tag, the
+/// same fact in secondary text, the way the TV app lists a film's genres.
 struct MetaChip: View {
     var text: String
     var symbol: String?
 
     var body: some View {
+        #if os(macOS)
+        HStack(spacing: 4) {
+            if let symbol {
+                Image(systemName: symbol).font(.caption)
+            }
+            Text(text).font(.subheadline)
+        }
+        .foregroundStyle(.secondary)
+        #else
         HStack(spacing: 5) {
             if let symbol {
                 Image(systemName: symbol).font(.caption2)
@@ -1857,6 +2483,7 @@ struct MetaChip: View {
         .foregroundStyle(Theme.textBody)
         .background(Theme.raised, in: Capsule())
         .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 0.5))
+        #endif
     }
 }
 
@@ -1905,7 +2532,7 @@ struct AncestorTrail: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
-                    .buttonStyle(RowPressStyle(inset: 6))
+                    .crumbStyle(name: step.name)
                     .accessibilityHint("Opens \(step.name)")
                 }
             }
@@ -1948,6 +2575,19 @@ struct AncestorTrail: View {
         if let name = item.SeasonName, !name.isEmpty { return name }
         guard let number = item.ParentIndexNumber else { return "Season" }
         return number == 0 ? "Specials" : "Season \(number)"
+    }
+}
+
+private extension View {
+    /// A crumb is a link on the Mac — the system's own, with a tooltip for
+    /// the name the line may have cut short — and a pressable row elsewhere.
+    @ViewBuilder
+    func crumbStyle(name: String) -> some View {
+        #if os(macOS)
+        buttonStyle(.link).help("Open \(name)")
+        #else
+        buttonStyle(RowPressStyle(inset: 6))
+        #endif
     }
 }
 #endif

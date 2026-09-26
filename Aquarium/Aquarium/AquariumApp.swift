@@ -22,6 +22,9 @@ struct AquariumApp: App {
     @State private var music = MusicPlayer.shared
 
     #if os(macOS)
+    /// The Dock menu and the return-to-app refresh — see `MacAppDelegate`.
+    @NSApplicationDelegateAdaptor(MacAppDelegate.self) private var delegate
+
     init() {
         // No window tabs: a tab is a second main window, and with one app
         // model, one player and one set of navigation paths it could only
@@ -56,7 +59,12 @@ struct AquariumApp: App {
                 #if !os(tvOS)
                 .themed(prefs.theme)
                 #endif
+                // Not on a Mac: there the tint is the accent colour the person
+                // chose in System Settings, and a forced one overrides it on
+                // every control in the app.
+                #if !os(macOS)
                 .tint(Theme.accent)
+                #endif
                 // The Apple TV home screen's top shelf comes back in here —
                 // see AppModel.handle.
                 .onOpenURL { app.handle($0) }
@@ -80,6 +88,7 @@ struct AquariumApp: App {
         #endif
 
         #if os(macOS)
+        // No `.tint` on any of these: the system accent colour, as above.
         Settings {
             MacSettingsWindow()
                 .environment(app)
@@ -88,7 +97,6 @@ struct AquariumApp: App {
                 .environment(player)
                 .environment(music)
                 .themed(prefs.theme)
-                .tint(Theme.accent)
         }
 
         // A title in a window of its own — see `ItemWindow`.
@@ -100,7 +108,20 @@ struct AquariumApp: App {
                 .environment(player)
                 .environment(music)
                 .themed(prefs.theme)
-                .tint(Theme.accent)
+        }
+        .defaultSize(width: 1040, height: 780)
+        .commandsRemoved()
+
+        // A library, Favorites or a search in a window of its own, from the
+        // sidebar's row menu — see `RouteWindow`.
+        WindowGroup("Library", id: RouteWindow.id, for: Route.self) { $route in
+            RouteWindow(route: route)
+                .environment(app)
+                .environment(client)
+                .environment(prefs)
+                .environment(player)
+                .environment(music)
+                .themed(prefs.theme)
         }
         .defaultSize(width: 1040, height: 780)
         .commandsRemoved()
@@ -114,7 +135,6 @@ struct AquariumApp: App {
                 .environment(player)
                 .environment(music)
                 .themed(prefs.theme)
-                .tint(Theme.accent)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 720)

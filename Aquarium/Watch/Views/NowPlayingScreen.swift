@@ -1,43 +1,34 @@
 //  What is playing, and the controls for it. A book gets fifteen back and
 //  thirty forward, a speed and its chapters; a song gets previous and next.
 //  Volume and the output route are the system's Now Playing view, a tap away.
+//
+//  A page on the root stack, pushed when something starts and backed out of
+//  like any other. No top-bar items: on a pushed page they pop it.
 
 import SwiftUI
 import WatchKit
 
 struct NowPlayingScreen: View {
     @Environment(WatchPlayer.self) private var player
+    @Environment(WatchNavigator.self) private var nav
     @State private var showsSystem = false
     @State private var showsChapters = false
 
     private var isBook: Bool { player.current?.isAudiobook == true }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if let item = player.current {
-                    content(item)
-                } else {
-                    idle
-                }
+        Group {
+            if let item = player.current {
+                content(item)
+            } else {
+                idle
             }
-            .navigationTitle("Now Playing")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                if player.isActive {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { showsSystem = true } label: {
-                            Image(systemName: "speaker.wave.2")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(WatchTheme.link)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            .sheet(isPresented: $showsSystem) { NowPlayingView() }
-            .sheet(isPresented: $showsChapters) { chapters }
         }
+        .navigationTitle("Now Playing")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showsSystem) { NowPlayingView() }
+        .sheet(isPresented: $showsChapters) { chapters }
+        .onDisappear { nav.playerLeft() }
     }
 
     private var idle: some View {
@@ -122,6 +113,12 @@ struct NowPlayingScreen: View {
             }
 
             HStack(spacing: 8) {
+                Button { showsSystem = true } label: {
+                    Image(systemName: "speaker.wave.2").font(.caption2.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .accessibilityLabel("Volume and output")
                 if isBook {
                     Button { player.stepSpeed(1) } label: {
                         Text(speedLabel).font(.caption2.weight(.semibold).monospacedDigit())
@@ -137,13 +134,19 @@ struct NowPlayingScreen: View {
                         .controlSize(.mini)
                         .accessibilityLabel("Chapters")
                     }
-                } else {
-                    if player.upNextCount > 0 {
-                        Text("\(player.upNextCount) up next").font(.caption2).foregroundStyle(WatchTheme.dim)
-                    }
-                    if player.isLocal {
-                        Label("On watch", systemImage: "applewatch").font(.caption2).foregroundStyle(WatchTheme.dim)
-                    }
+                }
+            }
+
+            if !isBook {
+                let notes = [
+                    player.upNextCount > 0 ? "\(player.upNextCount) up next" : nil,
+                    player.isLocal ? "On watch" : nil,
+                ].compactMap { $0 }
+                if !notes.isEmpty {
+                    Text(notes.joined(separator: " · "))
+                        .font(.caption2)
+                        .foregroundStyle(WatchTheme.dim)
+                        .lineLimit(1)
                 }
             }
         }

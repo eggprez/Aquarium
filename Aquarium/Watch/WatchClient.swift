@@ -204,16 +204,19 @@ final class JellyfinClient {
             (data, response) = try await session.data(for: req)
         } catch {
             if (error as? URLError)?.code == .cancelled || error is CancellationError { throw CancellationError() }
+            WatchLog.error("client", "\(method) \(path.components(separatedBy: "?")[0]) failed: \(error.localizedDescription)\(countsForOffline ? " — now offline" : "")")
             if countsForOffline { isOffline = true }
             throw APIError.offline("Can't reach the server")
         }
         if countsForOffline { isOffline = false }
         guard let http = response as? HTTPURLResponse else { throw APIError.message("Malformed response") }
         if http.statusCode == 401 {
+            WatchLog.error("client", "\(method) \(path.components(separatedBy: "?")[0]): 401, sign-in refused")
             tokenCache = nil
             throw APIError.auth("The watch's sign-in has expired. Open Aquarium on your iPhone to send it again.")
         }
         guard (200..<300).contains(http.statusCode) else {
+            WatchLog.error("client", "\(method) \(path.components(separatedBy: "?")[0]): HTTP \(http.statusCode)")
             throw APIError.server(status: http.statusCode, path: path.components(separatedBy: "?")[0])
         }
         return data
@@ -395,7 +398,10 @@ final class JellyfinClient {
     }
 
     func playlists() async throws -> [BaseItem] {
-        try await items(Query(types: "Playlist", limit: 500)).items.filter { ($0.MediaType ?? "Audio") == "Audio" }
+        // A playlist's media type is the server's guess from its first item —
+        // "Unknown" on some, and on Jellyfin 12 not always set at all — so
+        // only the ones that plainly aren't music are left out.
+        try await items(Query(types: "Playlist", limit: 500)).items.filter { !["Video", "Photo", "Book"].contains($0.MediaType ?? "") }
     }
 
     /// A playlist's songs in its own order — the strict route first, the

@@ -23,6 +23,9 @@
 //  sign in to as somebody else.
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct LoginView: View {
     @Environment(AppModel.self) private var app
@@ -64,6 +67,32 @@ struct LoginView: View {
     @FocusState private var focused: Field?
 
     var body: some View {
+        platformBody
+            .task {
+                // Someone else in the house, on the same server, is what adding
+                // an account nearly always is: start from the address in use.
+                if addingAccount, address.isEmpty, probe == nil, let server = client.session?.server {
+                    address = server
+                    await connect()
+                }
+                await discover()
+            }
+            // The code is polled for as long as it is on screen. Changing the
+            // secret — a fresh code after an expiry — restarts the loop.
+            .task(id: quick?.secret) { await waitForApproval() }
+    }
+
+    @ViewBuilder
+    private var platformBody: some View {
+        #if os(macOS)
+        macBody
+        #else
+        touchBody
+        #endif
+    }
+
+    #if !os(macOS)
+    private var touchBody: some View {
         // Centred rather than pinned to the top: on a phone the card is about a
         // third of the screen and everything under it was air.
         GeometryReader { proxy in
@@ -97,20 +126,525 @@ struct LoginView: View {
         }
         .background(Theme.background)
         .scrollDismissesKeyboard(.interactively)
-        .task {
-            // Someone else in the house, on the same server, is what adding
-            // an account nearly always is: start from the address in use.
-            if addingAccount, address.isEmpty, probe == nil, let server = client.session?.server {
-                address = server
-                await connect()
+    }
+    #endif
+
+    #if os(macOS)
+    // MARK: - The Mac's layout
+
+    /// A Mac signs in the way a Mac dialog does: a column of labelled fields,
+    /// the lists that spare the typing as tables under them, and the buttons
+    /// bottom-right with Return and Escape wired to them. No cards, no
+    /// scrolling, nothing sized for a thumb.
+    ///
+    /// As the add-account sheet the same content shrinks to a fixed width and
+    /// takes exactly the height it needs, whatever minimum the caller asks
+    /// for; as the whole window it sits centred in whatever space there is.
+    private var macBody: some View {
+        Group {
+            if addingAccount {
+                macContent
+                    .padding(20)
+                    .frame(width: 460)
+                    .fixedSize()
+            } else {
+                macContent
+                    .frame(width: 480)
+                    .padding(Metrics.gutter)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.background)
             }
-            await discover()
         }
-        // The code is polled for as long as it is on screen. Changing the
-        // secret — a fresh code after an expiry — restarts the loop.
-        .task(id: quick?.secret) { await waitForApproval() }
     }
 
+    private var macContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            macHeader
+            if probe == nil { macSavedAccounts }
+            macForm
+            if let error {
+                Text(error)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            macButtons
+            if !addingAccount {
+                Text("Aquarium talks to your own Jellyfin server and nothing else. Your access token is kept in the keychain and is never logged.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        // Landing in the field you are meant to fill in next.
+        .onChange(of: probe == nil) { _, noServer in
+            focused = noServer ? .address : (mode == .password ? .username : nil)
+        }
+        // The segmented control changes `mode` directly; what the footnote
+        // link used to do on the way is done here. Not while the server is
+        // being forgotten — that change of focus belongs to the address.
+        .onChange(of: mode) { _, now in
+            guard probe != nil else { return }
+            error = nil
+            switch now {
+            case .quickConnect:
+                focused = nil
+                if quick == nil || quickExpired { Task { await startQuickConnect() } }
+            case .password:
+                focused = .username
+            }
+        }
+        // Typing over an address that a table put there: the table's
+        // selection no longer describes the field.
+        .onChange(of: address) { _, now in
+            if selectedServer != nil, selectedServer != now { selectedServer = nil }
+        }
+        .alert(
+            "No Secure Connection",
+            isPresented: Binding(get: { unencryptedOffer != nil }, set: { if !$0 { unencryptedOffer = nil } }),
+            presenting: unencryptedOffer
+        ) { found in
+            Button("Connect Without Encryption", role: .destructive) {
+                Task { await adopt(found) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { found in
+            Text("\(found.server) didn't answer over https, only over plain http. Your password and everything you watch would cross the internet unencrypted — and a network that blocks secure connections looks exactly like this. Only continue if you know this server has no https.")
+        }
+    }
+
+    /// The mark and the name, at window size; in the sheet, a line that says
+    /// what the sheet is for, because the window behind it already has the
+    /// name on it.
+    @ViewBuilder
+    private var macHeader: some View {
+        if addingAccount {
+            HStack(alignment: .top, spacing: 12) {
+                Image("Logo")
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: 40, height: 40)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Add an Account")
+                        .font(.headline)
+                    Text("Sign in to another user on this server, or to a different server, without signing this one out.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        } else {
+            VStack(spacing: 6) {
+                Image("Logo")
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: 64, height: 64)
+                HStack(spacing: 0) {
+                    Text("Aqua").fontWeight(.semibold)
+                    Text("rium").fontWeight(.heavy).foregroundStyle(Theme.accent)
+                }
+                .font(.title2)
+                Text("A Jellyfin client")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    // MARK: Accounts already on this Mac
+
+    @State private var selectedAccount: String?
+
+    /// Who is still signed in here, as a table: select and Continue, or
+    /// double-click. In the sheet the accounts are in Settings behind it,
+    /// and a Mac has no household of users to offer, so nothing is listed.
+    @ViewBuilder
+    private var macSavedAccounts: some View {
+        let offered = (addingAccount ? [] : client.accounts) + client.householdAccounts
+        if !offered.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Accounts on this Mac")
+                    .font(.headline)
+                List(offered, id: \.accountKey, selection: $selectedAccount) { account in
+                    MacHoverRow(isSelected: selectedAccount == account.accountKey) {
+                        HStack(spacing: 8) {
+                            AccountAvatar(account: account, size: 24)
+                            Text(account.userName.isEmpty ? "Unnamed user" : account.userName)
+                            Text(account.serverLabel)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                }
+                .listStyle(.bordered)
+                .frame(height: Self.macListHeight(rows: offered.count))
+                .contextMenu(forSelectionType: String.self) { keys in
+                    if let account = offered.first(where: { keys.contains($0.accountKey) }) {
+                        Button("Continue as \(account.userName)") { takeUp(account) }
+                    }
+                } primaryAction: { keys in
+                    if let account = offered.first(where: { keys.contains($0.accountKey) }) { takeUp(account) }
+                }
+                .disabled(app.switchingTo != nil)
+                HStack {
+                    Text("Double-click an account to continue as them, or sign in below.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Continue") {
+                        if let account = offered.first(where: { $0.accountKey == selectedAccount }) { takeUp(account) }
+                    }
+                    .disabled(selectedAccount == nil || app.switchingTo != nil)
+                }
+            }
+        }
+    }
+
+    private func takeUp(_ account: SavedSession) {
+        Task {
+            await app.switchAccount(to: account)
+            if addingAccount, client.session?.accountKey == account.accountKey { app.isAddingAccount = false }
+        }
+    }
+
+    /// A bordered table's height for this many rows — enough that nothing
+    /// scrolls until the list is long, and no taller than the rows need.
+    private static func macListHeight(rows: Int) -> CGFloat {
+        CGFloat(min(max(rows, 1), 5)) * 30 + 2
+    }
+
+    // MARK: The form
+
+    private var macForm: some View {
+        Form {
+            TextField("Server Address:", text: $address, prompt: Text("jellyfin.example.com"))
+                .textFieldStyle(.roundedBorder)
+                .disabled(probe != nil)
+                .focused($focused, equals: .address)
+                .onSubmit { Task { await connect() } }
+
+            if probe == nil {
+                Text("The address you open Jellyfin at in a browser — for example http://192.168.1.10:8096 or https://jellyfin.example.com.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                macServerList
+            }
+
+            if let probe {
+                LabeledContent("Server:") { macBanner(probe) }
+
+                if quickConnectOffered {
+                    Picker("Sign In With:", selection: $mode) {
+                        Text("Password").tag(Mode.password)
+                        Text("Quick Connect").tag(Mode.quickConnect)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                switch mode {
+                case .password:
+                    macUserList(probe)
+                    TextField("Username:", text: $username)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focused, equals: .username)
+                        .onSubmit { focused = .password }
+                        // The pair of them, so a password manager sees a
+                        // sign-in form and offers to fill it — and to save it
+                        // afterwards.
+                        .textContentType(.username)
+                    SecureField("Password:", text: $password)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focused, equals: .password)
+                        .onSubmit { Task { await signIn() } }
+                        .textContentType(.password)
+                case .quickConnect:
+                    macQuickConnect(probe)
+                }
+            }
+        }
+        .formStyle(.columns)
+        .defaultFocus($focused, .address)
+    }
+
+    // MARK: Servers, as a table
+
+    /// One row of the servers table: signed in to before, or found on the
+    /// network — the address is what both come down to.
+    private struct MacServerChoice: Identifiable, Hashable {
+        var name: String
+        var address: String
+        var detail: String
+        var symbol: String
+        var id: String { address }
+    }
+
+    @State private var selectedServer: String?
+
+    private var macServerChoices: [MacServerChoice] {
+        let known = knownServerAddresses.map { server in
+            MacServerChoice(
+                name: server.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: ""),
+                address: server, detail: "Signed in to before", symbol: "person.badge.plus")
+        }
+        let found = discovered
+            .filter { server in !known.contains { $0.address == server.address } }
+            .map { MacServerChoice(name: $0.name, address: $0.address, detail: "On your network", symbol: "server.rack") }
+        return known + found
+    }
+
+    /// Selecting a server puts its address in the field, so Connect — or
+    /// Return — takes it from there; a double-click connects outright.
+    @ViewBuilder
+    private var macServerList: some View {
+        let choices = macServerChoices
+        if isDiscovering || !choices.isEmpty {
+            LabeledContent {
+                VStack(alignment: .leading, spacing: 6) {
+                    if !choices.isEmpty {
+                        List(choices, selection: $selectedServer) { choice in
+                            MacHoverRow(isSelected: selectedServer == choice.address) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: choice.symbol)
+                                        .foregroundStyle(Theme.accent)
+                                        .frame(width: 18)
+                                    Text(choice.name)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Text(choice.detail)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .help(choice.address)
+                            }
+                        }
+                        .listStyle(.bordered)
+                        .frame(height: Self.macListHeight(rows: choices.count))
+                        .contextMenu(forSelectionType: String.self) { keys in
+                            if let server = keys.first {
+                                Button("Connect") { connect(to: server) }
+                            }
+                        } primaryAction: { keys in
+                            if let server = keys.first { connect(to: server) }
+                        }
+                        .onChange(of: selectedServer) { _, server in
+                            if let server { address = server }
+                        }
+                        .disabled(isProbing)
+                    }
+                    HStack(spacing: 6) {
+                        if isDiscovering {
+                            ProgressView().controlSize(.mini)
+                            Text(choices.isEmpty ? "Looking on your network…" : "Still looking on your network…")
+                        } else {
+                            Text("Double-click a server to connect to it.")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            } label: {
+                Text("Servers:")
+            }
+        }
+    }
+
+    private func connect(to server: String) {
+        address = server
+        Task { await connect() }
+    }
+
+    // MARK: People on the server, as a table
+
+    /// The server's users less the ones already signed in here — all of
+    /// them, not narrowed by the field: a table that shrank to one row the
+    /// moment a row was clicked would look like the others had gone.
+    private var macOpenUsers: [JellyfinClient.PublicUser] {
+        guard let probe else { return [] }
+        let here = Set(client.accounts.filter { $0.server == probe.server }.map(\.userId))
+        return users.filter { !here.contains($0.Id) }
+    }
+
+    /// The selection follows the field: whoever's name is typed is the row
+    /// that is highlighted, and clicking a row types their name.
+    private var macUserSelection: Binding<String?> {
+        Binding(
+            get: { macOpenUsers.first { $0.name.caseInsensitiveCompare(username) == .orderedSame }?.Id },
+            set: { id in
+                guard let user = macOpenUsers.first(where: { $0.Id == id }) else { return }
+                error = nil
+                username = user.name
+                password = ""
+                focused = .password
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func macUserList(_ probe: ServerProbe) -> some View {
+        let people = macOpenUsers
+        if !people.isEmpty {
+            LabeledContent {
+                VStack(alignment: .leading, spacing: 6) {
+                    List(people, selection: macUserSelection) { user in
+                        MacHoverRow(isSelected: user.name.caseInsensitiveCompare(username) == .orderedSame) {
+                            HStack(spacing: 8) {
+                                AccountAvatar(account: SavedSession(server: probe.server, userId: user.Id, userName: user.name, deviceId: ""), size: 22)
+                                Text(user.name)
+                                if user.HasPassword == false {
+                                    Text("No password")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.bordered)
+                    .frame(height: Self.macListHeight(rows: people.count))
+                    .contextMenu(forSelectionType: String.self) { ids in
+                        if let user = people.first(where: { ids.contains($0.Id) }) {
+                            Button("Sign In as \(user.name)") { choose(user) }
+                        }
+                    } primaryAction: { ids in
+                        if let user = people.first(where: { ids.contains($0.Id) }) { choose(user) }
+                    }
+                    .disabled(isSigningIn)
+                    Text("Click a name to fill it in; double-click to sign in.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } label: {
+                Text("Users:")
+            }
+        }
+    }
+
+    // MARK: Quick Connect
+
+    private func macQuickConnect(_ probe: ServerProbe) -> some View {
+        LabeledContent {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    if let quick {
+                        Text(Self.spaced(quick.code))
+                            .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(quickExpired ? .secondary : .primary)
+                            .textSelection(.enabled)
+                            .contentTransition(.numericText())
+                            .animation(.default, value: quick.code)
+                            .accessibilityLabel("Quick Connect code \(quick.code.map(String.init).joined(separator: " "))")
+                        Button("Copy Code") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(quick.code, forType: .string)
+                        }
+                        .disabled(quickExpired)
+                    } else {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(height: 40)
+                    }
+                }
+                if quickExpired {
+                    Text("That code has expired.")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                } else if quick != nil {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text("Waiting for the code to be approved…")
+                    }
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                }
+                Text("On a phone or computer that is already signed in to \(probe.serverName ?? "this server"), enter this code under Settings → Quick Connect in Aquarium, or on the Quick Connect page of Jellyfin's own web app. This window signs in by itself the moment it is approved.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } label: {
+            Text("Code:")
+        }
+    }
+
+    // MARK: Banner and buttons
+
+    /// What the probe found, as facts rather than a pill: the name, the
+    /// version and address under it, and whether the link is encrypted.
+    private func macBanner(_ probe: ServerProbe) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Text(probe.serverName ?? probe.server)
+                    .fontWeight(.semibold)
+                Label(probe.secure ? "Encrypted" : "Not Encrypted", systemImage: probe.secure ? "lock.fill" : "lock.open")
+                    .font(.caption)
+                    .foregroundStyle(probe.secure ? .green : .orange)
+                    .help(probe.secure
+                          ? "Your password and access token are never sent in the clear."
+                          : "Anything on the network path can read your access token and what you watch.")
+            }
+            Text(probe.version.map { "Jellyfin \($0) · \(probe.server)" } ?? probe.server)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            if !probe.secure {
+                Text("This connection isn't encrypted. Anything on the network path can read your access token and what you watch — fine on a home network, worth fixing if the server is reachable from outside it.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button("Use a Different Server…") { useDifferentServer() }
+                .controlSize(.small)
+                .padding(.top, 2)
+        }
+    }
+
+    /// Bottom-right, the Mac way: Cancel with Escape, the one thing to do
+    /// next with Return, and the spinner beside them so nothing changes width.
+    private var macButtons: some View {
+        HStack(spacing: 12) {
+            Spacer()
+            if isProbing || isSigningIn || isStartingQuick {
+                ProgressView().controlSize(.small)
+            }
+            if addingAccount {
+                Button("Cancel") { app.isAddingAccount = false }
+                    .keyboardShortcut(.cancelAction)
+            }
+            if probe == nil {
+                Button("Connect") { Task { await connect() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty || isProbing)
+            } else if mode == .quickConnect {
+                // The code signs in by itself; the only thing to press is for
+                // a fresh one once the server has forgotten the last.
+                if quickExpired || (quick == nil && !isStartingQuick) {
+                    Button("Get New Code") { Task { await startQuickConnect() } }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(isStartingQuick)
+                }
+            } else {
+                Button("Sign In") {
+                    // Return in the username field is the default button as
+                    // well as the field's submit: with no password typed yet
+                    // it means "next field", not "try with none".
+                    if focused == .username, password.isEmpty {
+                        focused = .password
+                        return
+                    }
+                    Task { await signIn() }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(username.isEmpty || isSigningIn)
+            }
+        }
+        .buttonStyle(.bordered)
+    }
+    #endif
+
+    #if !os(macOS)
     private var card: some View {
         VStack(alignment: .leading, spacing: 14) {
             field("Server address", text: $address, placeholder: "jellyfin.example.com", isSecure: false)
@@ -263,6 +797,8 @@ struct LoginView: View {
         }
     }
 
+    #endif
+
     // MARK: - Servers signed in to before
 
     /// The servers this device — or, on an Apple TV, anyone using it — is
@@ -273,6 +809,7 @@ struct LoginView: View {
         return (client.accounts + client.householdAccounts).map(\.server).filter { seen.insert($0).inserted }
     }
 
+    #if !os(macOS)
     @ViewBuilder
     private var knownServers: some View {
         let servers = knownServerAddresses
@@ -382,6 +919,8 @@ struct LoginView: View {
         }
     }
 
+    #endif
+
     /// A name from the list: into the form, and straight in where the server
     /// says there is no password to ask for.
     private func choose(_ user: JellyfinClient.PublicUser) {
@@ -396,6 +935,7 @@ struct LoginView: View {
         }
     }
 
+    #if !os(macOS)
     // MARK: - Servers on the network
 
     @ViewBuilder
@@ -442,6 +982,8 @@ struct LoginView: View {
         }
     }
 
+    #endif
+
     private func discover() async {
         guard probe == nil, !isDiscovering else { return }
         isDiscovering = true
@@ -453,6 +995,7 @@ struct LoginView: View {
         if probe == nil { discovered = found }
     }
 
+    #if !os(macOS)
     // MARK: - Quick Connect
 
     private func quickConnectPanel(_ probe: ServerProbe) -> some View {
@@ -515,6 +1058,8 @@ struct LoginView: View {
         #endif
     }
 
+    #endif
+
     /// "123456" as "123 456" — the way the Jellyfin web app shows it.
     private static func spaced(_ code: String) -> String {
         guard code.count == 6 else { return code }
@@ -522,6 +1067,7 @@ struct LoginView: View {
         return String(chars[0..<3]) + " " + String(chars[3...])
     }
 
+    #if !os(macOS)
     private var modeSwitch: some View {
         Button {
             error = nil
@@ -543,6 +1089,8 @@ struct LoginView: View {
         .foregroundStyle(Theme.accent)
         .focused($focused, equals: .modeSwitch)
     }
+
+    #endif
 
     private func startQuickConnect() async {
         guard let probe, !isStartingQuick else { return }
@@ -599,6 +1147,7 @@ struct LoginView: View {
         }
     }
 
+    #if !os(macOS)
     // MARK: - Banner, fields, buttons
 
     private func connectedBanner(_ probe: ServerProbe) -> some View {
@@ -619,16 +1168,7 @@ struct LoginView: View {
                     .foregroundStyle(Theme.warn)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Button("Use a different server") {
-                self.probe = nil
-                users = []
-                quick = nil
-                quickExpired = false
-                quickConnectOffered = false
-                mode = .password
-                error = nil
-                Task { await discover() }
-            }
+            Button("Use a different server") { useDifferentServer() }
             .font(.caption)
             .buttonStyle(.plain)
             .foregroundStyle(Theme.accent)
@@ -714,6 +1254,20 @@ struct LoginView: View {
             .overlay(alignment: .leading) {
                 if busy { ProgressView().controlSize(.small) }
             }
+    }
+    #endif
+
+    /// Back to the address field, with everything the last server told us
+    /// forgotten.
+    private func useDifferentServer() {
+        probe = nil
+        users = []
+        quick = nil
+        quickExpired = false
+        quickConnectOffered = false
+        mode = .password
+        error = nil
+        Task { await discover() }
     }
 
     private func connect() async {
@@ -877,3 +1431,22 @@ struct AccountAvatar: View {
 
     private static let clear = LinearGradient(colors: [.clear], startPoint: .top, endPoint: .bottom)
 }
+
+#if os(macOS)
+/// A row of one of the sign-in screen's tables, tinted under the pointer.
+/// The system draws the selection; this only adds the hover, and stays out
+/// of the way of the selected row so the two never fight.
+private struct MacHoverRow<Content: View>: View {
+    var isSelected: Bool
+    @ViewBuilder var content: Content
+    @State private var hovering = false
+
+    var body: some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            .listRowBackground(hovering && !isSelected ? Color.primary.opacity(0.06) : nil)
+    }
+}
+#endif
