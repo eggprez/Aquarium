@@ -227,17 +227,23 @@ compiled into both the iPhone app and the watch app.
   anything else as an AAC transcode over HLS. `Watch/WatchClient.swift` is
   the client, small on purpose; it shares only `Core/Models.swift` and
   `Core/Formatting.swift` with the phone.
-- **Downloads are AAC at 128 kbps**, one file per song or book, fetched on a
-  background `URLSession` so a book keeps arriving with the wrist down. The
-  server's progressive transcode has no length it can promise, so every file
-  that lands is opened and measured against the item's runtime before it is
-  believed, and asked for again if it came up short. Songs, albums, playlists
-  and audiobooks can each be kept; a playlist kept is saved with its order.
+- **Downloads are AAC at 128 kbps**, one file per song or book. On Wi‑Fi of
+  its own the watch fetches on a background `URLSession`, so a book keeps
+  arriving with the wrist down. Through the phone's Bluetooth link a
+  background session is throttled to a crawl, so there the watch asks the
+  phone instead: the phone fetches the file on a background session of its
+  own (`WatchLink`'s relay), measures it, and hands it across as a
+  WatchConnectivity file transfer, which runs in the background on both ends
+  whether or not they are in reach at the time. The server's progressive
+  transcode has no length it can promise, so every file that lands is opened
+  and measured against the item's runtime before it is believed, and asked
+  for again if it came up short. Songs, albums, playlists and audiobooks can
+  each be kept; a playlist kept is saved with its order.
 - **Two things are kept on the watch without asking**: audiobooks the account
   is part-way through, and the playlists picked for the watch on the phone
   under Settings → Apple Watch. The phone sends the ids; the watch fetches
-  the rest and downloads over Wi‑Fi only. Nothing is ever removed
-  automatically.
+  the rest, and the phone carries them when the watch has no Wi‑Fi. Nothing
+  is ever removed automatically.
 - **Listening goes back the way the phone's offline sync goes.** Where a book
   was left, and each song heard to its end, is queued on the watch
   (`WatchSyncQueue`) and sent to the phone when it is in reach, which tells

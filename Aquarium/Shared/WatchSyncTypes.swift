@@ -155,12 +155,33 @@ enum WatchMessage: Codable, Sendable {
     case deleteAll
     case download(WatchDownloadRequest)
     case requestInventory
+    /// How far the phone has got fetching an item for the watch, 0...1.
+    case fetchProgress(itemId: String, fraction: Double)
+    /// The phone could not fetch this; the watch may try itself.
+    case fetchFailed(itemId: String, reason: String)
     // Watch → phone
     case progress([WatchProgressEvent])
+    /// Fetch this item and hand it over as a file. The watch's own radio
+    /// only reaches the server over Wi‑Fi; through the phone it goes as a
+    /// file transfer, which runs in the background on both ends.
+    case fetch(itemId: String)
+    case cancelFetch(itemId: String)
+    /// Send me the sign-in and the plan now, in the reply. The application
+    /// context is the usual way; this is for a watch that missed it.
+    case requestContext
+}
+
+/// The metadata on a file the phone hands the watch.
+enum WatchFileTransfer {
+    static let itemKey = "item"
+    static let bytesKey = "bytes"
+    static let secondsKey = "seconds"
 }
 
 /// The reply a live message gets. A queued transfer gets none.
 struct WatchReply: Codable, Sendable {
     var ok: Bool
     var note: String?
+    /// The answer to `requestContext`.
+    var context: PhoneContext?
 }

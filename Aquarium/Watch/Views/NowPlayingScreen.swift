@@ -26,7 +26,12 @@ struct NowPlayingScreen: View {
             .toolbar {
                 if player.isActive {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { showsSystem = true } label: { Image(systemName: "speaker.wave.2") }
+                        Button { showsSystem = true } label: {
+                            Image(systemName: "speaker.wave.2")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(WatchTheme.link)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -50,6 +55,12 @@ struct NowPlayingScreen: View {
     }
 
     private func content(_ item: BaseItem) -> some View {
+        ScrollView {
+            playing(item)
+        }
+    }
+
+    private func playing(_ item: BaseItem) -> some View {
         VStack(spacing: 6) {
             HStack(alignment: .top, spacing: 8) {
                 Artwork(item: item, size: 46, corner: 7)
@@ -120,10 +131,11 @@ struct NowPlayingScreen: View {
                     .simultaneousGesture(LongPressGesture().onEnded { _ in player.speed = 1 })
                     if !player.chapters.isEmpty {
                         Button { showsChapters = true } label: {
-                            Label("Chapters", systemImage: "list.bullet").font(.caption2)
+                            Image(systemName: "list.bullet").font(.caption2.weight(.semibold))
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.mini)
+                        .accessibilityLabel("Chapters")
                     }
                 } else {
                     if player.upNextCount > 0 {

@@ -109,6 +109,24 @@ struct WatchSettingsView: View {
                 if inventory.inFlight > 0 {
                     LabeledContent("Downloading", value: "\(inventory.inFlight)")
                 }
+                if let fetching = link.fetching {
+                    HStack {
+                        Text("Fetching for the watch")
+                        Spacer()
+                        if let f = link.fetchFraction {
+                            ProgressView(value: f).frame(width: 80)
+                        } else {
+                            ProgressView()
+                        }
+                    }
+                    .accessibilityLabel("Fetching \(fetching) for the watch")
+                }
+                if !link.transferring.isEmpty {
+                    LabeledContent("Sending to the watch", value: "\(link.transferring.count)")
+                }
+                if !link.fetchQueue.isEmpty {
+                    LabeledContent("Waiting to fetch", value: "\(link.fetchQueue.count)")
+                }
                 ForEach(inventory.groups) { group in
                     HStack(spacing: 12) {
                         Image(systemName: group.kind.symbol)
@@ -148,7 +166,7 @@ struct WatchSettingsView: View {
             Text("Storage on the watch")
         } footer: {
             if let at = link.inventoryAt {
-                Text("As of \(at.formatted(.relative(presentation: .named))). Swipe a row to remove it from the watch. Downloads on the watch are AAC at 128 kbps.")
+                Text("As of \(at.formatted(.relative(presentation: .named))). Swipe a row to remove it from the watch. The phone fetches what the watch asks for and hands it across, so downloads reach the watch over Bluetooth; they are AAC at 128 kbps.")
             }
         }
         .confirmationDialog("Remove everything from the watch?", isPresented: $confirmAll, titleVisibility: .visible) {

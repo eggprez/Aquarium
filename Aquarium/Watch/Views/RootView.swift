@@ -46,7 +46,7 @@ struct LibraryHome: View {
 
             if !continueRows.isEmpty {
                 Section("Continue") {
-                    ForEach(continueRows.prefix(3)) { book in
+                    ForEach(Array(continueRows.prefix(3))) { book in
                         Button { player.play([book], title: book.title) } label: {
                             BookRow(item: book)
                         }
@@ -69,7 +69,6 @@ struct LibraryHome: View {
         }
         .navigationTitle("Aquarium")
         .task(id: serverAvailable) { await load() }
-        .refreshable { await load(force: true) }
     }
 
     private var onWatchDetail: String? {
@@ -219,10 +218,19 @@ struct DownloadMark: View {
             case .complete:
                 Image(systemName: "checkmark.circle.fill").font(.caption2).foregroundStyle(.green)
             case .downloading:
+                // A small ring drawn by hand: the system's circular progress
+                // is a large control on a watch, and a row has no room for it.
                 if let f = downloads.fraction(itemId) {
-                    ProgressView(value: f).progressViewStyle(.circular).controlSize(.mini).tint(WatchTheme.accent)
+                    ZStack {
+                        Circle().stroke(WatchTheme.accent.opacity(0.25), lineWidth: 2.5)
+                        Circle().trim(from: 0, to: f)
+                            .stroke(WatchTheme.accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    }
+                    .frame(width: 16, height: 16)
                 } else {
-                    ProgressView().controlSize(.mini)
+                    Image(systemName: "arrow.down.circle.dotted").font(.caption2).foregroundStyle(WatchTheme.accent)
+                        .symbolEffect(.pulse)
                 }
             case .queued:
                 Image(systemName: "arrow.down.circle.dotted").font(.caption2).foregroundStyle(WatchTheme.dim)

@@ -6,6 +6,7 @@ import SwiftUI
 struct OnWatchView: View {
     @Environment(WatchDownloads.self) private var downloads
     @Environment(WatchPlayer.self) private var player
+    @Environment(WatchLink.self) private var link
     @State private var confirmAll = false
 
     var body: some View {
@@ -19,8 +20,11 @@ struct OnWatchView: View {
                                 Text(record.name).font(.footnote).lineLimit(1)
                                 if record.status == .downloading, let f = downloads.fraction(record.itemId) {
                                     ProgressView(value: f).tint(WatchTheme.accent).scaleEffect(x: 1, y: 0.6, anchor: .center)
+                                } else if record.status == .downloading, record.relayAskedAt != nil {
+                                    Text(link.isPhoneReachable ? "From iPhone…" : "Waiting for iPhone")
+                                        .font(.caption2).foregroundStyle(WatchTheme.dim).lineLimit(1)
                                 } else {
-                                    Text(record.status == .queued ? (record.automatic && !downloads.isOnWiFi ? "Waiting for Wi‑Fi" : "Waiting") : "Starting…")
+                                    Text(record.status == .queued ? (record.automatic && !downloads.isOnWiFi && !link.hasCompanion ? "Waiting for Wi‑Fi" : "Waiting") : "Starting…")
                                         .font(.caption2).foregroundStyle(WatchTheme.dim)
                                 }
                             }
@@ -199,7 +203,7 @@ struct WatchSettingsView: View {
                 let plan = downloads.plan
                 Text(plan.playlistIds.isEmpty && plan.bookIds.isEmpty
                      ? "Audiobooks you start on the phone are kept here automatically. Pick playlists for the watch in Aquarium on your iPhone under Settings → Apple Watch."
-                     : "\(plan.bookIds.count) audiobook\(plan.bookIds.count == 1 ? "" : "s") and \(plan.playlistIds.count) playlist\(plan.playlistIds.count == 1 ? "" : "s") kept in step. They arrive over Wi‑Fi.")
+                     : "\(plan.bookIds.count) audiobook\(plan.bookIds.count == 1 ? "" : "s") and \(plan.playlistIds.count) playlist\(plan.playlistIds.count == 1 ? "" : "s") kept in step. The iPhone fetches them and hands them across; over Wi‑Fi the watch can fetch for itself.")
                     .font(.caption2)
                     .foregroundStyle(WatchTheme.dim)
                 if let note = downloads.mirrorNote { Text(note).font(.caption2) }

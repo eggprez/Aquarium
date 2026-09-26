@@ -54,6 +54,9 @@ struct WatchRecord: Codable, Identifiable, Hashable, Sendable {
     var reasons: Set<String> = []
     /// Put here by the mirror plan rather than a tap. Waits for Wi-Fi.
     var automatic = false
+    /// Being fetched by the phone and handed over as a file, rather than
+    /// by this watch's own radio. Set when the phone was asked, with when.
+    var relayAskedAt: Date?
     var createdAt = Date()
     /// Listening, kept here so a book opens where it was left with no server.
     var positionTicks: Int64 = 0
@@ -111,6 +114,7 @@ struct WatchRecord: Codable, Identifiable, Hashable, Sendable {
         attempts = try c.decodeIfPresent(Int.self, forKey: .attempts) ?? 0
         reasons = try c.decodeIfPresent(Set<String>.self, forKey: .reasons) ?? ["song"]
         automatic = try c.decodeIfPresent(Bool.self, forKey: .automatic) ?? false
+        relayAskedAt = try c.decodeIfPresent(Date.self, forKey: .relayAskedAt)
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         positionTicks = try c.decodeIfPresent(Int64.self, forKey: .positionTicks) ?? 0
         played = try c.decodeIfPresent(Bool.self, forKey: .played) ?? false
@@ -227,8 +231,13 @@ final class WatchDownloads: NSObject {
             plan = saved
         }
         pathMonitor.pathUpdateHandler = { [weak self] path in
-            let wifi = !(path.isExpensive || path.usesInterfaceType(.cellular))
+            // Wi‑Fi of the watch's own. Through the phone the path is
+            // neither Wi‑Fi nor cellular, and the phone is the better carrier.
+            // Wired is the Simulator's word for the Mac's connection; a watch
+            // has no such thing, so it costs nothing to count it.
+            let wifi = (path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet)) && !path.isExpensive
             let up = path.status == .satisfied
+            Self.log.notice("network: \(up ? "up" : "down", privacy: .public) via \(path.availableInterfaces.map { "\($0.type)" }.joined(separator: ","), privacy: .public) expensive=\(path.isExpensive)")
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let gained = up && !self.hasNetwork
@@ -408,6 +417,7 @@ final class WatchDownloads: NSObject {
         r.status = .queued
         r.errorMessage = nil
         r.attempts = 0
+        r.relayAskedAt = nil
         save(r)
         pump()
     }
@@ -419,6 +429,7 @@ final class WatchDownloads: NSObject {
     /// Cancel and forget a download that hasn't finished.
     func cancel(_ itemId: String) {
         if active == itemId { cancelActiveTask() }
+        if record(for: itemId)?.relayAskedAt != nil { WatchLink.shared.send(.cancelFetch(itemId: itemId)) }
         removeFolder(itemId)
     }
 
@@ -426,6 +437,7 @@ final class WatchDownloads: NSObject {
 
     func delete(_ itemId: String) {
         if active == itemId { cancelActiveTask() }
+        if record(for: itemId)?.relayAskedAt != nil { WatchLink.shared.send(.cancelFetch(itemId: itemId)) }
         removeFolder(itemId)
         for i in playlists.indices { playlists[i].itemIds.removeAll { $0 == itemId } }
         savePlaylists()
@@ -537,18 +549,96 @@ final class WatchDownloads: NSObject {
 
     // MARK: - The pump
 
-    /// Start the next transfer, if there is one and the network allows it.
+    /// How long a phone is given before the watch tries by itself.
+    private static let relayPatience: TimeInterval = 20 * 60
+
+    /// Start the next transfer, if there is one and something can carry it.
+    ///
+    /// On Wi‑Fi of its own the watch fetches for itself. Through the
+    /// phone's Bluetooth link a background download session is throttled to
+    /// a crawl, so there the item is asked of the phone, which fetches it on
+    /// its own connection and hands the file across — a transfer that runs
+    /// in the background on both ends, in reach or not. Cellular carries
+    /// what was asked for by hand, never the mirror's things; and the phone
+    /// gets a long while before the watch takes an item back.
     func pump() {
-        guard active == nil, hasNetwork, JellyfinClient.shared.isSignedIn else { return }
-        // Asked-for things first, on any network; the mirror's things only
-        // on Wi-Fi.
+        guard JellyfinClient.shared.isSignedIn else { return }
+        let link = WatchLink.shared
+        let phone = link.hasCompanion && !isOnWiFi
+        // Anything the phone was asked for and hasn't delivered in a long
+        // while is taken back, when this watch can fetch it itself.
+        if hasNetwork {
+            for var r in records where r.status == .downloading && r.relayAskedAt != nil && active != r.itemId {
+                let overdue = Date().timeIntervalSince(r.relayAskedAt!) > Self.relayPatience && !link.isPhoneReachable
+                if isOnWiFi || (overdue && !r.automatic) {
+                    link.send(.cancelFetch(itemId: r.itemId))
+                    r.status = .queued
+                    r.relayAskedAt = nil
+                    save(r)
+                }
+            }
+        }
+        // Asked-for things first; the mirror's things only when a phone
+        // will carry them or the watch is on Wi‑Fi.
         let candidates = records.filter { $0.status == .queued }
             .sorted { a, b in
                 if a.automatic != b.automatic { return !a.automatic }
                 return a.createdAt < b.createdAt
             }
+        if phone {
+            // Every queued item goes to the phone at once: its queue is the
+            // reliable one, and it downloads one at a time on its own.
+            for var r in candidates where r.relayAskedAt == nil {
+                r.status = .downloading
+                r.relayAskedAt = Date()
+                save(r)
+                link.send(.fetch(itemId: r.itemId))
+                Self.log.notice("asked the phone for \(r.itemId, privacy: .public)")
+            }
+            return
+        }
+        guard active == nil, hasNetwork else { return }
         guard let next = candidates.first(where: { !$0.automatic || isOnWiFi }) else { return }
         Task { await start(next) }
+    }
+
+    /// How far the phone has got with an item it is fetching.
+    func notePhoneProgress(itemId: String, fraction: Double) {
+        guard let r = record(for: itemId), r.status == .downloading, r.relayAskedAt != nil else { return }
+        let expected = r.estimatedBytes > 0 ? r.estimatedBytes : 1
+        liveBytes[itemId] = (Int64(Double(expected) * max(0, min(1, fraction))), expected)
+    }
+
+    /// The phone gave up on an item. The watch tries itself when it can,
+    /// and otherwise says why.
+    func phoneFailed(itemId: String, reason: String) {
+        guard var r = record(for: itemId), r.relayAskedAt != nil else { return }
+        r.relayAskedAt = nil
+        liveBytes[itemId] = nil
+        if hasNetwork, isOnWiFi || !r.automatic {
+            r.status = .queued
+            save(r)
+            pump()
+        } else {
+            r.status = .error
+            r.errorMessage = reason
+            save(r)
+        }
+    }
+
+    /// A file the phone handed over, already moved into place by the link.
+    func receivedFromPhone(itemId: String, at url: URL, bytes: Int64) async {
+        guard let r = record(for: itemId) else {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        if r.status == .complete {
+            // Arrived twice — a phone that resent, or a watch that fetched
+            // for itself in the meantime.
+            if url.lastPathComponent != r.fileName { try? FileManager.default.removeItem(at: url) }
+            return
+        }
+        await landed(itemId: itemId, at: url, bytes: bytes)
     }
 
     private func start(_ record: WatchRecord) async {
@@ -575,7 +665,7 @@ final class WatchDownloads: NSObject {
             return
         }
         rec.status = .downloading
-        rec.attempts += 1
+        rec.relayAskedAt = nil
         rec.errorMessage = nil
         save(rec)
         let task = session.downloadTask(with: request)
@@ -583,7 +673,7 @@ final class WatchDownloads: NSObject {
         persistTasks()
         liveBytes[rec.itemId] = (0, rec.estimatedBytes)
         task.resume()
-        Self.log.info("downloading \(rec.itemId, privacy: .public) attempt \(rec.attempts)")
+        Self.log.notice("downloading \(rec.itemId, privacy: .public) attempt \(rec.attempts)")
     }
 
     private func cancelActiveTask() {
@@ -608,10 +698,12 @@ final class WatchDownloads: NSObject {
                 for var r in self.records where r.status == .downloading {
                     if running.contains(r.itemId) {
                         self.active = r.itemId
-                    } else {
+                    } else if r.relayAskedAt == nil {
                         r.status = .queued
                         self.save(r)
                     }
+                    // Asked of the phone: still the phone's, until it is
+                    // delivered or the pump loses patience.
                 }
                 self.tasks = self.tasks.filter { running.contains($0.value) }
                 self.persistTasks()
@@ -643,6 +735,8 @@ final class WatchDownloads: NSObject {
         if !whole {
             try? FileManager.default.removeItem(at: url)
             Self.log.error("\(itemId, privacy: .public) arrived short: \(seconds)s of \(expected)s")
+            rec.relayAskedAt = nil
+            rec.attempts += 1
             if rec.attempts < 3 {
                 rec.status = .queued
                 rec.errorMessage = nil
@@ -656,6 +750,7 @@ final class WatchDownloads: NSObject {
         }
         rec.status = .complete
         rec.bytes = bytes
+        rec.relayAskedAt = nil
         rec.errorMessage = nil
         if rec.runTimeTicks == 0, seconds.isFinite { rec.runTimeTicks = Int64(seconds * 10_000_000) }
         var excluded = url
@@ -670,6 +765,7 @@ final class WatchDownloads: NSObject {
 
     private func failed(itemId: String, message: String) {
         guard var rec = record(for: itemId) else { finishActive(itemId); return }
+        rec.attempts += 1
         if rec.attempts < 3, hasNetwork {
             rec.status = .queued
         } else {

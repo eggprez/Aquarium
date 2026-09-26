@@ -139,7 +139,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // Kept per session — three can be woken at once — and stored before
         // returning, so the session's "finished" can't arrive ahead of it.
         MainActor.assumeIsolated {
-            DownloadManager.shared.setBackgroundCompletionHandler(completionHandler, for: identifier)
+            if identifier == WatchLink.fetchSessionIdentifier {
+                WatchLink.shared.handleFetchEvents(completion: completionHandler)
+            } else {
+                DownloadManager.shared.setBackgroundCompletionHandler(completionHandler, for: identifier)
+            }
         }
     }
 

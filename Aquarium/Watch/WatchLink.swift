@@ -100,6 +100,9 @@ final class WatchLink: NSObject {
 
     private(set) var isActivated = false
     private(set) var isPhoneReachable = false
+    /// A phone with Aquarium on it is paired: it can fetch for the watch,
+    /// in reach or not — a queued transfer waits for it.
+    private(set) var hasCompanion = false
     private(set) var lastPhoneContextAt: Date?
     private(set) var lastInventorySentAt: Date?
 
@@ -122,6 +125,23 @@ final class WatchLink: NSObject {
 
     private func apply(_ dictionary: [String: Any]) {
         guard let context = WatchSync.unpack(PhoneContext.self, from: dictionary) else { return }
+        apply(context)
+    }
+
+    /// Ask the phone for the sign-in and the plan now. The application
+    /// context is what normally carries them; this covers a watch that
+    /// missed it, and a phone that couldn't send it.
+    func requestContext() {
+        guard WCSession.isSupported(), WCSession.default.activationState == .activated, WCSession.default.isReachable else { return }
+        WCSession.default.sendMessage(WatchSync.pack(WatchMessage.requestContext), replyHandler: { reply in
+            guard let answer = WatchSync.unpack(WatchReply.self, from: reply), let context = answer.context else { return }
+            Task { @MainActor in self.apply(context) }
+        }, errorHandler: { error in
+            Self.log.error("context request failed: \(error.localizedDescription, privacy: .public)")
+        })
+    }
+
+    private func apply(_ context: PhoneContext) {
         lastPhoneContextAt = Date()
         let client = JellyfinClient.shared
         if let credentials = context.credentials {
@@ -145,8 +165,27 @@ final class WatchLink: NSObject {
             Task { await downloads.download(request) }
         case .requestInventory:
             publishInventory(now: true)
-        case .progress:
+        case .fetchProgress(let itemId, let fraction):
+            downloads.notePhoneProgress(itemId: itemId, fraction: fraction)
+        case .fetchFailed(let itemId, let reason):
+            downloads.phoneFailed(itemId: itemId, reason: reason)
+        case .progress, .fetch, .cancelFetch, .requestContext:
             break
+        }
+    }
+
+    /// A message for the phone: now when it is in reach, queued for its
+    /// next wake otherwise. A fetch is always queued, so it survives both
+    /// apps being put away.
+    func send(_ message: WatchMessage) {
+        guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return }
+        let payload = WatchSync.pack(message)
+        // In reach, a message lands at once; away, a queued transfer waits
+        // for the phone — and a message that fails on the way becomes one.
+        if WCSession.default.isReachable {
+            WCSession.default.sendMessage(payload, replyHandler: nil) { _ in WCSession.default.transferUserInfo(payload) }
+        } else {
+            WCSession.default.transferUserInfo(payload)
         }
     }
 
@@ -209,11 +248,48 @@ extension WatchLink: WCSessionDelegate {
     nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
         let context = session.receivedApplicationContext
         let reachable = session.isReachable
+        let companion = session.isCompanionAppInstalled
         Task { @MainActor in
             isActivated = activationState == .activated
             isPhoneReachable = reachable
+            hasCompanion = companion
             if !context.isEmpty { apply(context) }
+            if reachable { requestContext() }
             publishInventory(now: true)
+            WatchDownloads.shared.pump()
+        }
+    }
+
+    nonisolated func sessionCompanionAppInstalledDidChange(_ session: WCSession) {
+        let companion = session.isCompanionAppInstalled
+        Task { @MainActor in
+            hasCompanion = companion
+            WatchDownloads.shared.pump()
+        }
+    }
+
+    /// A file from the phone: an item it fetched for the watch. Moved into
+    /// the item's folder here and now — the system deletes it when this
+    /// returns — and then measured before it is believed.
+    nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
+        guard let itemId = file.metadata?[WatchFileTransfer.itemKey] as? String else {
+            Self.log.error("a file with no item id arrived from the phone: \(String(describing: file.metadata), privacy: .public)")
+            return
+        }
+        Self.log.notice("file for \(itemId, privacy: .public) arrived from the phone")
+        let folder = WatchDownloads.folder(itemId)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let destination = folder.appendingPathComponent("audio.m4a")
+        try? FileManager.default.removeItem(at: destination)
+        do {
+            try FileManager.default.moveItem(at: file.fileURL, to: destination)
+        } catch {
+            Self.log.error("couldn't keep the phone's file: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        let bytes = ((try? FileManager.default.attributesOfItem(atPath: destination.path))?[.size] as? NSNumber)?.int64Value ?? 0
+        Task { @MainActor in
+            await WatchDownloads.shared.receivedFromPhone(itemId: itemId, at: destination, bytes: bytes)
         }
     }
 
@@ -221,7 +297,11 @@ extension WatchLink: WCSessionDelegate {
         let reachable = session.isReachable
         Task { @MainActor in
             isPhoneReachable = reachable
-            if reachable { await WatchSyncQueue.shared.flush() }
+            if reachable {
+                requestContext()
+                WatchDownloads.shared.pump()
+                await WatchSyncQueue.shared.flush()
+            }
         }
     }
 

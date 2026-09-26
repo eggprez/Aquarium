@@ -13,6 +13,7 @@
 
 #if os(iOS)
 
+import AVFoundation
 import Foundation
 import Observation
 import WatchConnectivity
@@ -38,10 +39,24 @@ final class WatchLink: NSObject {
     private(set) var pendingEvents: [WatchProgressEvent] = []
     private(set) var lastForwardedAt: Date?
 
+    /// Items the watch has asked for, in the order asked; the first is the
+    /// one being fetched. Kept across launches.
+    private(set) var fetchQueue: [String] = []
+    private(set) var fetching: String?
+    private(set) var fetchFraction: Double?
+    /// Files fetched and handed to WatchConnectivity, still on their way.
+    private(set) var transferring: [String] = []
+
     private var started = false
     private var revision = 0
     private var contextTask: Task<Void, Never>?
     private var forwardTask: Task<Void, Never>?
+    @ObservationIgnored nonisolated private let taskMap = OSAllocatedUnfairLock(initialState: [Int: String]())
+    @ObservationIgnored private var fetchSession: URLSession!
+    private var fetchCompletion: (() -> Void)?
+    private var lastProgressSentAt = Date.distantPast
+
+    nonisolated static let fetchSessionIdentifier = "scottai.FellyJin.watchrelay"
 
     var isAvailable: Bool { WCSession.isSupported() && isPaired && isWatchAppInstalled }
 
@@ -51,6 +66,18 @@ final class WatchLink: NSObject {
            let saved = try? JSONDecoder().decode([WatchProgressEvent].self, from: data) {
             pendingEvents = saved
         }
+        fetchQueue = UserDefaults.standard.stringArray(forKey: "watch_fetch_queue") ?? []
+        if let data = UserDefaults.standard.data(forKey: "watch_fetch_tasks"),
+           let saved = try? JSONDecoder().decode([Int: String].self, from: data) {
+            taskMap.withLock { $0 = saved }
+        }
+        // A background session: a ten-hour book is minutes of transcode,
+        // and the phone is in a pocket for most of them.
+        let config = URLSessionConfiguration.background(withIdentifier: Self.fetchSessionIdentifier)
+        config.isDiscretionary = false
+        config.sessionSendsLaunchEvents = true
+        config.timeoutIntervalForResource = 6 * 60 * 60
+        fetchSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }
 
     /// Called once at launch.
@@ -60,6 +87,14 @@ final class WatchLink: NSObject {
         let session = WCSession.default
         session.delegate = self
         session.activate()
+        transferring = session.outstandingFileTransfers.compactMap { $0.file.metadata?[WatchFileTransfer.itemKey] as? String }
+        rejoinFetches()
+    }
+
+    /// The system woke the app for the relay session's events.
+    func handleFetchEvents(completion: @escaping () -> Void) {
+        fetchCompletion = completion
+        _ = fetchSession
     }
 
     // MARK: - Phone → watch
@@ -77,6 +112,17 @@ final class WatchLink: NSObject {
 
     private func pushContext() async {
         guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return }
+        let context = await buildContext()
+        do {
+            try WCSession.default.updateApplicationContext(WatchSync.pack(context))
+            lastContextSentAt = Date()
+        } catch {
+            Self.log.error("context not sent: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// The sign-in and the plan as they stand.
+    private func buildContext() async -> PhoneContext {
         let client = JellyfinClient.shared
         var credentials: WatchCredentials?
         if let s = client.session, let token = Keychain.token(server: s.server, userId: s.userId) {
@@ -92,13 +138,7 @@ final class WatchLink: NSObject {
         }
         lastPlan = plan
         revision += 1
-        let context = PhoneContext(revision: revision, credentials: credentials, mirror: plan)
-        do {
-            try WCSession.default.updateApplicationContext(WatchSync.pack(context))
-            lastContextSentAt = Date()
-        } catch {
-            Self.log.error("context not sent: \(error.localizedDescription, privacy: .public)")
-        }
+        return PhoneContext(revision: revision, credentials: credentials, mirror: plan)
     }
 
     private var lastPlan: WatchMirrorPlan? {
@@ -162,6 +202,174 @@ final class WatchLink: NSObject {
     }
 
     /// Listening from the watch: queued, then told to the server in order.
+    private func handle(_ message: WatchMessage) {
+        Self.log.notice("from the watch: \(String(describing: message).prefix(80), privacy: .public)")
+        switch message {
+        case .progress(let events): take(events)
+        case .fetch(let itemId): enqueueFetch(itemId)
+        case .cancelFetch(let itemId): cancelFetch(itemId)
+        default: break
+        }
+    }
+
+    // MARK: - Fetching for the watch
+
+    /// Where a fetched file waits for its transfer. Under tmp: nothing
+    /// here is the phone's to keep.
+    nonisolated private static var relayFolder: URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("WatchRelay", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    nonisolated private static func relayFile(_ itemId: String) -> URL {
+        relayFolder.appendingPathComponent("\(JellyfinClient.pathId(itemId)).m4a")
+    }
+
+    private func persistFetches() {
+        UserDefaults.standard.set(fetchQueue, forKey: "watch_fetch_queue")
+        UserDefaults.standard.set(try? JSONEncoder().encode(taskMap.withLock { $0 }), forKey: "watch_fetch_tasks")
+    }
+
+    private func enqueueFetch(_ itemId: String) {
+        guard !fetchQueue.contains(itemId), fetching != itemId, !transferring.contains(itemId) else {
+            Self.log.notice("fetch of \(itemId, privacy: .public) already under way")
+            return
+        }
+        // Already fetched and waiting: hand it over again.
+        let file = Self.relayFile(itemId)
+        if FileManager.default.fileExists(atPath: file.path) {
+            handOver(itemId: itemId, file: file)
+            return
+        }
+        fetchQueue.append(itemId)
+        persistFetches()
+        pumpFetches()
+    }
+
+    private func cancelFetch(_ itemId: String) {
+        fetchQueue.removeAll { $0 == itemId }
+        if fetching == itemId {
+            fetchSession.getAllTasks { tasks in
+                for task in tasks where self.taskItem(task) == itemId { task.cancel() }
+            }
+        }
+        for transfer in WCSession.default.outstandingFileTransfers
+        where transfer.file.metadata?[WatchFileTransfer.itemKey] as? String == itemId {
+            transfer.cancel()
+        }
+        transferring.removeAll { $0 == itemId }
+        try? FileManager.default.removeItem(at: Self.relayFile(itemId))
+        persistFetches()
+    }
+
+    /// At launch: a fetch the session is still running stands; a queue
+    /// head with no task behind it is started again.
+    private func rejoinFetches() {
+        fetchSession.getAllTasks { live in
+            let running = live.compactMap { self.taskItem($0) }
+            Task { @MainActor in
+                if let first = running.first {
+                    self.fetching = first
+                    self.fetchQueue.removeAll { $0 == first }
+                } else {
+                    self.taskMap.withLock { $0 = [:] }
+                }
+                self.persistFetches()
+                self.pumpFetches()
+            }
+        }
+    }
+
+    /// One at a time: the server encodes one, the phone sends one.
+    private func pumpFetches() {
+        guard fetching == nil, let next = fetchQueue.first else { return }
+        let client = JellyfinClient.shared
+        guard client.isSignedIn else { Self.log.notice("fetch waits: not signed in"); return }
+        fetchQueue.removeFirst()
+        fetching = next
+        fetchFraction = nil
+        persistFetches()
+        Task {
+            var item: BaseItem?
+            if !client.isOffline { item = try? await client.musicItem(next) }
+            guard fetching == next else { return }
+            guard let item, let request = Self.fetchRequest(for: item, client: client) else {
+                fetchFailed(next, reason: client.isOffline ? "The phone can't reach the server" : "The server doesn't have this item")
+                return
+            }
+            let task = fetchSession.downloadTask(with: request)
+            taskMap.withLock { $0[task.taskIdentifier] = next }
+            persistFetches()
+            task.resume()
+            Self.log.notice("fetching \(next, privacy: .public) for the watch")
+        }
+    }
+
+    /// The same address the watch would use itself: AAC at 128 kbps in an
+    /// MP4 wrapper, one file. The token goes in a header.
+    private static func fetchRequest(for item: BaseItem, client: JellyfinClient) -> URLRequest? {
+        guard let s = client.session else { return nil }
+        var q = [
+            URLQueryItem(name: "static", value: "false"),
+            URLQueryItem(name: "deviceId", value: s.deviceId),
+            URLQueryItem(name: "Context", value: "Static"),
+            URLQueryItem(name: "audioCodec", value: "aac"),
+            URLQueryItem(name: "audioBitRate", value: "128000"),
+            URLQueryItem(name: "maxAudioChannels", value: "2"),
+        ]
+        if let id = item.MediaSources?.first?.Id { q.append(URLQueryItem(name: "mediaSourceId", value: id)) }
+        guard let url = URL(string: "\(s.server)/Audio/\(JellyfinClient.pathId(item.Id))/stream.m4a?\(JellyfinClient.encode(q))") else { return nil }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 120
+        for (k, v) in client.authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
+        return req
+    }
+
+    nonisolated private func taskItem(_ task: URLSessionTask) -> String? {
+        taskMap.withLock { $0[task.taskIdentifier] }
+    }
+
+    private func fetchFailed(_ itemId: String, reason: String) {
+        Self.log.error("fetch for the watch failed: \(itemId, privacy: .public) \(reason, privacy: .public)")
+        if fetching == itemId { fetching = nil }
+        fetchFraction = nil
+        taskMap.withLock { map in map = map.filter { $0.value != itemId } }
+        persistFetches()
+        send(.fetchFailed(itemId: itemId, reason: reason))
+        pumpFetches()
+    }
+
+    /// A file has landed. Measured before it goes to the watch: the server
+    /// cannot promise a transcode's length, and a short file sent across
+    /// would only be measured and thrown away there.
+    private func fetched(itemId: String, at url: URL, expectedSeconds: Double?) async {
+        let asset = AVURLAsset(url: url)
+        let seconds = (try? await asset.load(.duration))?.seconds ?? 0
+        let whole = seconds.isFinite && seconds > 0 && (expectedSeconds.map { seconds >= $0 * 0.97 } ?? true)
+        guard whole else {
+            try? FileManager.default.removeItem(at: url)
+            fetchFailed(itemId, reason: "The file arrived incomplete")
+            return
+        }
+        if fetching == itemId { fetching = nil }
+        fetchFraction = nil
+        taskMap.withLock { map in map = map.filter { $0.value != itemId } }
+        persistFetches()
+        handOver(itemId: itemId, file: url, seconds: seconds)
+        pumpFetches()
+    }
+
+    private func handOver(itemId: String, file: URL, seconds: Double? = nil) {
+        guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return }
+        let bytes = ((try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? NSNumber)?.int64Value ?? 0
+        var metadata: [String: Any] = [WatchFileTransfer.itemKey: itemId, WatchFileTransfer.bytesKey: bytes]
+        if let seconds { metadata[WatchFileTransfer.secondsKey] = seconds }
+        WCSession.default.transferFile(file, metadata: metadata)
+        if !transferring.contains(itemId) { transferring.append(itemId) }
+        Self.log.notice("handing \(itemId, privacy: .public) to the watch, \(bytes) bytes")
+    }
+
     private func take(_ events: [WatchProgressEvent]) {
         let known = Set(pendingEvents.map(\.id))
         pendingEvents += events.filter { !known.contains($0.id) }
@@ -273,22 +481,109 @@ extension WatchLink: WCSessionDelegate {
             return
         }
         Task { @MainActor in
-            if case .progress(let events) = decoded { take(events) }
+            if case .requestContext = decoded {
+                let context = await buildContext()
+                lastContextSentAt = Date()
+                replyHandler(WatchSync.pack(WatchReply(ok: true, context: context)))
+                return
+            }
+            handle(decoded)
             replyHandler(WatchSync.pack(WatchReply(ok: true)))
         }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         guard let decoded = WatchSync.unpack(WatchMessage.self, from: message) else { return }
-        Task { @MainActor in
-            if case .progress(let events) = decoded { take(events) }
-        }
+        Task { @MainActor in handle(decoded) }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
-        guard let decoded = WatchSync.unpack(WatchMessage.self, from: userInfo) else { return }
+        guard let decoded = WatchSync.unpack(WatchMessage.self, from: userInfo) else {
+            Self.log.error("unreadable transfer from the watch: \(userInfo.keys.joined(separator: ","), privacy: .public)")
+            return
+        }
+        Task { @MainActor in handle(decoded) }
+    }
+
+    /// A file handed to the watch has arrived there, or not. Either way the
+    /// phone's copy goes; a failure is told to the watch, which asks again
+    /// or fetches for itself.
+    nonisolated func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: Error?) {
+        let itemId = fileTransfer.file.metadata?[WatchFileTransfer.itemKey] as? String
+        let file = fileTransfer.file.fileURL
         Task { @MainActor in
-            if case .progress(let events) = decoded { take(events) }
+            try? FileManager.default.removeItem(at: file)
+            guard let itemId else { return }
+            transferring.removeAll { $0 == itemId }
+            if let error {
+                Self.log.error("transfer to the watch failed: \(error.localizedDescription, privacy: .public)")
+                send(.fetchFailed(itemId: itemId, reason: "The transfer to the watch failed"))
+            }
+        }
+    }
+}
+
+// MARK: - The relay session
+
+extension WatchLink: URLSessionDownloadDelegate {
+    nonisolated func urlSession(
+        _ session: URLSession, downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
+    ) {
+        guard let itemId = taskItem(downloadTask) else { return }
+        Task { @MainActor in
+            // The server sends a transcode with no length; the estimate is
+            // the item's runtime at the bitrate, which the watch keeps.
+            guard totalBytesExpectedToWrite > 0 else { return }
+            let fraction = min(0.99, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
+            fetchFraction = fraction
+            if WCSession.default.isReachable, Date().timeIntervalSince(lastProgressSentAt) > 2 {
+                lastProgressSentAt = Date()
+                WCSession.default.sendMessage(WatchSync.pack(WatchMessage.fetchProgress(itemId: itemId, fraction: fraction)), replyHandler: nil, errorHandler: nil)
+            }
+        }
+    }
+
+    nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        guard let itemId = taskItem(downloadTask) else {
+            try? FileManager.default.removeItem(at: location)
+            return
+        }
+        let destination = Self.relayFile(itemId)
+        try? FileManager.default.removeItem(at: destination)
+        let status = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 200
+        var moved = false
+        if (200..<300).contains(status) {
+            moved = (try? FileManager.default.moveItem(at: location, to: destination)) != nil
+        }
+        Task { @MainActor in
+            if moved {
+                await fetched(itemId: itemId, at: destination, expectedSeconds: nil)
+            } else {
+                fetchFailed(itemId, reason: status == 401 ? "The server refused the sign-in" : "Server error \(status)")
+            }
+        }
+    }
+
+    nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard let error, let itemId = taskItem(task) else { return }
+        let cancelled = (error as? URLError)?.code == .cancelled
+        Task { @MainActor in
+            if cancelled {
+                if fetching == itemId { fetching = nil }
+                taskMap.withLock { map in map = map.filter { $0.value != itemId } }
+                persistFetches()
+                pumpFetches()
+            } else {
+                fetchFailed(itemId, reason: error.localizedDescription)
+            }
+        }
+    }
+
+    nonisolated func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        Task { @MainActor in
+            fetchCompletion?()
+            fetchCompletion = nil
         }
     }
 }

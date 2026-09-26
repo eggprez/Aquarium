@@ -38,6 +38,7 @@ struct AquariumWatchApp: App {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
+                link.requestContext()
                 Task {
                     await client.checkOnline()
                     downloads.pump()
