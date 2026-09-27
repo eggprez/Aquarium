@@ -1,6 +1,9 @@
 //  What is playing, and the controls for it. A book gets fifteen back and
 //  thirty forward, a speed and its chapters; a song gets previous and next.
-//  Volume and the output route are the system's Now Playing view, a tap away.
+//  The Digital Crown is the volume, as in Apple's own players: the page
+//  doesn't scroll, and a `WKInterfaceVolumeControl` holds the crown whenever
+//  the page is in front. The output route is the system's Now Playing view,
+//  a tap away.
 //
 //  A page on the root stack, pushed when something starts and backed out of
 //  like any other. No top-bar items: on a pushed page they pop it.
@@ -11,8 +14,12 @@ import WatchKit
 struct NowPlayingScreen: View {
     @Environment(WatchPlayer.self) private var player
     @Environment(WatchNavigator.self) private var nav
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showsSystem = false
     @State private var showsChapters = false
+    /// Bumped whenever the crown should come back to the volume: on
+    /// appearing, on returning to the app, and when a sheet goes away.
+    @State private var crownClaim = 0
 
     private var isBook: Bool { player.current?.isAudiobook == true }
 
@@ -26,10 +33,16 @@ struct NowPlayingScreen: View {
         }
         .navigationTitle("Now Playing")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showsSystem) { NowPlayingView() }
-        .sheet(isPresented: $showsChapters) { chapters }
+        .sheet(isPresented: $showsSystem, onDismiss: claimCrown) { NowPlayingView() }
+        .sheet(isPresented: $showsChapters, onDismiss: claimCrown) { chapters }
+        .onAppear(perform: claimCrown)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { claimCrown() }
+        }
         .onDisappear { nav.playerLeft() }
     }
+
+    private func claimCrown() { crownClaim &+= 1 }
 
     private var idle: some View {
         VStack(spacing: 10) {
@@ -45,10 +58,10 @@ struct NowPlayingScreen: View {
         .padding()
     }
 
+    /// Not a scroll view: one would want the crown too.
     private func content(_ item: BaseItem) -> some View {
-        ScrollView {
-            playing(item)
-        }
+        playing(item)
+            .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private func playing(_ item: BaseItem) -> some View {
@@ -60,6 +73,10 @@ struct NowPlayingScreen: View {
                     Text(subtitle(item)).font(.caption2).foregroundStyle(WatchTheme.dim).lineLimit(2)
                 }
                 Spacer(minLength: 0)
+                // Beside the crown, which is what turns it.
+                CrownVolume(claim: crownClaim)
+                    .frame(width: 26, height: 26)
+                    .accessibilityLabel("Volume")
             }
 
             VStack(spacing: 2) {
@@ -114,11 +131,11 @@ struct NowPlayingScreen: View {
 
             HStack(spacing: 8) {
                 Button { showsSystem = true } label: {
-                    Image(systemName: "speaker.wave.2").font(.caption2.weight(.semibold))
+                    Image(systemName: "airplayaudio").font(.caption2.weight(.semibold))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
-                .accessibilityLabel("Volume and output")
+                .accessibilityLabel("Output")
                 if isBook {
                     Button { player.stepSpeed(1) } label: {
                         Text(speedLabel).font(.caption2.weight(.semibold).monospacedDigit())
@@ -186,4 +203,28 @@ struct NowPlayingScreen: View {
             }
         }
     }
+}
+
+/// The system's volume control for this watch's own output, holding the
+/// crown. A new `claim` hands the crown back to it; SwiftUI takes the crown
+/// for a sheet and doesn't return it on its own.
+private struct CrownVolume: WKInterfaceObjectRepresentable {
+    var claim: Int
+
+    func makeWKInterfaceObject(context: Context) -> WKInterfaceVolumeControl {
+        let control = WKInterfaceVolumeControl(origin: .local)
+        control.setTintColor(UIColor(WatchTheme.accent))
+        return control
+    }
+
+    func updateWKInterfaceObject(_ control: WKInterfaceVolumeControl, context: Context) {
+        guard context.coordinator.claim != claim else { return }
+        context.coordinator.claim = claim
+        // After this pass, so the control is in the window when it asks.
+        DispatchQueue.main.async { control.focus() }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator { var claim = -1 }
 }
