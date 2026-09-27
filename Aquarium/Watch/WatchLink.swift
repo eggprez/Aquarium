@@ -25,6 +25,8 @@ final class WatchSyncQueue {
     private(set) var lastFlushedAt: Date?
     private(set) var lastRoute: String?
     private var isFlushing = false
+    /// Something was queued while a flush was under way: go round again.
+    private var flushAgain = false
 
     private init() {
         if let data = UserDefaults.standard.data(forKey: "watch_pending_events"),
@@ -52,26 +54,55 @@ final class WatchSyncQueue {
 
     /// Try to send everything waiting. Phone first, server second.
     func flush() async {
-        guard !pending.isEmpty, !isFlushing else { return }
+        guard !isFlushing else {
+            flushAgain = true
+            return
+        }
         isFlushing = true
         defer { isFlushing = false }
+        repeat {
+            flushAgain = false
+            // A book noted and never queued — the app put away between the
+            // two — goes too, from its record.
+            let unsent = WatchDownloads.shared.unsentBookEvents(except: Set(pending.map(\.itemId)))
+            if !unsent.isEmpty {
+                pending += unsent
+                persist()
+            }
+            guard !pending.isEmpty else { return }
+            await flushOnce()
+        } while flushAgain
+    }
+
+    private func flushOnce() async {
         let batch = pending
-        if WatchLink.shared.isPhoneReachable {
-            if await WatchLink.shared.send(events: batch) {
-                remove(batch)
+        if WatchLink.shared.isPhoneReachable, let reply = await WatchLink.shared.send(events: batch), reply.ok {
+            // A phone that names what reached the server keeps the rest and
+            // sends it when it can; they stay here too, so the watch's place
+            // in a book isn't overwritten by the server's older one, and are
+            // asked about again next time. An older phone took the lot.
+            let delivered = reply.delivered.map(Set.init) ?? Set(batch.map(\.id))
+            let settled = batch.filter { delivered.contains($0.id) }
+            settle(settled)
+            if !settled.isEmpty {
                 lastRoute = "iPhone"
                 lastFlushedAt = Date()
-                return
             }
+            return
         }
         let client = JellyfinClient.shared
         guard client.isSignedIn, WatchDownloads.shared.hasNetwork, await client.checkOnline() else { return }
         for event in batch {
             do {
                 try await client.send(event)
-                remove([event])
+                settle([event])
             } catch is CancellationError {
                 return
+            } catch APIError.server(let status, _) where (400..<500).contains(status) && ![401, 403, 408, 429].contains(status) {
+                // The server won't ever take this one — the item is gone —
+                // and keeping it would hold up everything behind it.
+                WatchLog.error("link", "server refused an event for \(event.itemId) with \(status); dropping it")
+                settle([event])
             } catch {
                 // Whatever stopped this one stops the rest for now.
                 WatchLink.log.error("direct sync failed: \(error.localizedDescription)")
@@ -82,10 +113,15 @@ final class WatchSyncQueue {
         lastFlushedAt = Date()
     }
 
-    private func remove(_ sent: [WatchProgressEvent]) {
-        let ids = Set(sent.map(\.id))
+    /// These have reached the server, or been found older than what it has.
+    private func settle(_ done: [WatchProgressEvent]) {
+        guard !done.isEmpty else { return }
+        let ids = Set(done.map(\.id))
         pending.removeAll { ids.contains($0.id) }
         persist()
+        for event in done where event.isAudiobook {
+            WatchDownloads.shared.markSynced(itemId: event.itemId, through: event.at)
+        }
     }
 }
 
@@ -108,6 +144,10 @@ final class WatchLink: NSObject {
 
     private var inventoryTask: Task<Void, Never>?
     private var revision = 0
+    /// When the newest context applied was built. The phone's revision
+    /// restarts with each launch, so its clock is what orders them: the
+    /// context the system kept from last time can land after a fresh one.
+    private var lastContextSentAt = UserDefaults.standard.object(forKey: "phone_context_sent_at") as? Date
 
     private override init() {
         super.init()
@@ -142,6 +182,12 @@ final class WatchLink: NSObject {
     }
 
     private func apply(_ context: PhoneContext) {
+        if let last = lastContextSentAt, context.sentAt < last {
+            WatchLog.note("link", "ignoring an older context from the phone: revision \(context.revision), built \(context.sentAt.formatted(.iso8601))")
+            return
+        }
+        lastContextSentAt = context.sentAt
+        UserDefaults.standard.set(context.sentAt, forKey: "phone_context_sent_at")
         lastPhoneContextAt = Date()
         WatchLog.note("link", "context from the phone: revision \(context.revision), \(context.credentials == nil ? "signed out" : "signed in"), \(context.mirror.bookIds.count) books, \(context.mirror.playlistIds.count) playlists")
         let client = JellyfinClient.shared
@@ -151,7 +197,10 @@ final class WatchLink: NSObject {
             client.signOut()
         }
         WatchDownloads.shared.apply(plan: context.mirror)
-        Task { await WatchSyncQueue.shared.flush() }
+        Task {
+            await WatchSyncQueue.shared.flush()
+            await WatchActions.refreshBookPositions()
+        }
         publishInventory()
     }
 
@@ -172,7 +221,7 @@ final class WatchLink: NSObject {
             downloads.notePhoneProgress(itemId: itemId, fraction: fraction)
         case .fetchFailed(let itemId, let reason):
             downloads.phoneFailed(itemId: itemId, reason: reason)
-        case .progress, .fetch, .fetchMany, .cancelFetch, .requestContext, .logs:
+        case .progress, .fetch, .fetchMany, .cancelFetch, .playlistRemoved, .requestContext, .logs:
             break
         }
     }
@@ -260,6 +309,8 @@ final class WatchLink: NSObject {
             let context = WatchContext(
                 revision: revision,
                 inventory: WatchDownloads.shared.inventory(),
+                awaitingPhone: WatchDownloads.shared.awaitingPhone,
+                playlistIds: WatchDownloads.shared.playlists.map(\.id),
                 signedIn: JellyfinClient.shared.isSignedIn
             )
             do {
@@ -271,30 +322,33 @@ final class WatchLink: NSObject {
         }
     }
 
-    /// Hand the phone these events and wait for it to say it took them.
-    func send(events: [WatchProgressEvent]) async -> Bool {
-        guard WCSession.isSupported(), WCSession.default.isReachable else { return false }
+    /// Hand the phone these events and wait for its answer: which of them
+    /// reached the server. Nil when it didn't answer.
+    func send(events: [WatchProgressEvent]) async -> WatchReply? {
+        guard WCSession.isSupported(), WCSession.default.isReachable else { return nil }
         let payload = WatchSync.pack(WatchMessage.progress(events))
         return await withCheckedContinuation { continuation in
             let done = OSAllocatedUnfairLock(initialState: false)
-            func finish(_ ok: Bool) {
+            func finish(_ reply: WatchReply?) {
                 let first = done.withLock { was in
                     if was { return false }
                     was = true
                     return true
                 }
-                if first { continuation.resume(returning: ok) }
+                if first { continuation.resume(returning: reply) }
             }
             WCSession.default.sendMessage(payload, replyHandler: { reply in
-                finish(WatchSync.unpack(WatchReply.self, from: reply)?.ok ?? false)
+                finish(WatchSync.unpack(WatchReply.self, from: reply))
             }, errorHandler: { error in
                 WatchLog.error("link", "phone did not take events: \(error.localizedDescription)")
-                finish(false)
+                finish(nil)
             })
             // WatchConnectivity times a reply out on its own, but not quickly.
+            // The phone answers once the server has the events, or after
+            // about ten seconds of trying.
             Task {
                 try? await Task.sleep(for: .seconds(15))
-                finish(false)
+                finish(nil)
             }
         }
     }
@@ -333,20 +387,112 @@ extension WatchLink: WCSessionDelegate {
             WatchLog.error("link", "a file with no item id arrived from the phone: \(String(describing: file.metadata))")
             return
         }
-        WatchLog.note("link", "file for \(itemId) arrived from the phone")
         let folder = WatchDownloads.folder(itemId)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let destination = folder.appendingPathComponent("audio.m4a")
-        try? FileManager.default.removeItem(at: destination)
+        // The server's own file keeps its type: an .mp3 named .m4a won't open.
+        let ext = (file.metadata?[WatchFileTransfer.extensionKey] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "m4a"
+        let destination = folder.appendingPathComponent("audio.\(ext)")
+        let source: URL
+        if let send = file.metadata?[WatchFileTransfer.sendKey] as? String {
+            guard let whole = Self.takePiece(file.fileURL, metadata: file.metadata, send: send, itemId: itemId, folder: folder) else {
+                Task { @MainActor in WatchDownloads.shared.phoneStillAtIt(itemId) }
+                return
+            }
+            source = whole
+        } else {
+            WatchLog.note("link", "file for \(itemId) arrived from the phone")
+            source = file.fileURL
+        }
+        for old in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        where old.lastPathComponent.hasPrefix("audio.") {
+            try? FileManager.default.removeItem(at: old)
+        }
         do {
-            try FileManager.default.moveItem(at: file.fileURL, to: destination)
+            try FileManager.default.moveItem(at: source, to: destination)
         } catch {
             WatchLog.error("link", "couldn't keep the phone's file: \(error.localizedDescription)")
             return
         }
+        Self.removeIncoming(in: folder)
         let bytes = ((try? FileManager.default.attributesOfItem(atPath: destination.path))?[.size] as? NSNumber)?.int64Value ?? 0
         Task { @MainActor in
             await WatchDownloads.shared.receivedFromPhone(itemId: itemId, at: destination, bytes: bytes)
+        }
+    }
+
+    /// One piece of a file the phone sent in pieces. It joins the send's
+    /// partial file when its turn comes — pieces mostly arrive in order,
+    /// and one that doesn't waits beside it — so nothing is copied whole at
+    /// the end. The finished file, once the last piece is in.
+    nonisolated private static func takePiece(_ file: URL, metadata m: [String: Any]?, send: String, itemId: String, folder: URL) -> URL? {
+        guard let index = m?[WatchFileTransfer.pieceKey] as? Int,
+              let count = m?[WatchFileTransfer.piecesKey] as? Int, count > 0,
+              let pieceBytes = (m?[WatchFileTransfer.pieceBytesKey] as? NSNumber)?.int64Value, pieceBytes > 0 else {
+            WatchLog.error("link", "a piece for \(itemId) arrived without its place: \(String(describing: m))")
+            return nil
+        }
+        let total = (m?[WatchFileTransfer.bytesKey] as? NSNumber)?.int64Value ?? 0
+        let fm = FileManager.default
+        let incoming = folder.appendingPathComponent("incoming-\(send)", isDirectory: true)
+        // A send left behind — cancelled, or overtaken by another — goes
+        // once it has sat for an hour.
+        for other in (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        where other.lastPathComponent.hasPrefix("incoming-") && other.lastPathComponent != incoming.lastPathComponent {
+            let at = (try? other.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            if Date().timeIntervalSince(at) > 60 * 60 { try? fm.removeItem(at: other) }
+        }
+        try? fm.createDirectory(at: incoming, withIntermediateDirectories: true)
+        let piece = incoming.appendingPathComponent("\(index).part")
+        try? fm.removeItem(at: piece)
+        do {
+            try fm.moveItem(at: file, to: piece)
+        } catch {
+            WatchLog.error("link", "couldn't keep piece \(index + 1) of \(count) for \(itemId): \(error.localizedDescription)")
+            return nil
+        }
+        let partial = incoming.appendingPathComponent("partial")
+        if !fm.fileExists(atPath: partial.path) { fm.createFile(atPath: partial.path, contents: nil) }
+        guard let out = try? FileHandle(forWritingTo: partial) else { return nil }
+        defer { try? out.close() }
+        // What is in already: whole pieces only. A write cut short by a
+        // kill is trimmed back and done again from its piece, which is
+        // removed only once it is in.
+        var size = Int64((try? out.seekToEnd()) ?? 0)
+        var next: Int
+        if total > 0, size == total {
+            next = count
+        } else {
+            if size % pieceBytes != 0 {
+                size -= size % pieceBytes
+                try? out.truncate(atOffset: UInt64(size))
+            }
+            next = Int(size / pieceBytes)
+        }
+        while next < count {
+            let waiting = incoming.appendingPathComponent("\(next).part")
+            guard fm.fileExists(atPath: waiting.path), let input = try? FileHandle(forReadingFrom: waiting) else { break }
+            var ok = true
+            while let data = try? input.read(upToCount: 1024 * 1024), !data.isEmpty {
+                guard (try? out.write(contentsOf: data)) != nil else { ok = false; break }
+            }
+            try? input.close()
+            guard ok else {
+                try? out.truncate(atOffset: UInt64(Int64(next) * pieceBytes))
+                WatchLog.error("link", "couldn't add piece \(next + 1) of \(count) for \(itemId), \(WatchLog.disk)")
+                return nil
+            }
+            try? fm.removeItem(at: waiting)
+            next += 1
+        }
+        WatchLog.note("link", "piece \(index + 1) of \(count) for \(itemId) arrived, \(next) in place, \(WatchLog.memory)")
+        return next == count ? partial : nil
+    }
+
+    /// Whatever sends in pieces an item still has on the go.
+    nonisolated private static func removeIncoming(in folder: URL) {
+        for other in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        where other.lastPathComponent.hasPrefix("incoming-") {
+            try? FileManager.default.removeItem(at: other)
         }
     }
 
@@ -358,6 +504,7 @@ extension WatchLink: WCSessionDelegate {
                 requestContext()
                 WatchDownloads.shared.pump()
                 await WatchSyncQueue.shared.flush()
+                await WatchActions.refreshBookPositions()
             }
         }
     }

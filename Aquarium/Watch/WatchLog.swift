@@ -98,10 +98,15 @@ enum WatchLog {
 
     /// What the process may still take, in megabytes: the number that
     /// explains a watch that killed the app.
+    static var disk: String {
+        WatchDownloads.freeBytes().map { "disk free=\($0 / (1024 * 1024))MB" } ?? "disk free=?"
+    }
+
     static var memory: String {
         let free = os_proc_available_memory() / (1024 * 1024)
         // Zero on the Simulator, which does not keep the count.
-        return free > 0 ? "free=\(free)MB" : "free=?"
+        // Memory the app may still use, not storage: see `disk`.
+        return free > 0 ? "mem=\(free)MB" : "mem=?"
     }
 
     // MARK: - The system's side
@@ -110,11 +115,7 @@ enum WatchLog {
     /// time: our subsystem in full, and anything at error or above from any
     /// other. Off the main thread, as the store can take a moment.
     static func snapshotSystemLog() async {
-        let since: Date
-        lock.lock()
-        since = lastSnapshot
-        lastSnapshot = Date()
-        lock.unlock()
+        let since = beginSnapshot()
         let lines: [String] = await Task.detached(priority: .utility) {
             guard let store = try? OSLogStore(scope: .currentProcessIdentifier) else { return [] }
             let position = store.position(date: since)
@@ -135,9 +136,23 @@ enum WatchLog {
             return out
         }.value
         guard !lines.isEmpty else { return }
-        lock.lock(); defer { lock.unlock() }
-        append("---- system log since \(stamp.string(from: since)) (\(lines.count) lines)\n")
-        for line in lines { append(line + "\n") }
+        appendSnapshot(lines, since: since)
+    }
+
+    /// The window since the last snapshot, and the start of a new one.
+    private static func beginSnapshot() -> Date {
+        lock.withLock {
+            let since = lastSnapshot
+            lastSnapshot = Date()
+            return since
+        }
+    }
+
+    private static func appendSnapshot(_ lines: [String], since: Date) {
+        lock.withLock {
+            append("---- system log since \(stamp.string(from: since)) (\(lines.count) lines)\n")
+            for line in lines { append(line + "\n") }
+        }
     }
 
     // MARK: - Life
@@ -175,7 +190,11 @@ enum WatchLog {
     /// Everything, oldest first, as one file the phone can carry.
     static func export() async -> URL? {
         await snapshotSystemLog()
-        lock.lock(); defer { lock.unlock() }
+        return lock.withLock { writeExport() }
+    }
+
+    /// Under the lock.
+    private static func writeExport() -> URL? {
         let out = folder.appendingPathComponent("AquariumWatch-\(Self.fileStamp()).log")
         for old in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
         where old.lastPathComponent.hasPrefix("AquariumWatch-") {
@@ -183,7 +202,7 @@ enum WatchLog {
         }
         var data = Data()
         let device = WKInterfaceDevice.current()
-        data.append(Data("Aquarium watch log, exported \(stamp.string(from: Date())) from \(device.model) watchOS \(device.systemVersion), \(memory)\n\n".utf8))
+        data.append(Data("Aquarium watch log, exported \(stamp.string(from: Date())) from \(device.model) watchOS \(device.systemVersion), \(memory), \(disk)\n\n".utf8))
         for n in stride(from: kept, through: 1, by: -1) {
             if let part = try? Data(contentsOf: rotated(n)) { data.append(part) }
         }

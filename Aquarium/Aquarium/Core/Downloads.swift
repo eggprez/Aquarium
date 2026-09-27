@@ -308,9 +308,15 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
 
     var resumeSeconds: Double {
         // A file watched all the way through would otherwise "resume" in its
-        // closing seconds; start it from the top instead.
+        // closing seconds; start it from the top instead. A book is done by
+        // the server's rule, the watch's too: the last 90% of a twenty-hour
+        // book is two hours, not its closing seconds.
         if played { return 0 }
-        if runTimeTicks > 0, Double(positionTicks) / Double(runTimeTicks) > 0.9 { return 0 }
+        if type == "AudioBook" {
+            if BookProgress.isFinished(positionTicks: positionTicks, runTimeTicks: runTimeTicks) { return 0 }
+        } else if runTimeTicks > 0, Double(positionTicks) / Double(runTimeTicks) > 0.9 {
+            return 0
+        }
         return Double(positionTicks) / 10_000_000
     }
 }
@@ -2087,17 +2093,20 @@ final class DownloadManager: NSObject {
         guard var rec = record(for: itemId) else { return }
         rec.positionTicks = Int64(max(0, positionSeconds) * 10_000_000)
         let fraction = rec.runTimeTicks > 0 ? Double(rec.positionTicks) / Double(rec.runTimeTicks) : 0
+        let finished = rec.type == "AudioBook"
+            ? BookProgress.isFinished(positionTicks: rec.positionTicks, runTimeTicks: rec.runTimeTicks)
+            : rec.runTimeTicks > 0 && fraction > 0.92
         if let played {
             if rec.played && !played { rec.unplayedPending = true }
             rec.played = played
-        } else if rec.played, rec.isAudio, positionSeconds > 30, rec.runTimeTicks > 0, fraction < 0.92 {
+        } else if rec.played, rec.isAudio, positionSeconds > 30, rec.runTimeTicks > 0, !finished {
             // A book finished once and started again: `resumeSeconds` ignores
             // the position of anything marked played, so without this it
             // would open at 0:00 every time from here on.
             rec.played = false
             rec.unplayedPending = true
         }
-        if rec.runTimeTicks > 0, fraction > 0.92 {
+        if finished {
             rec.played = true
         }
         if rec.played { rec.unplayedPending = false }

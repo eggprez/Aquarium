@@ -43,6 +43,7 @@ struct WatchSettingsView: View {
 
             if link.isAvailable {
                 mirrorSection
+                relaySection
                 storageSection
                 syncSection
                 diagnosticsSection
@@ -87,20 +88,47 @@ struct WatchSettingsView: View {
         } header: {
             Text("Kept on the watch")
         } footer: {
-            Text("What is picked here is downloaded to the watch by itself and kept up to date. Everything else is fetched only when you ask for it on the watch. Turning something off leaves what is already on the watch; remove it below.")
+            Text("A playlist is on when it is on the watch, whether it was picked here or downloaded on the watch. Playlists on the watch follow the server: songs added there are downloaded, and songs taken out are removed from the watch. Turning a playlist off removes it from the watch. Books you're part-way through are sent as you start them; turning that off leaves those already sent.")
         }
     }
 
     private func binding(for playlistId: String) -> Binding<Bool> {
         Binding(
-            get: { prefs.watchPlaylistIds.contains(playlistId) },
-            set: { on in
-                var ids = prefs.watchPlaylistIds
-                if on { if !ids.contains(playlistId) { ids.append(playlistId) } } else { ids.removeAll { $0 == playlistId } }
-                prefs.watchPlaylistIds = ids
-                link.sendContext()
-            }
+            get: { link.keepsOnWatch(playlistId) },
+            set: { on in link.setKeepsOnWatch(playlistId, on) }
         )
+    }
+
+    // MARK: Fetching for the watch
+
+    @ViewBuilder
+    private var relaySection: some View {
+        if !link.relayItems.isEmpty {
+            Section {
+                ForEach(relayRows) { item in
+                    RelayItemRow(item: item)
+                }
+                if link.relayItems.contains(where: { $0.stage == .failed }) {
+                    Button("Clear Failed") { link.clearFinishedRelayItems() }
+                }
+            } header: {
+                Text("Fetching for the watch")
+            } footer: {
+                Text("What the watch asked this phone for: downloaded from the server here, a few at a time, then sent to the watch. Each leaves the list once it is on the watch. Downloads and sends carry on in the background.")
+            }
+        }
+    }
+
+    /// Moving first, furthest along at the top; then waiting, in the order
+    /// they'll start; then what failed.
+    private var relayRows: [RelayItem] {
+        func along(_ r: RelayItem) -> Double { 0.5 * (r.downloadFraction ?? 0) + 0.5 * (r.transferFraction ?? 0) }
+        let queue = Dictionary(link.fetchQueue.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        let moving = link.relayItems.filter { $0.stage == .downloading || $0.stage == .sending }.sorted { along($0) > along($1) }
+        let waiting = link.relayItems.filter { $0.stage == .waiting }
+            .sorted { (queue[$0.id] ?? .max, $0.askedAt ?? .distantPast) < (queue[$1.id] ?? .max, $1.askedAt ?? .distantPast) }
+        let failed = link.relayItems.filter { $0.stage == .failed }.sorted { $0.updatedAt > $1.updatedAt }
+        return moving + waiting + failed
     }
 
     // MARK: Storage
@@ -117,24 +145,6 @@ struct WatchSettingsView: View {
                 }
                 if inventory.inFlight > 0 {
                     LabeledContent("Downloading", value: "\(inventory.inFlight)")
-                }
-                if let fetching = link.fetching {
-                    HStack {
-                        Text("Fetching for the watch")
-                        Spacer()
-                        if let f = link.fetchFraction {
-                            ProgressView(value: f).frame(width: 80)
-                        } else {
-                            ProgressView()
-                        }
-                    }
-                    .accessibilityLabel("Fetching \(fetching) for the watch")
-                }
-                if !link.transferring.isEmpty {
-                    LabeledContent("Sending to the watch", value: "\(link.transferring.count)")
-                }
-                if !link.fetchQueue.isEmpty {
-                    LabeledContent("Waiting to fetch", value: "\(link.fetchQueue.count)")
                 }
                 ForEach(inventory.groups) { group in
                     HStack(spacing: 12) {
@@ -268,6 +278,63 @@ struct WatchSettingsView: View {
             Text("Listening from the watch")
         } footer: {
             Text("Where a book was left and which songs were heard, as the watch reported them. Passed to the server as soon as it can be reached.")
+        }
+    }
+}
+
+/// One item on its way to the watch: the download, then the send, each
+/// with its bar and a check when done.
+private struct RelayItemRow: View {
+    let item: RelayItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(item.title ?? "Looking it up…")
+                .lineLimit(1)
+                .foregroundStyle(item.title == nil ? Theme.textDim : Theme.text)
+            step("Download to this phone", symbol: "arrow.down.circle",
+                 fraction: item.downloadFraction, active: item.stage == .downloading)
+            step("Send to the watch", symbol: "applewatch",
+                 fraction: item.transferFraction, active: item.stage == .sending)
+            switch item.stage {
+            case .waiting:
+                Text("Waiting its turn").font(.caption).foregroundStyle(Theme.textDim)
+            case .failed:
+                Label(item.failure ?? "Failed", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(Theme.danger)
+            default:
+                EmptyView()
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func step(_ label: String, symbol: String, fraction: Double?, active: Bool) -> some View {
+        let done = (fraction ?? 0) >= 1
+        return HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .foregroundStyle(active || done ? Theme.accent : Theme.textDim)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(label).font(.caption)
+                    Spacer()
+                    if !done, let fraction {
+                        Text(fraction.formatted(.percent.precision(.fractionLength(0))))
+                            .font(.caption.monospacedDigit()).foregroundStyle(Theme.textDim)
+                    }
+                }
+                if active, fraction == nil {
+                    ProgressView().progressViewStyle(.linear)
+                } else {
+                    ProgressView(value: min(1, fraction ?? 0))
+                        .tint(done ? Theme.ok : Theme.accent)
+                }
+            }
+            Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(done ? Theme.ok : Theme.textDim.opacity(0.5))
+                .accessibilityLabel(done ? "done" : "not done")
         }
     }
 }

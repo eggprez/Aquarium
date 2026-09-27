@@ -174,6 +174,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         MainActor.assumeIsolated {
             WatchLink.shared.sendContext()
             WatchLink.shared.forward()
+            WatchLink.shared.resumeFetches()
         }
     }
 

@@ -1,7 +1,8 @@
 //  What is on the watch, what is arriving, and the room left — the page
 //  that answers "what is taking the space" and lets a thing go. Everything
 //  is shown as what was asked for: a playlist, an album or a book is one
-//  row, arriving or arrived, never its songs one by one.
+//  row, arriving or arrived, never its songs one by one. The songs and
+//  books on their way are listed one by one on the queue's own page.
 
 import SwiftUI
 
@@ -81,19 +82,49 @@ extension WatchDownloads {
     func retry(_ group: Group) {
         for id in group.itemIds { retry(id) }
     }
+
+    /// Everything still arriving, stopped: each group the way its own
+    /// Cancel would, so a playlist asked for by hand that has nothing here
+    /// yet goes with its songs.
+    func cancelAll() {
+        for group in groups() where progress(of: group.itemIds).arriving > 0 { cancel(group) }
+    }
+
+    /// The queue as its page shows it, one row per song or book: what is
+    /// moving now, furthest along first, then what is waiting, in the order
+    /// it will start — asked-for things before the phone's plan, oldest ask
+    /// first, the way the pump takes them.
+    func queue() -> (moving: [WatchRecord], waiting: [WatchRecord]) {
+        var moving: [(record: WatchRecord, fraction: Double)] = []
+        var waiting: [WatchRecord] = []
+        for r in inFlight {
+            if r.status == .downloading, let f = fraction(r.itemId) { moving.append((r, f)) } else { waiting.append(r) }
+        }
+        moving.sort { $0.fraction > $1.fraction }
+        waiting.sort { a, b in
+            let aStarting = isStarting(a.itemId), bStarting = isStarting(b.itemId)
+            if aStarting != bStarting { return aStarting }
+            if a.automatic != b.automatic { return !a.automatic }
+            return a.createdAt < b.createdAt
+        }
+        return (moving.map(\.record), waiting)
+    }
+
+    /// The name of the playlist a song is here for, if it is here for one.
+    func playlistName(for record: WatchRecord) -> String? {
+        playlists.first { record.reasons.contains("playlist:\($0.id)") }?.name
+    }
 }
 
 struct OnWatchView: View {
     @Environment(WatchDownloads.self) private var downloads
     @Environment(WatchPlayer.self) private var player
-    @Environment(WatchLink.self) private var link
     @State private var confirmAll = false
 
     /// The groups sorted into the page's shelves, each with its progress.
     private struct Shelves {
         var groups: [WatchDownloads.Group] = []
         var progress: [String: WatchDownloads.Progress] = [:]
-        var arriving: [WatchDownloads.Group] = []
         var failed: [WatchDownloads.Group] = []
         var here: [WatchDownloads.Group] = []
         func p(_ g: WatchDownloads.Group) -> WatchDownloads.Progress { progress[g.id + g.kind.rawValue] ?? .init() }
@@ -102,31 +133,24 @@ struct OnWatchView: View {
     private var shelves: Shelves {
         var s = Shelves(groups: downloads.groups())
         for g in s.groups { s.progress[g.id + g.kind.rawValue] = downloads.progress(of: g.itemIds) }
-        s.arriving = s.groups.filter { s.p($0).arriving > 0 }
         s.failed = s.groups.filter { s.p($0).arriving == 0 && s.p($0).failed > 0 }
-        s.here = s.groups.filter { s.p($0).arriving == 0 && s.p($0).failed == 0 && s.p($0).done > 0 }
+        // Arriving groups stay on their shelf, with how far they have got;
+        // the songs and books themselves are on the queue's page.
+        s.here = s.groups.filter { s.p($0).arriving > 0 || (s.p($0).failed == 0 && s.p($0).done > 0) }
         return s
     }
 
     var body: some View {
         let shelves = shelves
         let groups = shelves.groups
-        let arriving = shelves.arriving
         let failed = shelves.failed
         let here = shelves.here
         let p = shelves.p
 
         List {
-            if !arriving.isEmpty {
-                Section("Downloading") {
-                    ForEach(arriving) { group in
-                        GroupLink(group: group) {
-                            ArrivingRow(group: group, progress: p(group), waiting: waitingNote(group))
-                        }
-                        .swipeActions {
-                            Button(role: .destructive) { downloads.cancel(group) } label: { Label("Cancel", systemImage: "xmark") }
-                        }
-                    }
+            if !downloads.inFlight.isEmpty {
+                Section {
+                    NavigationLink(value: WatchRoute.downloadQueue) { DownloadingRow() }
                 }
             }
 
@@ -154,7 +178,11 @@ struct OnWatchView: View {
                                 GroupRow(group: group, note: hereNote(group, p(group)), noteColor: WatchTheme.dim)
                             }
                             .swipeActions {
-                                Button(role: .destructive) { downloads.remove(group) } label: { Label("Remove", systemImage: "trash") }
+                                if p(group).done == 0 {
+                                    Button(role: .destructive) { downloads.cancel(group) } label: { Label("Cancel", systemImage: "xmark") }
+                                } else {
+                                    Button(role: .destructive) { downloads.remove(group) } label: { Label("Remove", systemImage: "trash") }
+                                }
                             }
                         }
                     }
@@ -183,26 +211,15 @@ struct OnWatchView: View {
         }
     }
 
-    /// Why nothing is moving yet, when it isn't.
-    private func waitingNote(_ group: WatchDownloads.Group) -> String? {
-        let members = group.itemIds.compactMap { downloads.record(for: $0) }
-        guard !members.contains(where: { $0.status == .downloading && downloads.fraction($0.itemId) != nil }) else { return nil }
-        if members.contains(where: { $0.status == .downloading && $0.relayAskedAt != nil }) {
-            return link.isPhoneReachable ? "From iPhone…" : "Waiting for iPhone"
-        }
-        if members.contains(where: { $0.status == .downloading }) { return "Starting…" }
-        if members.contains(where: { $0.status == .queued && $0.automatic }), !downloads.isOnWiFi, !link.hasCompanion { return "Waiting for Wi‑Fi" }
-        // Part-way through, with another group's song on the wire.
-        let done = members.filter { $0.status == .complete }.count
-        return done > 0 ? "\(done) of \(group.itemIds.count)" : "Waiting"
-    }
-
     private func failedNote(_ group: WatchDownloads.Group, _ p: WatchDownloads.Progress) -> String {
         if p.total == 1, let message = downloads.record(for: group.itemIds[0])?.errorMessage { return message }
         return p.total == 1 ? "Didn't arrive" : "\(p.failed) of \(p.total) didn't arrive"
     }
 
     private func hereNote(_ group: WatchDownloads.Group, _ p: WatchDownloads.Progress) -> String? {
+        if p.arriving > 0 {
+            return group.kind == .book ? "Downloading · \(p.percent)%" : "\(p.done) of \(p.total) · downloading"
+        }
         switch group.kind {
         case .book:
             return group.subtitle
@@ -260,28 +277,110 @@ private struct GroupRow: View {
     }
 }
 
-/// A group on its way: what it is, and how far along.
-private struct ArrivingRow: View {
-    let group: WatchDownloads.Group
-    let progress: WatchDownloads.Progress
-    var waiting: String?
+// MARK: - The queue
+
+/// Every song and book on its way, one row each: what is moving at the
+/// top, furthest along first, and what is waiting below in the order it
+/// will start. A row leaves by itself once its file is on the watch.
+struct DownloadQueueView: View {
+    @Environment(WatchDownloads.self) private var downloads
+    @Environment(WatchLink.self) private var link
+    @State private var confirmCancel = false
+
+    /// Rows drawn for the waiting; a genre's worth of songs is thousands.
+    private static let shownWaiting = 60
+
+    var body: some View {
+        let (moving, waiting) = downloads.queue()
+        List {
+            if moving.isEmpty && waiting.isEmpty {
+                StatusRow(empty: "Nothing is downloading. Everything asked for is on the watch.")
+            }
+            if !moving.isEmpty {
+                Section("Downloading") {
+                    ForEach(moving) { record in
+                        QueueRow(record: record, fraction: downloads.fraction(record.itemId), note: nil)
+                            .swipeActions { cancelButton(record) }
+                    }
+                }
+            }
+            if !waiting.isEmpty {
+                Section("Waiting") {
+                    ForEach(waiting.prefix(Self.shownWaiting)) { record in
+                        QueueRow(record: record, fraction: nil, note: waitingNote(record))
+                            .swipeActions { cancelButton(record) }
+                    }
+                    if waiting.count > Self.shownWaiting {
+                        Text("and \(waiting.count - Self.shownWaiting) more")
+                            .font(.caption2).foregroundStyle(WatchTheme.dim)
+                    }
+                }
+            }
+            if !moving.isEmpty || !waiting.isEmpty {
+                Section {
+                    Button(role: .destructive) { confirmCancel = true } label: {
+                        Label("Cancel All", systemImage: "xmark.circle")
+                    }
+                }
+            }
+        }
+        .navigationTitle("Downloads")
+        .confirmationDialog("Cancel every download?", isPresented: $confirmCancel, titleVisibility: .visible) {
+            Button("Cancel \(moving.count + waiting.count)", role: .destructive) { downloads.cancelAll() }
+        } message: {
+            Text("What is already on the watch stays.")
+        }
+    }
+
+    private func cancelButton(_ record: WatchRecord) -> some View {
+        Button(role: .destructive) { downloads.cancel(record.itemId) } label: { Label("Cancel", systemImage: "xmark") }
+    }
+
+    /// Why a row isn't moving yet.
+    private func waitingNote(_ record: WatchRecord) -> String {
+        if downloads.isStarting(record.itemId) { return "Starting…" }
+        if record.status == .downloading, record.relayAskedAt != nil {
+            return link.isPhoneReachable ? "Queued on iPhone" : "Waiting for iPhone"
+        }
+        if record.automatic, !downloads.isOnWiFi, !link.hasCompanion { return "Waiting for Wi‑Fi" }
+        return "Waiting"
+    }
+}
+
+/// One song or book in the queue: what it is, what it came with, and how
+/// far along it is.
+private struct QueueRow: View {
+    let record: WatchRecord
+    let fraction: Double?
+    let note: String?
+    @Environment(WatchDownloads.self) private var downloads
 
     var body: some View {
         HStack(spacing: 8) {
-            Artwork(item: group.item, size: 40)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(group.title).font(.footnote.weight(.medium)).lineLimit(1)
-                HStack {
-                    Text(group.kind.label).font(.caption2).foregroundStyle(WatchTheme.dim)
-                    Spacer()
-                    Text(waiting ?? (progress.total > 1 ? "\(progress.done) of \(progress.total) · \(progress.percent)%" : "\(progress.percent)%"))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(WatchTheme.dim)
-                        .lineLimit(1)
+            Artwork(item: record.asItem, size: 34)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(record.name).font(.footnote.weight(.medium)).lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(from).font(.caption2).foregroundStyle(WatchTheme.dim).lineLimit(1)
+                    Spacer(minLength: 2)
+                    if let fraction {
+                        Text("\(Int((fraction * 100).rounded(.down)))%")
+                            .font(.caption2.monospacedDigit()).foregroundStyle(WatchTheme.dim)
+                    }
                 }
-                ProgressBar(fraction: progress.fraction)
+                if let fraction {
+                    ProgressBar(fraction: fraction)
+                } else if let note {
+                    Text(note).font(.caption2).foregroundStyle(WatchTheme.dim).lineLimit(1)
+                }
             }
         }
+    }
+
+    /// The playlist, the album or the book's author.
+    private var from: String {
+        if record.isAudiobook { return record.artist ?? "Audiobook" }
+        return downloads.playlistName(for: record) ?? record.album ?? record.artist ?? "Song"
     }
 }
 
@@ -354,7 +453,7 @@ struct WatchSettingsView: View {
                     Task {
                         await client.checkOnline()
                         await sync.flush()
-                        downloads.mirror()
+                        downloads.mirror(force: true)
                         await WatchActions.refreshBookPositions()
                         syncing = false
                     }
@@ -364,10 +463,11 @@ struct WatchSettingsView: View {
             }
 
             Section("From iPhone") {
-                let plan = downloads.plan
-                Text(plan.playlistIds.isEmpty && plan.bookIds.isEmpty
-                     ? "Nothing is sent by itself. Downloads happen only when you ask for them here. To keep the audiobooks you're listening to, or chosen playlists, on the watch automatically, open Aquarium on your iPhone under Settings → Apple Watch."
-                     : "\(plan.bookIds.count) audiobook\(plan.bookIds.count == 1 ? "" : "s") and \(plan.playlistIds.count) playlist\(plan.playlistIds.count == 1 ? "" : "s") kept in step from the iPhone's settings. The iPhone fetches them and hands them across; over Wi‑Fi the watch can fetch for itself.")
+                let books = downloads.plan.bookIds.count
+                let lists = downloads.plannedPlaylistIds.count
+                Text(lists == 0 && books == 0
+                     ? "Nothing is sent by itself. Downloads happen only when you ask for them here. To keep the audiobooks you're listening to, or chosen playlists, on the watch automatically, open Aquarium on your iPhone under Settings → Apple Watch. Playlists on the watch follow changes on the server either way."
+                     : "\(books) audiobook\(books == 1 ? "" : "s") and \(lists) playlist\(lists == 1 ? "" : "s") kept in step from the iPhone's settings. Every playlist on the watch follows changes on the server. The iPhone fetches for the watch and hands the files across; over Wi‑Fi the watch can fetch for itself.")
                     .font(.caption2)
                     .foregroundStyle(WatchTheme.dim)
                 if let note = downloads.mirrorNote { Text(note).font(.caption2) }
