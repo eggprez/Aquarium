@@ -2,31 +2,38 @@
 //
 //  A station is built from a seed — a song, an album, an artist, a genre, or
 //  one of the stations about this account rather than any one thing
-//  (Rediscover, Deep Cuts, the time-of-day mix). Building it gathers a large
-//  pool of candidates from several places at once: the server's Instant Mix
-//  of the seed, the Instant Mix of its artist, songs by the artists the
-//  server calls similar, every spelling of its genre, and the songs this
-//  account gave a thumbs-up. `StationRanker` then picks and orders from the
-//  pool.
+//  (Rediscover, Deep Cuts). Building it gathers a large pool of candidates
+//  from several places at once: the server's Instant Mix of the seed, the
+//  Instant Mix of its artist, songs by the artists the server calls similar,
+//  and every spelling of its genre. `StationRanker` then picks and orders
+//  from the pool.
 //
 //  The pool is kept for as long as the station plays. Each song finished,
 //  skipped or thumbed feeds `StationSession`, and the music player re-deals
 //  what is still to come from the same pool (see `MusicPlayer.restation`).
 //  A thumbs-up also widens the pool towards the song it was given to.
+//
+//  Nothing outlives the station. A thumb is advice to the mix playing, not
+//  a verdict on the song: the next station starts from the seed and the
+//  server's own record of the account — favourites, play counts — and
+//  nothing this app remembers.
 
 import Foundation
+import Observation
 
 @MainActor
+@Observable
 final class LiveStation {
     let title: String
     let seed: BaseItem
     let profile: MixProfile
     /// Built from downloads only — no server was asked.
     let isLocal: Bool
-    private(set) var pool: [String: BaseItem] = [:]
+    @ObservationIgnored private(set) var pool: [String: BaseItem] = [:]
+    /// Watched, so a thumb redraws the buttons showing it.
     var session = StationSession()
     /// Songs the pool has already been widened from.
-    fileprivate var widenedFrom = Set<String>()
+    @ObservationIgnored fileprivate var widenedFrom = Set<String>()
 
     init(title: String, seed: BaseItem, profile: MixProfile, isLocal: Bool, pool: [BaseItem]) {
         self.title = title
@@ -56,7 +63,7 @@ final class LiveStation {
 // MARK: - Seeds that aren't one thing
 
 enum SpecialStation: String, CaseIterable {
-    case rediscover, deepCuts, timeOfDay
+    case rediscover, deepCuts
 
     static let prefix = "fj-station:"
 
@@ -69,7 +76,6 @@ enum SpecialStation: String, CaseIterable {
         switch self {
         case .rediscover: "Rediscover"
         case .deepCuts: "Deep Cuts"
-        case .timeOfDay: "\(MusicTaste.daypartNames[MusicTaste.daypart()]) Mix"
         }
     }
 
@@ -77,7 +83,6 @@ enum SpecialStation: String, CaseIterable {
         switch self {
         case .rediscover: "Favourites you haven't played lately"
         case .deepCuts: "Songs you haven't heard by artists you love"
-        case .timeOfDay: "What you play at this time of day"
         }
     }
 
@@ -96,14 +101,10 @@ enum SpecialStation: String, CaseIterable {
         return seed
     }
 
-    /// Which of these have something to offer yet.
+    /// Which of these to offer. Both are read from the server's record of
+    /// the account, so both are always worth a try.
     @MainActor
-    static func available() -> [SpecialStation] {
-        var out: [SpecialStation] = [.rediscover]
-        if !MusicTaste.shared.topArtistIds(limit: 1).isEmpty { out.append(.deepCuts) }
-        if MusicTaste.shared.daypartFavourites() != nil { out.append(.timeOfDay) }
-        return out
-    }
+    static func available() -> [SpecialStation] { allCases }
 }
 
 // MARK: - Genres, every spelling of them
@@ -143,7 +144,6 @@ enum StationBuilder {
             return local(from: seed, title: title)
         }
         #endif
-        Task { await MusicTaste.shared.flushThumbs() }
         if let station = await remote(from: seed, title: title), !station.pool.isEmpty {
             return station
         }
@@ -155,8 +155,6 @@ enum StationBuilder {
     }
 
     private static func remote(from seed: BaseItem, title: String) async -> LiveStation? {
-        let liked = Array(MusicTaste.shared.liked.values)
-
         if let special = SpecialStation(seed: seed) {
             let (pool, profile) = await specialPool(special)
             return LiveStation(title: title, seed: seed, profile: profile, isLocal: false, pool: pool)
@@ -175,7 +173,7 @@ enum StationBuilder {
             let first = ids.first
             async let songs = fetch(byGenre)
             async let mix = mixOf(first, limit: 100)
-            let pool = (await songs) + (await mix) + liked
+            let pool = (await songs) + (await mix)
             return LiveStation(title: title, seed: seed, profile: MixProfile(seed: seed), isLocal: false, pool: pool)
         }
 
@@ -187,7 +185,7 @@ enum StationBuilder {
         async let similar = similarArtistSongs(artistId)
         async let members = seedMembers(seed)
         let mix = await own
-        var pool = mix + (await ofArtist) + (await similar) + liked
+        var pool = mix + (await ofArtist) + (await similar)
         var profile = MixProfile(seed: seed, members: await members)
         // A playlist says nothing about itself: what the server mixed from it
         // is the best account of what it sounds like.
@@ -239,7 +237,6 @@ enum StationBuilder {
 
     private static func specialPool(_ special: SpecialStation) async -> ([BaseItem], MixProfile) {
         let client = JellyfinClient.shared
-        let taste = MusicTaste.shared
         switch special {
         case .rediscover:
             let favs: JellyfinClient.MusicQuery = {
@@ -249,46 +246,30 @@ enum StationBuilder {
             }()
             async let starred = fetch(favs)
             async let top = try? client.mostPlayedSongs(limit: 150)
-            let all = (await starred) + (await top ?? []) + Array(taste.liked.values)
+            let all = (await starred) + (await top ?? [])
             return (all.filter(isForgotten), MixProfile(open: true))
         case .deepCuts:
-            var ids = taste.topArtistIds(limit: 10)
-            if ids.count < 5, let favourites = try? await client.albumArtists(limit: 10, favorites: true).items {
-                ids += favourites.map(\.Id).filter { !ids.contains($0) }
+            // The artists starred on the server, then the ones its play
+            // counts say are heard most.
+            async let starred = try? client.albumArtists(limit: 10, favorites: true).items
+            async let top = try? client.mostPlayedSongs(limit: 60)
+            var ids = (await starred ?? []).map(\.Id)
+            for song in await top ?? [] {
+                guard ids.count < 10 else { break }
+                if let id = (song.AlbumArtists?.first ?? song.ArtistItems?.first)?.Id, !ids.contains(id) { ids.append(id) }
             }
             guard !ids.isEmpty else { return ([], MixProfile(open: true)) }
             var q = JellyfinClient.MusicQuery(types: "Audio", sort: .random, limit: 250)
             q.artistIds = ids
             q.played = false
             return (await fetch(q), MixProfile(open: true))
-        case .timeOfDay:
-            guard let fav = taste.daypartFavourites() else { return ([], MixProfile(open: true)) }
-            var found: [String] = []
-            for key in fav.genres { found += await GenreCatalog.genres(forKey: key).compactMap(\.Id) }
-            let genreIds = found
-            let byArtist: JellyfinClient.MusicQuery = {
-                var q = JellyfinClient.MusicQuery(types: "Audio", sort: .random, limit: 150)
-                q.artistIds = fav.artistIds
-                return q
-            }()
-            let byGenre: JellyfinClient.MusicQuery = {
-                var q = JellyfinClient.MusicQuery(types: "Audio", sort: .random, limit: 150)
-                q.genreIds = genreIds
-                return q
-            }()
-            async let a = fav.artistIds.isEmpty ? [] : fetch(byArtist)
-            async let g = genreIds.isEmpty ? [] : fetch(byGenre)
-            let pool = (await a) + (await g)
-            return (pool, MixProfile(artistIds: fav.artistIds, genreKeys: fav.genres))
         }
     }
 
-    /// A favourite not heard in six weeks, by the server's record or this
-    /// device's.
+    /// A favourite not heard in six weeks, by the server's record.
     private static func isForgotten(_ song: BaseItem) -> Bool {
         let cutoff = Date().addingTimeInterval(-42 * 86400)
         if let last = Format.parseDate(song.UserData?.LastPlayedDate), last > cutoff { return false }
-        if let last = MusicTaste.shared.songs[song.Id]?.lastFinished, last > cutoff { return false }
         return true
     }
 
@@ -320,15 +301,16 @@ enum StationBuilder {
         if let special = SpecialStation(seed: seed) {
             switch special {
             case .rediscover:
-                pool = songs.filter { ($0.userData.isFavorite || MusicTaste.shared.thumb(for: $0) == 1) && isForgotten($0) }
+                pool = songs.filter { $0.userData.isFavorite && isForgotten($0) }
                 profile = MixProfile(open: true)
             case .deepCuts:
-                let top = Set(MusicTaste.shared.topArtistIds(limit: 10).map { "id:\($0)" })
+                // The artists of what is starred and what is played most.
+                let played = songs.filter { ($0.userData.PlayCount ?? 0) > 0 }
+                    .sorted { ($0.userData.PlayCount ?? 0) > ($1.userData.PlayCount ?? 0) }
+                let top = (songs.filter(\.userData.isFavorite) + played.prefix(40))
+                    .reduce(into: Set<String>()) { $0.formUnion(MusicKeys.artists(of: $1)) }
                 pool = songs.filter { !top.isDisjoint(with: MusicKeys.artists(of: $0)) && ($0.userData.PlayCount ?? 0) == 0 }
                 profile = MixProfile(open: true)
-            case .timeOfDay:
-                guard let fav = MusicTaste.shared.daypartFavourites() else { return nil }
-                profile = MixProfile(artistIds: fav.artistIds, genreKeys: fav.genres)
             }
         } else if seed.isArtist {
             let keys = MusicKeys.artist(id: seed.Id, name: seed.Name)
@@ -346,14 +328,100 @@ enum StationBuilder {
     #endif
 }
 
-extension MixProfile {
-    /// A station about some artists and some genres, rather than one seed.
-    init(artistIds: [String], genreKeys: [String]) {
-        self.init(open: false)
-        for id in artistIds { artists.formUnion(MusicKeys.artist(id: id, name: nil)) }
-        for key in genreKeys {
-            genres[key, default: 0] += 1
-            for word in Self.words(key) { words[word, default: 0] += 1 }
+// MARK: - One station, while it plays
+
+/// What a listener did with one song.
+enum ListenReaction: Sendable {
+    case finished, heardMost, skippedMid, skippedEarly, thumbUp, thumbDown, removed
+
+    /// How a song leaving the player reads. `heard` is seconds actually
+    /// played, seeks not counted. Nil when it says nothing either way.
+    init?(heard: Double, duration: Double, finished: Bool, skipped: Bool) {
+        let f = duration > 0 ? min(1, heard / duration) : 0
+        if finished || f >= 0.9 {
+            self = .finished
+        } else if skipped {
+            self = heard < 30 || f < 0.25 ? .skippedEarly : f < 0.6 ? .skippedMid : .heardMost
+        } else if f >= 0.5 {
+            // Stopped, or something else was put on: only counts for it.
+            self = .heardMost
+        } else {
+            return nil
         }
+    }
+}
+
+/// What has happened in the station playing now — everything a station goes
+/// on beyond its seed. Each reaction fades the ones before it a little, so
+/// the last few songs steer hardest, and the whole of it is forgotten when
+/// the station ends. That is what makes a station change course after two
+/// skips, and what keeps one evening's mood out of the next.
+struct StationSession: Sendable {
+    private(set) var artists: [String: Double] = [:]
+    private(set) var genres: [String: Double] = [:]
+    /// Skipped, removed or turned down while this station played: not again.
+    private(set) var passed = Set<String>()
+    /// Thumbs given in this station, by song: 1 up, -1 down.
+    private(set) var thumbs: [String: Int] = [:]
+
+    mutating func note(_ song: BaseItem, _ reaction: ListenReaction) {
+        for k in artists.keys { artists[k]! *= 0.9 }
+        for k in genres.keys { genres[k]! *= 0.9 }
+        shift(song, by: Self.weight(reaction))
+        if [.skippedEarly, .skippedMid, .thumbDown, .removed].contains(reaction) { passed.insert(song.Id) }
+    }
+
+    /// Thumbs up (1), down (-1) or neither (nil). A change takes back what
+    /// the old thumb said before the new one has its say.
+    mutating func setThumb(_ song: BaseItem, _ value: Int?) {
+        let old = thumbs[song.Id]
+        guard old != value else { return }
+        if let old {
+            let w = Self.weight(old > 0 ? .thumbUp : .thumbDown)
+            shift(song, by: (-w.artist, -w.genre))
+            if old < 0 { passed.remove(song.Id) }
+        }
+        thumbs[song.Id] = value
+        if let value { note(song, value > 0 ? .thumbUp : .thumbDown) }
+    }
+
+    func lean(for song: BaseItem) -> Double {
+        let a = MusicKeys.artists(of: song).reduce(0.0) { best, key in
+            let v = artists[key] ?? 0
+            return abs(v) > abs(best) ? v : best
+        }
+        let keys = MusicKeys.genres(of: song)
+        let g = keys.isEmpty ? 0 : keys.reduce(0.0) { $0 + (genres[$1] ?? 0) } / Double(keys.count)
+        return 3 * tanh(a / 2) + 2 * tanh(g / 2)
+    }
+
+    private static func weight(_ reaction: ListenReaction) -> (artist: Double, genre: Double) {
+        switch reaction {
+        // One thumbs-down is mostly about the song; two or three in a row
+        // are about the artist. A skip says less than either.
+        case .finished: (1, 0.5)
+        case .heardMost: (0.4, 0.2)
+        case .skippedMid: (-0.5, -0.2)
+        case .skippedEarly: (-1, -0.4)
+        case .thumbUp: (2, 0.8)
+        case .thumbDown: (-1.5, -0.5)
+        case .removed: (-0.6, -0.25)
+        }
+    }
+
+    private mutating func shift(_ song: BaseItem, by w: (artist: Double, genre: Double)) {
+        for key in MusicKeys.artists(of: song) { artists[key, default: 0] += w.artist }
+        for key in MusicKeys.genres(of: song) { genres[key, default: 0] += w.genre }
+    }
+
+    /// Stations once learned from every song for weeks and kept every thumb
+    /// for good, in a file of their own. They learn only while they play
+    /// now, so what that file kept is let go.
+    nonisolated static func forgetOldTaste() {
+        let file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("FellyJin", isDirectory: true)
+            .appendingPathComponent("MusicTaste.json")
+        guard FileManager.default.fileExists(atPath: file.path) else { return }
+        try? FileManager.default.removeItem(at: file)
     }
 }

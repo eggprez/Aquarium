@@ -263,6 +263,75 @@ extension View {
     func nowPlayingSheet() -> some View {
         modifier(NowPlayingPresenter())
     }
+
+    /// On a navigation stack, inside the mini player and the offline strip:
+    /// notes where they begin, for `clearsBottomChrome` on its pages.
+    func measuresBottomChrome() -> some View {
+        modifier(MeasuresBottomChrome())
+    }
+
+    /// On each page of a stack: room at the foot for the mini player and the
+    /// offline strip, so the last row scrolls clear of them.
+    func clearsBottomChrome() -> some View {
+        modifier(ClearsBottomChrome())
+    }
+}
+
+/// How far down the screen a page may go before the bars along the bottom
+/// begin — the mini player, the offline strip, the tab bar — in global
+/// points.
+///
+/// Both bars are a `safeAreaInset` on the navigation stack, and on iOS 26 the
+/// stack doesn't pass that on: its pages are inset for the tab bar alone, and
+/// the last row of every list and scroll view ended up behind the mini
+/// player. So the stack says where the bars begin and each page makes up the
+/// difference itself. Measured rather than assumed, so where the inset does
+/// come through the difference is nothing and nothing is added twice.
+private struct BottomChromeTopKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+
+extension EnvironmentValues {
+    fileprivate var bottomChromeTop: CGFloat? {
+        get { self[BottomChromeTopKey.self] }
+        set { self[BottomChromeTopKey.self] = newValue }
+    }
+}
+
+private struct MeasuresBottomChrome: ViewModifier {
+    @State private var top: CGFloat?
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.bottomChromeTop, top)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.frame(in: .global).maxY - proxy.safeAreaInsets.bottom
+            } action: { top = $0 }
+    }
+}
+
+private struct ClearsBottomChrome: ViewModifier {
+    @Environment(\.bottomChromeTop) private var chromeTop
+    /// Where this page's own safe area ends, before the room below is added.
+    @State private var safeBottom: CGFloat?
+
+    private var room: CGFloat {
+        guard let chromeTop, let safeBottom else { return 0 }
+        return max(0, (safeBottom - chromeTop).rounded())
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear
+                    .frame(height: room)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.frame(in: .global).maxY - proxy.safeAreaInsets.bottom
+            } action: { safeBottom = $0 }
+    }
 }
 
 /// The "name your new playlist" alert, hung once on each shell so a menu
@@ -319,5 +388,7 @@ extension View {
     /// keep their layout unchanged.
     func withMiniPlayer() -> some View { self }
     func nowPlayingSheet() -> some View { self }
+    func measuresBottomChrome() -> some View { self }
+    func clearsBottomChrome() -> some View { self }
 }
 #endif

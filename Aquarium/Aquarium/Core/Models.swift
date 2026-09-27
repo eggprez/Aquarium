@@ -20,8 +20,6 @@ struct UserData: Codable, Hashable, Sendable {
     /// When this was last played, as the server records it — what "recently
     /// played" in the music tab is sorted by.
     var LastPlayedDate: String?
-    /// The thumbs-up (true) or thumbs-down (false) rating, where one was given.
-    var Likes: Bool?
 
     var positionTicks: Int64 { PlaybackPositionTicks ?? 0 }
     var played: Bool { Played ?? false }

@@ -5,13 +5,14 @@
 //  here — and a Latin-script name on an artist where there is a fair one to
 //  give. `MixProfile` reduces a seed to what a candidate is measured against.
 //  `StationRanker` scores every candidate against that profile *and* against
-//  what this account has shown it likes (`MusicTaste`), then deals them out in
-//  an order that doesn't put one artist, or one album, back to back.
+//  what has happened in this station so far (`StationSession`), then deals
+//  them out in an order that doesn't put one artist, or one album, back to
+//  back.
 //
-//  The weights are deliberate: taste outweighs likeness. A song the seed only
-//  vaguely resembles but that this account plays to the end every time beats a
-//  close match it always skips. Likeness decides what is *in* a station;
-//  taste decides what comes first.
+//  The weights are deliberate: likeness decides what is *in* a station; what
+//  the listener does while it plays decides what comes first. Nothing is
+//  carried from one station to the next — the server's favourites and play
+//  counts nudge, and that is all the history a station reads.
 
 import Foundation
 
@@ -237,7 +238,8 @@ struct MixProfile: Sendable {
     var albumId: String?
     /// The seed is itself a song: it opens the station.
     var songId: String?
-    /// A station about no one thing — Rediscover, Deep Cuts — is all taste.
+    /// A station about no one thing — Rediscover, Deep Cuts — has no seed to
+    /// be like.
     var isOpen = false
     var isArtistStation = false
 
@@ -368,26 +370,21 @@ enum StationRanker {
         var artist: String
     }
 
-    /// Every candidate scored: likeness to the seed, what this account has
-    /// shown it thinks of the song, its artist and its genres, what it has
-    /// done in *this* station so far, and a little luck. Songs the account
-    /// has turned down are left out entirely.
+    /// Every candidate scored: likeness to the seed, what has been done in
+    /// *this* station so far, and a little luck. Songs passed on in this
+    /// station arrive in `exclude` and are left out entirely.
     static func score(
         _ pool: [BaseItem], profile: MixProfile, session: StationSession? = nil,
         exclude: Set<String> = [], jitter: Double = 1.2
     ) -> [Scored] {
-        let taste = MusicTaste.shared
-        let now = Date()
-        return pool.compactMap { song in
+        pool.compactMap { song in
             guard !exclude.contains(song.Id), song.Id != profile.songId else { return nil }
-            let lean = taste.lean(for: song, now: now)
-            guard !lean.blocked else { return nil }
             let likeness = profile.likeness(song)
-            var score = likeness + lean.score
+            var score = likeness
             if likeness == 0 { score -= 4 }
             if let session { score += session.lean(for: song) }
-            // Small nudges from the server's own record of the song, for an
-            // account whose history is older than this app.
+            // Small nudges from the server's own record of the song: starred,
+            // and how often it has been played anywhere.
             if song.userData.isFavorite { score += 0.6 }
             score += min(0.6, log2(1 + Double(song.userData.PlayCount ?? 0)) * 0.15)
             score += Double.random(in: 0..<jitter)

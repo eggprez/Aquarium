@@ -392,18 +392,6 @@ extension JellyfinClient {
         return try await get(ItemsResponse.self, "/Items/\(Self.pathId(itemId))/InstantMix?\(Self.encode(q))").items
     }
 
-    /// A thumbs-up (true), a thumbs-down (false), or neither (nil): the
-    /// item's Likes rating, which every client of the server shares.
-    func setLikes(_ itemId: String, likes: Bool?) async throws {
-        guard let s = prefs.session else { throw APIError.notConfigured }
-        let path = "/UserItems/\(Self.pathId(itemId))/Rating?userId=\(s.userId)"
-        if let likes {
-            try await request(path + "&likes=\(likes)", method: "POST")
-        } else {
-            try await request(path, method: "DELETE")
-        }
-    }
-
     /// Artists the server thinks are like this one.
     func similarArtists(to artistId: String, limit: Int = 12) async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }

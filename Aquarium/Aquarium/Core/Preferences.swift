@@ -575,11 +575,6 @@ final class Preferences {
     var musicAutoplay: Bool {
         didSet { write(musicAutoplay, forKey: "music_autoplay") }
     }
-    /// Let stations learn from what is finished and what is skipped. Thumbs
-    /// count either way.
-    var musicLearns: Bool {
-        didSet { write(musicLearns, forKey: "music_learns") }
-    }
     /// Show artist names in Latin letters where a fair transliteration exists.
     var musicRomanizeNames: Bool {
         didSet { write(musicRomanizeNames, forKey: "music_romanize") }
@@ -735,7 +730,9 @@ final class Preferences {
         losslessOnCellular = d.bool(forKey: "music_lossless_cellular")
         musicAutoplay = d.object(forKey: "music_autoplay") == nil ? true : d.bool(forKey: "music_autoplay")
         normalizeVolume = d.bool(forKey: "music_normalize")
-        musicLearns = d.object(forKey: "music_learns") == nil ? true : d.bool(forKey: "music_learns")
+        // Stations once had a switch for learning across weeks. They learn
+        // only while they play now, and the switch went with that.
+        d.removeObject(forKey: "music_learns")
         musicRomanizeNames = d.object(forKey: "music_romanize") == nil ? true : d.bool(forKey: "music_romanize")
         musicRepeat = d.string(forKey: "music_repeat") ?? "off"
         let bookSpeed = d.double(forKey: "audiobook_speed")
@@ -791,7 +788,6 @@ final class Preferences {
         CloudSync.set(losslessOnCellular, forKey: "music_lossless_cellular")
         CloudSync.set(musicAutoplay, forKey: "music_autoplay")
         CloudSync.set(normalizeVolume, forKey: "music_normalize")
-        CloudSync.set(musicLearns, forKey: "music_learns")
         CloudSync.set(musicRomanizeNames, forKey: "music_romanize")
         CloudSync.set(audiobookSpeed, forKey: "audiobook_speed")
         CloudSync.set(defaults.data(forKey: "smart_playlists"), forKey: "smart_playlists")
@@ -897,7 +893,6 @@ final class Preferences {
         }
         if let v = CloudSync.object(forKey: "music_autoplay") as? Bool, v != musicAutoplay { musicAutoplay = v }
         if let v = CloudSync.object(forKey: "music_normalize") as? Bool, v != normalizeVolume { normalizeVolume = v }
-        if let v = CloudSync.object(forKey: "music_learns") as? Bool, v != musicLearns { musicLearns = v }
         if let v = CloudSync.object(forKey: "music_romanize") as? Bool, v != musicRomanizeNames { musicRomanizeNames = v }
         if let v = (CloudSync.object(forKey: "audiobook_speed") as? NSNumber)?.doubleValue, v > 0,
            abs(v - audiobookSpeed) > 0.01 { audiobookSpeed = v }

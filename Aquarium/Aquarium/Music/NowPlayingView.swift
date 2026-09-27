@@ -6,7 +6,9 @@
 //  behind it is the whole instrument: where the music is coming from across
 //  the top, the cover big, a scrubber, one row of transport with shuffle and
 //  repeat at its ends and Play in the accent at its middle, volume, and a
-//  foot of lyrics, AirPlay, the sleep timer and the queue.
+//  foot of lyrics, AirPlay, the sleep timer and the queue. The queue is a
+//  card that comes up over all of it, leaving the top in view, and goes back
+//  down with a swipe — the player under it doesn't move.
 
 import AVKit
 import MediaPlayer
@@ -122,8 +124,8 @@ struct NowPlayingView: View {
     @State private var scrubbing: Double?
 
     /// What sits where the cover normally is.
-    private enum Panel { case art, queue, lyrics }
-    private var panel: Panel { showQueue ? .queue : (showLyrics ? .lyrics : .art) }
+    private enum Panel { case art, lyrics }
+    private var panel: Panel { showLyrics ? .lyrics : .art }
 
     var body: some View {
         ZStack {
@@ -133,9 +135,6 @@ struct NowPlayingView: View {
                     topBar(song)
                         .padding(.bottom, 8)
                     switch panel {
-                    case .queue:
-                        QueueView()
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
                     case .lyrics:
                         LyricsView()
                             .transition(.opacity)
@@ -158,11 +157,36 @@ struct NowPlayingView: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 18)
-                .animation(.easeInOut(duration: 0.25), value: showQueue)
                 .animation(.easeInOut(duration: 0.25), value: showLyrics)
+                // The player is still there under the card, just out of reach.
+                .accessibilityHidden(showQueue)
+            }
+            if showQueue {
+                // The strip of player left showing: a tap on it puts the card
+                // away, as a tap above a sheet does.
+                Color.black.opacity(0.35)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { setQueue(false) }
+                    .accessibilityHidden(true)
+                    .transition(.opacity)
+                QueueCard { setQueue(false) }
+                    .padding(.top, Self.queueCardTop)
+                    .transition(.move(edge: .bottom))
+                    .zIndex(1)
             }
         }
+        // Dragging the card down is the card's, not the whole screen's.
+        .interactiveDismissDisabled(showQueue)
         .preferredColorScheme(.dark)
+    }
+
+    /// Where the queue card's top edge sits: just under the top bar, so where
+    /// this is playing from stays in view above it.
+    private static let queueCardTop: CGFloat = 62
+
+    private func setQueue(_ shown: Bool) {
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.88)) { showQueue = shown }
     }
 
     /// The cover, blurred to nothing and darkened: the colour of the record
@@ -266,9 +290,9 @@ struct NowPlayingView: View {
                 .disabled(song.isAudiobook)
             }
             Spacer()
-            if song.isSong {
-                thumbButton(song, value: -1)
-                thumbButton(song, value: 1)
+            if music.canThumb {
+                thumbButton(value: -1)
+                thumbButton(value: 1)
             }
             Button {
                 Task { await toggleFavorite(song) }
@@ -283,20 +307,16 @@ struct NowPlayingView: View {
         }
     }
 
-    /// Thumbs down skips the song and keeps it out of every station; thumbs
-    /// up steers the one playing towards it. Tapped again, either is taken
-    /// back.
-    private func thumbButton(_ song: BaseItem, value: Int) -> some View {
-        let on = MusicTaste.shared.thumb(for: song) == value
+    /// Advice to the station playing, and only there: down skips the song
+    /// and steers away from it, up steers towards it. Both are forgotten when
+    /// the station ends. Tapped again, either is taken back.
+    private func thumbButton(value: Int) -> some View {
+        let on = music.thumb == value
         let symbol = value > 0 ? "hand.thumbsup" : "hand.thumbsdown"
         return Button {
             music.setThumb(on ? nil : value)
             guard !on else { return }
-            app.toast(
-                value > 0 ? (music.station != nil ? "More like this" : "Noted — stations will play more like this")
-                    : "You won't hear this in a station again",
-                tone: .ok
-            )
+            app.toast(value > 0 ? "More like this" : "Less like this", tone: .ok)
         } label: {
             Image(systemName: on ? symbol + ".fill" : symbol)
                 .font(.title3)
@@ -477,10 +497,7 @@ struct NowPlayingView: View {
                 toggle("backward.end", isOn: false, label: "Previous Chapter") { music.skipChapter(-1) }
             } else {
                 toggle("text.quote", isOn: showLyrics, dimmed: song.HasLyrics == false, label: "Lyrics") {
-                    withAnimation {
-                        showLyrics.toggle()
-                        if showLyrics { showQueue = false }
-                    }
+                    withAnimation { showLyrics.toggle() }
                 }
                 .disabled(song.isAudiobook)
                 .opacity(song.isAudiobook ? 0.3 : 1)
@@ -504,12 +521,7 @@ struct NowPlayingView: View {
             if stepsChapters {
                 toggle("forward.end", isOn: false, label: "Next Chapter") { music.skipChapter(1) }
             } else {
-                toggle("list.bullet", isOn: showQueue, label: "Queue") {
-                    withAnimation {
-                        showQueue.toggle()
-                        if showQueue { showLyrics = false }
-                    }
-                }
+                toggle("list.bullet", isOn: showQueue, label: "Queue") { setQueue(!showQueue) }
             }
         }
     }
@@ -546,80 +558,148 @@ struct NowPlayingView: View {
 
 // MARK: - Queue
 
-struct QueueView: View {
+/// Up Next as a card over the player. It follows a finger dragged down on
+/// its top — the grabber and the heading, not the list, whose rows drag to
+/// reorder — and goes away past a third of the way or on a flick.
+private struct QueueCard: View {
+    var close: () -> Void
+    @State private var drag: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { geo in
+            VStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    Capsule()
+                        .fill(.white.opacity(0.35))
+                        .frame(width: 36, height: 5)
+                        .padding(.top, 8)
+                        .padding(.bottom, 10)
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: close)
+                        .accessibilityLabel("Close Up Next")
+                        .accessibilityAddTraits(.isButton)
+                    QueueHeader()
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 8)
+                }
+                .contentShape(Rectangle())
+                .gesture(grip(height: geo.size.height))
+                QueueList()
+                    .padding(.horizontal, 20)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background {
+                let shape = UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous)
+                shape.fill(Color(hex: 0x16161E).opacity(0.94))
+                    .background(.ultraThinMaterial, in: shape)
+                    .overlay(shape.stroke(.white.opacity(0.08), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.4), radius: 20, y: -4)
+                    .ignoresSafeArea(edges: .bottom)
+            }
+            .offset(y: drag)
+        }
+        .accessibilityAction(.escape, close)
+    }
+
+    private func grip(height: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .global)
+            .onChanged { value in
+                // Up past where it rests, it gives a little and no more.
+                let y = value.translation.height
+                drag = y > 0 ? y : y / 6
+            }
+            .onEnded { value in
+                if value.translation.height > height / 3 || value.predictedEndTranslation.height > height / 2 {
+                    close()
+                } else {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { drag = 0 }
+                }
+            }
+    }
+}
+
+/// What Up Next is playing from, and the way to empty it.
+private struct QueueHeader: View {
     @Environment(MusicPlayer.self) private var music
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Up Next")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    if let title = music.queueTitle {
-                        Text("From \(title)")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.6))
-                    }
-                    if music.station != nil, !music.isShuffled {
-                        Label("Changes with what you play, skip and rate", systemImage: "sparkles")
-                            .font(.caption2)
-                            .foregroundStyle(Theme.link)
-                    }
-                }
-                Spacer()
-                if music.hasUpNext {
-                    Button("Clear") { music.clearUpNext() }
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.8))
-                        .buttonStyle(.plain)
-                }
-            }
-            if !music.hasUpNext {
-                VStack(spacing: 6) {
-                    Image(systemName: "music.note.list").font(.title).foregroundStyle(.white.opacity(0.4))
-                    Text(music.repeatMode == .all ? "The queue starts over from the top." : "Nothing queued after this.")
-                        .font(.subheadline)
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Up Next")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                if let title = music.queueTitle {
+                    Text("From \(title)")
+                        .font(.caption)
                         .foregroundStyle(.white.opacity(0.6))
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List {
-                    ForEach(music.upNext) { entry in
-                        HStack(spacing: 12) {
-                            MusicArtwork(item: entry.item, width: 160, radius: 5)
-                                .frame(width: 44, height: 44)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.item.title).font(.subheadline).lineLimit(1).foregroundStyle(.white)
-                                Text(entry.item.artistLine).font(.caption).lineLimit(1).foregroundStyle(.white.opacity(0.6))
-                            }
-                            Spacer()
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture { music.skip(to: entry) }
-                        .listRowBackground(Color.clear)
-                        .listRowSeparatorTint(.white.opacity(0.1))
-                        // Room on the left for the delete control the list
-                        // shows while it is editable: at zero it sits against
-                        // the cover.
-                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 0))
-                    }
-                    .onDelete { offsets in
-                        // One copy of the list, taken before anything is
-                        // removed — not a fresh copy per row deleted.
-                        let listed = music.upNext
-                        for i in offsets.sorted(by: >) where listed.indices.contains(i) {
-                            music.remove(listed[i])
-                        }
-                    }
-                    .onMove { from, to in music.moveUpNext(fromOffsets: from, toOffset: to) }
+                if music.station != nil, !music.isShuffled {
+                    Label("Changes with what you play, skip and rate", systemImage: "sparkles")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.link)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .environment(\.editMode, .constant(.active))
+            }
+            Spacer()
+            if music.hasUpNext {
+                Button("Clear") { music.clearUpNext() }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .buttonStyle(.plain)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+/// The songs still to come: tap one to go to it, drag to reorder, swipe
+/// to take one out.
+private struct QueueList: View {
+    @Environment(MusicPlayer.self) private var music
+
+    var body: some View {
+        if !music.hasUpNext {
+            VStack(spacing: 6) {
+                Image(systemName: "music.note.list").font(.title).foregroundStyle(.white.opacity(0.4))
+                Text(music.repeatMode == .all ? "The queue starts over from the top." : "Nothing queued after this.")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List {
+                ForEach(music.upNext) { entry in
+                    HStack(spacing: 12) {
+                        MusicArtwork(item: entry.item, width: 160, radius: 5)
+                            .frame(width: 44, height: 44)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.item.title).font(.subheadline).lineLimit(1).foregroundStyle(.white)
+                            Text(entry.item.artistLine).font(.caption).lineLimit(1).foregroundStyle(.white.opacity(0.6))
+                        }
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { music.skip(to: entry) }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparatorTint(.white.opacity(0.1))
+                    // Room on the left for the delete control the list
+                    // shows while it is editable: at zero it sits against
+                    // the cover.
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 0))
+                }
+                .onDelete { offsets in
+                    // One copy of the list, taken before anything is
+                    // removed — not a fresh copy per row deleted.
+                    let listed = music.upNext
+                    for i in offsets.sorted(by: >) where listed.indices.contains(i) {
+                        music.remove(listed[i])
+                    }
+                }
+                .onMove { from, to in music.moveUpNext(fromOffsets: from, toOffset: to) }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.editMode, .constant(.active))
+        }
     }
 }
 

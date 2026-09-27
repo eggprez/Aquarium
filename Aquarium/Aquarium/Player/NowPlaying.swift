@@ -50,12 +50,14 @@ final class NowPlaying {
         centre.skipBackwardCommand.isEnabled = !onStage || music.current?.isAudiobook == true
         centre.changeShuffleModeCommand.isEnabled = onStage
         centre.changeRepeatModeCommand.isEnabled = onStage
-        // Thumbs, for a song: what a watch, a car or a pair of headphones
-        // with the controls for it shows.
-        let song = onStage ? music.current.flatMap { $0.isSong ? $0 : nil } : nil
-        let thumb = song.flatMap { MusicTaste.shared.thumb(for: $0) }
-        centre.likeCommand.isEnabled = song != nil
-        centre.dislikeCommand.isEnabled = song != nil
+        // Thumbs, for a song in a station: what a watch, a car or a pair of
+        // headphones with the controls for it shows. They steer the station
+        // playing and mean nothing to an album or a playlist, so those get
+        // none.
+        let canThumb = onStage && music.canThumb
+        let thumb = canThumb ? music.thumb : nil
+        centre.likeCommand.isEnabled = canThumb
+        centre.dislikeCommand.isEnabled = canThumb
         centre.likeCommand.isActive = thumb == 1
         centre.dislikeCommand.isActive = thumb == -1
         if onStage {
@@ -156,13 +158,15 @@ final class NowPlaying {
         centre.dislikeCommand.localizedTitle = "Thumbs Down"
         centre.dislikeCommand.localizedShortTitle = "Dislike"
         centre.likeCommand.addTarget { [weak self] event in
-            guard let self, self.musicHasTheStage, let event = event as? MPFeedbackCommandEvent else { return .noSuchContent }
+            guard let self, self.musicHasTheStage, self.music.canThumb,
+                  let event = event as? MPFeedbackCommandEvent else { return .noSuchContent }
             self.music.setThumb(event.isNegative ? nil : 1)
             self.refreshCommandAvailability()
             return .success
         }
         centre.dislikeCommand.addTarget { [weak self] event in
-            guard let self, self.musicHasTheStage, let event = event as? MPFeedbackCommandEvent else { return .noSuchContent }
+            guard let self, self.musicHasTheStage, self.music.canThumb,
+                  let event = event as? MPFeedbackCommandEvent else { return .noSuchContent }
             self.music.setThumb(event.isNegative ? nil : -1)
             self.refreshCommandAvailability()
             return .success

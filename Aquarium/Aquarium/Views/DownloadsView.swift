@@ -351,6 +351,7 @@ struct DownloadsView: View {
         if link.isAvailable {
             NavigationLink {
                 WatchSettingsView()
+                    .clearsBottomChrome()
             } label: {
                 HStack(spacing: 14) {
                     Image(systemName: "applewatch")

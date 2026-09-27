@@ -364,8 +364,10 @@ struct RootView: View {
                 withOfflineStrip(
                     NavigationStack(path: app.path(for: app.shownSelection)) {
                         SectionView(section: app.shownSelection)
-                            .navigationDestination(for: Route.self) { destination($0) }
+                            .clearsBottomChrome()
+                            .navigationDestination(for: Route.self) { destination($0).clearsBottomChrome() }
                     }
+                    .measuresBottomChrome()
                 )
                 .withMiniPlayer()
             )
@@ -455,8 +457,10 @@ struct RootView: View {
                     withOfflineStrip(
                         NavigationStack(path: app.path(for: section)) {
                             SectionView(section: section)
-                                .navigationDestination(for: Route.self) { destination($0) }
+                                .clearsBottomChrome()
+                                .navigationDestination(for: Route.self) { destination($0).clearsBottomChrome() }
                         }
+                        .measuresBottomChrome()
                     )
                     .withMiniPlayer()
                 )

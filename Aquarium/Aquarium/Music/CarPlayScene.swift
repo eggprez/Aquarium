@@ -166,6 +166,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             _ = player.hasUpNext
             _ = player.sleepDeadline
             _ = player.station
+            _ = player.thumb
         }) { [weak self] in
             self?.markPlayingRows()
             self?.configureNowPlaying()
@@ -891,7 +892,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// shuffle, repeat and a star; a book gets its speed instead, since
     /// nobody shuffles a novel. Both get the sleep timer. A station's songs
     /// get thumbs down and up in place of shuffle and repeat, which a
-    /// station deals for itself — the car allows five buttons.
+    /// station deals for itself — the car allows five buttons. The thumbs
+    /// are the station's, and go with it.
     @MainActor
     private func configureNowPlaying() {
         let template = CPNowPlayingTemplate.shared
@@ -907,8 +909,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         var buttons: [CPNowPlayingButton] = []
         if current.isAudiobook {
             buttons.append(CPNowPlayingPlaybackRateButton { _ in MusicPlayer.shared.stepSpeed(1) })
-        } else if player.station != nil {
-            let thumb = MusicTaste.shared.thumb(for: current)
+        } else if player.canThumb {
+            let thumb = player.thumb
             if let down = UIImage(systemName: thumb == -1 ? "hand.thumbsdown.fill" : "hand.thumbsdown") {
                 buttons.append(CPNowPlayingImageButton(image: down) { _ in
                     Task { @MainActor in MusicPlayer.shared.setThumb(thumb == -1 ? nil : -1) }

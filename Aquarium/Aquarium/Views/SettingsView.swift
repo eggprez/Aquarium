@@ -136,7 +136,6 @@ struct SettingsView: View {
     @State private var isSigningOut = false
     @State private var confirmSignOut = false
     @State private var confirmDeleteCopy = false
-    @State private var confirmForgetListening = false
 
     private typealias Copy = SettingsCopy
 
@@ -205,13 +204,6 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(Copy.deleteCopy.text)
-        }
-        .confirmationDialog("Forget listening history for stations?",
-                            isPresented: $confirmForgetListening, titleVisibility: .visible) {
-            Button("Forget", role: .destructive) { MusicTaste.shared.forgetListening() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Clears what finished and skipped songs have taught stations on this Mac. Thumbs are kept.")
         }
     }
 
@@ -497,27 +489,13 @@ struct SettingsView: View {
         }
     }
 
+    /// Stations learn only while they play — thumbs included — so there is
+    /// nothing kept here to count or forget.
     private var stationsSection: some View {
         @Bindable var prefs = prefs
-        let taste = MusicTaste.shared
         return Section("Stations") {
-            Toggle(isOn: $prefs.musicLearns) { MacSettingLabel(Copy.musicLearns) }
-                .note(Copy.musicLearns)
             Toggle(isOn: $prefs.musicRomanizeNames) { MacSettingLabel(Copy.musicRomanize) }
                 .note(Copy.musicRomanize)
-            LabeledContent {
-                Text("\(taste.thumbsUpCount) up · \(taste.thumbsDownCount) down")
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            } label: {
-                MacSettingLabel(title: "Thumbs", summary: "Saved to your server as each song's rating, so other devices see them too.")
-            }
-            .help("Thumbs are saved to your server as each song's rating, so other devices and the web client see them too. A song with a thumbs down never plays in a station; click the thumb again on Now Playing to take it back.")
-            LabeledContent {
-                Button("Forget…") { confirmForgetListening = true }
-            } label: {
-                MacSettingLabel(title: "Listening History", summary: "What finished and skipped songs have taught stations on this Mac.")
-            }
         }
     }
 
@@ -659,11 +637,13 @@ struct SettingsView: View {
             Section {
                 NavigationLink {
                     ServerSettingsPage()
+                    .clearsBottomChrome()
                 } label: {
                     LabeledContent("Server", value: serverSummary)
                 }
                 NavigationLink {
                     TabBarSettingsView()
+                    .clearsBottomChrome()
                 } label: {
                     LabeledContent("Tab Bar", value: prefs.tabBarOrder.isEmpty ? "Default" : "Custom")
                 }
@@ -678,6 +658,7 @@ struct SettingsView: View {
                 if UIApplication.shared.supportsAlternateIcons {
                     NavigationLink {
                         AppIconSettingsView()
+                        .clearsBottomChrome()
                     } label: {
                         LabeledContent("App Icon", value: iconTitle)
                     }
@@ -718,6 +699,7 @@ struct SettingsView: View {
                 }
                 NavigationLink {
                     AudioSubtitleSettingsPage()
+                    .clearsBottomChrome()
                 } label: {
                     LabeledContent("Audio & Subtitles", value: audioSummary)
                 }
@@ -726,6 +708,7 @@ struct SettingsView: View {
             Section("Live TV") {
                 NavigationLink {
                     LiveTVSettingsPage()
+                    .clearsBottomChrome()
                 } label: {
                     LabeledContent("Source", value: prefs.liveTVSource == .custom ? "Custom playlist" : "Jellyfin")
                 }
@@ -736,11 +719,7 @@ struct SettingsView: View {
                     Toggle(isOn: $prefs.losslessOnCellular) { SettingLabel(Copy.losslessOnCellular) }
                     Toggle(isOn: $prefs.musicAutoplay) { SettingLabel(Copy.musicAutoplay) }
                     Toggle(isOn: $prefs.normalizeVolume) { SettingLabel(Copy.normalizeVolume) }
-                    NavigationLink {
-                        StationSettingsPage()
-                    } label: {
-                        LabeledContent("Stations", value: prefs.musicLearns ? "Learning" : "Thumbs only")
-                    }
+                    Toggle(isOn: $prefs.musicRomanizeNames) { SettingLabel(Copy.musicRomanize) }
                 }
             }
 
@@ -770,6 +749,7 @@ struct SettingsView: View {
             Section {
                 NavigationLink {
                     WatchSettingsView()
+                    .clearsBottomChrome()
                 } label: {
                     LabeledContent("Apple Watch", value: watchSummary)
                 }
@@ -788,11 +768,13 @@ struct SettingsView: View {
                 }
                 NavigationLink {
                     LibraryCopySettingsPage()
+                    .clearsBottomChrome()
                 } label: {
                     LabeledContent("Library copy", value: prefs.keepsLibraryCopy ? "On" : "Off")
                 }
                 NavigationLink {
                     AboutSettingsPage()
+                    .clearsBottomChrome()
                 } label: {
                     LabeledContent("About", value: Bundle.appVersion)
                 }
@@ -1556,10 +1538,6 @@ enum SettingsCopy {
         name: "Keep playing at the end",
         text: "When the queue runs out, carry on with songs like the last one, built by the server."
     )
-    static let musicLearns = SettingNote(
-        name: "Learn from listening",
-        text: "Stations play more of what you hear to the end and less of what you skip, and change course while they play. Off, only your thumbs steer them."
-    )
     static let musicRomanize = SettingNote(
         name: "Romanize artist names",
         text: "Name stations after an artist in Latin letters when the server has a romanized name or the script has a reliable transliteration. Japanese names written in kanji are left as they are."
@@ -1752,42 +1730,6 @@ enum SettingsCopy {
         text: "Apple's AVFoundation, the same media framework the system's own players are built on — so what plays directly, and what the server is asked to convert, follows what this device supports."
     )
 }
-
-#if os(iOS)
-/// What stations learn, and a way to make them forget it.
-struct StationSettingsPage: View {
-    @Environment(Preferences.self) private var prefs
-    @State private var confirmForget = false
-
-    var body: some View {
-        @Bindable var prefs = prefs
-        let taste = MusicTaste.shared
-        Form {
-            Section {
-                Toggle(SettingsCopy.musicLearns.name ?? "", isOn: $prefs.musicLearns)
-                    .note(SettingsCopy.musicLearns)
-                Toggle(SettingsCopy.musicRomanize.name ?? "", isOn: $prefs.musicRomanizeNames)
-                    .note(SettingsCopy.musicRomanize)
-            }
-            Section {
-                LabeledContent("Thumbs up", value: "\(taste.thumbsUpCount)")
-                LabeledContent("Thumbs down", value: "\(taste.thumbsDownCount)")
-            } footer: {
-                Text("Thumbs are saved to your server as each song's rating, so other devices and the web client see them too. A song with a thumbs down never plays in a station; tap the thumb again on Now Playing to take it back.")
-            }
-            Section {
-                Button("Forget What Stations Have Learned", role: .destructive) { confirmForget = true }
-            } footer: {
-                Text("Clears what finished and skipped songs have taught stations on this device. Thumbs are kept.")
-            }
-        }
-        .navigationTitle("Stations")
-        .confirmationDialog("Forget listening history for stations?", isPresented: $confirmForget, titleVisibility: .visible) {
-            Button("Forget", role: .destructive) { MusicTaste.shared.forgetListening() }
-        }
-    }
-}
-#endif
 
 extension SettingsView {
     /// Off whenever iCloud can't be used, whatever was chosen before. A
