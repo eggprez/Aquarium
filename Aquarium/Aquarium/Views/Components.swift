@@ -225,7 +225,17 @@ enum Metrics {
         #else
         // A phone has no width to spare; an iPad has, and spends it on the
         // channel's name.
-        return isPhone ? 124 : 172
+        //
+        // 124 left the name itself about 56 points wide once the logo, the
+        // spacing and the padding were taken out — not enough room for an
+        // ordinary word like "Animation" or "Cartoons" to fit on a line of
+        // its own, so the system fell back to breaking it mid-word with a
+        // hyphen ("Anima-tion Co…") rather than wrapping at the space after
+        // it. 148 gives the label roughly 80 points, which is enough for
+        // that kind of word at the row's own font size, at the cost of a
+        // fraction of a point per minute off the timeline the rest of the
+        // guide draws against.
+        return isPhone ? 148 : 172
         #endif
     }
 

@@ -349,7 +349,12 @@ struct PlayerScreen: View {
             }
         }
         .padding(28)
-        .overlayBackdrop(RoundedRectangle(cornerRadius: Self.overlayCorner, style: .continuous), opacity: 0.75)
+        // Fully opaque, unlike this view's other cards: this is the one that
+        // sits where AVKit centres its own play/pause glyph (see the note
+        // below on why the card can't just move off that spot), and at the
+        // same 0.75 every other overlay here uses, that glyph showed through
+        // the backdrop as a ghost triangle behind "Try a smaller stream".
+        .overlayBackdrop(RoundedRectangle(cornerRadius: Self.overlayCorner, style: .continuous), opacity: 1)
         #if os(macOS)
         // Centred: AVKit's panel is along the bottom of a Mac window and the
         // card is above it, so the card need not keep clear of two bands

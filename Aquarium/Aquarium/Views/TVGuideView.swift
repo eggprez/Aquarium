@@ -706,7 +706,13 @@ struct TVGuideView: View {
                         }
                     }
                 }
-                .overlay(alignment: .topLeading) { nowLine }
+                // Behind the rows, not on top of them: an overlay drew the
+                // line over every cell it crossed, cutting straight through
+                // programme titles wherever "now" happened to fall mid-word.
+                // Cell backgrounds are translucent or clear (see `GuideCell`),
+                // so the line still reads as a red thread down the guide —
+                // it just no longer competes with the text sitting on it.
+                .background(alignment: .topLeading) { nowLine }
                 #if os(macOS)
                 // Where the content's left edge is, in the scroll view's own
                 // space: minus that is how far it has been scrolled.
