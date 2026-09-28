@@ -164,15 +164,23 @@ struct HeroCarousel: View {
 /// `.borderedProminent`, which loses its fill whenever the window isn't the
 /// key one and left the hero with no Play button at all — see
 /// `HeroHeader.actions`.
+///
+/// Not prominent, it is the hero's Details button: the same shape and white
+/// label on a translucent dark fill. `.bordered` was the first try, and its
+/// label is the text colour — black in light mode, on artwork that the hero
+/// darkens at the bottom, so Details was all but invisible.
 struct MacHeroButtonStyle: ButtonStyle {
+    var prominent = true
+
     func makeBody(configuration: Configuration) -> some View {
-        Bezel(configuration: configuration)
+        Bezel(configuration: configuration, prominent: prominent)
     }
 
     /// A view of its own, because a style is not one: the hover has to be
     /// state, and state lives in a view.
     private struct Bezel: View {
         let configuration: Configuration
+        let prominent: Bool
         @State private var isHovering = false
         @Environment(\.isEnabled) private var isEnabled
 
@@ -184,7 +192,7 @@ struct MacHeroButtonStyle: ButtonStyle {
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.accentColor)
+                    .fill(prominent ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.black.opacity(0.35)))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)

@@ -43,7 +43,10 @@ struct MacEpisodeList: View {
         .contextMenu(forSelectionType: String.self) { ids in
             menu(for: ids)
         } primaryAction: { ids in
-            guard let id = ids.first, let episode = episodes.first(where: { $0.Id == id }) else { return }
+            // The earliest of the selection, in the season's order. `ids` is
+            // a set, and its `first` was whichever the hash put there: Return
+            // on episodes 3 to 5 played any one of them.
+            guard let episode = episodes.first(where: { ids.contains($0.Id) }) else { return }
             onPlay(episode)
         }
         .onChange(of: episodes.map(\.Id)) { _, ids in
@@ -104,10 +107,8 @@ struct MacEpisodeRow: View {
                     Text(episode.title)
                         .fontWeight(.medium)
                     if episode.userData.played {
-                        Image(systemName: "checkmark.circle.fill")
+                        MacWatchedMark()
                             .font(.caption)
-                            .foregroundStyle(Color.accentColor)
-                            .accessibilityLabel("Watched")
                     }
                 }
                 .lineLimit(1)

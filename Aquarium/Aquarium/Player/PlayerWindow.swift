@@ -162,8 +162,11 @@ extension FocusedValues {
 /// are looked at before the view that has focus, so bound everywhere they took
 /// the space bar from every text field in the app: typing "star wars" into
 /// Search paused the film instead. The same goes for ⌥[ and ⌥], which type
-/// quotation marks on a US keyboard. Skipping and stopping carry ⌘, the TV
-/// app's keys for them, and work from any window while something is playing.
+/// quotation marks on a US keyboard. So do ⌘← and ⌘→, the TV app's keys for
+/// skipping: bound everywhere they moved a film instead of the cursor to the
+/// start of a line in a text field, and took Go ▸ Earlier and Later from the
+/// guide, which uses the same two keys. Stopping carries ⌘ and works from any
+/// window while something is playing.
 ///
 /// The settings — Quality, Audio, Subtitles, Audio Sync, Audio Delay, Sleep,
 /// Fill Screen — are `PlayerMenuItems`, shared with the picture's context menu
@@ -180,10 +183,10 @@ struct PlaybackCommands: Commands {
                 .keyboardShortcut(bare(.space))
                 .disabled(!player.isActive)
             Button("Back 10 Seconds") { player.seek(by: -10) }
-                .keyboardShortcut(.leftArrow, modifiers: .command)
+                .keyboardShortcut(gated(.leftArrow, .command))
                 .disabled(!player.isActive)
             Button("Forward 10 Seconds") { player.seek(by: 10) }
-                .keyboardShortcut(.rightArrow, modifiers: .command)
+                .keyboardShortcut(gated(.rightArrow, .command))
                 .disabled(!player.isActive)
             Button(player.activeSegment?.isOutro == true ? "Skip Credits" : "Skip Intro") {
                 player.skipSegment()

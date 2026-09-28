@@ -818,6 +818,17 @@ final class AppModel {
         return out
     }
 
+    #if os(macOS)
+    /// A section with nothing opened over it: the menu bar's Go and View
+    /// commands, and a click on the sidebar row already selected — Music's and
+    /// Finder's way back to the top of where you are.
+    func showAtTop(_ section: AppSection) {
+        selection = section
+        let path = self.path(for: section)
+        if !path.wrappedValue.isEmpty { path.wrappedValue = NavigationPath() }
+    }
+    #endif
+
     /// Go to a section, from anywhere, whether or not it has a tab of its own.
     /// One that lives in More is opened *inside* More, because that is the only
     /// place it exists — selecting it directly would leave the tab bar pointing

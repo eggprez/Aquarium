@@ -860,12 +860,28 @@ struct VideoSurface: NSViewRepresentable {
             }
         }
 
-        /// Whether the click landed on one of AVKit's controls rather than
-        /// the picture: any control, or anything inside a view AVKit names
-        /// as its controls.
+        /// Whether the click landed on a control rather than the picture:
+        /// one of AVKit's — any control, or anything inside a view AVKit
+        /// names as its controls — or anything of this screen's layered over
+        /// the picture.
+        ///
+        /// The hit test starts at the window, not at the player view. Skip
+        /// Intro, Up Next's Play Now and Not Now, the quality and gear buttons
+        /// and the error card's Try Again are SwiftUI, siblings of the picture
+        /// in `PlayerScreen`'s stack and drawn by the hosting view above it;
+        /// asked from the player view down, a test never sees them, and a
+        /// quick double-click on one went to full screen as well as pressing
+        /// it. Asked from the top, anything that takes the click before the
+        /// picture does comes back as something other than the player view or
+        /// one of its own, and that is not the picture. What those overlays
+        /// leave to the picture — the loading card, the bitrate badge, the row
+        /// while it is hidden — is marked not to take hits, so double-clicking through
+        /// it still works.
         private func isOverControl(_ event: NSEvent, in view: AVPlayerView) -> Bool {
-            guard let superview = view.superview else { return false }
-            var hit = view.hitTest(superview.convert(event.locationInWindow, from: nil))
+            guard let content = view.window?.contentView else { return false }
+            let point = content.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow
+            var hit = content.hitTest(point)
+            guard let first = hit, first === view || first.isDescendant(of: view) else { return true }
             while let current = hit, current !== view {
                 if current is NSControl { return true }
                 if String(describing: type(of: current)).localizedCaseInsensitiveContains("control") { return true }

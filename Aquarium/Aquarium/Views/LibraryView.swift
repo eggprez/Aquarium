@@ -51,6 +51,51 @@ struct LibraryView: View {
     /// The tiles or rows selected, shared by the grid and the table so a
     /// selection survives switching between them. The toolbar acts on it.
     @State private var selection: Set<String> = []
+    @Environment(PlayerModel.self) private var player
+    @Environment(\.openWindow) private var openWindow
+    #endif
+
+    #if os(macOS)
+    /// What the Item menu does to the selection when it is one title. Several
+    /// have the toolbar's selection menu instead.
+    private var selectedItemActions: ItemMenuActions? {
+        guard selection.count == 1, let item = items.first(where: { selection.contains($0.Id) }) else { return nil }
+        // A show or a season has nothing of its own to play; its page does
+        // the working out of which episode is next.
+        let playable = !item.isFolderLike
+        return ItemMenuActions(
+            title: item.title,
+            canPlay: playable,
+            playLabel: item.progressFraction != nil ? "Resume" : "Play",
+            isFavorite: item.userData.isFavorite,
+            isWatched: item.isSeries ? nil : item.userData.played,
+            play: {
+                guard playable else { return }
+                Task { await player.play(item: item) }
+            },
+            toggleFavorite: {
+                Task {
+                    do {
+                        try await client.setFavorite(item.Id, favorite: !item.userData.isFavorite)
+                        ItemMutations.shared.changed()
+                    } catch {
+                        app.toast("Couldn't update favorites", tone: .error)
+                    }
+                }
+            },
+            toggleWatched: {
+                Task {
+                    do {
+                        try await client.markPlayed(item.Id, played: !item.userData.played)
+                        ItemMutations.shared.changed()
+                    } catch {
+                        app.toast("Couldn't update watched state", tone: .error)
+                    }
+                }
+            },
+            openInNewWindow: { openWindow(id: ItemWindow.id, value: item.Id) }
+        )
+    }
     #endif
 
     /// Pages asked for so far. This, not the item count, is what ends paging:
@@ -173,6 +218,10 @@ struct LibraryView: View {
             let present = Set(ids)
             if !selection.isSubset(of: present) { selection = selection.intersection(present) }
         }
+        // The Item menu, for the one title selected. Only a title's own page
+        // published it, so with a film picked out in the grid — "1 Selected"
+        // in the toolbar — Item ▸ Play, ⌘D and ⌥⌘O were all greyed out.
+        .focusedSceneValue(\.itemMenuActions, selectedItemActions)
         #endif
         #if os(iOS)
         // The filter bar is the one place in the app where a tap changes what
@@ -432,20 +481,34 @@ struct LibraryView: View {
         }
         if layout == .grid {
             ToolbarItem(placement: .primaryAction) {
-                Slider(value: thumbnailSize, in: MacViewOptions.range) {
-                    Text("Thumbnail Size")
-                } minimumValueLabel: {
-                    Image(systemName: "photo")
-                        .imageScale(.small)
-                        .foregroundStyle(.secondary)
-                } maximumValueLabel: {
-                    Image(systemName: "photo")
-                        .imageScale(.large)
-                        .foregroundStyle(.secondary)
+                // The ends are buttons of our own rather than the slider's
+                // value labels. AppKit makes those into step buttons too, but
+                // SwiftUI named both of them after the first — "Photo", and
+                // then "Smaller" twice — so VoiceOver couldn't tell them
+                // apart. These say what they do and follow View ▸ Bigger and
+                // Smaller, which they are.
+                HStack(spacing: 4) {
+                    Button { MacViewOptions.shared.smaller() } label: {
+                        Image(systemName: "photo").imageScale(.small)
+                    }
+                    .disabled(!MacViewOptions.shared.canShrink)
+                    .help("Smaller (⌘-)")
+                    .accessibilityLabel("Smaller")
+                    Slider(value: thumbnailSize, in: MacViewOptions.range) {
+                        Text("Thumbnail Size")
+                    }
+                    .labelsHidden()
+                    .help("Thumbnail Size")
+                    Button { MacViewOptions.shared.bigger() } label: {
+                        Image(systemName: "photo").imageScale(.large)
+                    }
+                    .disabled(!MacViewOptions.shared.canGrow)
+                    .help("Bigger (⌘=)")
+                    .accessibilityLabel("Bigger")
                 }
-                .labelsHidden()
-                .frame(width: 130)
-                .help("Thumbnail Size")
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .frame(width: 150)
             }
         }
         ToolbarItem(placement: .primaryAction) {

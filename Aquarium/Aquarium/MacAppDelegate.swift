@@ -4,6 +4,7 @@
 
 #if os(macOS)
 import AppKit
+import Observation
 import SwiftUI
 
 final class MacAppDelegate: NSObject, NSApplicationDelegate {
@@ -25,6 +26,64 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             guard JellyfinClient.shared.isSignedIn else { return }
             MacCommandRequests.shared.refresh += 1
+        }
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            watchPlayer()
+            watchAlerts()
+        }
+    }
+
+    /// A click on the Dock icon. AppKit only reopens an app that has no
+    /// windows showing; one whose main window was closed while a title,
+    /// Settings or the player stayed open got nothing. The main window comes
+    /// back either way, as Music's does.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        MainActor.assumeIsolated {
+            guard MacMainWindow.window == nil else { return true }
+            MacMainWindow.show()
+            return false
+        }
+    }
+
+    /// The player's window, opened when playback starts from anywhere. The
+    /// main window opens it too (see `RootView`), but it is the only view that
+    /// did: started from a title's own window, the Item menu or the Dock menu
+    /// with the main window closed, a film played with sound and no picture.
+    /// Opening a `Window` scene that is already open only brings it forward,
+    /// so the two never make a second one.
+    @MainActor private func watchPlayer() {
+        withObservationTracking {
+            _ = PlayerModel.shared.isActive
+        } onChange: {
+            Task { @MainActor [weak self] in
+                if PlayerModel.shared.isActive, MacMainWindow.window == nil {
+                    MacMainWindow.open(id: PlayerWindow.id)
+                }
+                self?.watchPlayer()
+            }
+        }
+    }
+
+    /// Errors, when there is no main window to put them on. `RootView` shows
+    /// `pendingAlert` as a sheet on the main window; without one they were set
+    /// and never seen. Here they are the standard alert instead.
+    @MainActor private func watchAlerts() {
+        withObservationTracking {
+            _ = AppModel.shared.pendingAlert
+        } onChange: {
+            Task { @MainActor [weak self] in
+                if let alert = AppModel.shared.pendingAlert, MacMainWindow.window == nil {
+                    let panel = NSAlert()
+                    panel.messageText = alert.title
+                    panel.informativeText = alert.message
+                    panel.runModal()
+                    if AppModel.shared.pendingAlert?.id == alert.id { AppModel.shared.pendingAlert = nil }
+                }
+                self?.watchAlerts()
+            }
         }
     }
 

@@ -146,6 +146,34 @@ struct HomeView: View {
         isRefreshing = false
     }
 
+    /// Built again from where it was left. Switching sections throws this
+    /// view away, and with it everything it had loaded, so each return to Home
+    /// drew skeletons and let the shelves arrive one at a time — or, with the
+    /// library copy off or just wiped, came up as My Media and On Now alone
+    /// until the rest landed. The last page shown for this account is kept in
+    /// memory (see `HomeMemo`) and is the first frame; `load` then brings it up
+    /// to date underneath, as it does for the copy.
+    init() {
+        guard let memo = HomeMemo.current else { return }
+        _resume = State(initialValue: memo.resume)
+        _nextUp = State(initialValue: memo.nextUp)
+        _latest = State(initialValue: memo.latest)
+        _musicRecent = State(initialValue: memo.musicRecent)
+        _musicNew = State(initialValue: memo.musicNew)
+        _sections = State(initialValue: memo.sections)
+        _heroItems = State(initialValue: memo.heroItems)
+        _heroDrawnAt = State(initialValue: memo.heroDrawnAt)
+    }
+
+    private func rememberPage() {
+        HomeMemo.save(HomeMemo(
+            account: client.session?.accountKey,
+            resume: resume, nextUp: nextUp, latest: latest,
+            musicRecent: musicRecent, musicNew: musicNew,
+            sections: sections, heroItems: heroItems, heroDrawnAt: heroDrawnAt
+        ))
+    }
+
     var body: some View {
         #if os(iOS)
         // No navigation bar: this screen's own bar is the one at the top of the
@@ -378,6 +406,7 @@ struct HomeView: View {
         .reloadWhenItemsChange { if isFrontmost { await reload() } }
         .task { await reload() }
         .task(id: app.libraries.map(\.Id)) { await loadLatest() }
+        .onDisappear { rememberPage() }
         // Coming back to Home is what asks the server again. Without it, what
         // you finished half an hour ago is still sitting in Continue Watching.
         //
@@ -783,6 +812,32 @@ struct HomeView: View {
         // Nothing replaces something: a blink on the network shouldn't empty
         // shelves that are already on screen.
         if !rows.isEmpty || latest.isEmpty { latest = rows }
+    }
+}
+
+/// Home as it was last left, for the next `HomeView` to open on — see
+/// `HomeView.init`. In memory only and for one account: another account's
+/// page is never the first frame of this one's.
+struct HomeMemo {
+    var account: String?
+    var resume: [BaseItem]
+    var nextUp: [BaseItem]
+    var latest: [(library: BaseItem, items: [BaseItem])]
+    var musicRecent: [BaseItem]
+    var musicNew: [BaseItem]
+    var sections: [HomeSection]
+    var heroItems: [BaseItem]
+    var heroDrawnAt: Date
+
+    @MainActor private static var saved: HomeMemo?
+
+    @MainActor static var current: HomeMemo? {
+        guard let saved, saved.account != nil, saved.account == JellyfinClient.shared.session?.accountKey else { return nil }
+        return saved
+    }
+
+    @MainActor static func save(_ memo: HomeMemo) {
+        saved = memo
     }
 }
 
@@ -1329,7 +1384,7 @@ struct HeroHeader: View {
             .help("\(playLabel) \(Self.displayTitle(of: item))")
 
             Button("Details") { app.push(.item(item.Id)) }
-                .buttonStyle(.bordered)
+                .buttonStyle(MacHeroButtonStyle(prominent: false))
                 .controlSize(.large)
                 .help("Show details for \(Self.displayTitle(of: item))")
             #else

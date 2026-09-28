@@ -233,6 +233,12 @@ struct AudioDelayPopover: View {
     /// thing the stepper moves.
     @State private var milliseconds: Int
     @State private var commit: Task<Void, Never>?
+    /// Whether the number on screen is one chosen here and not yet handed to
+    /// the model. Only then does putting the popover away write it: a number
+    /// that merely followed the model — ⌥[ pressed with this open, a preset
+    /// picked from the Playback menu — has nothing of this popover's to save,
+    /// and writing it back would undo whatever moved it.
+    @State private var edited = false
 
     private static let fineStep = 10
     private static let coarseStep = 50
@@ -298,6 +304,20 @@ struct AudioDelayPopover: View {
         }
         .padding(16)
         .frame(width: 320)
+        // The offset has other routes than this popover — ⌥[ and ⌥], which
+        // its own tooltip names, the menu presets, the picture's context
+        // menu — and any of them can be used with it open. The number here
+        // follows, and a click still waiting on its settle is dropped rather
+        // than left to land on top of the newer choice. The model catching up
+        // with a click of this popover's own arrives here too, and is already
+        // the number on screen, so it changes nothing.
+        .onChange(of: player.audioDelayMilliseconds) { _, current in
+            guard current != milliseconds else { return }
+            commit?.cancel()
+            commit = nil
+            milliseconds = current
+            edited = false
+        }
         // Whatever has been clicked and not yet built goes when the popover
         // is put away, however it is put away.
         .onDisappear { flush() }
@@ -338,17 +358,24 @@ struct AudioDelayPopover: View {
         let clamped = min(max(value, range.lowerBound), range.upperBound)
         guard clamped != milliseconds else { return }
         milliseconds = clamped
+        edited = true
         commit?.cancel()
         commit = Task {
             try? await Task.sleep(for: Self.settle)
             guard !Task.isCancelled else { return }
+            edited = false
             player.setAudioDelay(milliseconds: clamped)
         }
     }
 
+    /// Only a number chosen here is written. One that came from elsewhere
+    /// while this was open is the model's already, and the copy taken when
+    /// the popover opened is not a choice anyone made.
     private func flush() {
         commit?.cancel()
         commit = nil
+        guard edited else { return }
+        edited = false
         if milliseconds != player.audioDelayMilliseconds {
             player.setAudioDelay(milliseconds: milliseconds)
         }
