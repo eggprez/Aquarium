@@ -57,31 +57,40 @@ struct NowPlayingScreen: View {
         .padding()
     }
 
-    /// Not a scroll view: one would want the crown too.
+    /// Not a scroll view: one would want the crown too. So it has to fit:
+    /// a tighter layout takes over where the full one would run up under
+    /// the back button (a book's extra row, smaller watches).
     private func content(_ item: BaseItem) -> some View {
-        playing(item)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .overlay(alignment: .trailing) {
-                ZStack {
-                    // Holds the crown; never seen. Kept in the window (not
-                    // opacity 0) so it can take focus.
-                    CrownVolume(claim: crownClaim)
-                        .frame(width: 2, height: 2)
-                        .opacity(0.01)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                    VolumePopup()
-                }
+        ViewThatFits(in: .vertical) {
+            playing(item, compact: false)
+            playing(item, compact: true)
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .overlay(alignment: .trailing) {
+            ZStack {
+                // Holds the crown; never seen. Kept in the window (not
+                // opacity 0) so it can take focus.
+                CrownVolume(claim: crownClaim)
+                    .frame(width: 2, height: 2)
+                    .opacity(0.01)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                VolumePopup()
             }
+        }
     }
 
-    private func playing(_ item: BaseItem) -> some View {
-        VStack(spacing: 6) {
+    private func playing(_ item: BaseItem, compact: Bool) -> some View {
+        let lines = compact ? 1 : 2
+        let side: CGFloat = compact ? 44 : 52
+        let main: CGFloat = compact ? 50 : 58
+        let glyph: CGFloat = compact ? 22 : 26
+        return VStack(spacing: compact ? 4 : 6) {
             HStack(alignment: .top, spacing: 8) {
-                Artwork(item: item, size: 46, corner: 7)
+                Artwork(item: item, size: compact ? 38 : 46, corner: 7)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title).font(.footnote.weight(.semibold)).lineLimit(2)
-                    Text(subtitle(item)).font(.caption2).foregroundStyle(WatchTheme.dim).lineLimit(2)
+                    Text(item.title).font(.footnote.weight(.semibold)).lineLimit(lines)
+                    Text(subtitle(item)).font(.caption2).foregroundStyle(WatchTheme.dim).lineLimit(lines)
                 }
                 Spacer(minLength: 0)
             }
@@ -107,11 +116,11 @@ struct NowPlayingScreen: View {
                     if isBook { player.seek(by: -15) } else { player.skipPrevious() }
                 } label: {
                     Image(systemName: isBook ? "gobackward.15" : "backward.fill")
-                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .frame(maxWidth: .infinity, minHeight: side)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 26, weight: .semibold))
+                .font(.system(size: glyph, weight: .semibold))
 
                 Button { player.togglePlayPause() } label: {
                     ZStack {
@@ -120,11 +129,11 @@ struct NowPlayingScreen: View {
                             ProgressView().tint(.white)
                         } else {
                             Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 26, weight: .bold))
+                                .font(.system(size: glyph, weight: .bold))
                                 .foregroundStyle(.white)
                         }
                     }
-                    .frame(width: 58, height: 58)
+                    .frame(width: main, height: main)
                 }
                 .buttonStyle(.plain)
 
@@ -132,11 +141,11 @@ struct NowPlayingScreen: View {
                     if isBook { player.seek(by: 30) } else { player.skipNext() }
                 } label: {
                     Image(systemName: isBook ? "goforward.30" : "forward.fill")
-                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .frame(maxWidth: .infinity, minHeight: side)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 26, weight: .semibold))
+                .font(.system(size: glyph, weight: .semibold))
                 .disabled(!isBook && !player.hasNext)
             }
 

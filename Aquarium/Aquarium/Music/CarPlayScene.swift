@@ -225,128 +225,86 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         // A car is where the server is most often out of reach, and where an
         // empty screen is least welcome: the same page, from this device.
         if client.isOffline {
-            listenNow.updateSections(offlineListenNow())
+            listenNow.updateSections(await offlineListenNow())
             listenNow.emptyViewTitleVariants = ["Nothing downloaded"]
             return
         }
         async let recent = client.recentlyPlayedSongs(limit: 30)
-        async let added = client.music(.init(types: "MusicAlbum", sort: .recentlyAdded, limit: 12))
         async let books = client.resumeAudio()
-        var sections: [CPListSection] = []
-        if let songs = try? await recent, !songs.isEmpty {
-            let albums = songs.albumsInOrder()
-            sections.append(CPListSection(items: [albumRow("Recently Played", albums)]))
-            sections.append(CPListSection(
-                items: ListenNowView.stations(recent: songs, top: [], favoriteArtists: [], random: []).prefix(6).map { station in
-                    let item = CPListItem(text: station.title, detailText: station.subtitle)
-                    item.handler = { _, done in
-                        Task { @MainActor in
-                            await MusicMixes.startStation(from: station.seed, title: station.title)
-                            self.showNowPlaying()
-                            done()
-                        }
-                    }
-                    return item
-                },
-                header: "Stations", sectionIndexTitle: nil
-            ))
-        }
-        if let resumed = try? await books, !resumed.isEmpty {
-            sections.append(CPListSection(
-                items: resumed.prefix(6).map { songItem($0, queue: [$0], title: $0.title) },
-                header: "Continue Listening", sectionIndexTitle: nil
-            ))
-        }
-        if let albums = try? await added.items, !albums.isEmpty {
-            sections.append(CPListSection(items: [albumRow("Recently Added", albums)]))
+        let started = ((try? await books) ?? []).filter(\.isAudiobook)
+        let stations = ((try? await recent).map {
+            ListenNowView.stations(recent: $0, top: [], favoriteArtists: [], random: []).map { ($0.title, $0.subtitle, $0.seed) }
+        }) ?? []
+        var sections = await discoverSections(books: started, stations: stations) {
+            (try? await client.music(.init(types: "MusicAlbum", sort: .random, limit: 1)).items)?.first
         }
         // Asked of a server that didn't answer: the downloads are still here.
-        if sections.isEmpty, client.isOffline { sections = offlineListenNow() }
+        if sections.isEmpty, client.isOffline { sections = await offlineListenNow() }
         listenNow.updateSections(sections)
         listenNow.emptyViewTitleVariants = ["Nothing to suggest yet"]
         listenNow.emptyViewSubtitleVariants = ["Play something and it will turn up here."]
     }
 
     @MainActor
-    private func offlineListenNow() -> [CPListSection] {
+    private func offlineListenNow() async -> [CPListSection] {
         let all = OfflineMusic.songs
-        let recent = OfflineMusic.recentlyPlayed(limit: 30)
-        let top = OfflineMusic.mostPlayed(limit: 24)
+        let stations = OfflineListenNowView.stations(
+            recent: OfflineMusic.recentlyPlayed(limit: 30), top: OfflineMusic.mostPlayed(limit: 24),
+            favorites: OfflineMusic.favorites(), all: all
+        ).map { ($0.title, $0.subtitle, $0.seed) }
+        return await discoverSections(books: OfflineMusic.booksInProgress, stations: stations) { all.shuffled().localAlbums().first }
+    }
+
+    /// Discover, top to bottom: the book you're partway through, then
+    /// stations (led by Shuffle All), then playlists. Nothing else — it's a
+    /// screen read at a glance. Shuffle All is the phone's Surprise Me: one
+    /// of these stations at random, or a random album where there are none,
+    /// started as a live station that re-deals as songs are skipped.
+    @MainActor
+    private func discoverSections(
+        books: [BaseItem],
+        stations: [(title: String, subtitle: String, seed: BaseItem)],
+        randomAlbum: @escaping @MainActor () async -> BaseItem?
+    ) async -> [CPListSection] {
         var sections: [CPListSection] = []
-        let stations = OfflineListenNowView.stations(recent: recent, top: top, favorites: OfflineMusic.favorites(), all: all)
-        if !stations.isEmpty {
-            sections.append(CPListSection(
-                items: stations.prefix(8).map { station in
-                    let item = CPListItem(text: station.title, detailText: station.subtitle)
-                    item.handler = { [weak self] _, done in
-                        Task { @MainActor in
-                            await MusicMixes.startStation(from: station.seed, title: station.title)
-                            self?.showNowPlaying()
-                            done()
-                        }
-                    }
-                    return item
-                },
-                header: "Stations from This iPhone", sectionIndexTitle: nil
-            ))
-        }
-        if !recent.isEmpty {
-            sections.append(CPListSection(items: [albumRow("Recently Played", recent.localAlbums())]))
-        }
-        let books = OfflineMusic.booksInProgress
         if !books.isEmpty {
             sections.append(CPListSection(
                 items: books.prefix(6).map { songItem($0, queue: [$0], title: $0.title) },
                 header: "Continue Listening", sectionIndexTitle: nil
             ))
         }
-        let added = OfflineMusic.recentlyDownloadedAlbums(limit: 12)
-        if !added.isEmpty {
-            sections.append(CPListSection(items: [albumRow("Recently Downloaded", added)]))
+        let shuffle = CPListItem(text: "Shuffle All", detailText: nil, image: UIImage(systemName: "shuffle"))
+        shuffle.handler = { [weak self] _, done in
+            Task { @MainActor in
+                var started = false
+                if let station = stations.randomElement() {
+                    started = await MusicMixes.startStation(from: station.seed, title: station.title).started
+                } else if let album = await randomAlbum() {
+                    started = await MusicMixes.startStation(from: album, title: "Surprise Mix").started
+                }
+                if started { self?.showNowPlaying() } else { self?.alert("Couldn't build a mix", "There's nothing in the library to mix from yet.") }
+                done()
+            }
+        }
+        let stationRows: [CPListItem] = stations.prefix(6).map { station in
+            let item = CPListItem(text: station.title, detailText: station.subtitle)
+            item.handler = { [weak self] _, done in
+                Task { @MainActor in
+                    await MusicMixes.startStation(from: station.seed, title: station.title)
+                    self?.showNowPlaying()
+                    done()
+                }
+            }
+            return item
+        }
+        sections.append(CPListSection(items: [shuffle] + stationRows, header: "Stations", sectionIndexTitle: nil))
+        let used = sections.reduce(0) { $0 + $1.items.count }
+        let playlists = await playlistRows().prefix(max(0, CPListTemplate.maximumItemCount - used))
+        if !playlists.isEmpty {
+            sections.append(CPListSection(items: Array(playlists), header: "Playlists", sectionIndexTitle: nil))
         }
         return sections
     }
-
-    /// A shelf of covers: what a glance can take in, where a column of album
-    /// names has to be read. The heading opens the same albums as a list, for
-    /// the ones the row had no room for.
-    @MainActor
-    private func albumRow(_ title: String, _ albums: [BaseItem]) -> CPListImageRowItem {
-        let shown = Array(albums.prefix(CPMaximumNumberOfGridImages))
-        let blank = Self.blankCover
-        let row = CPListImageRowItem(text: title, images: shown.map { _ in blank })
-        row.listImageRowHandler = { [weak self] _, index, done in
-            Task { @MainActor in
-                if shown.indices.contains(index) { await self?.openAlbum(shown[index]) }
-                done()
-            }
-        }
-        row.handler = { [weak self] _, done in
-            Task { @MainActor in
-                guard let self else { return done() }
-                let list = CPListTemplate(title: title, sections: [CPListSection(items: albums.prefix(CPListTemplate.maximumItemCount).map { self.albumItem($0) })])
-                self.push(list)
-                done()
-            }
-        }
-        Task { @MainActor in
-            var covers = shown.map { _ in blank }
-            for (i, album) in shown.enumerated() {
-                guard let url = MusicArt.url(album, width: 240), let image = await ImageLoader.shared.load(url) else { continue }
-                covers[i] = image
-                row.update(covers)
-            }
-        }
-        return row
-    }
-
-    private static let blankCover: UIImage = {
-        let size = CGSize(width: 120, height: 120)
-        return UIGraphicsImageRenderer(size: size).image { context in
-            UIColor.secondarySystemFill.setFill()
-            context.fill(CGRect(origin: .zero, size: size))
-        }
-    }()
 
     // MARK: - Playlists
 
