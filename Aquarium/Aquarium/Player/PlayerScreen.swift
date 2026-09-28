@@ -814,7 +814,12 @@ struct VideoSurface: NSViewRepresentable {
             monitor = NSEvent.addLocalMonitorForEvents(
                 matching: [.scrollWheel, .mouseMoved, .leftMouseUp]
             ) { [weak self] event in
-                MainActor.assumeIsolated { self?.handle(event) ?? event }
+                // AppKit calls a local monitor on the main thread. The result
+                // goes out through a local because NSEvent isn't Sendable and
+                // `assumeIsolated` won't return one.
+                nonisolated(unsafe) var result: NSEvent? = event
+                MainActor.assumeIsolated { result = self?.handle(event) ?? event }
+                return result
             }
         }
 

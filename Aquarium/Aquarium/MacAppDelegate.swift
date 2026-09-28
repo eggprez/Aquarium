@@ -57,7 +57,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
     @MainActor private func watchPlayer() {
         withObservationTracking {
             _ = PlayerModel.shared.isActive
-        } onChange: {
+        } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 if PlayerModel.shared.isActive, MacMainWindow.window == nil {
                     MacMainWindow.open(id: PlayerWindow.id)
@@ -73,7 +73,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
     @MainActor private func watchAlerts() {
         withObservationTracking {
             _ = AppModel.shared.pendingAlert
-        } onChange: {
+        } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 if let alert = AppModel.shared.pendingAlert, MacMainWindow.window == nil {
                     let panel = NSAlert()
@@ -91,8 +91,10 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
     /// Search — the same entries the iPhone's home screen icon offers, and
     /// filled from the same place. See `AppModel.updateDockMenu`.
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        // Out through a local: NSMenu isn't Sendable, so `assumeIsolated`
+        // won't return one.
+        nonisolated(unsafe) let menu = NSMenu()
         MainActor.assumeIsolated {
-            let menu = NSMenu()
             let items = AppModel.shared.dockMenuItems
             if !items.isEmpty {
                 let heading = NSMenuItem(title: "Continue Watching", action: nil, keyEquivalent: "")
@@ -111,8 +113,8 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
             let search = NSMenuItem(title: "Search", action: #selector(showSearch), keyEquivalent: "")
             search.target = self
             menu.addItem(search)
-            return menu
         }
+        return menu
     }
 
     @objc private func playDockItem(_ sender: NSMenuItem) {
