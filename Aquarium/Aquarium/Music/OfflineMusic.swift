@@ -176,11 +176,15 @@ final class OfflineMusicIndex {
             }
             if let added = Format.parseDate(item.DateCreated) { f.dateCreated = added }
             if let lyrics = item.HasLyrics { f.hasLyrics = lyrics }
+            // Compared before the stamp below is set, or every refresh would
+            // read as a change — `refreshedAt` always differs — and touch the
+            // file and the revision for nothing. `facts` still takes the new
+            // stamp either way, so a song already known isn't asked about again
+            // this session even when nothing else about it moved.
+            let contentChanged = f != before
             f.refreshedAt = Date()
-            if f != before {
-                facts[item.Id] = f
-                changed = true
-            }
+            facts[item.Id] = f
+            if contentChanged { changed = true }
         }
         if changed { touch() }
     }

@@ -355,18 +355,32 @@ private struct PlaylistPromptHost: ViewModifier {
 /// bar in any tab opens the same screen.
 private struct NowPlayingPresenter: ViewModifier {
     @Environment(MusicPlayer.self) private var music
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var presenter = NowPlayingPresentation.shared
 
+    private var isPresented: Binding<Bool> {
+        Binding(
+            get: { presenter.isPresented && music.isActive },
+            set: { presenter.isPresented = $0 }
+        )
+    }
+
     func body(content: Content) -> some View {
-        content
-            .sheet(isPresented: Binding(
-                get: { presenter.isPresented && music.isActive },
-                set: { presenter.isPresented = $0 }
-            )) {
+        // iPad's regular width gives `.sheet` the desktop-style form sheet: a
+        // small card centered over the (still fully visible, undimmed) shell,
+        // with the mini player still showing along the bottom edge behind it.
+        // A full-screen cover is what Now Playing actually wants there.
+        if sizeClass == .regular {
+            content.fullScreenCover(isPresented: isPresented) {
+                NowPlayingView().presentationBackground(Theme.background)
+            }
+        } else {
+            content.sheet(isPresented: isPresented) {
                 NowPlayingView()
                     .presentationDragIndicator(.visible)
                     .presentationBackground(Theme.background)
             }
+        }
     }
 }
 

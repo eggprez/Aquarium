@@ -232,7 +232,13 @@ enum Languages {
         guard !preference.isEmpty, let tag = tag?.lowercased(), !tag.isEmpty else { return false }
         return preference.lowercased()
             .split(separator: ",")
-            .contains { tag.hasPrefix($0.prefix(2)) || $0 == tag[...] || tag.hasPrefix($0) }
+            // `tag.hasPrefix($0)` covers a preference code that is the tag or
+            // a prefix of it; the last clause is only for a genuinely
+            // two-letter ISO 639-1 tag ("en", "fr") against a three-letter
+            // preference code. Matching on just the preference's own first
+            // two letters, regardless of the tag's length, is what let "pol"
+            // satisfy a "por" track — both start "po".
+            .contains { tag.hasPrefix($0) || (tag.count <= 2 && $0.hasPrefix(tag)) }
     }
 }
 

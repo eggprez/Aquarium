@@ -8,6 +8,11 @@
 //  because an app icon can't be loaded as an image by name.
 //  Tools/IconGenerator/app_icons.py writes both.
 //
+//  Seasonal icons are offered only from a month before their holiday to a
+//  month after (see Core/Holidays.swift), on an "In Season" shelf at the top;
+//  one still on the Home Screen when its window closes goes back to the
+//  original the next time the app comes forward.
+//
 //  iOS says so itself, with an alert, whenever the icon changes; there is no
 //  sanctioned way round that and nothing here tries.
 
@@ -19,13 +24,25 @@ struct AppIconChoice: Identifiable, Hashable {
     let iconName: String?
     let title: String
     let blurb: String
+    /// The holiday a seasonal icon belongs to; nil for one offered all year.
+    var holiday: Holiday? = nil
 
     var id: String { iconName ?? "AppIcon" }
     var preview: String { (iconName ?? "AppIcon").replacingOccurrences(of: "AppIcon", with: "IconPreview") }
 
     static let classic = AppIconChoice(iconName: nil, title: "Aquarium", blurb: "The original")
 
-    static let shelves: [(title: String, icons: [AppIconChoice])] = [
+    /// The shelves on show now: whatever is in season, then the year-round ones.
+    static var shelves: [(title: String, icons: [AppIconChoice])] {
+        let now = Date.now
+        let inSeason = seasonal
+            .compactMap { icon in icon.holiday?.window(around: now).map { (icon, $0) } }
+            .sorted { $0.1.upperBound < $1.1.upperBound }
+            .map(\.0)
+        return (inSeason.isEmpty ? [] : [("In Season", inSeason)]) + yearRound
+    }
+
+    static let yearRound: [(title: String, icons: [AppIconChoice])] = [
         ("Aquarium", [
             classic,
             .init(iconName: "AppIcon-Ink", title: "Ink", blurb: "Just the mark"),
@@ -51,7 +68,20 @@ struct AppIconChoice: Identifiable, Hashable {
         ]),
     ]
 
-    static var all: [AppIconChoice] { shelves.flatMap(\.icons) }
+    static var all: [AppIconChoice] { yearRound.flatMap(\.icons) + seasonal }
+
+    /// The last day this icon is offered, for a seasonal one in season.
+    var lastDay: Date? {
+        holiday?.window(around: .now).map { $0.upperBound.addingTimeInterval(-86400) }
+    }
+
+    /// A seasonal icon left on the Home Screen after its window closes goes
+    /// back to the original.
+    @MainActor static func retireOutOfSeason() {
+        guard UIApplication.shared.supportsAlternateIcons,
+              let holiday = current.holiday, holiday.window() == nil else { return }
+        Task { try? await UIApplication.shared.setAlternateIconName(nil) }
+    }
 
     /// The icon the Home Screen shows now.
     @MainActor static var current: AppIconChoice {
@@ -81,7 +111,7 @@ struct AppIconSettingsView: View {
                         }
                     }
                 }
-                Text("Each icon has a dark look and follows the tint you choose for the Home Screen.")
+                Text("Each icon has a dark look and follows the tint you choose for the Home Screen. Holiday icons turn up a month before the day and stay for a month after.")
                     .font(.footnote)
                     .foregroundStyle(Theme.textDim)
             }
@@ -124,6 +154,11 @@ struct AppIconSettingsView: View {
                     Text(icon.blurb)
                         .font(.caption2)
                         .foregroundStyle(Theme.textDim)
+                    if let lastDay = icon.lastDay {
+                        Text("Until \(lastDay.formatted(.dateTime.month(.abbreviated).day()))")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(Theme.accent)
+                    }
                 }
                 .multilineTextAlignment(.center)
                 .lineLimit(2)

@@ -305,6 +305,15 @@ final class LibraryIndex {
             guard isEnabled, currentOwner == owner else { return }
             let previous = self.items
             let previousViews = self.views
+            // A favourite or watched flag set here while this sync was still
+            // fetching touched `self.items` directly, not this function's own
+            // snapshot of it — replacing `self.items` wholesale would revert
+            // that tap the moment the sync completes. The live copy's word on
+            // those ids wins over what this sync built.
+            for id in locallyPatchedIds where items[id] != nil {
+                if let live = previous[id] { items[id]?.UserData = live.UserData }
+            }
+            locallyPatchedIds.removeAll()
             self.items = items
             self.members = members
             self.views = fetchedViews
@@ -505,6 +514,11 @@ final class LibraryIndex {
     /// run of them is written once.
     /// Set between a change here and the delayed save that writes it.
     @ObservationIgnored private var hasUnsavedChanges = false
+    /// Ids `patchUserData` has touched since the last sync folded them in. A
+    /// sync in flight builds its result from a snapshot taken before such a
+    /// change, so committing it wholesale would silently undo the tap — see
+    /// `runSync`'s merge just before it assigns `items`.
+    @ObservationIgnored private var locallyPatchedIds: Set<String> = []
 
     private func saveCursor() async {
         guard let owner else { return }
@@ -783,6 +797,7 @@ final class LibraryIndex {
         change(&data)
         item.UserData = data
         items[id] = item
+        locallyPatchedIds.insert(id)
         queryCache = [:]
         scheduleSave()
     }

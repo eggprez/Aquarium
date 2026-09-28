@@ -229,8 +229,9 @@ extension JellyfinClient {
         return try await music(q).items
     }
 
-    /// Every song an artist is credited on, in album order, for "Play" and
-    /// "Shuffle" on their page.
+    /// Every song an artist is credited on, by album artist then title — not
+    /// grouped by album, since `MusicSort` (shared with the sort-order picker
+    /// elsewhere) has no such key — for "Play" and "Shuffle" on their page.
     func allSongs(artistId: String) async throws -> [BaseItem] {
         var q = MusicQuery(types: "Audio", sort: .artist, limit: 2000)
         q.artistIds = [artistId]

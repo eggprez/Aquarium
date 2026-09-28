@@ -14,6 +14,11 @@
 //  `TVSettingsView.swift`. What all of them share is at the bottom of this file.
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// A setting's name and the sentence that explains it, written once and read by
 /// both versions of the page.
@@ -737,12 +742,23 @@ struct SettingsView: View {
                     }
                 }
                 Toggle(isOn: $prefs.downloadsWiFiOnly) { SettingLabel(Copy.wifiOnly) }
-                LabeledContent("Kept in") {
-                    Text(DownloadManager.root.path)
-                        .font(.caption)
-                        .foregroundStyle(Theme.textDim)
-                        .textSelection(.enabled)
-                }
+                LabeledContent("Kept in", value: "On this device")
+                    // The sandbox path itself is only useful for support or
+                    // debugging, never for reading at a glance — long-press
+                    // to get at it instead of spelling it out on the row.
+                    .contextMenu {
+                        Button {
+                            let path = DownloadManager.root.path
+                            #if os(macOS)
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(path, forType: .string)
+                            #else
+                            UIPasteboard.general.string = path
+                            #endif
+                        } label: {
+                            Label("Copy Folder Path", systemImage: "doc.on.doc")
+                        }
+                    }
             }
 
             #if os(iOS)

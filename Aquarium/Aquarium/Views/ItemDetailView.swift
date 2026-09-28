@@ -1188,14 +1188,16 @@ struct ItemDetailView: View {
                                         .clipShape(Circle())
                                     Text(person.Name ?? "")
                                         .font(.caption.weight(.medium))
-                                        .lineLimit(1)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.center)
+                                        .fixedSize(horizontal: false, vertical: true)
                                         .foregroundStyle(Theme.text)
                                     Text(person.Role ?? person.type ?? "")
                                         .font(.caption2)
                                         .lineLimit(1)
                                         .foregroundStyle(Theme.textDim)
                                 }
-                                .frame(width: 96)
+                                .frame(width: 108)
                             }
                             .rowButtonStyle()
                             .macOpensOnReturn { openPerson(person) }

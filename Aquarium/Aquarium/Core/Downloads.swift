@@ -437,6 +437,11 @@ final class DownloadManager: NSObject {
     private var retiredTasks: Set<DownloadTaskKey> = []
     private var active: Set<String> = []
     private var pendingItems: [String: BaseItem] = [:]  // queued item id → the item
+    /// A cancel that arrived while `resolveThenStart` was still asking the
+    /// server for the item: there is no task and no record yet for `cancel`
+    /// to act on, so without this, the fetch completing would start the
+    /// transfer the person had just called off.
+    private var cancelledResolves: Set<String> = []
 
     /// How often a running transfer is allowed to redraw and, separately, how
     /// often it writes its byte count to disk.
@@ -1346,6 +1351,7 @@ final class DownloadManager: NSObject {
     func cancel(_ itemId: String) {
         cancelQueued(itemId)
         cancelTasks(for: itemId, keepingProgress: false)
+        cancelledResolves.insert(itemId)
         active.remove(itemId)
         forgetProgressThrottle(itemId)
         retryingAfterCancel[itemId] = nil
@@ -1731,7 +1737,14 @@ final class DownloadManager: NSObject {
     /// download that can't be described is left as a failure with a Retry on it
     /// rather than vanishing.
     private func resolveThenStart(_ entry: QueuedDownload) async {
-        if let item = try? await JellyfinClient.shared.item(entry.itemId) {
+        let item = try? await JellyfinClient.shared.item(entry.itemId)
+        guard cancelledResolves.remove(entry.itemId) == nil else {
+            // Called off while its metadata was in flight — see
+            // `cancelledResolves`. Neither started nor written off as failed.
+            active.remove(entry.itemId)
+            return
+        }
+        if let item {
             pendingItems[entry.itemId] = Self.trimmed(item)
             persistPendingItems()
             active.remove(entry.itemId)
@@ -2050,6 +2063,11 @@ final class DownloadManager: NSObject {
         // transfer with no task to cancel is requeued straight away.
         let reason = "Stalled"
         for rec in stalled {
+            // `stalled` was read before `await everyTask()` above; the item
+            // may have finished, failed or been removed in that gap. Acting
+            // on the stale copy regardless is how a download that had just
+            // completed got put back in the queue as `.queued`.
+            guard record(for: rec.itemId)?.status == .downloading else { continue }
             // A cancel the previous sweep sent that never came back — the map
             // held a task the session no longer had — is not sent again; the
             // transfer is requeued directly instead.

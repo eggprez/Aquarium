@@ -136,7 +136,9 @@ enum IPTVSource {
             item.Id = "iptv-\(index)-\(entry.id)"
             item.Name = channelNames[guideKey] ?? entry.name
             item.type = "TvChannel"
-            item.ChannelNumber = entry.channelNumber ?? String(index + 1)
+            // `tvg-chno=""` is as good as absent — the same generators that
+            // write `tvg-logo=""` for every channel do it for this too.
+            item.ChannelNumber = entry.channelNumber?.nonEmpty ?? String(index + 1)
             // A stream is an address on the web or it is nothing: a playlist
             // can name a file on this device, and the player would open it.
             let stream = absolute(entry.streamURL, against: playlistBase) ?? entry.streamURL

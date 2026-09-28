@@ -66,6 +66,22 @@ struct PhoneContext: Codable, Sendable {
     var sentAt = Date()
 }
 
+extension PhoneContext {
+    private enum CodingKeys: String, CodingKey { case revision, credentials, mirror, sentAt }
+
+    /// Key by key, so a side of the link one field behind — a phone that
+    /// hasn't sent `mirror` or `sentAt` yet — doesn't fail the whole context
+    /// over it. A synthesized `init(from:)` would: a default value in Swift
+    /// isn't a default on the wire, only `Optional` gets that for free.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try c.decode(Int.self, forKey: .revision)
+        credentials = try c.decodeIfPresent(WatchCredentials.self, forKey: .credentials)
+        mirror = try c.decodeIfPresent(WatchMirrorPlan.self, forKey: .mirror) ?? WatchMirrorPlan()
+        sentAt = try c.decodeIfPresent(Date.self, forKey: .sentAt) ?? Date()
+    }
+}
+
 // MARK: - Watch → phone
 
 /// One row of the watch's storage as the phone lists it. A song sits under
@@ -114,6 +130,22 @@ struct WatchInventory: Codable, Hashable, Sendable {
     var truncated = false
 }
 
+extension WatchInventory {
+    private enum CodingKeys: String, CodingKey { case groups, itemCount, totalBytes, freeBytes, inFlight, truncated }
+
+    /// Key by key, for the same reason as `PhoneContext`: a default value in
+    /// Swift isn't a default on the wire for the synthesized decoder.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        groups = try c.decodeIfPresent([WatchStorageGroup].self, forKey: .groups) ?? []
+        itemCount = try c.decodeIfPresent(Int.self, forKey: .itemCount) ?? 0
+        totalBytes = try c.decodeIfPresent(Int64.self, forKey: .totalBytes) ?? 0
+        freeBytes = try c.decodeIfPresent(Int64.self, forKey: .freeBytes)
+        inFlight = try c.decodeIfPresent(Int.self, forKey: .inFlight) ?? 0
+        truncated = try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
+    }
+}
+
 struct WatchContext: Codable, Sendable {
     var revision: Int
     var inventory: WatchInventory
@@ -129,6 +161,21 @@ struct WatchContext: Codable, Sendable {
     /// Whether the watch is signed in to the same account the phone last sent.
     var signedIn: Bool
     var sentAt = Date()
+}
+
+extension WatchContext {
+    private enum CodingKeys: String, CodingKey { case revision, inventory, awaitingPhone, playlistIds, signedIn, sentAt }
+
+    /// Key by key, for the same reason as `PhoneContext`.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try c.decode(Int.self, forKey: .revision)
+        inventory = try c.decode(WatchInventory.self, forKey: .inventory)
+        awaitingPhone = try c.decodeIfPresent([String].self, forKey: .awaitingPhone)
+        playlistIds = try c.decodeIfPresent([String].self, forKey: .playlistIds)
+        signedIn = try c.decode(Bool.self, forKey: .signedIn)
+        sentAt = try c.decodeIfPresent(Date.self, forKey: .sentAt) ?? Date()
+    }
 }
 
 // MARK: - Messages, either way
