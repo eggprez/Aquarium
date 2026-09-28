@@ -7,6 +7,7 @@
 //  what it has listened to when the phone is near.
 
 import SwiftUI
+import WatchConnectivity
 import WatchKit
 
 @main
@@ -52,7 +53,9 @@ struct AquariumWatchApp: App {
                 }
             case .background:
                 WatchLog.backgrounded()
+                player.checkpoint()
                 player.writeSnapshot()
+                downloads.handOffToPhone()
                 WatchDelegate.scheduleRefresh()
             default:
                 break
@@ -76,9 +79,20 @@ final class WatchDelegate: NSObject, WKApplicationDelegate {
                         urlTask.setTaskCompletedWithSnapshot(false)
                     }
                 }
+            case let link as WKWatchConnectivityRefreshBackgroundTask:
+                // Held while the session still has things to hand over —
+                // the pieces of a book from the phone — so the app isn't
+                // put back to sleep before they reach it.
+                Task { @MainActor in
+                    for _ in 0..<20 where WCSession.default.activationState != .activated || WCSession.default.hasContentPending {
+                        try? await Task.sleep(for: .milliseconds(500))
+                    }
+                    link.setTaskCompletedWithSnapshot(false)
+                }
             case let refresh as WKApplicationRefreshBackgroundTask:
                 Task { @MainActor in
                     await WatchSyncQueue.shared.flush()
+                    await WatchActions.refreshBookPositions()
                     WatchDownloads.shared.pump()
                     WatchDownloads.shared.mirror()
                     Self.scheduleRefresh()
@@ -94,9 +108,12 @@ final class WatchDelegate: NSObject, WKApplicationDelegate {
     @MainActor
     static func scheduleRefresh() {
         let hasWork = !WatchSyncQueue.shared.pending.isEmpty || !WatchDownloads.shared.inFlight.isEmpty
-        guard hasWork else { return }
+        // Playlists on the watch follow the server's: a wake now and then
+        // picks up songs added or taken out there with nobody looking.
+        let hasPlaylists = !WatchDownloads.shared.playlists.isEmpty
+        guard hasWork || hasPlaylists else { return }
         WKApplication.shared().scheduleBackgroundRefresh(
-            withPreferredDate: Date().addingTimeInterval(30 * 60), userInfo: nil
+            withPreferredDate: Date().addingTimeInterval(hasWork ? 30 * 60 : 2 * 60 * 60), userInfo: nil
         ) { _ in }
     }
 }
@@ -186,17 +203,40 @@ enum WatchActions {
         return []
     }
 
-    /// Books on the watch, brought in step with the server when it can be
-    /// asked and the watch has nothing newer to say.
-    static func refreshBookPositions() async {
+    /// Books on the watch — these, or all of them — brought in step with
+    /// the server when it can be asked and the watch has nothing newer to
+    /// say. What the server sent, for a caller that wants its word too;
+    /// nothing when it couldn't be asked, or took longer than `timeout`.
+    @discardableResult
+    static func refreshBookPositions(ids only: [String]? = nil, timeout: Duration? = nil) async -> [BaseItem] {
         let client = JellyfinClient.shared
         let downloads = WatchDownloads.shared
-        guard client.isSignedIn, !client.isOffline else { return }
-        let ids = downloads.books.map(\.itemId)
-        guard !ids.isEmpty, let items = try? await client.items(ids: ids) else { return }
-        for item in items {
-            downloads.applyServerState(itemId: item.Id, positionTicks: item.userData.positionTicks, played: item.userData.played)
+        guard client.isSignedIn, !client.isOffline else { return [] }
+        let ids = only ?? downloads.books.map(\.itemId)
+        guard !ids.isEmpty else { return [] }
+        let fetched: [BaseItem]?
+        if let timeout {
+            fetched = await withTaskGroup(of: [BaseItem]?.self) { group in
+                group.addTask { try? await JellyfinClient.shared.items(ids: ids) }
+                group.addTask {
+                    try? await Task.sleep(for: timeout)
+                    return nil
+                }
+                let first = await group.next() ?? nil
+                group.cancelAll()
+                return first
+            }
+        } else {
+            fetched = try? await client.items(ids: ids)
+        }
+        guard let items = fetched else { return [] }
+        for item in items where item.isAudiobook {
+            downloads.applyServerState(
+                itemId: item.Id, positionTicks: item.userData.positionTicks, played: item.userData.played,
+                lastPlayed: BookProgress.date(fromServer: item.userData.LastPlayedDate)
+            )
         }
         WatchPlayer.shared.writeSnapshot()
+        return items
     }
 }

@@ -1,0 +1,154 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "linear-gradient": [
+          "srgb:1.00000,0.82745,0.36078,1.00000",
+          "srgb:0.95294,0.54118,0.10588,1.00000"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.5,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.5,
+            "y": 1
+          }
+        }
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "linear-gradient": [
+          "srgb:0.22745,0.10196,0.02353,1.00000",
+          "srgb:0.06667,0.02745,0.01176,1.00000"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.5,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.5,
+            "y": 1
+          }
+        }
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "bubbles.svg",
+          "name": "bubbles",
+          "glass": true
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.35
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.5
+      }
+    },
+    {
+      "layers": [
+        {
+          "name": "picado",
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "picado.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "picado-tinted.svg"
+            }
+          ]
+        },
+        {
+          "name": "string",
+          "glass": false,
+          "image-name-specializations": [
+            {
+              "value": "string.svg"
+            },
+            {
+              "appearance": "dark",
+              "value": "string-dark.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "string-tinted.svg"
+            }
+          ]
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.4
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "play.svg",
+          "name": "play",
+          "glass": true
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.6
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "layers": [
+        {
+          "name": "ring",
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "ring.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "ring-tinted.svg"
+            }
+          ]
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

@@ -1,0 +1,155 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "linear-gradient": [
+          "srgb:1.00000,0.89412,0.36863,1.00000",
+          "srgb:1.00000,0.69020,0.12549,1.00000"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.5,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.5,
+            "y": 1
+          }
+        }
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "linear-gradient": [
+          "srgb:0.22745,0.16471,0.00000,1.00000",
+          "srgb:0.07059,0.04706,0.00000,1.00000"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.5,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.5,
+            "y": 1
+          }
+        }
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "name": "bubbles",
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "bubbles.svg"
+            },
+            {
+              "appearance": "dark",
+              "value": "bubbles-dark.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "bubbles-tinted.svg"
+            }
+          ]
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.35
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.5
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "play.svg",
+          "name": "play",
+          "glass": true
+        },
+        {
+          "image-name": "ring.svg",
+          "name": "ring",
+          "glass": true
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.45
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "arm.svg",
+          "name": "arm",
+          "glass": true
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.6
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "sheen.svg",
+          "name": "sheen",
+          "glass": false
+        },
+        {
+          "name": "disc",
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "disc.svg"
+            },
+            {
+              "appearance": "dark",
+              "value": "disc-dark.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "disc-tinted.svg"
+            }
+          ]
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

@@ -308,9 +308,15 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
 
     var resumeSeconds: Double {
         // A file watched all the way through would otherwise "resume" in its
-        // closing seconds; start it from the top instead.
+        // closing seconds; start it from the top instead. A book is done by
+        // the server's rule, the watch's too: the last 90% of a twenty-hour
+        // book is two hours, not its closing seconds.
         if played { return 0 }
-        if runTimeTicks > 0, Double(positionTicks) / Double(runTimeTicks) > 0.9 { return 0 }
+        if type == "AudioBook" {
+            if BookProgress.isFinished(positionTicks: positionTicks, runTimeTicks: runTimeTicks) { return 0 }
+        } else if runTimeTicks > 0, Double(positionTicks) / Double(runTimeTicks) > 0.9 {
+            return 0
+        }
         return Double(positionTicks) / 10_000_000
     }
 }
@@ -431,6 +437,11 @@ final class DownloadManager: NSObject {
     private var retiredTasks: Set<DownloadTaskKey> = []
     private var active: Set<String> = []
     private var pendingItems: [String: BaseItem] = [:]  // queued item id → the item
+    /// A cancel that arrived while `resolveThenStart` was still asking the
+    /// server for the item: there is no task and no record yet for `cancel`
+    /// to act on, so without this, the fetch completing would start the
+    /// transfer the person had just called off.
+    private var cancelledResolves: Set<String> = []
 
     /// How often a running transfer is allowed to redraw and, separately, how
     /// often it writes its byte count to disk.
@@ -1340,6 +1351,7 @@ final class DownloadManager: NSObject {
     func cancel(_ itemId: String) {
         cancelQueued(itemId)
         cancelTasks(for: itemId, keepingProgress: false)
+        cancelledResolves.insert(itemId)
         active.remove(itemId)
         forgetProgressThrottle(itemId)
         retryingAfterCancel[itemId] = nil
@@ -1725,7 +1737,14 @@ final class DownloadManager: NSObject {
     /// download that can't be described is left as a failure with a Retry on it
     /// rather than vanishing.
     private func resolveThenStart(_ entry: QueuedDownload) async {
-        if let item = try? await JellyfinClient.shared.item(entry.itemId) {
+        let item = try? await JellyfinClient.shared.item(entry.itemId)
+        guard cancelledResolves.remove(entry.itemId) == nil else {
+            // Called off while its metadata was in flight — see
+            // `cancelledResolves`. Neither started nor written off as failed.
+            active.remove(entry.itemId)
+            return
+        }
+        if let item {
             pendingItems[entry.itemId] = Self.trimmed(item)
             persistPendingItems()
             active.remove(entry.itemId)
@@ -2044,6 +2063,11 @@ final class DownloadManager: NSObject {
         // transfer with no task to cancel is requeued straight away.
         let reason = "Stalled"
         for rec in stalled {
+            // `stalled` was read before `await everyTask()` above; the item
+            // may have finished, failed or been removed in that gap. Acting
+            // on the stale copy regardless is how a download that had just
+            // completed got put back in the queue as `.queued`.
+            guard record(for: rec.itemId)?.status == .downloading else { continue }
             // A cancel the previous sweep sent that never came back — the map
             // held a task the session no longer had — is not sent again; the
             // transfer is requeued directly instead.
@@ -2087,17 +2111,20 @@ final class DownloadManager: NSObject {
         guard var rec = record(for: itemId) else { return }
         rec.positionTicks = Int64(max(0, positionSeconds) * 10_000_000)
         let fraction = rec.runTimeTicks > 0 ? Double(rec.positionTicks) / Double(rec.runTimeTicks) : 0
+        let finished = rec.type == "AudioBook"
+            ? BookProgress.isFinished(positionTicks: rec.positionTicks, runTimeTicks: rec.runTimeTicks)
+            : rec.runTimeTicks > 0 && fraction > 0.92
         if let played {
             if rec.played && !played { rec.unplayedPending = true }
             rec.played = played
-        } else if rec.played, rec.isAudio, positionSeconds > 30, rec.runTimeTicks > 0, fraction < 0.92 {
+        } else if rec.played, rec.isAudio, positionSeconds > 30, rec.runTimeTicks > 0, !finished {
             // A book finished once and started again: `resumeSeconds` ignores
             // the position of anything marked played, so without this it
             // would open at 0:00 every time from here on.
             rec.played = false
             rec.unplayedPending = true
         }
-        if rec.runTimeTicks > 0, fraction > 0.92 {
+        if finished {
             rec.played = true
         }
         if rec.played { rec.unplayedPending = false }

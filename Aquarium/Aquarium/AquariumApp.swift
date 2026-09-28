@@ -12,6 +12,9 @@ import CoreSpotlight
 #if os(macOS)
 import AppKit
 #endif
+#if canImport(CarPlay)
+import CarPlay
+#endif
 
 @main
 struct AquariumApp: App {
@@ -169,11 +172,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
     /// Coming forward: the watch gets a fresh sign-in and plan — a book
     /// started last night is in progress now — and whatever it handed over
-    /// while the phone was asleep goes on to the server.
+    /// while the phone was asleep goes on to the server. And a holiday icon
+    /// whose season is over comes off the Home Screen.
     func applicationDidBecomeActive(_ application: UIApplication) {
         MainActor.assumeIsolated {
             WatchLink.shared.sendContext()
             WatchLink.shared.forward()
+            WatchLink.shared.resumeFetches()
+            AppIconChoice.retireOutOfSeason()
         }
     }
 
@@ -190,16 +196,24 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     /// The scene delegate below is how a home screen quick action reaches
-    /// the app; there is no SwiftUI modifier for one. CarPlay's scene keeps
-    /// the configuration Info.plist spells out for it.
+    /// the app; there is no SwiftUI modifier for one. CarPlay's scene names
+    /// its classes here rather than trusting Info.plist to: build 72 shipped
+    /// with the generated scene manifest in place of the written one, the
+    /// "CarPlay" configuration came back with no delegate, and CarPlay threw
+    /// the moment a car connected.
     func application(
         _ application: UIApplication,
         configurationForConnecting connectingSceneSession: UISceneSession,
         options: UIScene.ConnectionOptions
     ) -> UISceneConfiguration {
-        if connectingSceneSession.role.rawValue == "CPTemplateApplicationSceneSessionRoleApplication" {
-            return UISceneConfiguration(name: "CarPlay", sessionRole: connectingSceneSession.role)
+        #if canImport(CarPlay)
+        if connectingSceneSession.role == .carTemplateApplication {
+            let config = UISceneConfiguration(name: "CarPlay", sessionRole: connectingSceneSession.role)
+            config.sceneClass = CPTemplateApplicationScene.self
+            config.delegateClass = CarPlaySceneDelegate.self
+            return config
         }
+        #endif
         let config = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
         config.delegateClass = SceneDelegate.self
         return config

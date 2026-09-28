@@ -68,6 +68,6 @@ private extension Double {
     /// 0.9999999.
     func rounded(toStep step: Double) -> Double {
         let steps = ((self - 1) / step).rounded()
-        return (1 + steps * step * 100).rounded() / 100
+        return ((1 + steps * step) * 100).rounded() / 100
     }
 }

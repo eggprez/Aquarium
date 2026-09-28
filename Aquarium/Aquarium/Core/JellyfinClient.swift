@@ -1208,10 +1208,14 @@ final class JellyfinClient {
     /// one, else the first unwatched. Nil when the server has nothing queued.
     func seriesNextUp(seriesId: String) async throws -> BaseItem? {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        return try await get(
-            ItemsResponse.self,
-            "/Shows/NextUp?userId=\(s.userId)&seriesId=\(seriesId)&Limit=1&Fields=\(Self.itemFields)&EnableImageTypes=Primary,Backdrop,Thumb,Logo"
-        ).items.first
+        let q: [URLQueryItem] = [
+            .init(name: "userId", value: s.userId),
+            .init(name: "seriesId", value: seriesId),
+            .init(name: "Limit", value: "1"),
+            .init(name: "Fields", value: Self.itemFields),
+            .init(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb,Logo"),
+        ]
+        return try await get(ItemsResponse.self, "/Shows/NextUp?\(Self.encode(q))").items.first
     }
 
     /// A handful of films and shows from the whole library, drawn at random —
@@ -1597,7 +1601,7 @@ final class JellyfinClient {
     func mediaSegments(itemId: String) async throws -> [MediaSegment] {
         guard let r = try? await get(
             MediaSegmentsResponse.self,
-            "/MediaSegments/\(itemId)?includeSegmentTypes=Intro,Outro"
+            "/MediaSegments/\(Self.pathId(itemId))?includeSegmentTypes=Intro,Outro"
         ) else { return [] }
         return (r.Items ?? []).map {
             MediaSegment(

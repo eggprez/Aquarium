@@ -93,6 +93,11 @@ final class WatchPlayer: NSObject {
     private var snapshotTask: Task<Void, Never>?
     private var userPaused = false
     private var startedReport = false
+    /// Whether `position` is where the item really is: false from opening
+    /// until the seek to the resume point has landed. Until then nothing is
+    /// written down — a pause while the route picker is up would otherwise
+    /// save a book's place as 0:00.
+    private var positionKnown = false
 
     private var client: JellyfinClient { .shared }
     private var downloads: WatchDownloads { .shared }
@@ -259,6 +264,7 @@ final class WatchPlayer: NSObject {
         let old = stream
         stream = nil
         startedReport = false
+        positionKnown = false
 
         WatchLog.note("player", "opening \(entry.item.Id) \"\(entry.item.title)\" \(entry.item.isAudiobook ? "book" : "song") at \(Int(startAt ?? 0))s, queue \(queue.count), \(WatchLog.memory)")
         isActive = true
@@ -306,7 +312,16 @@ final class WatchPlayer: NSObject {
                 }
             }
             guard generation == mine else { return }
-            let resumeAt = resumePoint(for: entry.item, explicit: startAt)
+            // A book opens where it was last left anywhere: the server is
+            // asked first, briefly, and the record takes its word unless
+            // the watch has newer listening of its own.
+            var opening = entry.item
+            if startAt == nil, opening.isAudiobook,
+               let fresh = await WatchActions.refreshBookPositions(ids: [opening.Id], timeout: .seconds(2.5)).first {
+                guard generation == mine else { return }
+                opening.UserData = fresh.UserData
+            }
+            let resumeAt = resumePoint(for: opening, explicit: startAt)
             install(avItem, startAt: resumeAt)
             // A book's chapters come with the full item; a list row hasn't got them.
             if entry.item.isAudiobook, chapters.isEmpty, !client.isOffline, let full = try? await client.item(entry.item.Id) {
@@ -317,35 +332,47 @@ final class WatchPlayer: NSObject {
         }
     }
 
-    /// A book opens where it was left: the watch's own note when it has one
-    /// that hasn't reached the server yet, the server's word otherwise.
+    /// A book with a record opens from the record: it has the watch's own
+    /// listening, and the server's whenever that is newer, brought in just
+    /// before. The item handed in may be a list row loaded an hour ago.
     private func resumePoint(for item: BaseItem, explicit: Double?) -> Double {
         if let explicit { return max(0, explicit) }
         guard item.isAudiobook else { return 0 }
-        if let record = downloads.record(for: item.Id) {
-            if WatchSyncQueue.shared.hasPending(for: item.Id) || item.userData.positionTicks == 0 {
-                return record.resumeSeconds
-            }
-        }
+        if let record = downloads.record(for: item.Id) { return record.resumeSeconds }
         let ticks = item.userData.positionTicks
-        guard ticks > 0, let total = item.RunTimeTicks, total > 0 else {
-            return downloads.record(for: item.Id)?.resumeSeconds ?? 0
-        }
-        let f = Double(ticks) / Double(total)
-        return f > 0.98 ? 0 : Double(ticks) / 10_000_000
+        guard ticks > 0, !item.userData.played, let total = item.RunTimeTicks, total > 0 else { return 0 }
+        return BookProgress.isFinished(positionTicks: ticks, runTimeTicks: total) ? 0 : Double(ticks) / 10_000_000
     }
 
+    /// Put the item in and start it once it is at `startAt`. Playing before
+    /// the seek lands plays a moment of the top, and reports it as where
+    /// the book is.
     private func install(_ avItem: AVPlayerItem, startAt: Double) {
         player.replaceCurrentItem(with: avItem)
         installItemObservers(on: avItem)
-        if startAt > 0.5 {
-            player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
-            position = startAt
-        }
-        player.playImmediately(atRate: Float(speed))
+        position = max(0, startAt)
         isPlaying = true
         userPaused = false
         updateNowPlaying()
+        let mine = generation
+        guard startAt > 0.5 else { return begin(mine) }
+        // A seek that says when it's done throws if the item isn't ready.
+        Task {
+            while avItem.status == .unknown {
+                guard generation == mine else { return }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            guard generation == mine, avItem.status == .readyToPlay else { return }
+            _ = await player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+            begin(mine)
+        }
+    }
+
+    private func begin(_ mine: Int) {
+        guard generation == mine else { return }
+        positionKnown = true
+        guard !userPaused else { return }
+        player.playImmediately(atRate: Float(speed))
         Task { await reportLive(started: true) }
     }
 
@@ -418,7 +445,7 @@ final class WatchPlayer: NSObject {
     }
 
     private func tick(_ seconds: Double) {
-        guard isActive, seconds.isFinite else { return }
+        guard isActive, positionKnown, seconds.isFinite else { return }
         position = seconds
         let now = Date()
         if isPlaying, now.timeIntervalSince(lastReportAt) >= 10 {
@@ -433,7 +460,7 @@ final class WatchPlayer: NSObject {
             }
             if now.timeIntervalSince(lastEventAt) >= 60 {
                 lastEventAt = now
-                note(finished: false)
+                note(finished: false, periodic: true)
             }
         }
     }
@@ -454,7 +481,7 @@ final class WatchPlayer: NSObject {
     /// The item on its way out: the record and the queue are told how far it
     /// got, and whether it counts as heard.
     private func closeCurrent(finished: Bool) {
-        guard isActive, current != nil else { return }
+        guard isActive, current != nil, positionKnown || finished else { return }
         note(finished: finished)
         if stream != nil {
             let s = stream
@@ -465,22 +492,31 @@ final class WatchPlayer: NSObject {
         }
     }
 
+    /// Where a book is now, for the server, while it plays on: the app
+    /// going to the background may be the last chance.
+    func checkpoint() {
+        guard isActive, isPlaying, current?.isAudiobook == true else { return }
+        note(finished: false, periodic: true)
+    }
+
     /// One event for the server, and the local note. A song counts as heard
-    /// when it played to its end or nearly; a book is a position until it is
-    /// done.
-    private func note(finished: Bool) {
-        guard let item = current else { return }
+    /// when it played to its end or nearly. A book is a position until it is
+    /// done by the server's own rule — under five minutes left — and the
+    /// once-a-minute note is only ever a position: the server makes a
+    /// position that close to the end "played" by itself.
+    private func note(finished: Bool, periodic: Bool = false) {
+        guard let item = current, positionKnown || finished else { return }
         let total = duration > 0 ? duration : item.runtimeSeconds
         let at = finished ? total : position
-        let heard = finished || (total > 0 && at / total > 0.9)
         let ticks = Int64(max(0, at) * 10_000_000)
         if item.isAudiobook {
+            let heard = finished || (!periodic && BookProgress.isFinished(position: at, duration: total))
             downloads.noteProgress(itemId: item.Id, positionSeconds: at, played: heard ? true : nil)
             WatchSyncQueue.shared.add(WatchProgressEvent(
                 itemId: item.Id, positionTicks: heard ? Int64(total * 10_000_000) : ticks,
                 played: heard, isAudiobook: true, streamed: stream != nil
             ))
-        } else if heard {
+        } else if finished || (total > 0 && at / total > 0.9) {
             downloads.noteProgress(itemId: item.Id, positionSeconds: 0, played: true)
             WatchSyncQueue.shared.add(WatchProgressEvent(
                 itemId: item.Id, positionTicks: Int64(total * 10_000_000),

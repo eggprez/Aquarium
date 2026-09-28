@@ -1,0 +1,175 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "linear-gradient": [
+          "srgb:1.00000,0.78431,0.34118,1.00000",
+          "srgb:0.87843,0.52549,0.11765,1.00000"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.5,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.5,
+            "y": 1
+          }
+        }
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "linear-gradient": [
+          "srgb:0.22745,0.13333,0.04706,1.00000",
+          "srgb:0.07059,0.03529,0.00784,1.00000"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.5,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.5,
+            "y": 1
+          }
+        }
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "name": "bubbles",
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "bubbles.svg"
+            },
+            {
+              "appearance": "dark",
+              "value": "bubbles-dark.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "bubbles-tinted.svg"
+            }
+          ]
+        },
+        {
+          "image-name": "flames.svg",
+          "name": "flames",
+          "glass": true
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "layer-color",
+        "opacity": 0.8
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "layers": [
+        {
+          "name": "candles",
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "candles.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "candles-tinted.svg"
+            }
+          ]
+        },
+        {
+          "name": "kinara",
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "kinara.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "kinara-tinted.svg"
+            }
+          ]
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "layers": [
+        {
+          "name": "play",
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "play.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "play-tinted.svg"
+            }
+          ]
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.6
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "layers": [
+        {
+          "name": "ring",
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "ring.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "ring-tinted.svg"
+            }
+          ]
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

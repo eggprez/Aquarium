@@ -666,11 +666,24 @@ struct ItemDetailView: View {
             }
         }
         #else
-        WrappingRow(spacing: 10, rowSpacing: 10) {
+        Group {
             if isCompact {
-                compactActions(item, playable: playable(for: item))
+                // A plain row, not `WrappingRow`: the compact row never holds
+                // more than four icon-sized buttons, which is never going to
+                // wrap on any iPhone width. It matters here because it isn't
+                // just tidiness — a `Menu` inside the custom `Layout` opened
+                // its pull-down anchored to the row's first button rather
+                // than the one actually pressed, so the "More" menu floated
+                // up over the title no matter which item it belonged to. A
+                // stock `HStack` doesn't confuse UIKit's popover geometry the
+                // way the custom layout did.
+                HStack(spacing: 10) {
+                    compactActions(item, playable: playable(for: item))
+                }
             } else {
-                actionButtons(item, playable: playable(for: item))
+                WrappingRow(spacing: 10, rowSpacing: 10) {
+                    actionButtons(item, playable: playable(for: item))
+                }
             }
         }
         // On a television this row is the first thing on the page the selector
@@ -1175,14 +1188,16 @@ struct ItemDetailView: View {
                                         .clipShape(Circle())
                                     Text(person.Name ?? "")
                                         .font(.caption.weight(.medium))
-                                        .lineLimit(1)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.center)
+                                        .fixedSize(horizontal: false, vertical: true)
                                         .foregroundStyle(Theme.text)
                                     Text(person.Role ?? person.type ?? "")
                                         .font(.caption2)
                                         .lineLimit(1)
                                         .foregroundStyle(Theme.textDim)
                                 }
-                                .frame(width: 96)
+                                .frame(width: 108)
                             }
                             .rowButtonStyle()
                             .macOpensOnReturn { openPerson(person) }

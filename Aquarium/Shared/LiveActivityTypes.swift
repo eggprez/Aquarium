@@ -43,6 +43,23 @@ struct ListeningActivityAttributes: ActivityAttributes {
 
 }
 
+extension ListeningActivityAttributes.ContentState {
+    private enum CodingKeys: String, CodingKey { case title, subtitle, isPlaying, sleepDeadline, isVideo }
+
+    /// Key by key: an activity already running when the app updates can have
+    /// the system hand its extension a state encoded by the build before
+    /// `isVideo` existed, and a synthesized decoder would drop the whole
+    /// update over that one missing key.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decode(String.self, forKey: .title)
+        subtitle = try c.decodeIfPresent(String.self, forKey: .subtitle)
+        isPlaying = try c.decode(Bool.self, forKey: .isPlaying)
+        sleepDeadline = try c.decode(Date.self, forKey: .sleepDeadline)
+        isVideo = try c.decodeIfPresent(Bool.self, forKey: .isVideo) ?? false
+    }
+}
+
 // MARK: - Downloads
 
 struct DownloadsActivityAttributes: ActivityAttributes {

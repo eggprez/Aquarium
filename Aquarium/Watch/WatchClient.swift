@@ -578,8 +578,16 @@ final class JellyfinClient {
     /// source already in AAC at or under the rate is rewrapped rather than
     /// re-encoded — the server decides. The token goes in a header, never
     /// the address.
-    func downloadRequest(for item: BaseItem) -> URLRequest? {
+    func downloadRequest(for item: BaseItem) -> (request: URLRequest, fileExtension: String)? {
         guard let account else { return nil }
+        if let ext = WatchDownloadSource.originalExtension(for: item, encodedBytes: Self.estimatedBytes(for: item)) {
+            let q = WatchDownloadSource.originalQuery(for: item, deviceId: deviceId)
+            guard let url = URL(string: "\(account.server)/Audio/\(Self.pathId(item.Id))/stream.\(ext)?\(Self.encode(q))") else { return nil }
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 120
+            for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
+            return (req, ext)
+        }
         var q = [
             URLQueryItem(name: "static", value: "false"),
             URLQueryItem(name: "deviceId", value: deviceId),
@@ -593,7 +601,7 @@ final class JellyfinClient {
         var req = URLRequest(url: url)
         req.timeoutInterval = 120
         for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
-        return req
+        return (req, "m4a")
     }
 
     /// About what a download will weigh, from its runtime.
@@ -656,13 +664,40 @@ final class JellyfinClient {
         try await request("/Users/\(account.userId)/PlayedItems/\(Self.pathId(itemId))?datePlayed=\(stamp)", method: "POST")
     }
 
-    /// Send one listening event straight to the server. What the phone does
-    /// with the same event when it is the one in reach.
+    func markUnplayed(itemId: String) async throws {
+        guard let account else { throw APIError.notConfigured }
+        try await request("/Users/\(account.userId)/PlayedItems/\(Self.pathId(itemId))", method: "DELETE")
+    }
+
+    /// Send one listening event straight to the server — what the phone does
+    /// with the same event when it is the one in reach; see its `deliver`.
+    ///
+    /// A book's event is weighed against the server first: one heard before
+    /// the book was last started anywhere else is dropped, since the newer
+    /// listening wins. A position for a book the server has as finished is
+    /// someone starting it again, and says so first — a stopped report
+    /// leaves the tick where it is. A play the watch streamed was counted
+    /// when the stream began, so it goes as a stopped report at its end.
     func send(_ event: WatchProgressEvent) async throws {
-        if event.played {
+        var server: UserData?
+        var runTimeTicks: Int64 = 0
+        if event.isAudiobook {
+            let item = try await items(ids: [event.itemId]).first
+            server = item?.UserData
+            runTimeTicks = item?.RunTimeTicks ?? 0
+            if BookProgress.isStale(eventAt: event.at, serverLastPlayed: BookProgress.date(fromServer: server?.LastPlayedDate)) {
+                WatchLog.note("client", "not sending \(event.itemId): played elsewhere since")
+                return
+            }
+        }
+        if event.played, !event.streamed {
             try await markPlayed(itemId: event.itemId, at: event.at)
-        } else if event.positionTicks > 0 {
-            try await reportStopped(itemId: event.itemId, positionTicks: event.positionTicks)
+        } else {
+            if event.isAudiobook, !event.played, server?.played == true,
+               !BookProgress.isFinished(positionTicks: event.positionTicks, runTimeTicks: runTimeTicks) {
+                try await markUnplayed(itemId: event.itemId)
+            }
+            try await reportStopped(itemId: event.itemId, positionTicks: max(0, event.positionTicks))
         }
     }
 }

@@ -85,8 +85,15 @@ final class MusicPlayer {
     /// The track reached the end of the queue and stopped; Play starts it over.
     private(set) var reachedEndOfQueue = false
     /// The station the queue is being dealt from, when it is one. It re-deals
-    /// Up Next after every song finished or skipped and every thumb.
-    private(set) var station: LiveStation?
+    /// Up Next after every song finished or skipped and every thumb. Nil for
+    /// an album, a playlist or anything else picked by hand — and then there
+    /// is nothing for a thumb to steer.
+    private(set) var station: LiveStation? {
+        didSet {
+            // The lock screen's thumbs come and go with the station.
+            if station !== oldValue { NowPlaying.shared.refreshCommandAvailability() }
+        }
+    }
 
     /// How many songs a station keeps queued ahead.
     static let stationDepth = 25
@@ -236,6 +243,7 @@ final class MusicPlayer {
         }
         pathMonitor.start(queue: DispatchQueue(label: "aquarium.music.path"))
         observeAudioSession()
+        Task.detached(priority: .utility) { StationSession.forgetOldTaste() }
     }
 
     // MARK: - Starting a queue
@@ -813,13 +821,13 @@ final class MusicPlayer {
         }
     }
 
-    // MARK: - Learning, and stations that follow it
+    // MARK: - Stations, and what steers them
 
     private enum Leaving { case finished, skipped, other }
 
-    /// The track playing is on its way out: tell `MusicTaste` how much of it
-    /// was heard and how it ended, and the station, if one is playing, what
-    /// that amounted to. Called at every way out, before the report.
+    /// The track playing is on its way out: tell the station, if one is
+    /// playing, how much of it was heard and how it ended. Called at every
+    /// way out, before the report. Outside a station nothing is learned.
     private func learn(_ how: Leaving) {
         guard let prepared = currentPrepared else { return }
         let key = ObjectIdentifier(prepared.avItem)
@@ -828,28 +836,39 @@ final class MusicPlayer {
         let heard = heardSeconds
         heardSeconds = 0
         lastTickPosition = nil
-        let reaction = MusicTaste.shared.noteListen(
-            prepared.item, heard: heard, duration: duration,
-            finished: how == .finished, skipped: how == .skipped
-        )
-        guard let reaction, let station else { return }
+        guard let station, prepared.item.isSong,
+              let reaction = ListenReaction(
+                  heard: heard, duration: duration,
+                  finished: how == .finished, skipped: how == .skipped
+              )
+        else { return }
         station.session.note(prepared.item, reaction)
         scheduleRestation()
     }
 
-    /// Thumbs up (1), down (-1) or neither (nil) for the song playing. Down
-    /// also skips it, and it is never dealt again by any station.
+    /// Whether thumbs mean anything now: a station is dealing the queue and
+    /// a song is playing. A thumb is advice to that station and nothing
+    /// else, so an album or a playlist picked by hand offers none.
+    var canThumb: Bool { station != nil && current?.isSong == true }
+
+    /// The thumb on the song playing, in this station: 1 up, -1 down, nil
+    /// neither — and nil whenever `canThumb` is false.
+    var thumb: Int? {
+        guard let station, let song = current, song.isSong else { return nil }
+        return station.session.thumbs[song.Id]
+    }
+
+    /// Thumbs up (1), down (-1) or neither (nil) for the song playing, told
+    /// to the station playing it and forgotten when it ends. Down also skips
+    /// the song, and this station never deals it again; up pulls in more
+    /// like it. Does nothing when `canThumb` is false.
     func setThumb(_ value: Int?) {
-        guard let song = current, song.isSong else { return }
-        MusicTaste.shared.setThumb(song, value)
-        for i in queue.indices where queue[i].item.Id == song.Id {
-            var data = queue[i].item.UserData ?? UserData()
-            data.Likes = value.map { $0 > 0 }
-            queue[i].item.UserData = data
-        }
-        if let station, let value {
-            station.session.note(song, value > 0 ? .thumbUp : .thumbDown)
-        }
+        guard canThumb, let station, let song = current else { return }
+        guard station.session.thumbs[song.Id] != value else { return }
+        station.session.setThumb(song, value)
+        // The lock screen shows the thumb too, and after a skip, the next
+        // song's lack of one.
+        defer { NowPlaying.shared.refreshCommandAvailability() }
         if value == -1 {
             if let c = currentIndex {
                 let later = queue.indices.filter { $0 > c && queue[$0].item.Id == song.Id }
@@ -863,7 +882,7 @@ final class MusicPlayer {
                 lastTickPosition = nil
             }
             if hasNext { skipNext() } else { scheduleRestation() }
-        } else if value == 1, let station {
+        } else if value == 1 {
             // More like this, as well as more of this.
             Task {
                 await StationBuilder.widen(station, from: song)
@@ -894,11 +913,10 @@ final class MusicPlayer {
         guard let station, !isShuffled, let c = currentIndex, queue.indices.contains(c) else { return }
         let head = Array(queue[...c])
         let tail = Array(queue[(c + 1)...])
-        let taste = MusicTaste.shared
 
         var keep: Entry?
         if let first = tail.first, first.fromStation, nextPrepared?.entryId == first.id,
-           !station.session.passed.contains(first.item.Id), taste.thumb(for: first.item) != -1 {
+           !station.session.passed.contains(first.item.Id) {
             keep = first
         }
         let pinned = tail.filter { !$0.fromStation }

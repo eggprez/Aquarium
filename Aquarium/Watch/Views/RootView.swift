@@ -10,6 +10,7 @@ import SwiftUI
 enum WatchRoute: Hashable {
     case player
     case onWatch
+    case downloadQueue
     case books, music, playlists, albums, artists, songs, genres, search, settings
     case book(BaseItem)
     case collection(BaseItem)
@@ -19,6 +20,7 @@ enum WatchRoute: Hashable {
         switch self {
         case .player: NowPlayingScreen()
         case .onWatch: OnWatchView()
+        case .downloadQueue: DownloadQueueView()
         case .books: BooksView()
         case .music: MusicMenu()
         case .playlists: PlaylistsView()
@@ -99,7 +101,7 @@ struct LibraryHome: View {
             }
 
             if !downloads.inFlight.isEmpty {
-                NavigationLink(value: WatchRoute.onWatch) { DownloadingRow() }
+                NavigationLink(value: WatchRoute.downloadQueue) { DownloadingRow() }
             }
 
             if !client.isSignedIn {

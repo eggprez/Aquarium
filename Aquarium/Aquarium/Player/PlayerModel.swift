@@ -1200,6 +1200,8 @@ final class PlayerModel {
         errorMessage = nil
         noVideoTrack = false
         noVideoDetail = nil
+        bitrateNoticeDismissal?.cancel()
+        bitrateNotice = nil
 
         var opts = options
         if opts.maxBitrate == nil, !opts.bitrateIsChosen, !opts.live, prefs.defaultBitrate != nil,
@@ -1469,6 +1471,8 @@ final class PlayerModel {
         errorMessage = nil
         noVideoTrack = false
         noVideoDetail = nil
+        bitrateNoticeDismissal?.cancel()
+        bitrateNotice = nil
         item = nil
         source = nil
         options = .init()
@@ -1522,6 +1526,8 @@ final class PlayerModel {
         errorMessage = nil
         noVideoTrack = false
         noVideoDetail = nil
+        bitrateNoticeDismissal?.cancel()
+        bitrateNotice = nil
         item = nil
         source = nil
         options = StreamOptions(live: true)
@@ -2724,7 +2730,11 @@ final class PlayerModel {
         diagnosis?.cancel()
         diagnosis = Task { [weak self] in
             let finding = await StreamDiagnosis.inspect(hlsURL: url)
-            guard !Task.isCancelled, let self, let finding, self.isExternal else { return }
+            // Not cancelled by a channel change to another external stream —
+            // only `diagnoseExternalStream` and `finish()` cancel this task —
+            // so without checking the URL is still current, a slow diagnosis
+            // of the channel just left behind lands on whatever is playing now.
+            guard !Task.isCancelled, let self, let finding, self.isExternal, self.currentStreamURL == url else { return }
             self.noVideoDetail = finding.message
             // The stream has been read and it is not going to produce a
             // picture. Said outright rather than waiting for AVFoundation to

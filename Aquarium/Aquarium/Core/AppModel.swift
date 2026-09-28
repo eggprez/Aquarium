@@ -1269,6 +1269,10 @@ final class AppModel {
         #if !os(tvOS)
         await OfflineProgress.sync()
         await OfflineProgress.refreshFromServer()
+        #if os(iOS)
+        // The watch's listening, held while the server was away.
+        WatchLink.shared.forward()
+        #endif
         // Stars given offline go back, and the offline pages' facts
         // are brought up to date, before the next time they're needed.
         await OfflineMusicIndex.shared.refresh()
