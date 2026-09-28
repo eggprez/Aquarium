@@ -1,0 +1,127 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "linear-gradient": [
+          "srgb:0.65490,0.63529,0.60784,1.00000",
+          "srgb:0.36863,0.35294,0.33333,1.00000"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.2,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.8,
+            "y": 1
+          }
+        }
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "linear-gradient": [
+          "srgb:0.14902,0.14902,0.16863,1.00000",
+          "srgb:0.00000,0.00000,0.00000,1.00000"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.2,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.8,
+            "y": 1
+          }
+        }
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "bubbles.svg",
+          "name": "bubbles",
+          "glass": true
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.35
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.5
+      }
+    },
+    {
+      "layers": [
+        {
+          "name": "play",
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "play.svg"
+            },
+            {
+              "appearance": "dark",
+              "value": "play-dark.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "play-tinted.svg"
+            }
+          ]
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.7
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "layers": [
+        {
+          "name": "ring",
+          "glass": true,
+          "image-name-specializations": [
+            {
+              "value": "ring.svg"
+            },
+            {
+              "appearance": "dark",
+              "value": "ring-dark.svg"
+            },
+            {
+              "appearance": "tinted",
+              "value": "ring-tinted.svg"
+            }
+          ]
+        }
+      ],
+      "lighting": "combined",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.7
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

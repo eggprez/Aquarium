@@ -6,7 +6,8 @@
 //  ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES for the iPhone SDKs. The tiles
 //  here are pictures of them from `App Icon Previews` in the asset catalog,
 //  because an app icon can't be loaded as an image by name.
-//  Tools/IconGenerator/app_icons.py writes both.
+//  Tools/IconGenerator/app_icons.py writes all of it, and the list of them
+//  in AppIconCatalog.swift.
 //
 //  Seasonal icons are offered only from a month before their holiday to a
 //  month after (see Core/Holidays.swift), on an "In Season" shelf at the top;
@@ -42,31 +43,8 @@ struct AppIconChoice: Identifiable, Hashable {
         return (inSeason.isEmpty ? [] : [("In Season", inSeason)]) + yearRound
     }
 
-    static let yearRound: [(title: String, icons: [AppIconChoice])] = [
-        ("Aquarium", [
-            classic,
-            .init(iconName: "AppIcon-Ink", title: "Ink", blurb: "Just the mark"),
-            .init(iconName: "AppIcon-Gold", title: "Gold", blurb: "The premiere edition"),
-        ]),
-        ("Colourful", [
-            .init(iconName: "AppIcon-Prism", title: "Prism", blurb: "Every colour at once"),
-            .init(iconName: "AppIcon-Sherbet", title: "Sherbet", blurb: "Three scoops"),
-            .init(iconName: "AppIcon-Neon", title: "Neon", blurb: "Open all night"),
-        ]),
-        ("Throwbacks", [
-            .init(iconName: "AppIcon-RabbitEars", title: "Rabbit Ears", blurb: "Don't touch that dial"),
-            .init(iconName: "AppIcon-Glitch", title: "Glitch", blurb: "Signal lost, show found"),
-            .init(iconName: "AppIcon-8Bit", title: "8-Bit", blurb: "Press start"),
-        ]),
-        ("After dark", [
-            .init(iconName: "AppIcon-Midnight", title: "Midnight", blurb: "For the 2 a.m. episode"),
-            .init(iconName: "AppIcon-SunsetDrive", title: "Sunset Drive", blurb: "Outrun the end credits"),
-        ]),
-        ("Wildcards", [
-            .init(iconName: "AppIcon-Jelly", title: "Jelly", blurb: "Say hi to the locals"),
-            .init(iconName: "AppIcon-Popcorn", title: "Popcorn", blurb: "Extra butter"),
-        ]),
-    ]
+    // `yearRound` and `seasonal` are in AppIconCatalog.swift, generated with
+    // the icons.
 
     static var all: [AppIconChoice] { yearRound.flatMap(\.icons) + seasonal }
 
