@@ -12,7 +12,7 @@ swiftc -O brand.swift main.swift -o build-icons && ./build-icons stage
 That writes a staging tree whose layout mirrors `Aquarium/Assets.xcassets`:
 
 - `AppIcon.appiconset/` — **superseded on iOS and macOS by `App Icons/AppIcon.icon`**
-  (see below); the last one written is kept in `superseded/`. It was the iOS 1024 (default, dark and tinted variants) and
+  (see below); it is still written but no longer copied in. It was the iOS 1024 (default, dark and tinted variants) and
   every macOS size. The iOS default is written **without an alpha channel**,
   which the App Store requires, and full-bleed square with no corner rounding
   baked in — iOS masks it itself. The dark and tinted variants are transparent

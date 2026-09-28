@@ -12,6 +12,10 @@ import SwiftUI
 struct MacSidebarRows: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openWindow) private var openWindow
+    /// When the selection last moved to another row — set by the list's
+    /// selection binding (see `RootView.sidebarSelection`), which runs as the
+    /// row is pressed. See `reselected`.
+    static var selectionChangedAt = Date.distantPast
 
     var body: some View {
         ForEach(MacSidebarGroup.grouped(app.sections)) { group in
@@ -29,7 +33,20 @@ struct MacSidebarRows: View {
                 .badge(badge(for: section))
                 .tag(section)
                 .contextMenu { menu(for: section) }
+                .simultaneousGesture(TapGesture().onEnded { reselected(section) })
         }
+    }
+
+    /// A click on the row already selected: back to the top of that section,
+    /// as Music and Finder do. The list's selection binding isn't told about a
+    /// click that doesn't change it, so the row hears it itself. The list
+    /// selects on the way down and the tap ends on the way up, so a click that
+    /// has only just moved the selection here is told apart by how recently
+    /// it moved — that one keeps the section's pages where they were left.
+    private func reselected(_ section: AppSection) {
+        guard app.shownSelection == section,
+              Date().timeIntervalSince(Self.selectionChangedAt) > 0.4 else { return }
+        app.showAtTop(section)
     }
 
     /// A row's menu: the section in a window of its own, and a fresh answer

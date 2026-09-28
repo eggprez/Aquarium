@@ -53,21 +53,21 @@ struct LibraryTable: View {
             TableColumn("Year", value: \.tableYear) { item in
                 Text(item.ProductionYear.map(String.init) ?? "—")
                     .monospacedDigit()
-                    .foregroundStyle(Theme.textDim)
+                    .foregroundStyle(.secondary)
             }
             .width(min: 50, ideal: 60, max: 80)
 
             TableColumn("Runtime", value: \.tableRuntime) { item in
                 Text(Format.ticks(item.RunTimeTicks))
                     .monospacedDigit()
-                    .foregroundStyle(Theme.textDim)
+                    .foregroundStyle(.secondary)
             }
             .width(min: 60, ideal: 80, max: 110)
 
             TableColumn("Rated") { item in
                 Text(item.OfficialRating ?? "")
                     .lineLimit(1)
-                    .foregroundStyle(Theme.textDim)
+                    .foregroundStyle(.secondary)
                     .help(item.OfficialRating ?? "")
             }
             .width(min: 50, ideal: 64, max: 90)
@@ -75,14 +75,13 @@ struct LibraryTable: View {
             TableColumn("Score", value: \.tableScore) { item in
                 Text(item.CommunityRating.map { String(format: "%.1f", $0) } ?? "—")
                     .monospacedDigit()
-                    .foregroundStyle(Theme.textDim)
+                    .foregroundStyle(.secondary)
             }
             .width(min: 50, ideal: 60, max: 80)
 
             TableColumn("Watched") { item in
                 if item.userData.played {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Theme.accent)
+                    MacWatchedMark()
                         .help("Watched")
                 } else if let progress = item.progressFraction {
                     ProgressView(value: progress)
@@ -146,5 +145,19 @@ extension BaseItem {
     var tableYear: Int { ProductionYear ?? 0 }
     var tableRuntime: Int64 { RunTimeTicks ?? 0 }
     var tableScore: Double { CommunityRating ?? 0 }
+}
+
+/// The watched checkmark in a row: the accent colour, except on a selected
+/// row in the key window, whose highlight is the accent colour too and hid it.
+/// There it goes white with the row's text. The row's grey columns are
+/// `.secondary` for the same reason — a fixed grey stayed grey on the blue.
+struct MacWatchedMark: View {
+    @Environment(\.backgroundProminence) private var prominence
+
+    var body: some View {
+        Image(systemName: "checkmark.circle.fill")
+            .foregroundStyle(prominence == .increased ? AnyShapeStyle(.primary) : AnyShapeStyle(Color.accentColor))
+            .accessibilityLabel("Watched")
+    }
 }
 #endif

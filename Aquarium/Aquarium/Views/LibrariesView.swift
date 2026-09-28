@@ -152,11 +152,20 @@ struct LibraryTile: View {
             )
 
             // A library with no artwork is a blank rectangle otherwise, and
-            // three of those in a row are indistinguishable.
+            // three of those in a row are indistinguishable. The name goes on
+            // it as well: beside the server's generated covers, which have
+            // theirs written across the picture, a folder glyph alone read as
+            // a card that hadn't loaded.
             if Artwork.url(library, type: "Primary") == nil {
-                Image(systemName: symbol)
-                    .font(.system(size: 30))
-                    .foregroundStyle(Theme.textDim)
+                VStack(spacing: 6) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 30))
+                    Text(library.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                }
+                .foregroundStyle(Theme.textDim)
+                .padding(.horizontal, 12)
             }
         }
 
@@ -173,7 +182,13 @@ struct LibraryTile: View {
         switch library.CollectionType {
         case "movies": "film"
         case "tvshows": "tv"
-        default: "folder"
+        case "livetv": "recordingtape"
+        case "music": "music.note"
+        case "musicvideos", "homevideos": "video"
+        case "boxsets": "square.stack"
+        case "photos": "photo"
+        case "books": "book"
+        default: library.title.localizedCaseInsensitiveContains("recording") ? "recordingtape" : "folder"
         }
     }
 

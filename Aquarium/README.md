@@ -1,8 +1,8 @@
 # Aquarium for iOS, iPadOS, tvOS, macOS and watchOS
 
-A native SwiftUI port of [Aquarium](../README.md), the Linux Jellyfin client.
-Everything under this directory belongs to the Apple build; nothing in it is
-shared with, or read by, the Linux/Tauri project in the parent directory.
+A native SwiftUI Jellyfin client, ported from the original Linux client (now
+retired; it lives on the `sync-linux-client-v0.1.30` branch). The Linux
+comparisons below describe that build.
 
 > Built with AI assistance (Claude), like the Linux original. Personal project,
 > shared as-is, no guarantee of updates or support.

@@ -36,7 +36,13 @@ struct RootView: View {
         Group {
             if client.isSignedIn {
                 if app.launchSettled {
+                    // A new shell for each account. Switching emptied the
+                    // model (see `AppModel.clearSessionState`), but the pages
+                    // hold what they loaded in their own state: Home kept the
+                    // last account's hero and Next Up, scrolled where they had
+                    // left it, until something happened to reload it.
                     shell
+                        .id(client.session?.accountKey)
                 } else {
                     // The launch's first question to the server — see
                     // `AppModel.launchSettled`. Under a second against a
@@ -243,7 +249,30 @@ struct RootView: View {
     private var sidebarSelection: Binding<AppSection?> {
         Binding(
             get: { app.shownSelection },
-            set: { if let new = $0 { app.selection = new } }
+            set: { new in
+                guard let new else { return }
+                #if os(macOS)
+                if new != app.shownSelection { MacSidebarRows.selectionChangedAt = Date() }
+                #endif
+                app.selection = new
+            }
+        )
+    }
+
+    /// A section's stack, which only that section, while it is showing, can
+    /// write to. A stack being taken down as another section takes its place
+    /// sets its path to empty on the way out, and that write landed on the
+    /// section being left: a title opened from Home was gone after a look at
+    /// Movies — the place `AppModel.paths` exists to keep. Go ▸ Home and the
+    /// like reset a path through the model, not through here.
+    private func stackPath(for section: AppSection) -> Binding<NavigationPath> {
+        let path = app.path(for: section)
+        return Binding(
+            get: { path.wrappedValue },
+            set: { new in
+                guard app.shownSelection == section else { return }
+                path.wrappedValue = new
+            }
         )
     }
 
@@ -362,11 +391,14 @@ struct RootView: View {
         } detail: {
             withToasts(
                 withOfflineStrip(
-                    NavigationStack(path: app.path(for: app.shownSelection)) {
+                    NavigationStack(path: stackPath(for: app.shownSelection)) {
                         SectionView(section: app.shownSelection)
                             .clearsBottomChrome()
                             .navigationDestination(for: Route.self) { destination($0).clearsBottomChrome() }
                     }
+                    // A stack per section, not one stack handed each
+                    // section's path in turn — see `stackPath`.
+                    .id(app.shownSelection)
                     .measuresBottomChrome()
                 )
                 .withMiniPlayer()

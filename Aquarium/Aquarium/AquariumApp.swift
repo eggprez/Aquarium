@@ -50,7 +50,8 @@ struct AquariumApp: App {
     #endif
 
     var body: some Scene {
-        WindowGroup {
+        // "main" is `MacMainWindow.id`, which the Mac finds and reopens it by.
+        WindowGroup(id: "main") {
             RootView()
                 .environment(app)
                 .environment(client)

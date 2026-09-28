@@ -250,7 +250,10 @@ struct TVGuideView: View {
         .task(id: windowKey) {
             await loadPrograms()
         }
-        .task(id: channels.count) {
+        // The channels themselves, not how many there are: a filter or a
+        // refresh that swapped or reordered them without changing the count
+        // left the highlight — and its popover — on another channel.
+        .task(id: channels.map(\.id)) {
             resetRowWindow()
             #if os(macOS)
             // A different line-up — the filter, a source switch — and the
@@ -944,6 +947,32 @@ struct TVGuideView: View {
         infoShown = false
     }
 
+    /// What the selection points at by identity: its channel, and its
+    /// programme (nil for a row's placeholder). The selection itself is a
+    /// position, which a reload of the programmes can hand to another show.
+    private var selectedProgram: (channel: String, program: String?)? {
+        guard let selection, selection.row < channels.count else { return nil }
+        let channel = channels[selection.row].id
+        let programs = programsByChannel[channel] ?? []
+        return (channel, selection.column < programs.count ? programs[selection.column].Id : nil)
+    }
+
+    /// The same programme found again after the programmes reloaded, or no
+    /// selection at all if it has gone — never whatever took its place.
+    private func reselect(_ kept: (channel: String, program: String?)?) {
+        guard let kept else { return }
+        let programs = programsByChannel[kept.channel] ?? []
+        guard let row = channels.firstIndex(where: { $0.id == kept.channel }) else { return clearSelection() }
+        let column: Int? = if let id = kept.program {
+            programs.firstIndex { $0.Id == id }
+        } else {
+            programs.isEmpty ? 0 : nil
+        }
+        guard let column else { return clearSelection() }
+        let next = GuideSelection(row: row, column: column)
+        if next != selection { selection = next }
+    }
+
     /// Up and down: the row above or below, at the programme on at the same
     /// time as the one that was selected — the way a finger reads down a
     /// column of a printed guide.
@@ -1086,7 +1115,13 @@ struct TVGuideView: View {
             var grouped = await Self.grouped(items)
             if extendingFrom != nil { grouped = await Self.appending(grouped, to: existing) }
             guard mine == programsGeneration, !Task.isCancelled else { return }
+            #if os(macOS)
+            let kept = selectedProgram
+            #endif
             programsByChannel = grouped
+            #if os(macOS)
+            reselect(kept)
+            #endif
             loadedWindow = (start, end, ids)
         } catch is CancellationError {
             // Overtaken by a newer window or channel list; not an outage.
@@ -1345,6 +1380,19 @@ private struct ChannelGuideCell: View {
         Artwork.channelLogo(channel, width: Int(Metrics.guideLogoSize.width) * 3)
     }
 
+    /// The name as the column shows it, under the number: without the number
+    /// again in front of it. Playlists that name their channels
+    /// "1 Family Guy Channel" had the column say 1 above "1 Family Guy Ch…",
+    /// cutting the name short to repeat what the line above had just said.
+    private var name: String {
+        guard let number = channel.ChannelNumber, !number.isEmpty,
+              channel.title.hasPrefix(number) else { return channel.title }
+        let rest = channel.title.dropFirst(number.count)
+        guard let first = rest.first, first == " " || first == "." || first == "-" || first == ":" else { return channel.title }
+        let trimmed = rest.drop { $0 == " " || $0 == "." || $0 == "-" || $0 == ":" }
+        return trimmed.isEmpty ? channel.title : String(trimmed)
+    }
+
     /// The first letters of the channel's name, minus the noise every line-up
     /// puts in front of it — "UK: BBC One HD" is a B and a B and a C.
     private var initials: String {
@@ -1416,7 +1464,7 @@ private struct ChannelGuideCell: View {
                 // them. On one, every name on a phone was its first five
                 // letters — "Ameri…", "Rick a…", "Carto…" — in a column
                 // whose whole job is to say which channel this is.
-                Text(channel.title)
+                Text(name)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(Theme.text)
                     #if os(tvOS)
@@ -1444,7 +1492,7 @@ private struct ChannelGuideCell: View {
     /// The full name, and the number, for the names the column cuts short.
     private var channelHelp: String {
         if let number = channel.ChannelNumber, !number.isEmpty {
-            return "\(number) · \(channel.title)"
+            return "\(number) · \(name)"
         }
         return channel.title
     }

@@ -13,7 +13,7 @@ Done in App Store Connect (app record 6799581721, which already existed):
   Utilities, content rights "no third-party content", age rating 4+.
 - App Privacy: policy URL and Apple TV policy text set, "No data collected"
   published.
-- Privacy policy committed to github.com/eggprez/FellyJin as PRIVACY.md.
+- Privacy policy committed to github.com/eggprez/Aquarium as PRIVACY.md.
 
 Deep-dive pass (security, function, guidelines), 2026-09-12 evening — all in build 46:
 - Sign-out now cancels running downloads and deletes their resume data (which
@@ -133,9 +133,9 @@ Requires a Jellyfin server (10.9 or later) that you run or have an account on. J
 
 | Field | Value |
 |---|---|
-| Support URL | https://github.com/eggprez/FellyJin |
+| Support URL | https://github.com/eggprez/Aquarium |
 | Marketing URL | leave blank |
-| Privacy Policy URL | https://github.com/eggprez/FellyJin/blob/main/PRIVACY.md |
+| Privacy Policy URL | https://github.com/eggprez/Aquarium/blob/main/PRIVACY.md |
 
 ## App Privacy (Data Collection)
 
