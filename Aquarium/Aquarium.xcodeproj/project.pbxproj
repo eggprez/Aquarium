@@ -102,6 +102,7 @@
 		FE11A5D00000000000000004 /* TopShelf.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TopShelf.entitlements; sourceTree = "<group>"; };
 		FE11A5D00000000000000005 /* TopShelfSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopShelfSnapshot.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000006 /* Aquarium-tvOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Aquarium-tvOS.entitlements"; sourceTree = "<group>"; };
+		FE11A5D00000000000000007 /* Aquarium-iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Aquarium-iOS.entitlements"; sourceTree = "<group>"; };
 		FE11A5D00000000000000101 /* LiveActivities.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LiveActivities.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		FE11A5D00000000000000102 /* LiveActivitiesBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivitiesBundle.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000103 /* ListeningLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningLiveActivity.swift; sourceTree = "<group>"; };
@@ -203,6 +204,7 @@
 				FE11A5D00000000000000210 /* Watch */,
 				FE11A5D00000000000000310 /* WatchWidgets */,
 				FE11A5D00000000000000006 /* Aquarium-tvOS.entitlements */,
+				FE11A5D00000000000000007 /* Aquarium-iOS.entitlements */,
 				D296FAB8302815340097E3E7 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -670,8 +672,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Aquarium.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletv*]" = "Aquarium-tvOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphone*]" = "Aquarium-iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				ENABLE_APP_SANDBOX = YES;
@@ -723,8 +726,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Aquarium.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletv*]" = "Aquarium-tvOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphone*]" = "Aquarium-iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				ENABLE_APP_SANDBOX = YES;
@@ -771,7 +775,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TopShelf/Info.plist;
@@ -802,7 +806,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TopShelf/Info.plist;
@@ -832,7 +836,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LiveActivities/Info.plist;
@@ -861,7 +865,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LiveActivities/Info.plist;
@@ -893,7 +897,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Watch/Watch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -928,7 +932,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Watch/Watch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -961,7 +965,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = WatchWidgets/WatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = WatchWidgets/Info.plist;
@@ -992,7 +996,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = WatchWidgets/WatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 61;
+				CURRENT_PROJECT_VERSION = 62;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = WatchWidgets/Info.plist;

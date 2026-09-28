@@ -2,21 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- macOS sandbox: the app talks to a Jellyfin server and nothing else. -->
-	<key>com.apple.security.app-sandbox</key>
-	<true/>
-	<key>com.apple.security.network.client</key>
-	<true/>
-	<key>com.apple.security.files.user-selected.read-only</key>
-	<true/>
+	<!-- iPhone and iPad only. It exists because of CarPlay: macOS rejects an
+	     upload that carries the carplay-audio key, so the Mac build keeps
+	     Aquarium.entitlements (sandbox, no CarPlay) and this one adds it. -->
 	<!-- The shared settings dictionary — see Core/CloudSync.swift. Needs
 	     iCloud (Key-value storage) enabled on the App ID; without it the store
 	     answers false to synchronize() and the whole feature stands down
 	     quietly, so a build signed without it behaves as before. -->
 	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
 	<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
-	<!-- No CarPlay key here: macOS refuses an upload that carries
-	     com.apple.developer.carplay-audio. iPhone/iPad sign with
-	     Aquarium-iOS.entitlements, which has it. -->
+	<!-- CarPlay: the audio category, granted by Apple and enabled on the
+	     App ID. Music/CarPlayScene.swift is the scene it unlocks. -->
+	<key>com.apple.developer.carplay-audio</key>
+	<true/>
 </dict>
 </plist>
