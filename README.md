@@ -1,10 +1,10 @@
 # Aquarium
 
 **Aquarium** (on the App Store as "Aquarium Media") is a native SwiftUI
-Jellyfin client for iPhone, iPad, Apple TV, Mac and Apple Watch. It was
-called FellyJin until September 2026. The source is in
-[`Aquarium/`](Aquarium/); see its [README](Aquarium/README.md) for features,
-architecture and building.
+Jellyfin client for iPhone, iPad, Apple TV, Mac and Apple Watch, with a
+separate [Linux client](#the-linux-client). It was called FellyJin until
+September 2026. The Apple source is in [`Aquarium/`](Aquarium/); see its
+[README](Aquarium/README.md) for features, architecture and building.
 
 It was written with AI assistance (Anthropic's Claude), directed and tested
 by the developer, and is shared as-is.
@@ -28,6 +28,6 @@ query parameter, all of which Jellyfin 12 disables by default), and the
 
 ## The Linux client
 
-This project began as a Linux client (Tauri + libmpv, packaged as a `.deb`).
-It has been retired; its last version lives on the
-[`sync-linux-client-v0.1.30`](../../tree/sync-linux-client-v0.1.30) branch.
+A Linux client for GNOME and other desktops (Tauri + libmpv, packaged as a
+`.deb`) lives in [`Linux/`](Linux/); see its [README](Linux/README.md) for
+features and building. It shares behaviour with the Apple app but not code.
