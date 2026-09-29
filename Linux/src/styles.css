@@ -1,0 +1,2033 @@
+/* Inter is first in the font stack, so it has to ship with the app: on a stock
+   Linux desktop it isn't installed and the UI silently falls back to Cantarell,
+   which is not what any of this was designed against. Bundled as a variable
+   font (one file per subset, weights 100–900) via Vite. */
+@import "@fontsource-variable/inter/wght.css";
+
+/* Theme: `data-theme` is set on <html> by src/theme.ts ("dark" | "light").
+   Dark is the default so the pre-hydration paint matches the old look.
+   Overlays that sit on top of artwork (badges, play overlay, poster scrims)
+   deliberately stay dark in both themes — the artwork underneath doesn't
+   change with the theme. */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e0e14;
+  --bg-raised: #16161f;
+  --bg-hover: #1e1e2a;
+  --border: #262635;
+  --text: #ececf4;
+  --text-body: #c9c9da;
+  --text-dim: #9a9ab0;
+  --accent: #8b5cf6;
+  --accent-strong: #7c3aed;
+  --accent-soft: rgba(139, 92, 246, 0.16);
+  --danger: #ef4444;
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --warn-border: rgba(251, 191, 36, 0.35);
+  --warn-bg: rgba(251, 191, 36, 0.08);
+
+  --topbar-bg: rgba(14, 14, 20, 0.85);
+  /* Fully opaque: the bar sits over page content in windowed mode and over the
+     picture in fullscreen, and any bleed-through of either reads as a bug. */
+  --player-bg: #12121a;
+  --player-icon: #d6d6e4;
+  --player-icon-hover: #fff;
+  --noart-bg: linear-gradient(160deg, #1c1c28, #14141d);
+  --hero-scrim-top: rgba(14, 14, 20, 0.55);
+  --hero-scrim-bottom: rgba(14, 14, 20, 0.92);
+  --track-empty: #34344a;
+  /* Loaded-but-not-yet-played part of the scrubber: reads as "ahead of you"
+     without competing with the accent-coloured played portion. */
+  --track-buffer: #4d4d68;
+  --scrub-thumb: #fff;
+  --scrollbar: #2c2c3c;
+  --sk-base: #1c1c28;
+  --sk-sheen: rgba(255, 255, 255, 0.055);
+  --shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 14px 40px rgba(0, 0, 0, 0.5);
+  --btn-hover-filter: brightness(1.15);
+
+  --radius: 12px;
+  --sidebar-w: 232px;
+  --player-h: 72px;
+  /* The top bar floats over the page, so its height is a layout constant
+     rather than something the content can be laid out around: #content pads
+     itself past it, and the heroes pull themselves back up underneath it. */
+  --topbar-h: 67px;
+
+  /* Type scale. Ten steps, and nothing in the app picks a size outside them —
+     the alternative (a hand-chosen 12.5px here, 14.5px there) is why sibling
+     components used to disagree about what "small text" means. Sizes are
+     absolute rather than rem because `html` is itself set from this scale.
+     --fs-micro exists for one job: badges over the 52px download posters. */
+  --fs-micro: 10px;
+  --fs-eyebrow: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  --fs-2xl: 24px;
+  --fs-3xl: 30px;
+  --fs-4xl: 34px;
+
+  --lh-tight: 1.15;
+  --lh-snug: 1.4;
+  --lh-body: 1.55;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f7f7fb;
+  --bg-raised: #ffffff;
+  --bg-hover: #ececf3;
+  --border: #dcdce8;
+  --text: #16161f;
+  --text-body: #3d3d4e;
+  --text-dim: #63637a;
+  --accent: #7c3aed;
+  --accent-strong: #6d28d9;
+  --accent-soft: rgba(124, 58, 237, 0.12);
+  --danger: #dc2626;
+  --ok: #059669;
+  --warn: #b45309;
+  --warn-border: rgba(180, 83, 9, 0.35);
+  --warn-bg: rgba(180, 83, 9, 0.08);
+
+  --topbar-bg: rgba(247, 247, 251, 0.85);
+  /* Not redefined here on purpose: the player bar sits over video, and stays
+     on its dark values in both themes — see the comment on #player-bar. */
+  --noart-bg: linear-gradient(160deg, #e8e8f0, #dcdce8);
+  --hero-scrim-top: rgba(247, 247, 251, 0.62);
+  --hero-scrim-bottom: rgba(247, 247, 251, 0.94);
+  --track-empty: #d5d5e2;
+  --track-buffer: #b3b3c6;
+  --scrub-thumb: var(--accent-strong);
+  --scrollbar: #c3c3d2;
+  --sk-base: #e6e6ee;
+  --sk-sheen: rgba(255, 255, 255, 0.75);
+  --shadow: 0 10px 28px rgba(24, 24, 40, 0.13);
+  --shadow-lg: 0 14px 40px rgba(24, 24, 40, 0.18);
+  --btn-hover-filter: brightness(0.96);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  /* "Inter Variable" is the bundled copy (@import above); plain "Inter" picks
+     up a system install if one exists, and the rest are the old fallbacks. */
+  font-family: "Inter Variable", "Inter", "Cantarell", "Segoe UI", system-ui, sans-serif;
+  font-size: var(--fs-md);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Headings carried no line-height, so they inherited the browser's `normal`
+   and any that wrapped — a long series title, a two-line episode name — set
+   far looser than the design intends. */
+h1, h2, h3, h4, h5, h6 { line-height: var(--lh-tight); }
+p { line-height: var(--lh-body); }
+
+.hidden { display: none !important; }
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* ---------- Icons ---------- */
+/* Every icon in the app comes from src/icons.ts through this box. Sizing is in
+   em so an icon inherits the scale of whatever label it sits beside, which is
+   the whole point of having one set: a `.btn.small` gets a smaller glyph than a
+   `.btn` without either of them saying so. */
+.ico {
+  display: inline-flex;
+  width: 1.15em;
+  height: 1.15em;
+  flex-shrink: 0;
+  line-height: 0;
+  vertical-align: -0.18em;
+}
+.ico svg { width: 100%; height: 100%; display: block; }
+
+/* ---------- Focus ---------- */
+/* One ring for everything. Keyboard focus was previously untrackable: the app
+   had no :focus-visible rule at all, so tabbing through it moved an invisible
+   cursor. :focus-visible (rather than :focus) keeps the ring off things the
+   user clicked. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* Elements with their own rounding get a ring that follows it. */
+.card:focus-visible,
+.btn:focus-visible,
+.nav-item:focus-visible,
+.menu button:focus-visible,
+.ep-row:focus-visible,
+.channel-row:focus-visible,
+.search-recent .sr-item:focus-visible { border-radius: inherit; }
+.nav-btn:focus-visible,
+.avatar:focus-visible,
+.play-overlay .pbtn:focus-visible,
+.dl-del-badge:focus-visible,
+.dl-shuffle-badge:focus-visible,
+.row-nav:focus-visible { border-radius: 50%; }
+/* Over artwork the accent ring can land on a purple poster; pair it with a
+   dark halo so it stays visible whatever is underneath. */
+.play-overlay .pbtn:focus-visible,
+.dl-del-badge:focus-visible,
+.dl-shuffle-badge:focus-visible {
+  outline-color: #fff;
+  box-shadow: 0 0 0 4px rgba(10, 10, 16, 0.55);
+}
+/* The menu container takes focus programmatically; it shouldn't draw a ring. */
+.menu:focus,
+.menu:focus-visible { outline: none; }
+
+#app { height: 100vh; display: flex; flex-direction: column; }
+
+/* ---------- Shell layout ---------- */
+#shell { flex: 1; display: flex; min-height: 0; }
+
+#sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 12px;
+  gap: 6px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: var(--fs-lg);
+  padding: 4px 10px 18px;
+  letter-spacing: 0.2px;
+}
+/* The app's own icon, not a generic play glyph. It's the same mark the desktop
+   launcher and the window use, so the product is recognisable as one thing. */
+.brand-mark {
+  width: 30px; height: 30px;
+  border-radius: 9px;
+  display: block;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+.wordmark { font-weight: 600; }
+.wordmark b { font-weight: 800; color: var(--accent); }
+
+.sidebar-footer .foot-version { display: flex; align-items: center; gap: 7px; }
+.sidebar-footer .foot-version img { width: 15px; height: 15px; opacity: 0.75; }
+.sidebar-footer .foot-line {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 5px;
+  font-size: var(--fs-eyebrow);
+}
+.sidebar-footer .foot-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-dim);
+  flex-shrink: 0;
+}
+.sidebar-footer .foot-line.ok .foot-dot { background: var(--ok); }
+/* Static, deliberately. This dot used to pulse for as long as a download or a
+   sync was outstanding — hours, for a big queue — and on WebKitGTK every
+   frame of even an 8px animation repaints the whole window: measured
+   2026-09-23 on a 2880×1920 panel, one pulsing dot on an otherwise idle page
+   cost the UI thread 61 % of a core, the web process 19 % and ~1.8 W. The
+   ring and the text beside it say "working" without a single frame. */
+.sidebar-footer .foot-line.busy .foot-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.sidebar-footer .foot-line.warn { color: var(--warn); }
+.sidebar-footer .foot-line.warn .foot-dot { background: var(--warn); }
+
+#nav { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow-y: auto; }
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  color: var(--text-dim);
+  text-align: left;
+  font-weight: 500;
+  transition: background 0.12s, color 0.12s;
+  width: 100%;
+}
+.nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+.nav-item:hover { background: var(--bg-hover); color: var(--text); }
+.nav-item.active { background: var(--accent-soft); color: var(--accent); }
+.nav-sep {
+  font-size: var(--fs-eyebrow);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-dim);
+  opacity: 0.6;
+  padding: 14px 12px 5px;
+}
+
+.sidebar-footer { font-size: var(--fs-xs); color: var(--text-dim); padding: 8px 12px 0; }
+
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+
+/* The bar floats over the page rather than boxing it in from above, so a hero's
+   artwork runs all the way to the top of the window — the arrangement every
+   commercial streamer uses, because a full-bleed backdrop with a toolbar sitting
+   on top of it is the whole visual. It carries no background of its own until
+   something scrolls underneath, then frosts over. */
+#topbar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 60;
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 28px;
+  background: transparent;
+  border-bottom: 1px solid transparent;
+  transition: background 0.25s ease, border-color 0.25s ease;
+}
+/* No backdrop-filter here, deliberately. A blur over this bar has to re-sample
+   and re-blur the full window width on every frame the page scrolls under it,
+   and WebKitGTK pays far more for that than Chrome does — it was the whole of
+   the "smooth until you scroll" stutter. The bar is 85% opaque on its own,
+   which is enough to separate it from what's passing underneath.
+
+   Transitioning it was worse again: crossing the 4px threshold animated the
+   blur radius over 250ms, re-blurring every frame of the transition.
+
+   If the frosted look is wanted back, blur(8px) costs a fraction of blur(20px)
+   — the expense scales with the radius — but measure before keeping it. */
+#topbar.scrolled {
+  background: var(--topbar-bg);
+  border-bottom-color: var(--border);
+}
+.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.nav-btn:hover { background: var(--bg-hover); border-color: var(--accent); }
+.nav-btn:active { transform: scale(0.92); }
+.nav-btn[hidden] { display: none; }
+.nav-btn svg { width: 20px; height: 20px; display: block; }
+.search-wrap { position: relative; flex: 0 1 420px; display: flex; }
+.search-recent {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0; right: 0;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 6px;
+  z-index: 80;
+  box-shadow: var(--shadow-lg);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.search-recent[hidden] { display: none; }
+.search-recent .sr-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: 1px;
+  color: var(--text-dim);
+  padding: 6px 10px 4px;
+}
+.search-recent .sr-clear { font-size: var(--fs-eyebrow); color: var(--accent); cursor: pointer; }
+.search-recent button.sr-item {
+  display: block; width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: var(--fs-sm);
+}
+.search-recent button.sr-item:hover { background: var(--bg-hover); }
+#search-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  padding: 9px 18px;
+  font: inherit;
+  font-size: var(--fs-base);
+  outline: none;
+  transition: border-color 0.15s;
+}
+#search-input:focus { border-color: var(--accent); }
+#topbar-user { margin-left: auto; color: var(--text-dim); font-size: var(--fs-sm); display: flex; align-items: center; gap: 10px; }
+.avatar {
+  width: 30px; height: 30px; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent);
+  display: grid; place-items: center; font-weight: 700; font-size: var(--fs-sm);
+}
+
+/* Scrolls under the floating top bar, so the first line of a page still starts
+   26px below it. */
+#content { flex: 1; overflow-y: auto; padding: calc(var(--topbar-h) + 26px) 28px 40px; scroll-behavior: smooth; }
+#content.has-player { padding-bottom: calc(var(--player-h) + 40px); }
+
+/* ---------- Login ---------- */
+#login-root {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(1000px 500px at 20% -10%, rgba(139, 92, 246, 0.14), transparent 60%),
+    radial-gradient(800px 500px at 90% 110%, rgba(69, 62, 158, 0.18), transparent 60%),
+    var(--bg);
+}
+.login-card {
+  width: 400px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* The sign-in card is the first thing anyone sees, so it leads with the mark
+   and the wordmark rather than a bare sentence. */
+.login-brand {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  margin-bottom: 4px;
+}
+.login-brand img { display: block; border-radius: 14px; }
+.login-brand .wordmark { font-size: var(--fs-xl); letter-spacing: 0.2px; }
+.login-card h1 { font-size: var(--fs-md); font-weight: 600; color: var(--text-dim); text-align: center; margin-bottom: 6px; }
+.login-card label { font-size: var(--fs-sm); color: var(--text-dim); margin-bottom: -8px; }
+.login-error { color: var(--danger); font-size: var(--fs-sm); min-height: 18px; }
+.login-hint { color: var(--text-dim); font-size: var(--fs-xs); }
+/* Raised when the server only answers over plain HTTP — the sign-in button
+   turns into "Connect anyway" and nothing is sent until it's clicked again. */
+.login-warning {
+  border: 1px solid var(--warn, #d08a2c);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text);
+  background: color-mix(in srgb, var(--warn, #d08a2c) 12%, transparent);
+}
+.login-warning[hidden] { display: none; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: var(--fs-base);
+  /* An icon box is shorter than a line of text, so a button holding only an
+     icon used to come out ~3px shorter than the labelled one next to it.
+     Pinning the line-height and then flooring the box at one line of it makes
+     the two the same height whatever they contain. */
+  line-height: var(--lh-snug);
+  min-height: calc(1.4em + 22px);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  transition: filter 0.12s, background 0.12s;
+  white-space: nowrap;
+}
+.btn:hover { filter: var(--btn-hover-filter); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn.primary { background: var(--accent-strong); border-color: transparent; color: #fff; }
+.btn.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+.btn.small { padding: 6px 12px; font-size: var(--fs-sm); border-radius: 8px; min-height: calc(1.4em + 14px); }
+.btn.icon { padding: 8px 10px; }
+/* Icon-only button beside a labelled one (the episode row's download): square,
+   and the same height as its neighbour rather than a wider slab. */
+.btn.small.icon { padding: 6px 8px; }
+
+/* ---------- Home hero ---------- */
+/* Full-bleed spotlight for whatever the user is most likely to resume. Bleeds
+   past #content's padding, so its margins mirror the padding exactly. */
+.home-hero {
+  position: relative;
+  /* Bleeds past #content's padding on every side, including up behind the
+     floating top bar. */
+  margin: calc(-1 * (var(--topbar-h) + 26px)) -28px 30px;
+  min-height: 516px;
+  display: flex;
+  align-items: flex-end;
+  padding: calc(var(--topbar-h) + 40px) 28px 26px;
+  overflow: hidden;
+}
+.hero-bg {
+  position: absolute; inset: 0;
+  background-size: cover;
+  background-position: center 22%;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+  /* Feathered bottom edge. The scrim below already darkens toward the page
+     colour, but a gradient over an image that stops dead still reads as an
+     image that stops dead; masking the artwork itself is what makes it
+     dissolve. */
+  -webkit-mask-image: linear-gradient(180deg, #000 52%, transparent 97%);
+  mask-image: linear-gradient(180deg, #000 52%, transparent 97%);
+}
+.hero-bg.loaded { opacity: 1; }
+/* Three scrims: down from the top so the floating toolbar stays legible over
+   bright artwork, sideways so the text always has contrast, and upward so the
+   artwork dissolves into the page rather than ending on a hard edge. */
+.home-hero::before {
+  content: "";
+  position: absolute; inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(180deg, var(--hero-scrim-bottom) 0%, transparent 24%),
+    linear-gradient(90deg, var(--hero-scrim-bottom) 0%, var(--hero-scrim-top) 58%, transparent 100%),
+    linear-gradient(0deg, var(--bg) 0%, transparent 60%);
+}
+.home-hero.skeleton { margin: calc(-1 * (var(--topbar-h) + 26px)) -28px 30px; }
+.home-hero.skeleton::before { display: none; }
+.hero-inner {
+  position: relative;
+  z-index: 2;
+  max-width: 744px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.hero-eyebrow {
+  font-size: var(--fs-eyebrow);
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.hero-title { font-size: var(--fs-4xl); line-height: var(--lh-tight); }
+
+/* ---------- Title art ---------- */
+/* The wordmark the studio ships with a title, used in place of typeset text.
+   Hidden until its image has decoded (JS adds .has-logo), so a missing or
+   broken logo leaves the text title standing rather than an empty hero. */
+.title-logo { display: none; }
+.has-logo .title-logo {
+  display: block;
+  max-height: 125px;
+  max-width: min(528px, 100%);
+  object-fit: contain;
+  object-position: left bottom;
+  /* Studio logos are flat white; without a shadow they vanish into a pale
+     patch of backdrop. */
+  filter: drop-shadow(0 3px 16px rgba(0, 0, 0, 0.65));
+}
+.has-logo .title-text { display: none; }
+.detail-title.has-logo .title-logo { max-height: 86px; }
+/* Those same white logos are invisible against the light theme's hero, which
+   is scrimmed toward the page colour rather than toward black. The typeset
+   title comes back instead — and because the swap is CSS, changing theme
+   doesn't need the page re-rendered. */
+:root[data-theme="light"] .has-logo .title-logo { display: none; }
+:root[data-theme="light"] .has-logo .title-text { display: inline; }
+
+/* ---------- Ambient artwork lighting ---------- */
+/* The dominant colour of the backdrop, sampled in ui.ts, bled back out of the
+   bottom of the hero — the artwork lights the page it sits on instead of
+   fading to a neutral grey. Absent (and invisible) when the colour couldn't be
+   read, which is the case whenever the image comes back without CORS headers. */
+.home-hero, .detail-hero {
+  --tint: transparent;
+  --tint-soft: transparent;
+  --tint-faint: transparent;
+}
+.home-hero::after, .detail-hero::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 46%;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(0deg, var(--tint-faint) 0%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.9s ease;
+}
+.home-hero.has-tint::after, .detail-hero.has-tint::after { opacity: 1; }
+.hero-sub { font-size: var(--fs-base); color: var(--text); }
+.hero-meta { font-size: var(--fs-sm); color: var(--text-dim); }
+.hero-progress {
+  height: 4px; max-width: 320px;
+  background: var(--track-empty);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.hero-progress > div { height: 100%; background: var(--accent); }
+.hero-overview {
+  color: var(--text-body);
+  font-size: var(--fs-base);
+  line-height: var(--lh-body);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.hero-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+
+/* ---------- Hero rotator ---------- */
+/* Several spotlights stacked in one frame, one visible at a time. The stage
+   carries the hero's bleed and a fixed height, because every slide is taken out
+   of flow — a stage sized by its contents would resize on each crossfade. */
+.hero-stage {
+  position: relative;
+  margin: calc(-1 * (var(--topbar-h) + 26px)) -28px 30px;
+  height: 516px;
+}
+.hero-stage .home-hero {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  min-height: 0;
+  opacity: 0;
+  /* Not opacity alone: a transparent slide still takes clicks and still holds
+     tab stops, so an invisible hero's Play button would answer the keyboard. */
+  visibility: hidden;
+  transition: opacity 0.7s ease, visibility 0.7s;
+}
+.hero-stage .home-hero.on { opacity: 1; visibility: visible; }
+.hero-dots {
+  position: absolute;
+  right: 30px; bottom: 26px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hero-dots button {
+  width: 8px; height: 8px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--text);
+  opacity: 0.35;
+  transition: opacity 0.2s ease, width 0.3s cubic-bezier(0.22, 0.9, 0.3, 1);
+}
+.hero-dots button:hover { opacity: 0.7; }
+.hero-dots button.on { opacity: 1; width: 22px; }
+
+/* ---------- Sections & cards ---------- */
+.section { margin-bottom: 34px; }
+.section-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  /* The row below carries 12px of its own headroom for the hover lift. */
+  margin-bottom: 2px;
+}
+.section-head h2 { font-size: var(--fs-lg); font-weight: 700; }
+.section-head a, .see-all { color: var(--accent); font-size: var(--fs-sm); cursor: pointer; text-decoration: none; }
+
+.card-row {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  /* Headroom for the hover lift. `overflow-x: auto` computes overflow-y to
+     `auto` as well, so a card that grows past the row's box is clipped —
+     without this padding the whole raise/scale is cropped off at the top. */
+  padding: 12px 6px 8px;
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
+  /* Match the horizontal padding, so a card snapped to the start sits at
+     scrollLeft 0. Without it the first card's 6px inset can't be satisfied at
+     0 and the browser snaps to 6 on its own — which reads as "already
+     scrolled" and lights the left fade and arrow before anything has moved. */
+  scroll-padding: 0 6px;
+}
+.card-row > .card { scroll-snap-align: start; }
+
+/* Scroll affordances for a card row: edge fades showing there's more, and
+   arrow buttons on hover. Both appear only for the direction that can move. */
+.row-wrap { position: relative; }
+.row-wrap::before,
+.row-wrap::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 8px;
+  width: 60px;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.row-wrap::before { left: -1px; background: linear-gradient(90deg, var(--bg), transparent); }
+.row-wrap::after { right: -1px; background: linear-gradient(270deg, var(--bg), transparent); }
+.row-wrap.can-prev::before,
+.row-wrap.can-next::after { opacity: 1; }
+
+.row-nav {
+  position: absolute;
+  top: 41%;
+  transform: translateY(-50%);
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  display: grid; place-items: center;
+  z-index: 3;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  box-shadow: var(--shadow);
+}
+.row-nav svg { width: 18px; height: 18px; display: block; }
+/* A dead direction: invisible, and out of the way of the card beneath it. */
+.row-nav:disabled { pointer-events: none; }
+.row-nav:hover { background: var(--bg-hover); border-color: var(--accent); }
+.row-nav.prev { left: -6px; }
+.row-nav.next { right: -6px; }
+.row-wrap.can-prev:hover .row-nav.prev,
+.row-wrap.can-next:hover .row-nav.next,
+.row-wrap.can-prev:focus-within .row-nav.prev,
+.row-wrap.can-next:focus-within .row-nav.next,
+.row-nav:focus-visible { opacity: 1; }
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  gap: 18px 14px;
+}
+
+/* ---------- Library filter bar ---------- */
+.lib-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+/* A page title sharing its line with a count or a control group carries its
+   spacing on the row, not on itself. */
+.lib-head h1.page-title { margin-bottom: 0; }
+.lib-count { font-size: var(--fs-sm); color: var(--text-dim); }
+/* Right-aligned button cluster in a breadcrumb or heading row. */
+.row-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+/* Controls that sit beside a page title (sync pill, concurrency picker…). */
+.head-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.clickable { cursor: pointer; }
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.filter-bar .btn.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+/* One definition for every select and text field in the app. The library sort
+   dropdown, the downloads concurrency picker and the settings dropdowns used to
+   be three near-identical controls with three separate definitions and subtly
+   different padding — this is all of them.
+   `--control-bg` lets a control sit on a raised surface (settings blocks, the
+   login card) and still read as recessed rather than disappearing into it. */
+.control {
+  background: var(--control-bg, var(--bg-raised));
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  outline: none;
+}
+.control:focus { border-color: var(--accent); }
+.control[hidden] { display: none; }
+/* Size variants: `md` for settings rows, `lg` for the login form's fields. */
+.control.md { padding: 8px 10px; font-size: var(--fs-base); min-width: 200px; }
+.control.lg { padding: 11px 14px; font-size: var(--fs-md); border-radius: 10px; }
+.load-more { text-align: center; margin-top: 24px; }
+
+.card { width: 158px; flex-shrink: 0; cursor: pointer; }
+/* A 16:9 still cropped to a poster's width is a thumbnail — too small to read
+   the frame, which is the only reason to show a still rather than a poster.
+   Continue Watching and Next Up are the rows the eye lands on first. */
+.card.wide { width: 268px; }
+.card-grid .card { width: auto; }
+.card-poster {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-hover);
+  /* Overshooting ease: the card settles into place rather than arriving on a
+     linear ramp. It's the difference between "an element with a transition"
+     and the weighted focus movement a living-room app has. */
+  transition: transform 0.34s cubic-bezier(0.16, 0.84, 0.34, 1.06), box-shadow 0.34s ease;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.card.wide .card-poster { aspect-ratio: 16 / 9; }
+/* Focus gets the same treatment as hover: a keyboard user is "on" a card in
+   exactly the same sense a pointer user is. */
+.card:hover .card-poster,
+.card:focus-visible .card-poster {
+  transform: translateY(-6px) scale(1.03);
+  box-shadow: var(--shadow-lg), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+.card-title, .card-sub { transition: color 0.18s ease; }
+.card:hover .card-sub { color: var(--text-body); }
+.card-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Artwork fades in as it decodes instead of snapping into place. */
+img.art { opacity: 0; transition: opacity 0.25s ease; }
+img.art.loaded { opacity: 1; }
+/* When the server gave us a BlurHash there is nothing to fade in *from*: the
+   decoded hash is already the artwork's own colours in roughly the right
+   places, painted as the element's background. An <img> renders nothing until
+   it has decoded, so the background is what shows through the gap, and the real
+   image lands on top of a picture that already looks like it. Fading here would
+   only fade the placeholder out along with everything else. */
+img.art.has-ph {
+  opacity: 1;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.card-poster .noart {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  color: var(--text-dim); font-size: var(--fs-3xl); font-weight: 700;
+  background: var(--noart-bg);
+}
+.card-title { margin-top: 8px; font-size: var(--fs-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-sub { font-size: var(--fs-xs); color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Bottom furniture on a poster: how far in you are and how much is left. Both
+   sit on their own scrim, because the artwork underneath is as likely to be a
+   white snowfield as a night exterior. */
+.card-scrim {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 48%;
+  pointer-events: none;
+  background: linear-gradient(0deg, rgba(8, 8, 14, 0.85) 0%, rgba(8, 8, 14, 0.45) 42%, transparent 100%);
+}
+.time-left {
+  position: absolute; left: 10px; bottom: 15px;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #ececf4;
+  pointer-events: none;
+}
+/* Inset and rounded rather than edge-to-edge: it reads as a control on the
+   artwork instead of a hairline cropped off the bottom of it. */
+.progress-strip {
+  position: absolute; left: 10px; right: 10px; bottom: 8px;
+  height: 3px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.3);
+}
+.progress-strip > div { height: 100%; border-radius: 3px; background: var(--accent); }
+
+/* Badges/overlays ride on top of poster artwork, so they keep a dark scrim
+   and light text in both themes. */
+.badge {
+  position: absolute; top: 8px; right: 8px;
+  display: inline-flex; align-items: center; gap: 4px;
+  background: rgba(14, 14, 20, 0.85);
+  color: #ececf4;
+  border-radius: 7px;
+  padding: 3px 8px;
+  font-size: var(--fs-eyebrow);
+  font-weight: 700;
+}
+/* Icon-only badge: square rather than a pill with nothing in it. */
+.badge.played { color: var(--ok); padding: 4px; border-radius: 8px; }
+
+.play-overlay {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  opacity: 0;
+  background: rgba(10, 10, 16, 0.45);
+  transition: opacity 0.15s;
+}
+/* Hover was the only way to reach these: a keyboard user could tab to the play
+   button but never see it. Focus anywhere inside the card reveals it too. */
+.card:hover .play-overlay,
+.card:focus-visible .play-overlay,
+.card:focus-within .play-overlay { opacity: 1; }
+.play-overlay .pbtn {
+  width: 46px; height: 46px; border-radius: 50%;
+  background: var(--accent-strong); color: #fff;
+  display: grid; place-items: center;
+}
+/* The triangle's optical centre sits left of its bounding box. */
+.play-overlay .pbtn .ico { margin-left: 2px; }
+
+/* ---------- Detail view ---------- */
+.detail-hero {
+  position: relative;
+  margin: calc(-1 * (var(--topbar-h) + 26px)) -28px 24px;
+  padding: calc(var(--topbar-h) + 42px) 28px 26px;
+}
+/* The frame the backdrop moves inside. The clip can't go on the hero itself:
+   the Quality and Download menus open inside it and would be cut off. */
+.detail-backdrop-clip {
+  position: absolute; inset: 0; z-index: 0;
+  overflow: hidden;
+}
+/* The backdrop is its own layer so it can fade in once decoded — a 1600px
+   still snapping in behind the text is the most visible pop-in in the app —
+   and so it can be moved independently for the parallax. The vertical slack is
+   what it travels through; without it the drift would expose the frame edge. */
+.detail-backdrop {
+  position: absolute; inset: -110px 0; z-index: 0;
+  will-change: transform;
+  background-size: cover;
+  background-position: center 20%;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+}
+.detail-backdrop.loaded { opacity: 1; }
+.detail-hero::before {
+  content: "";
+  position: absolute; inset: 0; z-index: 1;
+  /* Starts at the heavier scrim so the floating toolbar has something to sit
+     on, then eases to the lighter one over the poster and the title. */
+  background: linear-gradient(180deg, var(--hero-scrim-bottom) 0%, var(--hero-scrim-top) 20%, var(--hero-scrim-bottom) 78%, var(--bg) 100%);
+}
+.detail-inner { position: relative; z-index: 2; display: flex; gap: 28px; }
+.detail-poster {
+  position: relative;
+  width: 210px; flex-shrink: 0;
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  background: var(--bg-hover);
+  transition: box-shadow 0.9s ease;
+}
+/* The poster casts light in its own colour once the tint has been read. */
+.detail-hero.has-tint .detail-poster {
+  box-shadow: 0 20px 60px var(--tint-soft), var(--shadow-lg), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.detail-poster img { width: 100%; height: 100%; object-fit: cover; }
+.detail-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; padding-top: 8px; }
+.detail-info h1 { font-size: var(--fs-3xl); line-height: var(--lh-tight); }
+.detail-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--text-dim); font-size: var(--fs-sm); align-items: center; }
+.detail-meta .chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: var(--fs-xs);
+}
+/* Community rating: the star is the accent, the number stays body text. */
+.meta-rating { display: inline-flex; align-items: center; gap: 5px; }
+.meta-rating .ico { color: var(--warn); }
+.detail-overview { color: var(--text-body); line-height: var(--lh-body); max-width: 780px; font-size: var(--fs-base); }
+.detail-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; position: relative; }
+/* "Next up · S1E1 — Pilot" above a series' play button. */
+.detail-nextup { font-size: var(--fs-sm); color: var(--text-dim); }
+.detail-nextup strong { color: var(--text); font-weight: 600; }
+
+/* Credits, then what the file on the server actually is. Two quiet lines: the
+   page's job is still the artwork and the play button. */
+.detail-crew { font-size: var(--fs-sm); color: var(--text-dim); }
+.detail-source {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  letter-spacing: 0.2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Cast ---------- */
+.person-card {
+  width: 112px;
+  flex-shrink: 0;
+  cursor: pointer;
+  text-align: center;
+  scroll-snap-align: start;
+}
+.person-photo {
+  position: relative;
+  width: 92px; height: 92px;
+  margin: 0 auto 9px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--bg-hover);
+  transition: transform 0.34s cubic-bezier(0.16, 0.84, 0.34, 1.06), box-shadow 0.34s ease;
+}
+.person-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.person-card:hover .person-photo,
+.person-card:focus-visible .person-photo {
+  transform: translateY(-4px) scale(1.04);
+  box-shadow: var(--shadow-lg);
+}
+.person-card .noart { font-size: var(--fs-lg); }
+.person-name {
+  font-size: var(--fs-sm); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.person-role {
+  font-size: var(--fs-xs); color: var(--text-dim); margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* ---------- Page motion ---------- */
+/* Two arrivals, both small. A route change fades the page up rather than
+   swapping it, and each section rises as its own request lands — a home page
+   whose rows appear one at a time reads as a page being built, where the same
+   rows appearing instantly read as the layout jumping. */
+#content.view-in { animation: view-in 0.32s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+@keyframes view-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.section { animation: section-in 0.42s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+@keyframes section-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .person-card:hover .person-photo,
+  .person-card:focus-visible .person-photo,
+  .card:hover .card-poster,
+  .card:focus-visible .card-poster { transform: none; }
+  #content.view-in,
+  .section { animation: none; }
+  .hero-bg, .detail-backdrop { transition: none; }
+}
+
+/* Dropdown menu */
+.menu-wrap { position: relative; display: inline-block; }
+.menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 220px;
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 6px;
+  z-index: 60;
+  box-shadow: var(--shadow-lg);
+}
+/* Menu entries carry a leading icon and, on a submenu, a trailing chevron, so
+   they're a three-slot row rather than a block of text. Entries without an icon
+   still line up: `.menu-gutter` is an empty box the same width. */
+.menu button {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: var(--fs-sm);
+}
+.menu button > .menu-text { flex: 1; min-width: 0; }
+/* Trailing chevron on a submenu row — the only icon that can be last. */
+.menu button > .ico:last-child { color: var(--text-dim); }
+.menu .menu-gutter { width: 1.15em; flex-shrink: 0; }
+.menu button:hover { background: var(--bg-hover); }
+.menu button.danger { color: var(--danger); }
+.menu-back { color: var(--text-dim); font-size: var(--fs-xs) !important; }
+/* Card menus float above clipping ancestors (posters, scrolling rows). */
+.menu-fixed { position: fixed; right: auto; bottom: auto; z-index: 90; }
+.menu .menu-label { font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); padding: 8px 12px 4px; }
+
+/* Episode list */
+.ep-row {
+  display: flex; gap: 16px;
+  padding: 12px;
+  border-radius: var(--radius);
+  transition: background 0.12s;
+  align-items: center;
+  cursor: pointer;
+}
+.ep-row:hover { background: var(--bg-raised); }
+/* Watched episodes step back rather than wearing a badge. In a season list the
+   badge is on nearly every row, which makes it decoration; dimming the ones
+   behind you leaves the eye on the one you haven't seen. */
+.ep-row.watched .ep-thumb,
+.ep-row.watched .ep-body h4 { opacity: 0.55; }
+.ep-row.watched:hover .ep-thumb,
+.ep-row.watched:hover .ep-body h4 { opacity: 1; }
+.ep-row.watched .ep-body h4 .ico { color: var(--ok); opacity: 0.9; margin-left: 7px; }
+.ep-thumb {
+  position: relative;
+  width: 200px; flex-shrink: 0;
+  aspect-ratio: 16 / 9;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--bg-hover);
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.ep-thumb img { width: 100%; height: 100%; object-fit: cover; }
+/* Same play affordance the cards have, so a thumbnail that starts playback
+   looks like one. */
+.ep-row:hover .play-overlay,
+.ep-row:focus-visible .play-overlay,
+.ep-row:focus-within .play-overlay { opacity: 1; }
+.ep-thumb .play-overlay .pbtn { width: 40px; height: 40px; }
+.ep-body { flex: 1; min-width: 0; }
+.ep-body h4 { font-size: var(--fs-base); margin-bottom: 4px; display: flex; align-items: center; }
+.ep-body p {
+  font-size: var(--fs-sm); color: var(--text-dim); line-height: var(--lh-snug);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ep-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.season-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+.season-tabs .btn.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.season-actions { display: flex; justify-content: flex-end; margin-bottom: 12px; position: relative; }
+
+/* ---------- Live TV ---------- */
+.channel-row {
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  transition: background 0.12s;
+}
+.channel-row:hover { background: var(--bg-raised); }
+.channel-logo {
+  width: 72px; height: 44px; flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--bg-hover);
+  display: grid; place-items: center;
+  overflow: hidden;
+  font-weight: 700; color: var(--text-dim);
+}
+.channel-logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.channel-body { flex: 1; min-width: 0; }
+.channel-body h4 { font-size: var(--fs-base); }
+.channel-body p { font-size: var(--fs-xs); color: var(--text-dim); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-dot { display: inline-block; width: 7px; height: 7px; background: var(--danger); border-radius: 50%; margin-right: 6px; }
+
+/* ---------- TV Guide ---------- */
+/* A schedule grid: time runs left to right at a fixed scale, one lane per
+   channel. Both axes scroll inside .guide-scroll rather than on the page, which
+   is what lets the time header stick to the top and the channel column stick to
+   the left — an EPG where either can scroll out of sight stops being readable
+   the moment you move away from the corner. */
+.guide { --guide-ch-w: 190px; --guide-row-h: 58px; margin-top: 4px; }
+.guide.busy { opacity: 0.55; pointer-events: none; transition: opacity 0.15s; }
+.guide-note { color: var(--text-dim); font-size: var(--fs-sm); margin-bottom: 14px; max-width: 62ch; }
+
+.guide-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.guide-range { font-size: var(--fs-sm); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.guide-scroll {
+  overflow: auto;
+  max-height: calc(100vh - var(--topbar-h) - 190px);
+  min-height: 340px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  overscroll-behavior: contain;
+}
+#content.has-player .guide-scroll { max-height: calc(100vh - var(--topbar-h) - var(--player-h) - 190px); }
+/* Sized by its content so the sticky channel column has a row wider than the
+   viewport to stick inside of. */
+.guide-body { position: relative; width: max-content; min-width: 100%; }
+
+.guide-head { position: sticky; top: 0; z-index: 3; display: flex; background: var(--bg-raised); }
+.guide-corner {
+  position: sticky; left: 0; z-index: 4;
+  flex: 0 0 var(--guide-ch-w); width: var(--guide-ch-w);
+  display: flex; align-items: center;
+  padding: 0 14px;
+  height: 34px;
+  background: var(--bg-raised);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: 1px;
+  color: var(--text-dim); font-weight: 700;
+}
+.guide-times { position: relative; width: var(--lane-w); height: 34px; border-bottom: 1px solid var(--border); }
+.guide-tick {
+  position: absolute; top: 0; height: 34px;
+  display: flex; align-items: center;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  font-size: var(--fs-xs); color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.guide-row { display: flex; height: var(--guide-row-h); }
+.guide-ch {
+  position: sticky; left: 0; z-index: 2;
+  flex: 0 0 var(--guide-ch-w); width: var(--guide-ch-w);
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 12px;
+  background: var(--bg-raised);
+  border: none;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.guide-ch:hover { background: var(--bg-hover); }
+.guide-ch .channel-logo { width: 46px; height: 30px; border-radius: 6px; font-size: var(--fs-xs); }
+.guide-ch-text { display: flex; flex-direction: column; min-width: 0; }
+.guide-ch-num { font-size: var(--fs-micro); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.guide-ch-name { font-size: var(--fs-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.guide-lane { position: relative; width: var(--lane-w); border-bottom: 1px solid var(--border); }
+.guide-prog {
+  position: absolute; top: 3px; bottom: 4px;
+  display: flex; flex-direction: column; justify-content: center; gap: 2px;
+  overflow: hidden;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.guide-prog:hover { background: var(--bg-hover); border-color: var(--accent); }
+/* What's on right now, which is the only row anyone scans for on arrival. */
+.guide-prog.on-now { background: var(--accent-soft); border-color: transparent; }
+.guide-prog.on-now:hover { border-color: var(--accent); }
+.guide-prog-title { font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.guide-prog-sub { font-size: var(--fs-micro); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.guide-gap {
+  position: absolute; inset: 3px 0 4px 0;
+  display: flex; align-items: center;
+  padding: 0 12px;
+  font-size: var(--fs-xs); color: var(--text-dim);
+}
+
+/* Scrolls with the schedule, spans every lane. Sits under the sticky column
+   and header so it can't be mistaken for a border on either. */
+.guide-now {
+  position: absolute;
+  top: 34px; bottom: 0;
+  width: 2px;
+  margin-left: var(--guide-ch-w);
+  background: var(--danger);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.guide-dlg-when { color: var(--text-dim); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.guide-dlg-ep { font-size: var(--fs-sm); font-weight: 600; margin-top: 4px; }
+.guide-dlg-badges { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+.guide-badge {
+  font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 700;
+  padding: 3px 7px; border-radius: 5px;
+  background: var(--bg-hover); color: var(--text-dim);
+}
+
+/* ---------- Downloads ---------- */
+.dl-row {
+  display: flex; gap: 16px; align-items: center;
+  padding: 13px 14px;
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+.dl-poster { position: relative; width: 52px; aspect-ratio: 2/3; border-radius: 7px; overflow: hidden; background: var(--bg-hover); flex-shrink: 0; }
+.dl-poster img { width: 100%; height: 100%; object-fit: cover; }
+/* Compact watched ✓ / progress overlay on the small download posters. */
+.dl-poster .badge { top: 3px; right: 3px; padding: 3px; font-size: var(--fs-micro); border-radius: 6px; }
+.dl-poster .progress-strip { height: 3px; }
+.dl-body { flex: 1; min-width: 0; }
+.dl-body h4 { font-size: var(--fs-base); }
+.dl-body .dl-sub { font-size: var(--fs-xs); color: var(--text-dim); margin-top: 3px; }
+.dl-bar {
+  height: 5px; border-radius: 4px;
+  background: var(--bg-hover);
+  margin-top: 8px; overflow: hidden;
+}
+.dl-bar > div { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.3s; }
+.dl-actions { display: flex; gap: 6px; }
+.sync-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--fs-xs); color: var(--text-dim);
+  border: 1px solid var(--border);
+  padding: 4px 10px; border-radius: 999px;
+}
+.dl-concurrency-wrap {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--fs-xs); color: var(--text-dim);
+}
+#offline-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: var(--fs-xs); font-weight: 600; color: var(--warn);
+  border: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+  padding: 4px 6px 4px 12px; border-radius: 999px;
+  white-space: nowrap;
+}
+#offline-pill[hidden] { display: none; }
+.offline-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--warn);
+  /* No pulse: see .foot-dot above for what a perpetual animation costs. The
+     pill is up for as long as the machine is offline, which is exactly when
+     it's most likely to be on battery. */
+}
+.offline-screen {
+  max-width: 460px; margin: 10vh auto 0; text-align: center;
+}
+.offline-screen p { color: var(--text-dim); line-height: var(--lh-body); margin: 14px 0 26px; }
+.offline-actions { display: flex; gap: 10px; justify-content: center; }
+.dl-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0 20px; }
+.dl-tabs .btn.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.dl-tab-count {
+  display: inline-block; margin-left: 6px;
+  font-size: var(--fs-eyebrow); font-weight: 700;
+  opacity: 0.7;
+}
+.dl-tabs .btn.active .dl-tab-count { opacity: 1; }
+.dl-pane .season-group {
+  font-size: var(--fs-base); font-weight: 700; color: var(--text-dim);
+  margin: 22px 0 12px;
+}
+.dl-pane .season-group:first-child { margin-top: 0; }
+/* A group heading with its bulk action parked on the right ("Retry all"). The
+   heading keeps its own margins so the group spacing matches the plain ones. */
+.dl-pane .dl-group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dl-pane .dl-group-head:first-child .season-group { margin-top: 0; }
+.dl-pane .dl-group-head .season-group { flex: 1; }
+.lib-crumb { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; font-size: var(--fs-md); font-weight: 600; }
+.lib-crumb a { color: var(--accent); cursor: pointer; }
+.queue-pos { font-size: var(--fs-xs); color: var(--text-dim); align-self: center; }
+.dl-del-badge {
+  position: absolute; top: 6px; right: 6px;
+  width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1;
+  background: rgba(0, 0, 0, 0.55); color: #fff;
+  border: none; cursor: pointer; opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+.card:hover .dl-del-badge,
+.card:focus-visible .dl-del-badge,
+.card:focus-within .dl-del-badge { opacity: 1; }
+.dl-del-badge:hover { background: var(--danger); }
+
+/* Shuffle sits top-left so it never collides with the ✓ / delete badges. */
+.dl-shuffle-badge {
+  position: absolute; top: 6px; left: 6px;
+  width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1;
+  background: rgba(0, 0, 0, 0.55); color: #fff;
+  border: none; cursor: pointer; opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+.card:hover .dl-shuffle-badge,
+.card:focus-visible .dl-shuffle-badge,
+.card:focus-within .dl-shuffle-badge { opacity: 1; }
+.dl-shuffle-badge:hover { background: var(--accent-strong); }
+
+/* ---------- Settings ---------- */
+.settings-block {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px;
+  margin-bottom: 16px;
+  max-width: 660px;
+}
+.settings-block h3 { font-size: var(--fs-md); margin-bottom: 12px; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0; }
+.settings-row .lbl { font-size: var(--fs-base); }
+.settings-row .sub { font-size: var(--fs-xs); color: var(--text-dim); margin-top: 2px; }
+/* Rows that only apply while one particular choice is selected — the M3U and
+   XMLTV addresses under the Live TV source picker. Indented and ruled so they
+   read as belonging to the row above rather than as siblings of it. */
+.settings-sub {
+  border-left: 2px solid var(--border);
+  padding-left: 14px;
+  margin: 4px 0 4px 2px;
+}
+/* Long addresses need the room; the fixed-width `.control.md` used elsewhere on
+   this page would show about a third of a playlist URL. */
+.settings-sub .control.lg { min-width: 0; width: 320px; max-width: 100%; }
+/* A slider and the number it's currently at. Given the same width as the
+   `.control.md` selects in the rows above and below, so the right-hand edge of
+   the page stays a straight line. */
+.settings-slider { display: flex; align-items: center; gap: 12px; min-width: 200px; flex-shrink: 0; }
+.settings-slider .settings-range { flex: 1; }
+.settings-value {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  min-width: 54px;
+  text-align: right;
+}
+/* Controls inside a raised block are recessed, not raised again. */
+.settings-block, .login-card { --control-bg: var(--bg); }
+.about-row { display: flex; align-items: center; gap: 16px; }
+.about-row img { display: block; border-radius: 12px; flex-shrink: 0; }
+.about-name { display: flex; align-items: baseline; gap: 8px; }
+.about-name .wordmark { font-size: var(--fs-lg); }
+.about-version { font-size: var(--fs-xs); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.sync-pill.ok { color: var(--ok); border-color: rgba(52, 211, 153, 0.35); }
+.sync-pill.warn { color: var(--warn); border-color: var(--warn-border); background: var(--warn-bg); }
+
+/* ---------- Player bar ---------- */
+/* It sits over video, whose colours never follow the app's own light/dark
+   setting — the same reasoning the top-of-file comment already gives for
+   badges and poster scrims. --player-bg/--player-icon(-hover) were already
+   pinned per-theme (see :root above); the rest of the bar reused general
+   theme tokens, which is what let the light theme turn it white. Pinning
+   those same tokens to their dark values here, scoped to the bar's own
+   subtree, cascades to every descendant — panels, the scrubber, any menu —
+   without touching the rest of the app. */
+#player-bar {
+  --text: #ececf4;
+  --text-dim: #9a9ab0;
+  --bg-hover: #1e1e2a;
+  --border: #262635;
+  --btn-hover-filter: brightness(1.15);
+  --track-empty: #34344a;
+  --track-buffer: #4d4d68;
+  --scrub-thumb: #fff;
+  /* The bar sits over video and stays dark in both themes (the vars above),
+     but `color` itself isn't one of them — it's a real property, not a custom
+     one, and without this line it keeps whatever `body` resolved it to. In
+     dark theme that's already this same light shade, so the bug was invisible
+     there; in light theme `body`'s colour is near-black, and everything below
+     that only sets its own colour via `--text`/`--text-dim` (most of the
+     title, the plain buttons in the quality/audio/subtitle panels, and more)
+     rendered as near-black text on this bar's always-dark background. Setting
+     it here, once, is what every descendant's `color: inherit` or bare
+     `var(--text)` actually needed. */
+  color: var(--text);
+
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  height: var(--player-h);
+  background: var(--player-bg);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 20px;
+  z-index: 100;
+}
+/* Player-bar panels (quality, speed/subtitle delay) overlay the bar itself —
+   the only place guaranteed not to be covered by the embedded X11 video. */
+.pb-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  background: var(--player-bg);
+  overflow-x: auto;
+}
+.pb-panel-label {
+  font-size: var(--fs-eyebrow);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.pb-panel-label:not(:first-child) { margin-left: 10px; }
+.pb-panel-note { color: var(--text-dim); font-size: var(--fs-sm); }
+.pb-panel-value {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  min-width: 46px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.pb-panel .btn { flex-shrink: 0; }
+.pb-panel .pb-panel-close { margin-left: auto; }
+/* Sliders inside a bar panel: the strip is one row high and holds several of
+   them, so each gets a fixed, deliberately small track. The panel scrolls
+   sideways when the window is too narrow for all of them. */
+.pb-panel .pb-range.pb-mini { width: 82px; flex-shrink: 0; }
+.pb-panel .pb-panel-value { min-width: 38px; }
+
+/* Fullscreen: the bar snaps in and out of the bottom edge rather than sliding.
+   It used to animate the transform over 0.2s, but the backend's re-clip of the
+   video window (see the comment on `fsSetBar` in main.ts) is a separate async
+   call racing that same 0.2s — so for a chunk of every reveal/hide the bar was
+   partway through its slide while the video strip underneath was still (or
+   already) un-clipped, and whatever the app had drawn there — the page behind
+   the player — flashed through. Snapping instead of animating collapses that
+   window to nothing. */
+#player-bar.fs {
+  border-top: none;
+  transform: translateY(100%);
+}
+#player-bar.fs.revealed { transform: none; }
+
+/* Fullscreen playback's safety backdrop — see the comment on the `video-fs`
+   toggle in setVideoFullscreen(). The video surface is a native window that
+   always paints over this; it only ever shows through for the instant the
+   bottom bar-strip is being clipped or unclipped, and that instant should
+   read as black, not as whatever page was open underneath.
+
+   Blacking out the *backgrounds* was not enough, and the strip is the worst
+   possible place to be one short. The sidebar footer — the app icon and the
+   `Aquarium v…` line — sits at the bottom-left of the window, which is
+   precisely the strip being un-clipped, and text and images are not
+   backgrounds: they went on painting over the black and flashed the wordmark
+   through on every hide. Hiding the whole shell instead covers every kind of
+   pixel it can draw, backgrounds and content alike, for as long as fullscreen
+   playback owns the window.
+
+   `visibility`, not `display`: the shell keeps its layout and its scroll
+   positions, so leaving fullscreen returns to the row the user left rather
+   than to the top of the page. #player-bar and #toasts are siblings of #shell,
+   not children, so both go on drawing — the bar is the whole point of the
+   strip. */
+body.video-fs { background: #000; }
+body.video-fs #sidebar { background: #000; }
+body.video-fs #shell { visibility: hidden; }
+
+/* Given a height of its own rather than taking its content's: the frame preview
+   and the Up Next card both overlay this slot, and both need room to sit in. */
+#player-bar .pb-title {
+  flex: 0 1 260px;
+  min-width: 90px;
+  height: 56px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+/* Nothing may spill outside the bar: everything above it is video. */
+#player-bar { overflow: hidden; }
+
+/* The window can be dragged down to 900px, which is narrower than everything in
+   the bar laid side by side. Two things give way, in order of what's least
+   missed: the volume slider (the mute button and the arrow keys both cover it)
+   and then the title, which the window title bar shows anyway. */
+@media (max-width: 1180px) {
+  #player-bar .pb-vol .pb-range { display: none; }
+}
+@media (max-width: 1020px) {
+  #player-bar .pb-title { display: none; }
+  /* Unless it's carrying the Up Next card, which for those twenty seconds is
+     the most useful thing in the bar. */
+  #player-bar.upnext .pb-title { display: flex; }
+}
+
+/* ---------- Scrubber frame preview ---------- */
+/* The frame under the pointer, shown in the title slot. It belongs above the
+   scrubber, next to the pointer — but the embedded X11 video owns every pixel
+   above this bar, so a bubble tall enough to hold a thumbnail would be sliced
+   off at the bar's top edge. Inside the bar it is always fully visible, in
+   fullscreen as well as windowed. */
+.pb-preview {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--player-bg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.pb-preview.on { opacity: 1; }
+.pb-preview-img {
+  width: 104px; height: 56px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  background: #000 no-repeat center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+.pb-preview-time {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* ---------- Skip intro / credits ---------- */
+/* Takes no space at all until there's something to skip, so the bar's layout
+   doesn't hold a gap open for a button that appears twice an episode. */
+.pb-skip { display: none; flex-shrink: 0; white-space: nowrap; }
+.pb-skip.on { display: inline-flex; }
+/* Credits sequences and the Up Next card overlap by design — the credits are
+   exactly when the next episode is being offered. Two buttons that both mean
+   "move on" is one too many, and the card's Play is the better of them. */
+#player-bar.upnext .pb-skip { display: none; }
+
+/* ---------- Up Next ---------- */
+/* Over the picture is where this belongs and is exactly where it can't go, so
+   it takes the title slot instead — the same slot as the frame preview. Sharing
+   a slot rather than being inserted into the bar means the transport controls
+   and the scrubber never move when it appears, which matters when it appears
+   during the seconds you're most likely to be reaching for them. */
+.pb-upnext {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 6px 6px 11px;
+  border-radius: 10px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+}
+.pb-upnext.on { display: flex; }
+/* Hold the slot at full width while the card is up — and wider than the plain
+   title slot ever gets, since a countdown label plus a show/episode name in
+   13px type was unreadable at a couch distance. */
+#player-bar.upnext .pb-title { flex: 0 0 340px; min-width: 340px; }
+.pb-upnext-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.pb-upnext-when {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pb-upnext-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pb-upnext .btn { flex-shrink: 0; }
+/* Series (or the item's own name) — bold, one line, ellipsised. Right-padded
+   by the same amount whether or not #pb-state is currently showing, so a
+   Paused/Buffering badge appearing never shifts where the text truncates. */
+#player-bar .pb-title h5 {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 50px;
+}
+/* Season/episode underneath, quieter than the title above it. */
+.pb-subtitle {
+  font-size: var(--fs-eyebrow);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 50px;
+}
+/* A transient status (Paused, Buffering…, a speed change) rather than a third
+   permanent line — it only takes up room while there's something to say, so
+   the steady-state title stays exactly the two lines above it. */
+#pb-state {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: var(--fs-eyebrow);
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  padding: 2px 7px;
+  border-radius: 6px;
+  pointer-events: none;
+}
+#pb-state:empty { display: none; }
+#player-bar .pb-controls { display: flex; align-items: center; gap: 2px; }
+/* The transport buttons are round, sized by their own padding — the shared
+   min-height would stretch them into ellipses. */
+#player-bar .btn { min-height: 0; }
+#player-bar .btn.icon {
+  border: none;
+  background: transparent;
+  padding: 9px;
+  border-radius: 50%;
+  color: var(--player-icon);
+  transition: background 0.12s, color 0.12s, transform 0.08s;
+}
+#player-bar .btn.icon:hover { background: var(--bg-hover); color: var(--player-icon-hover); }
+#player-bar .btn.icon:active { transform: scale(0.92); }
+#player-bar .btn.icon svg { width: 20px; height: 20px; display: block; }
+#pb-playpause {
+  background: var(--accent-strong);
+  color: #fff;
+  margin: 0 4px;
+}
+#pb-playpause:hover { background: var(--accent); color: #fff; }
+/* A toggle that is currently on — picture in picture, so far. Filled rather
+   than outlined: while the video is out in its own window this button is the
+   way back, and it has to read as held down, not as one more thing to try. */
+#player-bar .btn.icon.on { background: var(--accent-strong); color: #fff; }
+#player-bar .btn.icon.on:hover { background: var(--accent); color: #fff; }
+/* Exit button: bordered so it reads as "leave the player", not a transport control */
+#player-bar #pb-exit {
+  border: 1px solid var(--border);
+  margin-right: 4px;
+  flex: 0 0 auto;
+}
+#player-bar #pb-exit:hover { background: var(--bg-hover); border-color: var(--accent); color: var(--player-icon-hover); }
+
+.pb-seek { flex: 1; display: flex; align-items: center; gap: 12px; font-size: var(--fs-xs); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+/* Live channels: there is no position to report and nothing to seek to, so the
+   scrubber, both clocks and the skip buttons come out and a badge takes their
+   place. A scrubber over a stream with no end is a control that lies. */
+.pb-live {
+  display: none;
+  align-items: center;
+  font-size: var(--fs-eyebrow);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+  color: var(--danger);
+}
+#player-bar.live .pb-live { display: inline-flex; }
+#player-bar.live .pb-scrub,
+#player-bar.live #pb-pos,
+#player-bar.live #pb-dur,
+#player-bar.live #pb-back,
+#player-bar.live #pb-fwd { display: none; }
+
+/* The scrubber and the two things drawn against it: chapter marks, and the
+   time readout that follows the pointer. Both need a positioned box around the
+   <input>, which can't host children of its own. */
+.pb-scrub { position: relative; flex: 1; display: flex; align-items: center; min-width: 80px; }
+.pb-chapters {
+  position: absolute;
+  left: 0; right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 5px;
+  pointer-events: none;
+  z-index: 1;
+}
+.pb-chapters i {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--bg);
+  opacity: 0.85;
+}
+/* Time under the pointer. Deliberately one short line: in fullscreen the
+   embedded video covers everything above the bar, so a taller bubble would be
+   sliced off at the bar's top edge. At this height it clears the scrubber and
+   still sits inside the bar. */
+.pb-tip {
+  position: absolute;
+  bottom: calc(100% + 1px);
+  transform: translateX(-50%);
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  box-shadow: var(--shadow);
+  z-index: 5;
+}
+.pb-scrub:hover .pb-tip { opacity: 1; }
+/* Chapter name, when the media has named chapters — inline, and clipped, so
+   the bubble stays one line however long the chapter is called. */
+.pb-tip b {
+  font-weight: 600;
+  margin-right: 6px;
+  display: inline-block;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* Volume: icon plus a short slider, sharing the scrubber's look. Inline in the
+   bar rather than in a popover — in fullscreen the bar is the only HTML the
+   embedded video doesn't cover, so a hover-out flyout would be unreachable. */
+.pb-vol { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.pb-vol .pb-range { width: 84px; flex: 0 0 84px; }
+.pb-vol .pb-range.muted { opacity: 0.45; }
+
+/* One scrubber definition, used by the seek bar and the volume slider: slim
+   filled track that grows on hover, thumb fades in. */
+.pb-range {
+  --fill: 0%;
+  /* End of the buffered region. Defaults to --fill so a control with nothing
+     to report (the volume slider, a local file) draws the plain two-tone
+     track it always did. */
+  --buffered: var(--fill);
+  flex: 1;
+  position: relative;
+  z-index: 2;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+  margin: 0;
+}
+.pb-range::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  /* Three zones: played, buffered-but-unplayed, and nothing yet. The middle
+     one is what tells you whether a stall is the network or the server. */
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) var(--fill),
+    var(--track-buffer) var(--fill),
+    var(--track-buffer) var(--buffered),
+    var(--track-empty) var(--buffered),
+    var(--track-empty) 100%
+  );
+  transition: height 0.12s ease;
+}
+.pb-range:hover::-webkit-slider-runnable-track,
+.pb-range:active::-webkit-slider-runnable-track,
+.pb-range:focus-visible::-webkit-slider-runnable-track {
+  height: 8px;
+}
+.pb-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--scrub-thumb);
+  border: none;
+  margin-top: -5px;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: scale(0.5);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.pb-range:hover::-webkit-slider-thumb,
+.pb-range:active::-webkit-slider-thumb,
+.pb-range:focus-visible::-webkit-slider-thumb {
+  opacity: 1;
+  transform: scale(1);
+  margin-top: -3.5px;
+}
+#player-bar .menu { bottom: calc(100% + 8px); top: auto; right: 0; left: auto; max-height: 320px; overflow-y: auto; }
+
+/* ---------- Skeletons ---------- */
+/* Loading placeholders. They reuse the real components' classes (.card,
+   .ep-row, .detail-hero…) and only replace their inner boxes, so the layout
+   is already correct when the data lands — nothing shifts. */
+.skeleton { pointer-events: none; }
+.sk-box, .sk-line, .sk-btn {
+  background-color: var(--sk-base);
+  background-image: linear-gradient(90deg, transparent, var(--sk-sheen), transparent);
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  /* The resting position is the sweep's last frame, with the sheen parked off
+     the left edge, so a placeholder that outlives the animation is simply the
+     flat base colour. */
+  background-position: -60% 0;
+  /* Two passes, not forever: enough to read as "loading", and a slow or
+     offline load then sits still instead of repainting the whole window at
+     display rate for as long as it takes (see .foot-dot). */
+  animation: sk-sweep 1.5s ease-in-out 2;
+  border-radius: 6px;
+}
+.sk-line { height: 10px; }
+.sk-title { width: 72%; margin-top: 9px; }
+.sk-sub { width: 46%; height: 9px; margin-top: 6px; }
+.sk-heading { height: 28px; width: 44%; border-radius: 9px; }
+.sk-para { height: 11px; width: 86%; margin-top: 6px; }
+/* Ragged last line of a placeholder paragraph, and the metadata line under a
+   placeholder heading — the only two widths that differ from the base. */
+.sk-para.short { width: 52%; }
+.sk-sub.meta { width: 240px; }
+.sk-btn { width: 132px; height: 40px; border-radius: 10px; animation-delay: 0.1s; }
+.sk-actions { display: flex; gap: 10px; margin-top: 10px; }
+.sk-body { flex: 1; min-width: 0; }
+/* The hero placeholder has no artwork behind it, so drop the scrim. */
+.detail-hero.skeleton::before { display: none; }
+@keyframes sk-sweep {
+  from { background-position: 160% 0; }
+  to { background-position: -60% 0; }
+}
+
+/* Everything that moves on its own, or moves under the pointer, stands still
+   for a user who has asked their desktop for less motion. The spinner keeps a
+   visible state change (it fades) so "still loading" is still legible. */
+@media (prefers-reduced-motion: reduce) {
+  .sk-box, .sk-line, .sk-btn { animation: none; background-image: none; }
+  img.art, .detail-backdrop, .hero-bg { transition: none; }
+  .card:hover .card-poster { transform: none; }
+  .nav-btn:active, #player-bar .btn.icon:active { transform: none; }
+  #content { scroll-behavior: auto; }
+  .toast, .dialog, .dialog-scrim { animation: none; }
+  .spinner { animation: spin-fade 1.6s ease-in-out 6; border-top-color: var(--accent); }
+  #player-bar { transition: none; }
+}
+@keyframes spin-fade { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* While the embedded video covers the page (`body.video-covered`, set from
+   main.ts; not picture-in-picture, where the page is being browsed) nothing
+   under it can be seen — yet every running animation still has WebKit
+   composite a frame at display rate, and the app's main thread pays a
+   full-window paint for each of those frames. Nothing in the app animates
+   forever any more, but the few finite ones (skeleton sweep, spinner) are
+   still frozen for the duration. A hidden window (`body.bg-idle`) gets the
+   same treatment. */
+body.video-covered .sk-box,
+body.video-covered .sk-line,
+body.video-covered .sk-btn,
+body.video-covered .spinner,
+body.bg-idle .sk-box,
+body.bg-idle .sk-line,
+body.bg-idle .sk-btn,
+body.bg-idle .spinner {
+  animation-play-state: paused;
+}
+
+/* ---------- Dialogs ---------- */
+.dialog-scrim {
+  position: fixed; inset: 0;
+  z-index: 300;
+  background: rgba(8, 8, 14, 0.62);
+  display: grid; place-items: center;
+  padding: 24px;
+  animation: fade-in 0.14s ease;
+}
+.dialog {
+  width: 420px; max-width: 100%;
+  max-height: 80vh; overflow-y: auto;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: var(--shadow-lg);
+  animation: dialog-in 0.16s ease;
+}
+.dialog.wide { width: 560px; }
+.dialog h2 { font-size: var(--fs-lg); margin-bottom: 10px; }
+.dialog p { color: var(--text-dim); font-size: var(--fs-base); line-height: var(--lh-body); }
+.dialog-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; flex-wrap: wrap; }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dialog-in { from { transform: translateY(10px) scale(0.98); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* Keyboard shortcut sheet (the `?` key). */
+.shortcut-group { margin-top: 16px; }
+.shortcut-group h4 {
+  font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: 1px;
+  color: var(--text-dim); margin-bottom: 8px;
+}
+.shortcut-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  padding: 5px 0;
+  font-size: var(--fs-sm);
+}
+.shortcut-row span { color: var(--text-body); }
+kbd {
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 2px 7px;
+  white-space: nowrap;
+  color: var(--text);
+}
+.shortcut-keys { display: flex; gap: 5px; flex-shrink: 0; }
+
+/* ---------- Toasts ---------- */
+#toasts {
+  position: fixed;
+  bottom: calc(var(--player-h) + 14px);
+  right: 18px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 200;
+}
+.toast {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 11px 16px;
+  font-size: var(--fs-sm);
+  max-width: 360px;
+  box-shadow: var(--shadow);
+  animation: toast-in 0.18s ease;
+}
+.toast.error { border-left-color: var(--danger); }
+.toast.ok { border-left-color: var(--ok); }
+@keyframes toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ---------- Empty & error states ---------- */
+/* An absence should look designed, not like a failed render: icon, headline,
+   one explanatory sentence, and the button that resolves it. The offline
+   screen was already built this way; this is that shape, everywhere. */
+.state {
+  max-width: 420px;
+  margin: 8vh auto 0;
+  padding: 0 20px 40px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.state-icon {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+.state-icon svg { width: 28px; height: 28px; display: block; }
+.state h3 { font-size: var(--fs-lg); font-weight: 700; }
+.state p { color: var(--text-dim); font-size: var(--fs-base); line-height: var(--lh-body); }
+.state .btn { margin-top: 6px; }
+.state-error .state-icon { background: rgba(239, 68, 68, 0.12); color: var(--danger); }
+/* The library and favorites grids put their empty state *inside* the grid, so
+   it has to span every column — otherwise it's squeezed into one 158px card
+   slot and wraps to a column of single words. */
+.card-grid > .state { grid-column: 1 / -1; }
+/* Compact variant for a state inside a pane or tab rather than a whole page. */
+.dl-pane .state, .season-body .state { margin-top: 4vh; }
+
+/* ---------- Misc ---------- */
+.empty {
+  color: var(--text-dim);
+  text-align: center;
+  padding: 60px 0;
+  font-size: var(--fs-base);
+}
+.spinner {
+  width: 26px; height: 26px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  /* About ten seconds of turning, then a still ring: a spinner that runs for
+     as long as a dead request hangs costs a full-window repaint per frame
+     (see .foot-dot) and says nothing the still ring doesn't. */
+  animation: spin 0.8s linear 12;
+  margin: 60px auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+h1.page-title { font-size: var(--fs-2xl); margin-bottom: 20px; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
