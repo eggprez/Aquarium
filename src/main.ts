@@ -509,8 +509,8 @@ function paintNav(views: any[] | null): void {
   if (views.length) nav.append(el("div", { class: "nav-sep" }, ["Libraries"]));
   for (const v of views) {
     if (v.CollectionType === "livetv") { hasLiveTv = true; continue; }
-    // Music-type libraries are out of scope for this client.
-    if (["boxsets", "playlists", "music", "audiobooks", "podcasts"].includes(v.CollectionType)) continue;
+    // Only video libraries: Books (audiobooks), Music, Photos etc. are out of scope.
+    if (!api.VIDEO_COLLECTION_TYPES.includes(v.CollectionType)) continue;
     const icon =
       v.CollectionType === "movies" ? ICONS.movies :
       v.CollectionType === "tvshows" ? ICONS.tv : ICONS.folder;

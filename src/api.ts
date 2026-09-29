@@ -289,6 +289,26 @@ const ITEM_FIELDS =
  *  list on a feature film, so it isn't asked for on every grid query. */
 const DETAIL_FIELDS = `${ITEM_FIELDS},People,Studios,Taglines`;
 
+/**
+ * This client is for watching things. Libraries of these collection types get
+ * a sidebar entry and a Latest row on Home; Books (Jellyfin's type for
+ * audiobooks too), Music, Photos and the rest don't. Untyped means a mixed
+ * library, which is kept and has its non-video items filtered out instead.
+ */
+export const VIDEO_COLLECTION_TYPES: (string | null | undefined)[] = [
+  "movies", "tvshows", "homevideos", "musicvideos", "folders", null, undefined,
+];
+
+/** Item types that never play as video, excluded from mixed libraries. */
+const NON_VIDEO_ITEM_TYPES = "AudioBook,Audio,Book,MusicAlbum,MusicArtist,Photo,PhotoAlbum,Playlist";
+
+/** False for an audiobook, song, e-book or photo that slipped into a row. */
+export function isVideoItem(item: any): boolean {
+  if (!item) return false;
+  if (item.MediaType === "Audio" || item.MediaType === "Book" || item.MediaType === "Photo") return false;
+  return !NON_VIDEO_ITEM_TYPES.split(",").includes(item.Type);
+}
+
 export async function getViews(): Promise<any[]> {
   const s = session!;
   const r = await api(`/UserViews?userId=${s.userId}`);
@@ -339,7 +359,7 @@ export async function getLatest(parentId: string, limit = 16): Promise<any[]> {
   const items: any[] = await api(
     `/Items/Latest?userId=${s.userId}&parentId=${parentId}&Limit=${limit}&Fields=${ITEM_FIELDS}`
   );
-  return foldEpisodesIntoSeries(items);
+  return foldEpisodesIntoSeries(items.filter(isVideoItem));
 }
 
 /** Replace every episode with its series, keeping the row's order and dropping
@@ -401,6 +421,7 @@ export async function getLibraryItems(
     Limit: String(opts.limit ?? 60),
   });
   if (opts.includeTypes) p.set("IncludeItemTypes", opts.includeTypes);
+  else p.set("ExcludeItemTypes", NON_VIDEO_ITEM_TYPES);
   if (opts.unwatched) p.set("Filters", "IsUnplayed");
   if (opts.favorites) p.set("IsFavorite", "true");
   if (opts.genre) p.set("Genres", opts.genre);
@@ -456,7 +477,7 @@ export async function getSimilar(itemId: string, limit = 12): Promise<any[]> {
   const r = await api(
     `/Items/${itemId}/Similar?userId=${s.userId}&limit=${limit}&Fields=${ITEM_FIELDS}`
   );
-  return r.Items ?? [];
+  return (r.Items ?? []).filter(isVideoItem);
 }
 
 export async function getSeasons(seriesId: string): Promise<any[]> {

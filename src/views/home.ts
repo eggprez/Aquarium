@@ -28,8 +28,6 @@ interface HomeData {
   latest: Map<string, any[]>;
 }
 
-const MEDIA_COLLECTION_TYPES = ["movies", "tvshows", "homevideos", "musicvideos", null, undefined];
-
 function homeSignature(d: HomeData): string {
   return [
     itemSignature(d.resume),
@@ -46,7 +44,7 @@ async function fetchHomeData(): Promise<HomeData> {
     api.getViews().catch(() => []),
     favoritesRow().catch(() => []),
   ]);
-  const mediaViews = views.filter((v: any) => MEDIA_COLLECTION_TYPES.includes(v.CollectionType));
+  const mediaViews = views.filter((v: any) => api.VIDEO_COLLECTION_TYPES.includes(v.CollectionType));
   const pairs = await Promise.all(
     mediaViews.map(
       async (v: any) => [v.Id, await api.getLatest(v.Id).catch(() => [])] as [string, any[]]
