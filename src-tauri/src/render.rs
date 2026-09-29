@@ -173,6 +173,32 @@ impl RenderCtx {
         Ok(())
     }
 
+    /// Consume the due frame without drawing it: mpv counts it as rendered —
+    /// no dropped-frame count, same timing — but skips the scaling and
+    /// presentation passes. For a picture nobody can see (a minimised window,
+    /// another workspace); frames that are simply not rendered instead hold
+    /// mpv's video thread in a wait and then count as dropped, which the
+    /// adaptive-quality policy would read as the machine failing to keep up.
+    /// The GL context must still be current.
+    pub fn render_skip(&self) -> Result<(), String> {
+        let mut skip: c_int = 1;
+        let mut params = [
+            libmpv2_sys::mpv_render_param {
+                type_: libmpv2_sys::mpv_render_param_type_MPV_RENDER_PARAM_SKIP_RENDERING,
+                data: &mut skip as *mut _ as *mut c_void,
+            },
+            libmpv2_sys::mpv_render_param {
+                type_: 0,
+                data: std::ptr::null_mut(),
+            },
+        ];
+        let err = unsafe { libmpv2_sys::mpv_render_context_render(self.ctx, params.as_mut_ptr()) };
+        if err < 0 {
+            return Err(format!("mpv_render_context_render (skip) failed: {err}"));
+        }
+        Ok(())
+    }
+
     /// Tell mpv the frame it last rendered has been handed to the display.
     /// Part of the advanced-control contract; mpv uses the timing for its
     /// vsync estimate.

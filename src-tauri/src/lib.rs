@@ -9,6 +9,7 @@ mod jellyfin;
 mod mpris;
 mod mpv;
 mod player;
+mod power;
 mod prefs;
 mod progress;
 mod secret;
@@ -719,6 +720,9 @@ pub fn run() {
 
             // Keep the "Auto" theme setting in step with the desktop.
             theme::watch(app.handle().clone());
+            // On battery / power saver, for Settings' Automatic battery
+            // rendering.
+            power::watch(app.handle().clone());
 
             // The desktop's own word on whether there is a network at all.
             // The frontend backs its offline probes off to minutes; a link
@@ -795,7 +799,8 @@ pub fn run() {
             // the given seconds after startup, the way the frontend would:
             // fullscreen on/off (`fs`/`nofs`), the fullscreen bar revealed or
             // hidden (`bar`/`nobar`), picture-in-picture on/off
-            // (`pip`/`nopip`), and `stop`/`play` to end the session and start
+            // (`pip`/`nopip`), minimised and restored (`min`/`unmin`), and
+            // `stop`/`play` to end the session and start
             // another on the AQUARIUM_TEST_PLAY file — the way the next thing
             // opened from the page starts, i.e. windowed, whatever the last
             // session was. Native Wayland has no input injection, so this is
@@ -830,6 +835,21 @@ pub fn run() {
                             "pip" | "nopip" => {
                                 if let Err(e) = player_set_pip(handle.clone(), what == "pip") {
                                     eprintln!("aquarium: test sequence: pip failed: {e}");
+                                }
+                            }
+                            // Out of sight and back: the video thread's
+                            // frame-callback check (wl::FrameClock).
+                            "min" | "unmin" => {
+                                if let Some(w) = &win {
+                                    if what == "min" {
+                                        let _ = w.minimize();
+                                    } else {
+                                        // A Wayland client can't un-minimise
+                                        // itself; presenting asks the shell,
+                                        // which may or may not oblige.
+                                        let _ = w.unminimize();
+                                        let _ = w.set_focus();
+                                    }
                                 }
                             }
                             "stop" => player.stop().await,

@@ -178,7 +178,20 @@ struct State {
     /// When the last frame was swapped, for the stutter diagnostic in
     /// `draw` (debug builds of the log only).
     last_draw: Option<Instant>,
+    /// The compositor has stopped answering frame callbacks: the surface is
+    /// out of sight, and frames are consumed without being drawn (`draw`).
+    hidden: bool,
+    /// Frames consumed without drawing since it went out of sight.
+    skipped: u64,
+    /// When a real frame was last drawn while hidden, to find out whether the
+    /// surface is still hidden or the compositor lost an answer.
+    last_probe: Instant,
 }
+
+/// While hidden, draw one real frame this often anyway, with a fresh frame
+/// callback. Costs nothing worth measuring; guarantees a lost callback can
+/// freeze the picture for at most this long.
+const HIDDEN_PROBE_EVERY: Duration = Duration::from_secs(2);
 
 impl State {
     fn debug(&self) -> bool {
@@ -236,6 +249,7 @@ impl State {
             _ => None,
         };
         let old_sub = self.sub.replace(sub.clone());
+        self.hidden = false;
         let old_size = self.size;
         self.size = size;
         if !self.recreate_win() {
@@ -379,6 +393,50 @@ impl State {
         if !self.can_draw() {
             return;
         }
+        // Frame-callback answers and presentation feedback for our surface
+        // are only delivered from here. Never blocks, never reads the socket.
+        self.globals.dispatch();
+        // Nobody can see the picture (minimised, another workspace, the lock
+        // screen): hand mpv its frame back undrawn. It counts as rendered, so
+        // timing and the dropped-frame counters the adaptive-quality policy
+        // watches are untouched — only the scaling passes, the swap and the
+        // compositor's share of it are saved. Nothing is committed, so the
+        // compositor's answer to the last callback is what brings us back —
+        // or, should that answer never come, the probe below.
+        if let Some(clock) = self.sub.as_ref().map(|s| s.frames.clone()) {
+            if !self.hidden && clock.overdue() {
+                self.hidden = true;
+                self.skipped = 0;
+                self.last_probe = Instant::now();
+                if self.debug() {
+                    eprintln!("aquarium: video thread: surface out of sight, skipping rendering (at {})", crate::now_ms());
+                }
+            } else if self.hidden && !clock.pending() {
+                self.hidden = false;
+                if self.debug() {
+                    eprintln!(
+                        "aquarium: video thread: surface back in sight after {} skipped frames (at {})",
+                        self.skipped,
+                        crate::now_ms()
+                    );
+                }
+            }
+            if self.hidden {
+                if self.last_probe.elapsed() < HIDDEN_PROBE_EVERY {
+                    let ctx = self.ctx.as_ref().unwrap();
+                    if let Err(e) = ctx.render_skip() {
+                        eprintln!("aquarium: video thread: {e}");
+                    }
+                    ctx.report_swap();
+                    self.skipped += 1;
+                    self.last_draw = None;
+                    return;
+                }
+                // Draw this one for real, with a callback of its own.
+                clock.abandon();
+                self.last_probe = Instant::now();
+            }
+        }
         if self.win_stale && !self.recreate_win() {
             return;
         }
@@ -387,6 +445,13 @@ impl State {
         let win = self.win.as_ref().unwrap();
         if let Err(e) = ctx.render(0, w, h, true) {
             eprintln!("aquarium: video thread: {e}");
+        }
+        // Both are surface state carried by the commit the swap makes.
+        if let Some(sub) = self.sub.as_ref() {
+            sub.request_frame();
+            if self.debug() {
+                sub.request_presentation_feedback();
+            }
         }
         let swap_started = Instant::now();
         if !self.egl.swap(win) {
@@ -407,9 +472,6 @@ impl State {
         }
         ctx.report_swap();
         let n = self.handle.frames.fetch_add(1, Ordering::Relaxed);
-        // Events for our own objects (surface enter/leave, preferred scale);
-        // never blocks, never reads the socket.
-        self.globals.dispatch();
         if self.debug() {
             // A frame that took more than two of its predecessors' intervals
             // to arrive is a stutter the viewer saw; log it with the time so
@@ -428,7 +490,13 @@ impl State {
             self.last_draw = Some(now);
         }
         if self.debug() && n.is_multiple_of(240) {
-            eprintln!("aquarium: video thread: frame #{n} at {w}x{h}");
+            // How the compositor has been showing our frames: `zero-copy` is
+            // a display plane scanning out mpv's buffer directly, the rest
+            // were composited by the GPU first.
+            let (presented, zero_copy, discarded) = crate::wl::presentation_stats();
+            eprintln!(
+                "aquarium: video thread: frame #{n} at {w}x{h}; presented {presented}, zero-copy {zero_copy}, discarded {discarded}"
+            );
         }
     }
 
@@ -482,6 +550,9 @@ fn run(
         redraw_at: None,
         win_stale: false,
         last_draw: None,
+        hidden: false,
+        skipped: 0,
+        last_probe: Instant::now(),
     };
 
     loop {

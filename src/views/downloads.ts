@@ -234,6 +234,7 @@ async function setLocalPlayed(dl: any, played: boolean, root: HTMLElement): Prom
   try {
     // Either way the resume point is cleared — that's what the toggle means.
     await invoke("progress_store_local", { itemId: dl.item_id, positionTicks: 0, played });
+    document.dispatchEvent(new CustomEvent("aquarium-progress-queue"));
     dl.played = played;
     dl.position_ticks = 0;
     toast(played ? "Marked watched" : "Marked unwatched", "ok");
@@ -314,6 +315,7 @@ function groupActions(eps: any[], label: string, root: HTMLElement): MenuAction[
           e.played = !allPlayed;
           e.position_ticks = 0;
         }
+        document.dispatchEvent(new CustomEvent("aquarium-progress-queue"));
         toast(`Marked ${eps.length} episode${eps.length === 1 ? "" : "s"} ${allPlayed ? "unwatched" : "watched"}`, "ok");
         renderDownloads(root, { keepTab: true });
       },

@@ -210,7 +210,8 @@ function playButtons(item: any): HTMLElement {
           el("button", {
             onClick: () => {
               menu.remove();
-              playItem(item, { resume: true, maxBitrate: q.maxBitrate });
+              // An explicit bitrate streams even when the item is downloaded.
+              playItem(item, { resume: true, maxBitrate: q.maxBitrate }, { stream: true });
             },
           }, [q.label])
         );

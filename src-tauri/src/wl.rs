@@ -22,14 +22,16 @@
 //! thread's next commit and must match the buffer it carries.
 //!
 //! The `wl_*_interface` descriptors come from libwayland-client itself;
-//! `wp_viewporter` is not in the core library, so its two interfaces are
-//! spelled out here exactly as wayland-scanner would emit them.
+//! `wp_viewporter` and `wp_presentation` are not in the core library, so
+//! their interfaces are spelled out here exactly as wayland-scanner would
+//! emit them.
 #![allow(non_camel_case_types, dead_code)]
 
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 #[repr(C)]
 pub struct wl_proxy {
@@ -75,6 +77,7 @@ const WL_COMPOSITOR_CREATE_SURFACE: u32 = 0;
 const WL_COMPOSITOR_CREATE_REGION: u32 = 1;
 const WL_SURFACE_DESTROY: u32 = 0;
 const WL_SURFACE_ATTACH: u32 = 1;
+const WL_SURFACE_FRAME: u32 = 3;
 const WL_SURFACE_SET_OPAQUE_REGION: u32 = 4;
 const WL_SURFACE_SET_INPUT_REGION: u32 = 5;
 const WL_SURFACE_COMMIT: u32 = 6;
@@ -91,6 +94,7 @@ const WP_VIEWPORTER_GET_VIEWPORT: u32 = 1;
 const WP_VIEWPORT_DESTROY: u32 = 0;
 const WP_VIEWPORT_SET_SOURCE: u32 = 1;
 const WP_VIEWPORT_SET_DESTINATION: u32 = 2;
+const WP_PRESENTATION_FEEDBACK: u32 = 1;
 
 // ------------------------------------------------------------------- loader
 
@@ -156,6 +160,7 @@ pub struct Api {
     surface_iface: *const wl_interface,
     subsurface_iface: *const wl_interface,
     region_iface: *const wl_interface,
+    callback_iface: *const wl_interface,
 }
 
 // Function pointers and pointers to immutable library data.
@@ -198,6 +203,7 @@ pub fn api() -> Option<&'static Api> {
             surface_iface: load!("wl_surface_interface" as *const wl_interface),
             subsurface_iface: load!("wl_subsurface_interface" as *const wl_interface),
             region_iface: load!("wl_region_interface" as *const wl_interface),
+            callback_iface: load!("wl_callback_interface" as *const wl_interface),
         })
     })
     .as_ref()
@@ -279,6 +285,217 @@ static WP_VIEWPORT_INTERFACE: wl_interface = wl_interface {
     events: ptr::null(),
 };
 
+// ---------------------------------------------------------- wp_presentation
+//
+// Debug instrumentation only (AQUARIUM_SURFACE_TEST): whether the compositor
+// put our buffers on a display plane as they are (`ZERO_COPY`) or composited
+// them. Event-side `o` arguments may leave their interface null: libwayland
+// only compares it when it's set.
+
+static FEEDBACK_TYPES: Types<2> = Types([ptr::null(), &WP_PRESENTATION_FEEDBACK_INTERFACE as *const wl_interface]);
+
+static WP_PRESENTATION_METHODS: [wl_message; 2] = [
+    wl_message {
+        name: cstr!("destroy"),
+        signature: cstr!(""),
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    wl_message {
+        name: cstr!("feedback"),
+        signature: cstr!("on"),
+        types: FEEDBACK_TYPES.0.as_ptr(),
+    },
+];
+
+static WP_PRESENTATION_EVENTS: [wl_message; 1] = [wl_message {
+    name: cstr!("clock_id"),
+    signature: cstr!("u"),
+    types: NULL_TYPES.0.as_ptr(),
+}];
+
+static WP_PRESENTATION_INTERFACE: wl_interface = wl_interface {
+    name: cstr!("wp_presentation"),
+    version: 1,
+    method_count: 2,
+    methods: WP_PRESENTATION_METHODS.as_ptr(),
+    event_count: 1,
+    events: WP_PRESENTATION_EVENTS.as_ptr(),
+};
+
+static SEVEN_NULL_TYPES: Types<7> = Types([ptr::null(); 7]);
+
+static WP_PRESENTATION_FEEDBACK_EVENTS: [wl_message; 3] = [
+    wl_message {
+        name: cstr!("sync_output"),
+        signature: cstr!("o"),
+        types: NULL_TYPES.0.as_ptr(),
+    },
+    wl_message {
+        name: cstr!("presented"),
+        signature: cstr!("uuuuuuu"),
+        types: SEVEN_NULL_TYPES.0.as_ptr(),
+    },
+    wl_message {
+        name: cstr!("discarded"),
+        signature: cstr!(""),
+        types: NULL_TYPES.0.as_ptr(),
+    },
+];
+
+static WP_PRESENTATION_FEEDBACK_INTERFACE: wl_interface = wl_interface {
+    name: cstr!("wp_presentation_feedback"),
+    version: 1,
+    method_count: 0,
+    methods: ptr::null(),
+    event_count: 3,
+    events: WP_PRESENTATION_FEEDBACK_EVENTS.as_ptr(),
+};
+
+const PRESENTATION_KIND_ZERO_COPY: u32 = 0x8;
+
+static PRESENTED: AtomicU64 = AtomicU64::new(0);
+static PRESENTED_ZERO_COPY: AtomicU64 = AtomicU64::new(0);
+static DISCARDED: AtomicU64 = AtomicU64::new(0);
+
+/// Frames the compositor reported presented, how many of those went to the
+/// screen zero-copy (scanned out straight from our buffer), and how many it
+/// discarded unseen — since the process started.
+pub fn presentation_stats() -> (u64, u64, u64) {
+    (
+        PRESENTED.load(Ordering::Relaxed),
+        PRESENTED_ZERO_COPY.load(Ordering::Relaxed),
+        DISCARDED.load(Ordering::Relaxed),
+    )
+}
+
+#[repr(C)]
+struct FeedbackListener {
+    sync_output: unsafe extern "C" fn(*mut c_void, *mut wl_proxy, *mut wl_proxy),
+    presented: unsafe extern "C" fn(*mut c_void, *mut wl_proxy, u32, u32, u32, u32, u32, u32, u32),
+    discarded: unsafe extern "C" fn(*mut c_void, *mut wl_proxy),
+}
+
+unsafe extern "C" fn on_sync_output(_: *mut c_void, _: *mut wl_proxy, _: *mut wl_proxy) {}
+
+#[allow(clippy::too_many_arguments)]
+unsafe extern "C" fn on_presented(
+    _data: *mut c_void,
+    fb: *mut wl_proxy,
+    _sec_hi: u32,
+    _sec_lo: u32,
+    _nsec: u32,
+    _refresh: u32,
+    _seq_hi: u32,
+    _seq_lo: u32,
+    flags: u32,
+) {
+    PRESENTED.fetch_add(1, Ordering::Relaxed);
+    if flags & PRESENTATION_KIND_ZERO_COPY != 0 {
+        PRESENTED_ZERO_COPY.fetch_add(1, Ordering::Relaxed);
+    }
+    if let Some(api) = api() {
+        unsafe { (api.proxy_destroy)(fb) };
+    }
+}
+
+unsafe extern "C" fn on_discarded(_data: *mut c_void, fb: *mut wl_proxy) {
+    DISCARDED.fetch_add(1, Ordering::Relaxed);
+    if let Some(api) = api() {
+        unsafe { (api.proxy_destroy)(fb) };
+    }
+}
+
+static FEEDBACK_LISTENER: FeedbackListener = FeedbackListener {
+    sync_output: on_sync_output,
+    presented: on_presented,
+    discarded: on_discarded,
+};
+
+// --------------------------------------------------------------- frame clock
+
+/// Whether the compositor is still showing the video surface, judged by
+/// `wl_surface.frame`: a compositor answers the callback once it has drawn a
+/// frame with the surface on screen, and holds it for as long as the surface
+/// can't be seen — minimised, on another workspace, behind the lock screen.
+///
+/// At most one callback is outstanding, and a new one is asked for at most
+/// every [`REQUEST_EVERY`]: every answer wakes the GTK thread to read the
+/// socket, and a few a second say all there is to say. The video thread reads
+/// [`FrameClock::overdue`] and [`FrameClock::pending`] around each frame; see
+/// `video_thread::State::draw` for what it does with them.
+pub struct FrameClock {
+    pending: AtomicBool,
+    /// Which request is outstanding. An answer to an older one — abandoned by
+    /// [`FrameClock::abandon`] and then answered late — changes nothing.
+    generation: AtomicU64,
+    requested_at: Mutex<Instant>,
+}
+
+/// How long an unanswered frame callback means "not on screen" rather than
+/// "compositor busy". gnome-shell 50 has been seen stalling ~100 ms; nothing
+/// visible has been seen waiting this long.
+const OVERDUE_AFTER: Duration = Duration::from_millis(500);
+
+/// The most often a new callback is requested.
+const REQUEST_EVERY: Duration = Duration::from_millis(250);
+
+impl FrameClock {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            pending: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
+            requested_at: Mutex::new(Instant::now() - REQUEST_EVERY),
+        })
+    }
+
+    /// A callback is outstanding.
+    pub fn pending(&self) -> bool {
+        self.pending.load(Ordering::Acquire)
+    }
+
+    /// The compositor has sat on the outstanding callback long enough that
+    /// the surface can't be on screen.
+    pub fn overdue(&self) -> bool {
+        self.pending() && self.requested_at.lock().unwrap().elapsed() > OVERDUE_AFTER
+    }
+
+    /// Stop waiting on the outstanding callback, so the next commit asks
+    /// afresh. For a compositor that has dropped an answer rather than
+    /// holding it: a picture that stays frozen because a callback was lost
+    /// is far worse than the occasional frame drawn for nobody.
+    pub fn abandon(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        self.pending.store(false, Ordering::Release);
+    }
+}
+
+#[repr(C)]
+struct CallbackListener {
+    done: unsafe extern "C" fn(*mut c_void, *mut wl_proxy, u32),
+}
+
+/// What travels with a request as its listener's `data`.
+struct CallbackTicket {
+    clock: Arc<FrameClock>,
+    generation: u64,
+}
+
+unsafe extern "C" fn on_frame_done(data: *mut c_void, callback: *mut wl_proxy, _time: u32) {
+    // Balances the `into_raw` in `request_frame`. A callback that never fires
+    // (its surface destroyed first, or a compositor that drops it) leaks one
+    // ticket, which is the price of never freeing one that might yet be
+    // answered.
+    let ticket = unsafe { Box::from_raw(data as *mut CallbackTicket) };
+    if ticket.clock.generation.load(Ordering::Acquire) == ticket.generation {
+        ticket.clock.pending.store(false, Ordering::Release);
+    }
+    if let Some(api) = api() {
+        unsafe { (api.proxy_destroy)(callback) };
+    }
+}
+
+static CALLBACK_LISTENER: CallbackListener = CallbackListener { done: on_frame_done };
+
 /// `wl_fixed_t`: 24.8 fixed point.
 fn fixed(v: i32) -> i32 {
     v << 8
@@ -291,6 +508,7 @@ struct Found {
     compositor: Option<(u32, u32)>,
     subcompositor: Option<(u32, u32)>,
     viewporter: Option<(u32, u32)>,
+    presentation: Option<(u32, u32)>,
 }
 
 #[repr(C)]
@@ -312,6 +530,7 @@ unsafe extern "C" fn on_global(
         b"wl_compositor" => found.compositor = Some((name, version)),
         b"wl_subcompositor" => found.subcompositor = Some((name, version)),
         b"wp_viewporter" => found.viewporter = Some((name, version)),
+        b"wp_presentation" => found.presentation = Some((name, version)),
         _ => {}
     }
 }
@@ -340,6 +559,8 @@ pub struct Globals {
     subcompositor: *mut wl_proxy,
     /// Null if the compositor does not offer `wp_viewporter`.
     viewporter: *mut wl_proxy,
+    /// Null if the compositor does not offer `wp_presentation`.
+    presentation: *mut wl_proxy,
 }
 
 unsafe impl Send for Globals {}
@@ -418,6 +639,10 @@ impl Globals {
                 Some((name, v)) => bind(name, &WP_VIEWPORTER_INTERFACE, v.min(1)),
                 None => ptr::null_mut(),
             };
+            let presentation = match found.presentation {
+                Some((name, _)) => bind(name, &WP_PRESENTATION_INTERFACE, 1),
+                None => ptr::null_mut(),
+            };
             if compositor.is_null() || subcompositor.is_null() {
                 return Err("wl_registry.bind failed".into());
             }
@@ -431,6 +656,7 @@ impl Globals {
                 compositor,
                 subcompositor,
                 viewporter,
+                presentation,
             })
         }
     }
@@ -478,6 +704,10 @@ pub struct Subsurface {
     /// Null without `wp_viewporter`.
     viewport: *mut wl_proxy,
     compositor: *mut wl_proxy,
+    /// Null without `wp_presentation`.
+    presentation: *mut wl_proxy,
+    /// Whether this surface is on screen; see [`FrameClock`].
+    pub frames: Arc<FrameClock>,
     destroyed: AtomicBool,
 }
 
@@ -541,6 +771,8 @@ impl Subsurface {
                 parent,
                 viewport,
                 compositor: g.compositor,
+                presentation: g.presentation,
+                frames: FrameClock::new(),
                 destroyed: AtomicBool::new(false),
             };
             me.set_input_region_empty();
@@ -775,6 +1007,66 @@ impl Subsurface {
         self.surface_request_noarg(WL_SURFACE_COMMIT);
     }
 
+    /// Ask for a `wl_surface.frame` callback with the next commit, unless one
+    /// is already outstanding or the last was asked for under
+    /// [`REQUEST_EVERY`] ago. Video-thread only, immediately before the swap
+    /// that commits: the request is surface state applied by that commit.
+    pub fn request_frame(&self) {
+        let clock = &self.frames;
+        if clock.pending() || clock.requested_at.lock().unwrap().elapsed() < REQUEST_EVERY {
+            return;
+        }
+        let generation = clock.generation.load(Ordering::Acquire);
+        unsafe {
+            let cb = (self.api.marshal_flags)(
+                self.surface,
+                WL_SURFACE_FRAME,
+                self.api.callback_iface,
+                1,
+                0,
+                ptr::null_mut::<c_void>(),
+            );
+            if cb.is_null() {
+                return;
+            }
+            *clock.requested_at.lock().unwrap() = Instant::now();
+            clock.pending.store(true, Ordering::Release);
+            let ticket = Box::new(CallbackTicket { clock: clock.clone(), generation });
+            (self.api.add_listener)(
+                cb,
+                &CALLBACK_LISTENER as *const CallbackListener as *const c_void,
+                Box::into_raw(ticket) as *mut c_void,
+            );
+        }
+    }
+
+    /// Ask the compositor how the next commit reaches the screen (see
+    /// [`presentation_stats`]). Diagnostics only; same thread rule as
+    /// [`Self::request_frame`]. No-op without `wp_presentation`.
+    pub fn request_presentation_feedback(&self) {
+        if self.presentation.is_null() {
+            return;
+        }
+        unsafe {
+            let fb = (self.api.marshal_flags)(
+                self.presentation,
+                WP_PRESENTATION_FEEDBACK,
+                &WP_PRESENTATION_FEEDBACK_INTERFACE,
+                1,
+                0,
+                self.surface,
+                ptr::null_mut::<c_void>(),
+            );
+            if !fb.is_null() {
+                (self.api.add_listener)(
+                    fb,
+                    &FEEDBACK_LISTENER as *const FeedbackListener as *const c_void,
+                    ptr::null_mut(),
+                );
+            }
+        }
+    }
+
     fn surface_request_noarg(&self, opcode: u32) {
         unsafe {
             (self.api.marshal_flags)(
@@ -857,5 +1149,52 @@ mod tests {
         }
         assert_eq!(fixed(1), 256);
         assert_eq!(fixed(-1), -256);
+    }
+
+    #[test]
+    fn presentation_descriptors_are_well_formed() {
+        unsafe {
+            let feedback = &*WP_PRESENTATION_INTERFACE.methods.add(1);
+            assert_eq!(CStr::from_ptr(feedback.name).to_str().unwrap(), "feedback");
+            assert_eq!(CStr::from_ptr(feedback.signature).to_str().unwrap(), "on");
+            assert_eq!(*feedback.types.add(1), &WP_PRESENTATION_FEEDBACK_INTERFACE as *const _);
+            let presented = &*WP_PRESENTATION_FEEDBACK_INTERFACE.events.add(1);
+            assert_eq!(CStr::from_ptr(presented.signature).to_str().unwrap(), "uuuuuuu");
+        }
+        let api = api().expect("libwayland-client loads");
+        let name = unsafe { CStr::from_ptr((*api.callback_iface).name) }.to_str().unwrap();
+        assert_eq!(name, "wl_callback");
+    }
+
+    #[test]
+    fn frame_clock_reads_overdue_only_when_overdue() {
+        let clock = FrameClock::new();
+        assert!(!clock.overdue(), "nothing requested yet");
+        clock.pending.store(true, Ordering::Release);
+        *clock.requested_at.lock().unwrap() = Instant::now();
+        assert!(!clock.overdue(), "just requested");
+        *clock.requested_at.lock().unwrap() = Instant::now() - OVERDUE_AFTER - Duration::from_millis(1);
+        assert!(clock.overdue(), "overdue");
+        clock.abandon();
+        assert!(!clock.overdue() && !clock.pending(), "abandoned");
+    }
+
+    /// A late answer to an abandoned request must not clear the flag for the
+    /// request that replaced it.
+    #[test]
+    fn a_stale_answer_changes_nothing() {
+        let clock = FrameClock::new();
+        let stale = Box::into_raw(Box::new(CallbackTicket {
+            clock: clock.clone(),
+            generation: clock.generation.load(Ordering::Acquire),
+        }));
+        clock.abandon();
+        clock.pending.store(true, Ordering::Release);
+        // What `on_frame_done` does with the ticket, minus destroying a proxy.
+        let ticket = unsafe { Box::from_raw(stale) };
+        if ticket.clock.generation.load(Ordering::Acquire) == ticket.generation {
+            ticket.clock.pending.store(false, Ordering::Release);
+        }
+        assert!(clock.pending(), "stale answer cleared the live request");
     }
 }

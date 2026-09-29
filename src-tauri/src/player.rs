@@ -133,6 +133,23 @@ pub struct Player {
     /// it's a question about the series, not about the file mpv has open — so
     /// it's pushed down here for MPRIS's `CanGoNext` to report.
     next_available: AtomicBool,
+    /// The `aquarium-battery` mpv profile is on in the current session
+    /// (Settings' Automatic battery rendering; see `sync_battery_profile`).
+    battery_profile: AtomicBool,
+}
+
+/// The machine went on or off battery, or in or out of power saver
+/// (`power.rs`): put the running session's picture chain in step.
+pub fn power_changed(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(p) = app.try_state::<Player>() {
+            let guard = p.session.lock().await;
+            if let Some(s) = guard.as_ref() {
+                p.sync_battery_profile(&s.session);
+            }
+        }
+    });
 }
 
 /// The `Authorization` header mpv should send for this stream, if any. Skipped
@@ -166,6 +183,32 @@ impl Player {
             epoch: Arc::new(AtomicU64::new(0)),
             idle: StdMutex::new(None),
             next_available: AtomicBool::new(false),
+            battery_profile: AtomicBool::new(false),
+        }
+    }
+
+    /// Settings' Automatic battery rendering: the cheap scaler chain while the
+    /// desktop is asking to save power, mpv's own otherwise. Applied as a
+    /// profile with `profile-restore=copy`, so taking it off mid-film puts
+    /// back exactly what was there. Idempotent; called at session start and
+    /// whenever `power.rs` sees the answer change.
+    fn sync_battery_profile(&self, session: &mpv::Session) {
+        let want = crate::prefs::Prefs::load().battery_render() == crate::prefs::BatteryRender::Auto
+            && crate::power::low_power();
+        if want == self.battery_profile.load(Ordering::SeqCst) {
+            return;
+        }
+        let cmd = if want {
+            json!(["apply-profile", crate::prefs::BATTERY_PROFILE])
+        } else {
+            json!(["apply-profile", crate::prefs::BATTERY_PROFILE, "restore"])
+        };
+        match session.command(cmd) {
+            Ok(()) => {
+                self.battery_profile.store(want, Ordering::SeqCst);
+                crate::debug_log_line(&format!("player: battery rendering {}", if want { "on" } else { "off" }));
+            }
+            Err(e) => crate::debug_log_line(&format!("player: battery profile: {e}")),
         }
     }
 
@@ -320,6 +363,9 @@ impl Player {
             }
         };
         let session = Arc::new(session);
+        // A fresh core has mpv's defaults, whatever the last session had on.
+        self.battery_profile.store(false, Ordering::SeqCst);
+        self.sync_battery_profile(&session);
 
         // Hand the surface the handle and wait for the render context to
         // exist before loading anything. mpv initialises `vo=libmpv` while it
@@ -456,6 +502,9 @@ impl Player {
             let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let mut last_report = std::time::Instant::now();
+            // What the last tick sent, so a paused tick with nothing new can
+            // be skipped.
+            let mut last_tick: Option<Value> = None;
             // mouse-pos fires per pixel; throttle what crosses the bridge.
             let mut last_mouse = std::time::Instant::now() - std::time::Duration::from_secs(1);
             // Why the file ended, for the frontend to tell "the stream
@@ -497,6 +546,7 @@ impl Player {
                                     continue;
                                 }
                                 let pause_changed = apply_event(&msg, &status, &app, lock_duration);
+                                wake_ui_for(&msg, &session_task, &app);
                                 own_final = status.lock().unwrap().clone();
                                 if pause_changed {
                                     // Release the screen-wake inhibitor while
@@ -524,7 +574,18 @@ impl Player {
                         if superseded { continue; }
                         let diag = crate::surface::debug_enabled();
                         let t0 = std::time::Instant::now();
-                        emit_status(&app, &status);
+                        // Paused with nothing new to say: a film left paused
+                        // over dinner would otherwise wake the page once a
+                        // second, every second, to redraw the same bar. Only
+                        // while paused — a stall stands just as still, and
+                        // the adaptive-quality policy times stalls off these
+                        // ticks, so they must keep coming then.
+                        let payload = status_payload(&status.lock().unwrap());
+                        let unchanged = payload.get("paused") == Some(&Value::Bool(true))
+                            && last_tick.as_ref() == Some(&payload);
+                        if !unchanged {
+                            last_tick = Some(emit_status(&app, &status));
+                        }
                         if diag {
                             eprintln!("aquarium: player: status tick at {} ({} ms)", crate::now_ms(), t0.elapsed().as_millis());
                         }
@@ -594,9 +655,39 @@ impl Player {
                 crate::mpris::notify();
             }
             report_stopped(&ctx, &own_final).await;
+            // A local file's final position was just queued and (if the server
+            // answered) synced; the sidebar's "Syncing N items" reads that queue.
+            if ctx.as_ref().is_some_and(|c| c.is_local) {
+                let _ = app.emit("progress-queue-changed", ());
+            }
         });
 
         Ok(())
+    }
+}
+
+/// uosc isn't loaded with the core (see `mpv::Session::ensure_ui`); besides
+/// its menus, the two things it draws are a buffering spinner and a flash of
+/// the pause icon over the picture. Windowed, the player bar says both, so
+/// they only earn uosc its keep in fullscreen with the bar tucked away — load
+/// it the first time either happens there. The pause that did the loading
+/// missed its flash (uosc starts out already paused), so it's replayed.
+fn wake_ui_for(msg: &Value, session: &mpv::Session, app: &AppHandle) {
+    if msg.get("event").and_then(|v| v.as_str()) != Some("property-change")
+        || msg.get("data") != Some(&Value::Bool(true))
+    {
+        return;
+    }
+    let name = msg.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    if name != "pause" && name != "paused-for-cache" {
+        return;
+    }
+    let bar_hidden = app
+        .try_state::<Player>()
+        .map(|p| p.viewport_full.load(Ordering::SeqCst) && !p.bar_reveal.load(Ordering::SeqCst))
+        .unwrap_or(false);
+    if bar_hidden && session.ensure_ui() && name == "pause" {
+        let _ = session.command(json!(["script-binding", "uosc/flash-pause-indicator"]));
     }
 }
 
@@ -777,10 +868,18 @@ fn apply_event(
     pause_changed
 }
 
-fn emit_status(app: &AppHandle, status: &Arc<StdMutex<Status>>) {
-    let st = status.lock().unwrap().clone();
-    let _ = app.emit(
-        "player-status",
+fn emit_status(app: &AppHandle, status: &Arc<StdMutex<Status>>) -> Value {
+    let payload = status_payload(&status.lock().unwrap());
+    let _ = app.emit("player-status", payload.clone());
+    // The shell's media controls are the same status, told to a different
+    // listener. Announced from here rather than polled for, so the D-Bus thread
+    // can sleep; the call diffs internally and is a no-op when nothing moved.
+    crate::mpris::notify();
+    payload
+}
+
+/// What `player-status` carries.
+fn status_payload(st: &Status) -> Value {
         json!({
             "active": st.active,
             "position": st.position,
@@ -801,12 +900,7 @@ fn emit_status(app: &AppHandle, status: &Arc<StdMutex<Status>>) {
             "buffering": st.buffering,
             "dropped_frames": st.drops_decoder + st.drops_vo,
             "hwdec": st.hwdec,
-        }),
-    );
-    // The shell's media controls are the same status, told to a different
-    // listener. Announced from here rather than polled for, so the D-Bus thread
-    // can sleep; the call diffs internally and is a no-op when nothing moved.
-    crate::mpris::notify();
+        })
 }
 
 fn report_body(ctx: &PlayContext, st: &Status, event: Option<&str>) -> Value {

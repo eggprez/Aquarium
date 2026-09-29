@@ -22,6 +22,7 @@ import {
   isAdaptiveEnabled,
   QUALITY_CHOICES,
   switchQuality,
+  switchToDownload,
 } from "./playback";
 
 // QUALITY_CHOICES runs best-first: index 0 is Direct Play, the last entry is
@@ -144,6 +145,24 @@ function nextRungDown(idx: number, sourceBitrate: number | undefined): number {
 async function stepDown(reason: "stall" | "drops"): Promise<void> {
   const idx = currentRung();
   if (idx === null || settling()) return;
+
+  // A downloaded copy can't stall on the network at all, so it beats any
+  // lower rung. Nothing climbs back from it: a file on disk isn't watched.
+  if (getQualityState()?.download) {
+    toast(
+      reason === "drops"
+        ? "Playback can't keep up — switching to the downloaded copy"
+        : "Buffering — switching to the downloaded copy"
+    );
+    switching = true;
+    try {
+      if (await switchToDownload({ inherited: true, quiet: true })) return;
+    } catch {
+      // Fall through to the ladder.
+    } finally {
+      switching = false;
+    }
+  }
 
   if (idx >= LOWEST) {
     // Nothing left to give. Say so once — a picture that keeps stopping with

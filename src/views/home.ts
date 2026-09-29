@@ -141,6 +141,28 @@ function homeHero(item: any, eyebrow: string): HTMLElement | null {
 
 /** How long a spotlight holds before the next one takes over. */
 const HERO_DWELL = 9000;
+/** How long after the last touch of the keyboard, pointer or wheel the
+ *  spotlight keeps rotating. A few changes after you stop is a front page; a
+ *  crossfade every nine seconds for the rest of the evening in a window
+ *  nobody is using is a screensaver — and measured 2026-09-23 on a 2880×1920
+ *  panel that screensaver cost ~18 % of a core, averaged, for as long as Home
+ *  sat open. */
+const HERO_ATTENTION = 30_000;
+
+/** When the user last did anything in the window. One set of listeners for
+ *  the app's lifetime, however many times Home is rebuilt. */
+let lastInputAt = Date.now();
+let inputWired = false;
+function wireInputClock(): void {
+  if (inputWired) return;
+  inputWired = true;
+  const touch = (): void => {
+    lastInputAt = Date.now();
+  };
+  for (const type of ["pointermove", "pointerdown", "keydown", "wheel", "touchstart"]) {
+    window.addEventListener(type, touch, { passive: true, capture: true });
+  }
+}
 
 /**
  * The spotlight, cycling. A home page whose hero shows the same title every
@@ -161,6 +183,7 @@ function heroRotator(items: any[], eyebrow: string): HTMLElement | null {
   const first = slides[0]!.node!;
   if (slides.length === 1) return first;
 
+  wireInputClock();
   const stage = el("div", { class: "hero-stage" });
   for (const s of slides) {
     s.node!.classList.add("hero-slide");
@@ -211,9 +234,16 @@ function heroRotator(items: any[], eyebrow: string): HTMLElement | null {
    * started from a Continue Watching row leaves this view mounted underneath —
    * where it would otherwise go on crossfading full-screen artwork behind an
    * opaque video for the length of a film.
+   *
+   * Nor is anybody looking, as far as a rotator should assume, when the window
+   * isn't the one being used or hasn't been touched in a while. The next
+   * movement of the pointer brings it back on the following tick.
    */
   const unseen = (): boolean =>
-    document.hidden || !!document.getElementById("content")?.classList.contains("has-player");
+    document.hidden ||
+    !document.hasFocus() ||
+    Date.now() - lastInputAt > HERO_ATTENTION ||
+    !!document.getElementById("content")?.classList.contains("has-player");
 
   const restart = (): void => {
     stop();

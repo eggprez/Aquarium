@@ -1,6 +1,6 @@
 [package]
 name = "aquarium"
-version = "0.1.30"
+version = "0.1.34"
 description = "Lightweight Jellyfin client"
 edition = "2021"
 

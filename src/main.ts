@@ -30,6 +30,8 @@ import {
   SPEEDS,
   SUB_DELAY_STEP,
   switchQuality,
+  switchToDownload,
+  downloadedLabel,
   syncOfflineProgress,
 } from "./playback";
 import {
@@ -74,6 +76,11 @@ const ICONS: Record<string, string> = {
 
 let playerActive = false;
 let playerEmbedded = false;
+/** Which decoder mpv settled on, as last written for Settings to report — kept
+ *  across restarts so it can say without a stream running while the page is
+ *  open (which it can't be: the video covers the page). Compared first so the
+ *  once-a-second status tick doesn't rewrite storage with the same value. */
+let lastHwdecSaved = "";
 let videoFullscreen = false;
 let videoPip = false;
 let seeking = false;
@@ -126,6 +133,9 @@ let fsLastVideoPointer = { x: -1, y: -1 };
 function fsSetBar(shown: boolean): void {
   if (fsBarShown === shown) return;
   fsBarShown = shown;
+  // The bar stopped following the status ticks while it was out of sight
+  // (see `barOutOfSight`); bring it up to date before it slides in.
+  if (shown && lastBarStatus) updatePlayerBar(lastBarStatus);
   $("player-bar").classList.toggle("revealed", shown);
   invoke("player_set_viewport", { full: true, bar: shown }).catch(() => {});
   // Subtitles sit at the very bottom of the frame, which is exactly the strip
@@ -227,6 +237,9 @@ async function setVideoFullscreen(full: boolean): Promise<void> {
   }
   // Flash the controls on entry so they're discoverable, then auto-hide.
   if (full) fsPokeControls();
+  // Back to windowed: the bar is permanently on screen again, and may have
+  // skipped every tick since it was last revealed.
+  else if (lastBarStatus) updatePlayerBar(lastBarStatus);
 }
 
 /**
@@ -760,19 +773,40 @@ function toggleBarPanel(name: string, label: string, build: (panel: BarPanel) =>
 function toggleQualityPicker(): void {
   toggleBarPanel("quality", "Quality", (panel) => {
     const state = getQualityState();
-    if (!state || state.isLocal) {
+    if (!state || state.live) {
+      panel.append(el("span", { class: "pb-panel-note" }, ["Live TV — quality is set by the channel"]));
+      return;
+    }
+    // The downloaded file is a rung of its own, above the streams: it's what
+    // plays by default, and the way back to it after trying a stream.
+    if (state.download) {
       panel.append(
-        el("span", { class: "pb-panel-note" }, ["Playing a downloaded file — quality is fixed"])
+        el("button", {
+          class: `btn small${state.isLocal ? " primary" : ""}`,
+          title: "Play the downloaded file from disk",
+          onClick: () => {
+            closeBarPanel();
+            if (state.isLocal) return;
+            switchToDownload()
+              .then((ok) => { if (!ok) toast("The download isn't there anymore", "error"); })
+              .catch((e) => toast(String(e), "error"));
+          },
+        }, [downloadedLabel(state.download)])
       );
+    }
+    // Streaming needs the server; from a download while offline there's
+    // nowhere to switch to.
+    if (state.isLocal && api.isOffline()) {
+      panel.append(el("span", { class: "pb-panel-note" }, ["Offline — streaming unavailable"]));
       return;
     }
     for (const q of QUALITY_CHOICES) {
       panel.append(
         el("button", {
-          class: `btn small${q.maxBitrate === state.current ? " primary" : ""}`,
+          class: `btn small${!state.isLocal && q.maxBitrate === state.current ? " primary" : ""}`,
           onClick: () => {
             closeBarPanel();
-            switchQuality(q.maxBitrate).catch((e) => toast(String(e), "error"));
+            switchQuality(q.maxBitrate).catch((e) => toast(`Couldn't start the stream: ${e?.message ?? e}`, "error"));
           },
         }, [q.label])
       );
@@ -1521,7 +1555,23 @@ function buildPlayerBar(): void {
   });
 }
 
+/** The last player-status seen, for redrawing the bar when it comes back into
+ *  view after ticks it skipped. */
+let lastBarStatus: any = null;
+
+/**
+ * Fullscreen with the controls tucked away: the video covers every pixel of the
+ * page, bar included. Rewriting the bar's clock and scrubber once a second
+ * there is invisible, but not free — every DOM change is a web frame, and each
+ * web frame a full-window paint in the UI process — for the whole length of a
+ * film. `fsSetBar` redraws from `lastBarStatus` on the way back in.
+ */
+function barOutOfSight(): boolean {
+  return videoFullscreen && !fsBarShown && playerEmbedded && !videoPip;
+}
+
 function updatePlayerBar(st: any): void {
+  lastBarStatus = st.active ? st : null;
   const bar = $("player-bar");
   const content = $("content");
   if (!st.active) {
@@ -1550,6 +1600,23 @@ function updatePlayerBar(st: any): void {
   }
   playerEmbedded = !!st.embedded;
   reflectCoverage();
+
+  // Bookkeeping that isn't drawing, so it happens whether or not the bar is
+  // on screen: a new file re-resolves its extras (and tells MPRIS whether
+  // there is a next episode), and Settings reports the last decoder used.
+  const playingId = st.item_id ?? getNowPlaying()?.item?.Id ?? null;
+  if (playingId !== mediaItemId) resetMediaExtras(playingId);
+  if (typeof st.hwdec === "string" && st.hwdec && st.hwdec !== lastHwdecSaved) {
+    lastHwdecSaved = st.hwdec;
+    try {
+      localStorage.setItem("aquarium.hwdec-last", st.hwdec);
+    } catch {
+      // Settings just says "not measured yet".
+    }
+  }
+  if (Array.isArray(st.chapters)) pbChapters = st.chapters;
+  if (barOutOfSight()) return;
+
   // mpv reports a duration for a live mux too — a growing one, which is worse
   // than none — so what's playing, not what mpv measured, decides this.
   const live = !!getQualityState()?.live;
@@ -1594,23 +1661,6 @@ function updatePlayerBar(st: any): void {
     const buffered = Math.max(st.position ?? 0, st.buffered ?? 0);
     range.style.setProperty("--buffered", `${Math.min(100, (buffered / st.duration) * 100)}%`);
   }
-  // A new file: previews, skip points and the next episode all belong to the
-  // item, so they're re-resolved rather than carried over.
-  const playingId = st.item_id ?? getNowPlaying()?.item?.Id ?? null;
-  if (playingId !== mediaItemId) resetMediaExtras(playingId);
-
-  // Which decoder mpv settled on. Kept across restarts so Settings can report
-  // it without a stream having to be running while the page is open — which it
-  // can't be, since the video covers the page.
-  if (typeof st.hwdec === "string" && st.hwdec) {
-    try {
-      localStorage.setItem("aquarium.hwdec-last", st.hwdec);
-    } catch {
-      // Settings just says "not measured yet".
-    }
-  }
-
-  if (Array.isArray(st.chapters)) pbChapters = st.chapters;
   renderChapters(st.duration ?? 0);
   syncSkipButton(st);
   syncUpNext(st);
@@ -1926,11 +1976,9 @@ async function boot(): Promise<void> {
     console.error("adaptive quality failed:", e);
   }
 
-  // The sidebar's "busy" dot pulses via an infinite CSS animation for as long
-  // as a download or a sync is outstanding, which for a large download queue
-  // is hours. Nobody benefits from the compositor ticking that every frame
-  // while the window is minimized or on another workspace, so pause it the
-  // same way home.ts's hero rotator already stands down when unseen.
+  // `bg-idle` freezes the finite loading animations (skeleton sweep, spinner)
+  // while the window is minimized or on another workspace; home.ts's hero
+  // rotator stands down on its own when unseen.
   document.addEventListener("visibilitychange", () => {
     document.body.classList.toggle("bg-idle", document.hidden);
   });
@@ -2088,6 +2136,10 @@ async function boot(): Promise<void> {
   });
 
   await listen("player-status", (ev) => updatePlayerBar(ev.payload as any));
+  // The offline-progress queue changed (queued, or pushed to the server): the
+  // footer's "Syncing N items" is otherwise only re-read on navigation.
+  await listen("progress-queue-changed", () => void updateSidebarFooter());
+  document.addEventListener("aquarium-progress-queue", () => void updateSidebarFooter());
   await listen("download-progress", (ev) => {
     updateDownloadProgress(ev.payload, $("content"));
     // Only terminal states change the footer's summary; per-byte updates would

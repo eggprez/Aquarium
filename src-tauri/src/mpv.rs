@@ -186,6 +186,9 @@ pub struct Options {
 /// A running mpv core and the thread draining its event queue.
 pub struct Session {
     mpv: Arc<Mpv>,
+    /// The bundled uosc, loaded on first use rather than with the core.
+    ui_script: Option<PathBuf>,
+    ui_loaded: std::sync::atomic::AtomicBool,
 }
 
 impl Session {
@@ -219,7 +222,41 @@ impl Session {
             set("keep-open", "no");
             set("ytdl", "no");
             set("cache", "yes");
-            set("demuxer-max-bytes", "64MiB");
+            // Read the stream in bursts rather than a trickle. With a plain
+            // byte cap the demuxer tops the cache up the moment playback eats
+            // into it, so the network (Wi-Fi radio included) never goes idle
+            // for the length of a film. The hysteresis lets the cache run
+            // down to 30 s before refilling it to the cap in one go; at the
+            // 10 Mbps a typical 1080p transcode runs at, 150 MiB is about two
+            // minutes, so the radio gets ~90 s off between refills. At bit
+            // rates where the cap holds less than 30 s the hysteresis never
+            // engages and reading is continuous, i.e. no worse than before.
+            set("demuxer-max-bytes", "150MiB");
+            set("demuxer-hysteresis-secs", "30");
+            // PipeWire runs its whole graph at the smallest latency any
+            // stream asks for, and mpv otherwise takes the server's default
+            // quantum: ~47 wakeups a second in mpv's audio thread and in the
+            // graph. Video has no use for low audio latency — mpv reports the
+            // latency and schedules frames against it — so ask for 100 ms and
+            // let the graph run at its largest quantum while only we play.
+            set("pipewire-buffer", "100");
+            // mpv's built-in Lua scripts, each a Lua VM with a thread of its
+            // own and its own property observers: the stats page (`i`), the
+            // console (`\``), the select menus, the positioning helpers, the
+            // command history, conditional auto-profiles and the right-click
+            // menu that input.conf already suppresses. Nothing in Aquarium
+            // uses any of them.
+            for builtin in [
+                "load-stats-overlay",
+                "load-console",
+                "load-select",
+                "load-positioning",
+                "load-commands",
+                "load-auto-profiles",
+                "load-context-menu",
+            ] {
+                set(builtin, "no");
+            }
 
             // libmpv reads no config files at all unless told to, and if told
             // to without a directory it would read the *command line player's*
@@ -234,11 +271,17 @@ impl Session {
                     set("osc", "no");
                     set("osd-bar", "no");
                     // Also off by default under libmpv, and also init-only:
-                    // without them the bundled `input.conf` would load into a
-                    // player that ignores key bindings, and `scripts/` — uosc
-                    // itself — would not load at all.
-                    set("load-scripts", "yes");
+                    // without it the bundled `input.conf` would load into a
+                    // player that ignores key bindings.
                     set("input-default-bindings", "yes");
+                    // uosc is *not* loaded with the core. With every one of
+                    // its always-on elements turned off (uosc.conf) it has
+                    // nothing to show until a menu opens, a stream stalls or
+                    // the user pauses — yet it observes playback all the
+                    // same, ~70 wakeups a second for the length of a film.
+                    // `Session::ensure_ui` loads it the first time it's
+                    // needed; see there.
+                    set("load-scripts", "no");
                 }
                 None => {
                     set("config", "no");
@@ -277,7 +320,14 @@ impl Session {
             .name("mpv-events".into())
             .spawn(move || pump_events(thread_mpv, tx))
             .map_err(|e| format!("Could not start the mpv event thread: {}", e))?;
-        let session = Session { mpv };
+        let session = Session {
+            mpv,
+            ui_script: config_dir
+                .as_ref()
+                .map(|d| d.join("scripts").join("uosc"))
+                .filter(|p| p.join("main.lua").is_file()),
+            ui_loaded: std::sync::atomic::AtomicBool::new(false),
+        };
 
         // Authenticate with a header rather than an `api_key=` query parameter:
         // the token would otherwise be written verbatim into Jellyfin's access
@@ -315,6 +365,37 @@ impl Session {
         self.mpv.clone()
     }
 
+    /// Load the bundled uosc into this core if it isn't already. Returns
+    /// whether this call did the loading.
+    ///
+    /// Safe to call ahead of a message for it: `load-script` creates the
+    /// script's client before returning, so `script-message-to uosc` finds
+    /// its target, and the message waits in that client's queue until the
+    /// script's main chunk has registered its handlers. A menu opened before
+    /// uosc has seen `osd-dimensions` is laid out at its placeholder size and
+    /// re-laid out when the size arrives (`Menu:on_display`).
+    pub fn ensure_ui(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        let Some(path) = &self.ui_script else { return false };
+        if self.ui_loaded.swap(true, Ordering::AcqRel) {
+            return false;
+        }
+        let loaded = self.run_node(&[
+            Value::String("load-script".into()),
+            Value::String(path.to_string_lossy().into_owned()),
+        ]);
+        match loaded {
+            Ok(()) => {
+                crate::debug_log_line("mpv: uosc loaded on first use");
+                true
+            }
+            Err(e) => {
+                crate::debug_log_line(&format!("mpv: loading uosc failed: {e}"));
+                false
+            }
+        }
+    }
+
     /// Run one JSON command array, exactly as the IPC socket did.
     ///
     /// The `{"command": [...]}` envelope is accepted as well as the bare
@@ -328,6 +409,14 @@ impl Session {
             return Err("mpv command must be an array".into());
         };
         let name = args.first().and_then(|v| v.as_str()).unwrap_or("");
+
+        // Anything addressed to uosc is the moment it's first needed.
+        let target = args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+        if (name == "script-message-to" && target == "uosc")
+            || (name == "script-binding" && target.starts_with("uosc/"))
+        {
+            self.ensure_ui();
+        }
 
         // Two commands that only ever existed in the IPC layer, not in mpv:
         // `mpv_command_node` has never heard of them, and passing them on
@@ -412,6 +501,12 @@ impl Session {
         // Everything else goes through as a node array rather than as strings,
         // so `["seek", 12.5, "absolute"]` and `["set_property", "aid", 2]`
         // keep their types instead of being re-parsed out of decimal text.
+        self.run_node(args)
+    }
+
+    /// `mpv_command_node` on a JSON array, types kept.
+    fn run_node(&self, args: &[Value]) -> Result<(), String> {
+        let cmd = Value::Array(args.to_vec());
         let mut arena = Arena::default();
         let mut node = arena.node(&cmd);
         let mut result = empty_node();
@@ -871,7 +966,12 @@ mod tests {
             ("keep-open", "no"),
             ("ytdl", "no"),
             ("cache", "yes"),
-            ("demuxer-max-bytes", "67108864"),
+            ("demuxer-max-bytes", "157286400"),
+            ("demuxer-hysteresis-secs", "30.000000"),
+            ("pipewire-buffer", "100"),
+            ("load-stats-overlay", "no"),
+            ("load-console", "no"),
+            ("load-select", "no"),
             ("force-media-title", "A Title"),
             ("start", "+30"),
             // From `prefs`, i.e. the Settings page.
@@ -894,12 +994,37 @@ mod tests {
         if config == "yes" {
             assert!(!read("config-dir").is_empty(), "config=yes with no dir");
             assert_eq!(read("osc"), "no", "uosc and mpv's OSC would both draw");
-            // Off by default under libmpv, and init-only: without them the
-            // bundled input.conf loads into a player that ignores bindings and
-            // uosc does not load at all.
-            assert_eq!(read("load-scripts"), "yes");
+            // Off by default under libmpv, and init-only: without it the
+            // bundled input.conf loads into a player that ignores bindings.
             assert_eq!(read("input-default-bindings"), "yes");
+            // uosc waits for `ensure_ui` rather than loading with the core.
+            assert_eq!(read("load-scripts"), "no");
         }
+        let _ = session.command(json!(["quit"]));
+    }
+
+    /// uosc loads on first use and only once, and a message sent to it in
+    /// the same breath as the load finds its target rather than failing with
+    /// "can't find script". Skipped where there is no bundled config dir.
+    #[test]
+    fn uosc_loads_on_first_use() {
+        let (session, _rx) = Session::start(Options {
+            prefs: vec!["--ao=null".into(), "--vo=null".into()],
+            ..Default::default()
+        })
+        .expect("mpv core");
+        if session.ui_script.is_none() {
+            eprintln!("no bundled uosc here (set AQUARIUM_MPV_CONFIG); skipping");
+            return;
+        }
+        // Straight to the core, bypassing `command`'s own `ensure_ui`: no uosc
+        // client may exist yet.
+        let direct = session.run_node(&[json!("script-message-to"), json!("uosc"), json!("noop")]);
+        assert!(direct.is_err(), "uosc loaded with the core");
+        session
+            .command(json!(["script-message-to", "uosc", "update-menu", "{}"]))
+            .expect("message to a uosc loaded on demand");
+        assert!(!session.ensure_ui(), "loaded twice");
         let _ = session.command(json!(["quit"]));
     }
 }

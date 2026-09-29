@@ -69,14 +69,27 @@ export interface StartMeta {
    *  something picked from the page. The player keeps its mode across a
    *  continuation (fullscreen stays fullscreen) and starts windowed otherwise. */
   continuation?: boolean;
+  /** Stream from the server even when the item has been downloaded: the user
+   *  picked a bitrate by hand (the in-player menu, the item page's "Stream
+   *  as"). Also skips the starting-bitrate probe, since the choice is made. */
+  stream?: boolean;
 }
 
 // What's currently playing, for the in-player quality/episode menus.
 let nowPlaying: {
+  /** The Jellyfin item when streaming; the download's meta.json record when
+   *  playing from disk. */
   item: any;
   opts: StreamOptions;
   isLocal: boolean;
   queue: any[] | null;
+  /** The Jellyfin item behind a downloaded file, when playback started from a
+   *  server page (or it has been fetched since). Null for a file started from
+   *  the Downloads view until a switch to streaming needs it. */
+  serverItem: any | null;
+  /** The finished download of whatever is playing, streamed or not — what
+   *  the quality menu's "Downloaded" row switches back to. */
+  download: any | null;
 } | null = null;
 let lastPosition = 0;
 // Set synchronously when a finished playback is about to autoplay its next
@@ -327,14 +340,17 @@ export async function peekNextEpisode(): Promise<any | null> {
   if (!id) return null;
   const cached = nextPeek;
   if (cached && cached.forId === id) return cached.item;
-  const isEpisode = np.isLocal ? isLocalEpisode(np.item) : np.item.Type === "Episode" && np.item.SeriesId;
+  const server = nextFromServer(np);
+  const isEpisode = server
+    ? server.Type === "Episode" && server.SeriesId
+    : isLocalEpisode(np.item);
   if (!isEpisode) {
     nextPeek = { forId: id, item: null };
     return null;
   }
-  const found = np.isLocal
-    ? await findNextLocalEpisode(np.item).catch(() => null)
-    : await findNextEpisode(np.item).catch(() => null);
+  const found = server
+    ? await findNextEpisode(server).catch(() => null)
+    : await findNextLocalEpisode(np.item).catch(() => null);
   nextPeek = { forId: id, item: found };
   return found;
 }
@@ -358,6 +374,13 @@ function itemTitle(item: any): string {
     return `${item.SeriesName}${code} · ${item.Name}`;
   }
   return item.Name ?? "Aquarium";
+}
+
+/** The finished download of a server item, or null when there isn't one. */
+async function findDownload(itemId: string): Promise<any | null> {
+  if (!itemId) return null;
+  const items = await invoke<any[]>("downloads_list").catch(() => [] as any[]);
+  return items.find((d: any) => d.item_id === itemId && d.status === "complete" && d.path) ?? null;
 }
 
 /** Bytes fetched for the pre-flight bandwidth probe: enough that connection
@@ -411,13 +434,27 @@ export async function playItem(
       : opts.resume
         ? item.UserData?.PlaybackPositionTicks ?? 0
         : 0;
+  // A finished download beats any stream: no server transcode, no network to
+  // stall on. The quality menu can still move it to a stream (see
+  // switchQuality), and adaptive quality falls back to it.
+  const download = opts.live ? null : await findDownload(item.Id);
+  if (download && !meta.stream) {
+    if (!meta.quiet) toast(`Starting “${item.Name}” from downloads…`);
+    await playLocal(download, {
+      continuation: meta.continuation,
+      inherited: meta.inherited,
+      serverItem: item,
+      startSeconds: startTicks / 10_000_000,
+    });
+    return;
+  }
   // Keep the episode queue when switching quality or hopping episodes
   // within the same series.
   const keepQueue =
-    nowPlaying?.queue && nowPlaying.item?.SeriesId === item.SeriesId
+    nowPlaying?.queue && nowPlaying.serverItem?.SeriesId === item.SeriesId
       ? nowPlaying.queue
       : null;
-  nowPlaying = { item, opts, isLocal: false, queue: keepQueue };
+  nowPlaying = { item, opts, isLocal: false, queue: keepQueue, serverItem: item, download };
   // Captured before the probe below, which is the only await between here and
   // using it: a later call — a fast double-press of Play, a quality switch —
   // would replace `nowPlaying` with its own object while this one is still in
@@ -436,7 +473,7 @@ export async function playItem(
   // trip of its own. Autoplay, a hand-picked quality, and live TV all already
   // know what they want and skip it.
   const maxBitrate =
-    opts.maxBitrate === undefined && !meta.inherited && !opts.live
+    opts.maxBitrate === undefined && !meta.inherited && !meta.stream && !opts.live
       ? await pickStartingBitrate(item)
       : opts.maxBitrate;
   if (nowPlaying === startedPlaying) nowPlaying = { ...nowPlaying, opts: { ...opts, maxBitrate } };
@@ -490,7 +527,7 @@ export async function playItem(
  */
 export async function playChannelUrl(ch: any): Promise<void> {
   shuffleState = null;
-  nowPlaying = { item: ch, opts: { live: true }, isLocal: false, queue: null };
+  nowPlaying = { item: ch, opts: { live: true }, isLocal: false, queue: null, serverItem: null, download: null };
   autoplayCancelled = false;
   nextPeek = null;
   tracksApplied = false;
@@ -536,15 +573,33 @@ export async function playChannelUrl(ch: any): Promise<void> {
 
 export async function playLocal(
   dl: any,
-  /** `continuation`: see StartMeta — the next episode of a binge, not a click. */
-  opts: { keepShuffle?: boolean; continuation?: boolean } = {}
+  opts: {
+    keepShuffle?: boolean;
+    /** See StartMeta — the next episode of a binge or a switch, not a click. */
+    continuation?: boolean;
+    inherited?: boolean;
+    /** The Jellyfin item this file is a copy of, when the caller has it. */
+    serverItem?: any;
+    /** Start here instead of the file's own saved position. */
+    startSeconds?: number;
+  } = {}
 ): Promise<void> {
   // Deliberately playing one item ends an in-progress shuffle; only the
   // shuffle's own draws (and its first episode) keep it alive.
   if (!opts.keepShuffle) shuffleState = null;
   const s = api.getSession();
-  const resumeTicks = dl.position_ticks ?? 0;
-  nowPlaying = { item: dl, opts: {}, isLocal: true, queue: null };
+  const resumeTicks =
+    opts.startSeconds != null ? Math.floor(opts.startSeconds * 10_000_000) : dl.position_ticks ?? 0;
+  const series = opts.serverItem?.SeriesId;
+  nowPlaying = {
+    item: dl,
+    opts: {},
+    isLocal: true,
+    // The in-player episode list, kept across a switch or an episode hop.
+    queue: series && nowPlaying?.serverItem?.SeriesId === series ? nowPlaying!.queue : null,
+    serverItem: opts.serverItem ?? null,
+    download: dl,
+  };
   autoplayCancelled = false;
   nextPeek = null;
   tracksApplied = false;
@@ -572,7 +627,7 @@ export async function playLocal(
     });
     document.dispatchEvent(
       new CustomEvent("aquarium-player-started", {
-        detail: { continuation: !!opts.continuation },
+        detail: { inherited: !!opts.inherited, continuation: !!opts.continuation },
       })
     );
   } catch (e: any) {
@@ -689,9 +744,22 @@ async function nextShuffledEpisode(current: any): Promise<any | null> {
   return next;
 }
 
+/**
+ * The server item to find the next episode from, or null to look among the
+ * downloads instead. A downloaded file started from a server page walks the
+ * server's episode list — the next one plays from disk if it's downloaded too
+ * (playItem checks), and streams if not. One started from the Downloads view,
+ * or a shuffle, stays within the downloads.
+ */
+function nextFromServer(np: NonNullable<typeof nowPlaying>): any | null {
+  if (!np.isLocal) return np.item;
+  return np.serverItem && !isShuffling() ? np.serverItem : null;
+}
+
 /** Returns true when a next episode was found and playback started. */
 async function autoplayNext(np: NonNullable<typeof nowPlaying>): Promise<boolean> {
-  if (np.isLocal) {
+  const server = nextFromServer(np);
+  if (!server) {
     const shuffling = isShuffling();
     const next = shuffling
       ? await nextShuffledEpisode(np.item)
@@ -702,10 +770,16 @@ async function autoplayNext(np: NonNullable<typeof nowPlaying>): Promise<boolean
     await playLocal(fromStart(next), { keepShuffle: true, continuation: true });
     return true;
   }
-  const next = await findNextEpisode(np.item);
+  const next = await findNextEpisode(server);
   if (!next) return false;
   toast(`Up next: ${itemTitle(next)}`);
-  await playItem(next, { resume: true, maxBitrate: np.opts.maxBitrate }, { inherited: true, continuation: true });
+  // After a downloaded file there's no bitrate to carry over, so a next
+  // episode that has to stream gets the usual bandwidth probe.
+  await playItem(
+    next,
+    { resume: true, maxBitrate: np.isLocal ? undefined : np.opts.maxBitrate },
+    { inherited: !np.isLocal, continuation: true, quiet: true }
+  );
   return true;
 }
 
@@ -731,7 +805,8 @@ function maybeAutoplay(st: any): void {
   if (!(st.duration > 0) || st.position / st.duration < 0.9) return;
   const playingId = np.isLocal ? np.item.item_id : np.item.Id;
   if (st.item_id && playingId && st.item_id !== playingId) return;
-  const isEpisode = np.isLocal ? isLocalEpisode(np.item) : np.item.Type === "Episode" && np.item.SeriesId;
+  const server = nextFromServer(np);
+  const isEpisode = server ? server.Type === "Episode" && server.SeriesId : isLocalEpisode(np.item);
   if (!isEpisode) return;
 
   autoplayPending = true;
@@ -1301,31 +1376,78 @@ export function getQualityState(): {
    *  uses it so a step down from Direct Play never lands on a transcode rung
    *  whose cap is no lighter than the original already was. */
   sourceBitrate?: number;
+  /** The quality the item was downloaded at ("720p · 4.5 Mbps"), when there
+   *  is a finished download of it — playing now or not. */
+  download?: string;
 } | null {
   if (!nowPlaying) return null;
-  const bitrate = nowPlaying.item?.MediaSources?.[0]?.Bitrate;
+  const bitrate = nowPlaying.serverItem?.MediaSources?.[0]?.Bitrate;
+  const dl = nowPlaying.download;
   return {
-    current: nowPlaying.opts.maxBitrate,
+    current: nowPlaying.isLocal ? undefined : nowPlaying.opts.maxBitrate,
     isLocal: nowPlaying.isLocal,
     live: !!nowPlaying.opts.live,
     sourceBitrate: typeof bitrate === "number" && bitrate > 0 ? bitrate : undefined,
+    download: dl ? String(dl.quality ?? "Original quality") : undefined,
   };
 }
 
-/** Restart the current stream at a new bitrate, keeping the position. */
+/** Label for the quality menus' row that plays the downloaded file. */
+export function downloadedLabel(quality: string): string {
+  return `Downloaded · ${quality}`;
+}
+
+/**
+ * Restart what's playing as a stream at a new bitrate, keeping the position.
+ * From a downloaded file this is how streaming starts: the file's server item
+ * is fetched if playback didn't begin from one.
+ */
 export async function switchQuality(maxBitrate?: number, meta: StartMeta = {}): Promise<void> {
   const np = nowPlaying;
-  invoke("ui_log", { msg: `quality-switch maxBitrate=${maxBitrate} np=${!!np} lastPosition=${lastPosition}` }).catch(() => {});
-  if (!np || np.isLocal) return;
+  const pos = lastPosition;
+  invoke("ui_log", { msg: `quality-switch maxBitrate=${maxBitrate} np=${!!np} local=${np?.isLocal} lastPosition=${pos}` }).catch(() => {});
+  if (!np) return;
+  if (np.isLocal) {
+    const item = np.serverItem ?? (await api.getItem(np.item.item_id));
+    // Something else started while the item was being fetched.
+    if (nowPlaying !== np) return;
+    await playItem(item, { maxBitrate, startSeconds: pos }, { ...meta, stream: true, continuation: true });
+    return;
+  }
   await playItem(
     np.item,
     {
       ...np.opts,
       maxBitrate,
-      startSeconds: np.opts.live ? undefined : lastPosition,
+      startSeconds: np.opts.live ? undefined : pos,
     },
-    { ...meta, continuation: true }
+    { ...meta, stream: true, continuation: true }
   );
+}
+
+/**
+ * Go from streaming back to the item's downloaded file, keeping the position.
+ * False when there's no finished download to go to (it may have been deleted
+ * since the stream started).
+ */
+export async function switchToDownload(meta: StartMeta = {}): Promise<boolean> {
+  const np = nowPlaying;
+  const pos = lastPosition;
+  if (!np || np.isLocal || np.opts.live || !np.download) return false;
+  const dl = await findDownload(np.item.Id);
+  if (nowPlaying !== np) return false;
+  if (!dl) {
+    np.download = null;
+    return false;
+  }
+  invoke("ui_log", { msg: `quality-switch to download ${dl.item_id} lastPosition=${pos}` }).catch(() => {});
+  await playLocal(dl, {
+    continuation: true,
+    inherited: meta.inherited,
+    serverItem: np.item,
+    startSeconds: pos,
+  });
+  return true;
 }
 
 // ---------- Adaptive quality (preference) ----------
@@ -1362,13 +1484,14 @@ function openUoscMenu(menu: any): Promise<void> {
 }
 
 export async function showQualityMenu(): Promise<void> {
-  if (!nowPlaying || nowPlaying.isLocal) {
+  const q = getQualityState();
+  if (!q || q.live) {
     return openUoscMenu({
       title: "Quality",
-      items: [{ title: "Playing a downloaded file", value: "ignore", muted: true }],
+      items: [{ title: "Nothing to change", value: "ignore", muted: true }],
     });
   }
-  const current = nowPlaying.opts.maxBitrate;
+  const current = q.current;
   const auto = isAdaptiveEnabled();
   await openUoscMenu({
     title: "Quality",
@@ -1378,10 +1501,18 @@ export async function showQualityMenu(): Promise<void> {
         hint: auto ? "drops a rung when the stream stalls" : "stays where you put it",
         value: "script-message aquarium-adaptive toggle",
       },
-      ...QUALITY_CHOICES.map((q) => ({
-        title: q.label,
-        active: q.maxBitrate === current,
-        value: `script-message aquarium-quality ${q.maxBitrate ?? "direct"}`,
+      ...(q.download
+        ? [{
+            title: downloadedLabel(q.download),
+            hint: "plays from disk",
+            active: q.isLocal,
+            value: "script-message aquarium-quality download",
+          }]
+        : []),
+      ...QUALITY_CHOICES.map((c) => ({
+        title: c.label,
+        active: !q.isLocal && c.maxBitrate === current,
+        value: `script-message aquarium-quality ${c.maxBitrate ?? "direct"}`,
       })),
     ],
   });
@@ -1389,7 +1520,8 @@ export async function showQualityMenu(): Promise<void> {
 
 export async function showEpisodeMenu(): Promise<void> {
   const np = nowPlaying;
-  if (!np || np.isLocal || np.item.Type !== "Episode" || !np.item.SeriesId) {
+  const cur = np?.serverItem;
+  if (!np || !cur || cur.Type !== "Episode" || !cur.SeriesId) {
     return openUoscMenu({
       title: "Episode queue",
       items: [{ title: "Not playing an episode", value: "ignore", muted: true }],
@@ -1397,18 +1529,18 @@ export async function showEpisodeMenu(): Promise<void> {
   }
   if (!np.queue) {
     try {
-      np.queue = await api.getEpisodes(np.item.SeriesId, np.item.SeasonId);
+      np.queue = await api.getEpisodes(cur.SeriesId, cur.SeasonId);
     } catch {
       np.queue = [];
     }
   }
   const pad = (n: any) => String(n ?? 0).padStart(2, "0");
   await openUoscMenu({
-    title: `${np.item.SeriesName ?? "Episodes"} — ${np.item.SeasonName ?? "Season"}`,
+    title: `${cur.SeriesName ?? "Episodes"} — ${cur.SeasonName ?? "Season"}`,
     items: (np.queue ?? []).map((ep: any) => ({
       title: `${ep.IndexNumber != null ? ep.IndexNumber + ". " : ""}${ep.Name}`,
       hint: `S${pad(ep.ParentIndexNumber)}E${pad(ep.IndexNumber)}${ep.UserData?.Played ? " ✓" : ""}`,
-      active: ep.Id === np.item.Id,
+      active: ep.Id === cur.Id,
       value: `script-message aquarium-episode ${ep.Id}`,
     })),
   });
@@ -1422,7 +1554,12 @@ async function handlePlayerMessage(args: any[]): Promise<void> {
       else if (arg === "episodes") await showEpisodeMenu();
       break;
     case "aquarium-quality":
-      await switchQuality(arg === "direct" ? undefined : parseInt(arg, 10));
+      if (arg === "download") {
+        if (nowPlaying?.isLocal) break;
+        if (!(await switchToDownload())) toast("The download isn't there anymore", "error");
+      } else {
+        await switchQuality(arg === "direct" ? undefined : parseInt(arg, 10));
+      }
       break;
     case "aquarium-adaptive": {
       const on = !isAdaptiveEnabled();
@@ -1438,7 +1575,13 @@ async function handlePlayerMessage(args: any[]): Promise<void> {
     case "aquarium-episode": {
       const np = nowPlaying;
       const ep = np?.queue?.find((e: any) => e.Id === arg);
-      if (ep) await playItem(ep, { resume: true, maxBitrate: np!.opts.maxBitrate }, { inherited: true, continuation: true });
+      if (ep) {
+        await playItem(
+          ep,
+          { resume: true, maxBitrate: np!.isLocal ? undefined : np!.opts.maxBitrate },
+          { inherited: !np!.isLocal, continuation: true }
+        );
+      }
       break;
     }
     case "aquarium-fullscreen":
@@ -1552,4 +1695,6 @@ export async function syncOfflineProgress(showToast = false): Promise<void> {
   } catch {
     if (showToast) toast("Sync failed — server unreachable?", "error");
   }
+  // The sidebar footer counts this queue; it read it before the sync ran.
+  document.dispatchEvent(new CustomEvent("aquarium-progress-queue"));
 }

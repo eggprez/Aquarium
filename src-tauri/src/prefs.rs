@@ -16,6 +16,23 @@
 
 use serde_json::Value;
 
+/// Settings' "Battery saver rendering".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BatteryRender {
+    /// mpv's own high-quality chain, always.
+    Off,
+    /// The cheap chain, always — as command-line options, so it holds even
+    /// without the bundled config dir.
+    On,
+    /// The cheap chain while the machine is on battery or in the power-saver
+    /// profile, switched live through the `aquarium-battery` profile in the
+    /// bundled mpv.conf (see `power.rs` and `Player::sync_battery_profile`).
+    Auto,
+}
+
+/// The name of that profile in src-tauri/mpv-config/mpv.conf.
+pub const BATTERY_PROFILE: &str = "aquarium-battery";
+
 /// The playback half of config.json, with the defaults applied.
 pub struct Prefs {
     cfg: Value,
@@ -39,6 +56,18 @@ impl Prefs {
 
     fn flag(&self, key: &str) -> bool {
         self.cfg.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
+    }
+
+    /// Older configs stored a plain on/off; `true` and `false` still mean
+    /// exactly what they did. Unset is Automatic.
+    pub fn battery_render(&self) -> BatteryRender {
+        match self.cfg.get("battery_render") {
+            Some(Value::Bool(true)) => BatteryRender::On,
+            Some(Value::Bool(false)) => BatteryRender::Off,
+            Some(Value::String(s)) if s == "on" => BatteryRender::On,
+            Some(Value::String(s)) if s == "off" => BatteryRender::Off,
+            _ => BatteryRender::Auto,
+        }
     }
 
     fn number(&self, key: &str, default: f64) -> f64 {
@@ -120,7 +149,9 @@ impl Prefs {
         // intermediates. From the couch, bilinear and lanczos are the same
         // picture; at the wall they are not. Opt-in, because on mains power
         // the default chain is the better picture.
-        if self.flag("battery_render") {
+        // Automatic is not an option here: it's a profile applied and lifted
+        // at runtime (`Player::sync_battery_profile`).
+        if self.battery_render() == BatteryRender::On {
             push("scale", "bilinear".into());
             push("cscale", "bilinear".into());
             push("dscale", "bilinear".into());
@@ -232,6 +263,41 @@ mod tests {
         for want in ["--scale=bilinear", "--dither=no", "--fbo-format=rgba8", "--hdr-compute-peak=no"] {
             assert!(on.iter().any(|a| a == want), "missing {want}");
         }
+        assert_eq!(prefs(json!({ "battery_render": "on" })).args(), on);
+        // Automatic is a runtime profile, not a startup option.
+        assert_eq!(prefs(json!({ "battery_render": "auto" })).args(), off);
+        assert_eq!(prefs(json!({})).battery_render(), BatteryRender::Auto);
+        assert_eq!(prefs(json!({ "battery_render": false })).battery_render(), BatteryRender::Off);
+    }
+
+    /// Always-on and Automatic must draw the same picture: the options pushed
+    /// for "on" and the bundled profile Automatic applies are one list.
+    #[test]
+    fn battery_profile_matches_battery_args() {
+        let conf = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/mpv-config/mpv.conf"))
+            .expect("bundled mpv.conf");
+        let header = format!("[{BATTERY_PROFILE}]");
+        let body: Vec<String> = conf
+            .lines()
+            .skip_while(|l| l.trim() != header)
+            .skip(1)
+            .take_while(|l| !l.trim_start().starts_with('['))
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("profile-"))
+            .map(|l| format!("--{l}"))
+            .collect();
+        assert!(!body.is_empty(), "no [{BATTERY_PROFILE}] profile in mpv.conf");
+        // What "on" adds over the defaults is exactly the battery chain.
+        let off = prefs(json!({})).args();
+        let mut on: Vec<String> = prefs(json!({ "battery_render": true }))
+            .args()
+            .into_iter()
+            .filter(|a| !off.contains(a))
+            .collect();
+        let mut body = body;
+        on.sort();
+        body.sort();
+        assert_eq!(on, body);
     }
 
     /// Defaults must produce no subtitle styling at all, so mpv's own defaults

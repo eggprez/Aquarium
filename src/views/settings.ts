@@ -45,6 +45,22 @@ function choice(
   return select;
 }
 
+/**
+ * Battery saver rendering. Stored as "auto" / "on" / "off"; configs from
+ * before Automatic existed hold a plain true/false, which still mean on and
+ * off. Unset is Automatic.
+ */
+function batteryRenderChoice(cfg: any): HTMLSelectElement {
+  const v = cfg.battery_render;
+  const current = v === true || v === "on" ? "on" : v === false || v === "off" ? "off" : "auto";
+  const select = choice({ battery_render: current }, "battery_render", [
+    ["auto", "Automatic — on battery or power saver"],
+    ["off", "Off — best picture"],
+    ["on", "Always — lighter on the GPU"],
+  ]);
+  return select;
+}
+
 /** A checkbox-style toggle bound to one config key. */
 function toggle(
   cfg: any,
@@ -364,8 +380,8 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
       ),
       row(
         "Battery saver rendering",
-        "Draws the picture with the simplest scaler and 8-bit intermediates instead of mpv's default high-quality chain. On a HiDPI screen every scaler pass runs at the panel's full resolution, so this is a real saving on the GPU, and the difference in the picture is hard to see from viewing distance. Applies from the next thing you play.",
-        toggle(cfg, "battery_render", ["Off — best picture", "On — lighter on the GPU"])
+        "Draws the picture with the simplest scaler and 8-bit intermediates instead of mpv's default high-quality chain. On a HiDPI screen every scaler pass runs at the panel's full resolution, so this is a real saving on the GPU, and the difference in the picture is hard to see from viewing distance. Automatic switches it on while the computer runs on battery or in power-saver mode, and off again when it doesn't, even partway through a film.",
+        batteryRenderChoice(cfg)
       ),
       row(
         "mpv",

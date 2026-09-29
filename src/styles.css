@@ -244,8 +244,16 @@ button {
   flex-shrink: 0;
 }
 .sidebar-footer .foot-line.ok .foot-dot { background: var(--ok); }
-.sidebar-footer .foot-line.busy .foot-dot { background: var(--accent); animation: offline-pulse 1.6s ease-in-out infinite; }
-body.bg-idle .sidebar-footer .foot-line.busy .foot-dot { animation-play-state: paused; }
+/* Static, deliberately. This dot used to pulse for as long as a download or a
+   sync was outstanding — hours, for a big queue — and on WebKitGTK every
+   frame of even an 8px animation repaints the whole window: measured
+   2026-09-23 on a 2880×1920 panel, one pulsing dot on an otherwise idle page
+   cost the UI thread 61 % of a core, the web process 19 % and ~1.8 W. The
+   ring and the text beside it say "working" without a single frame. */
+.sidebar-footer .foot-line.busy .foot-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
 .sidebar-footer .foot-line.warn { color: var(--warn); }
 .sidebar-footer .foot-line.warn .foot-dot { background: var(--warn); }
 
@@ -1269,9 +1277,10 @@ img.art.has-ph {
 .offline-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--warn);
-  animation: offline-pulse 2s ease-in-out infinite;
+  /* No pulse: see .foot-dot above for what a perpetual animation costs. The
+     pill is up for as long as the machine is offline, which is exactly when
+     it's most likely to be on battery. */
 }
-@keyframes offline-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .offline-screen {
   max-width: 460px; margin: 10vh auto 0; text-align: center;
 }
@@ -1825,7 +1834,14 @@ body.video-fs #shell { visibility: hidden; }
   background-image: linear-gradient(90deg, transparent, var(--sk-sheen), transparent);
   background-size: 220% 100%;
   background-repeat: no-repeat;
-  animation: sk-sweep 1.5s ease-in-out infinite;
+  /* The resting position is the sweep's last frame, with the sheen parked off
+     the left edge, so a placeholder that outlives the animation is simply the
+     flat base colour. */
+  background-position: -60% 0;
+  /* Two passes, not forever: enough to read as "loading", and a slow or
+     offline load then sits still instead of repainting the whole window at
+     display rate for as long as it takes (see .foot-dot). */
+  animation: sk-sweep 1.5s ease-in-out 2;
   border-radius: 6px;
 }
 .sk-line { height: 10px; }
@@ -1856,10 +1872,8 @@ body.video-fs #shell { visibility: hidden; }
   .card:hover .card-poster { transform: none; }
   .nav-btn:active, #player-bar .btn.icon:active { transform: none; }
   #content { scroll-behavior: auto; }
-  .offline-dot { animation: none; }
-  .foot-line.busy .foot-dot { animation: none; }
   .toast, .dialog, .dialog-scrim { animation: none; }
-  .spinner { animation: spin-fade 1.6s ease-in-out infinite; border-top-color: var(--accent); }
+  .spinner { animation: spin-fade 1.6s ease-in-out 6; border-top-color: var(--accent); }
   #player-bar { transition: none; }
 }
 @keyframes spin-fade { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
@@ -1867,17 +1881,15 @@ body.video-fs #shell { visibility: hidden; }
 /* While the embedded video covers the page (`body.video-covered`, set from
    main.ts; not picture-in-picture, where the page is being browsed) nothing
    under it can be seen — yet every running animation still has WebKit
-   composite a frame at display rate, and on GTK3 the app's main thread pays a
-   full-window GPU readback for each of those frames. Freeze every infinite
-   animation for the duration; they pick up where they were the moment the
-   video lifts. A hidden window (`body.bg-idle`) gets the same treatment. */
-body.video-covered .offline-dot,
-body.video-covered .foot-line.busy .foot-dot,
+   composite a frame at display rate, and the app's main thread pays a
+   full-window paint for each of those frames. Nothing in the app animates
+   forever any more, but the few finite ones (skeleton sweep, spinner) are
+   still frozen for the duration. A hidden window (`body.bg-idle`) gets the
+   same treatment. */
 body.video-covered .sk-box,
 body.video-covered .sk-line,
 body.video-covered .sk-btn,
 body.video-covered .spinner,
-body.bg-idle .offline-dot,
 body.bg-idle .sk-box,
 body.bg-idle .sk-line,
 body.bg-idle .sk-btn,
@@ -2006,7 +2018,10 @@ kbd {
   border: 3px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  /* About ten seconds of turning, then a still ring: a spinner that runs for
+     as long as a dead request hangs costs a full-window repaint per frame
+     (see .foot-dot) and says nothing the still ring doesn't. */
+  animation: spin 0.8s linear 12;
   margin: 60px auto;
 }
 @keyframes spin { to { transform: rotate(360deg); } }

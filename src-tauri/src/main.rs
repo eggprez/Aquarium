@@ -19,7 +19,7 @@ fn main() {
 /// WebKitGTK tuning for a mostly static page sitting next to a video surface.
 /// These have to be in the environment before wry initialises WebKit, which
 /// is why they live here rather than in `lib.rs`. Each is only set when the
-/// environment doesn't already say otherwise, so `WEBKIT_..._FORCE_SHM=0
+/// environment doesn't already say otherwise, so `WEBKIT_FORCE_VBLANK_TIMER=0
 /// aquarium` gets the stock behaviour back for comparison, and
 /// `AQUARIUM_WEBKIT_DEFAULTS=0` skips all of them at once.
 fn webkit_defaults() {
@@ -27,29 +27,28 @@ fn webkit_defaults() {
         return;
     }
     let defaults = [
-        // The GTK3 build of WebKitGTK paints a hardware (dmabuf) web frame
-        // with `gdk_cairo_draw_from_gl` on a GL texture, which puts the
-        // web view's GdkWindow in GL paint mode: every web frame then costs
-        // the main thread a full-size paint surface (22 MB on a 2880×1920
-        // panel) whether or not anything of the page is visible, and the
-        // web view's `draw` guard in `surface.rs` cannot stop it, because
-        // the web process is not waiting on that draw to release a dmabuf
-        // frame. A shared-memory frame is blitted by cairo, clip region
-        // only, and the frame is acknowledged from the draw handler, so
-        // stopping the draw stops the page.
+        // `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1` — shared-memory web frames —
+        // was set here from 4 Sep 2026 until 23 Sep 2026. It was kept for one
+        // case: a page animating *under* fullscreen video, where a dmabuf
+        // frame puts the web view in GL paint mode and the `draw` guard in
+        // `surface.rs` cannot stop it (fullscreen over a synthetic animation:
+        // SHM main 0.8 %, dmabuf main 27 % and web process 160 %).
         //
-        // Re-measured 4 Sep 2026 on the Wayland subsurface backend with a
-        // synthetic full-window CSS animation running in the page (the
-        // `AQUARIUM_TEST_EVAL` hook), which is the worst case either way:
+        // That case no longer arises: nothing in the page animates forever
+        // any more (styles.css), the finite animations and the Home hero
+        // stand down under the video, and the player bar stops redrawing
+        // while it's tucked away (main.ts `barOutOfSight`). Re-measured
+        // 23 Sep 2026 on the 2880×1920 panel, UI + web process:
         //
-        //   fullscreen video over it:  SHM main 0.8 %, web process idle;
-        //                              GPU path main 27 %, web process 160 %.
-        //   page visible, no video:    SHM main 23 %; GPU path main 10 %.
+        //   scrolling 400 posters:   SHM ~60 % of a core, dmabuf ~32 %,
+        //                            both 31 fps, p95 33 ms;
+        //   fullscreen playback:     SHM 13.1 %, dmabuf 12.8 %;
+        //   windowed playback:       SHM 15.9 %, dmabuf 16.5 %;
+        //   idle page:               both ~0.
         //
-        // The GPU path wins only while a large animation is actually on
-        // screen; the app's own UI has nothing of the kind, and playback is
-        // where the hours go, so SHM stays.
-        ("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1"),
+        // Browsing is where the page spends its CPU, so the stock dmabuf
+        // path wins. `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1 aquarium` still
+        // selects the old path for comparison.
         // Under the vblank timer below WebKit takes the panel for 60 Hz (a
         // throttle of 120 is rejected as "not a factor of refresh rate
         // 60fps"), and a scrolling frame costs two ticks of whatever rate it
