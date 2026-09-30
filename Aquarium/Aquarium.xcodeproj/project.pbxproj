@@ -703,7 +703,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletv*]" = "Aquarium-tvOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphone*]" = "Aquarium-iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 69;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				ENABLE_APP_SANDBOX = YES;
@@ -763,7 +763,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletv*]" = "Aquarium-tvOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphone*]" = "Aquarium-iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 69;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				ENABLE_APP_SANDBOX = YES;
@@ -816,7 +816,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 69;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TopShelf/Info.plist;
@@ -847,7 +847,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 69;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TopShelf/Info.plist;
@@ -877,7 +877,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 69;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LiveActivities/Info.plist;
@@ -906,7 +906,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 69;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LiveActivities/Info.plist;
@@ -938,7 +938,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Watch/Watch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 69;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -973,7 +973,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Watch/Watch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 69;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1006,7 +1006,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = WatchWidgets/WatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 69;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = WatchWidgets/Info.plist;
@@ -1037,7 +1037,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = WatchWidgets/WatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 69;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = WatchWidgets/Info.plist;
