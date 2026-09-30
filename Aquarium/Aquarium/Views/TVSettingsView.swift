@@ -222,6 +222,7 @@ private struct ServerSettingsPage: View {
 
 private struct AudioSettingsPage: View {
     @Environment(Preferences.self) private var prefs
+    @Environment(PlayerModel.self) private var player
 
     var body: some View {
         @Bindable var prefs = prefs
@@ -239,6 +240,11 @@ private struct AudioSettingsPage: View {
                 // player, over the picture — see `AudioDelayOverlay`.
                 SettingChoice(Copy.audioDelay, selection: audioDelayMilliseconds,
                               options: audioDelayOptions)
+                // Opens the player on a looped test clip; the Sync tab sets
+                // the delay over it.
+                SettingButton(Copy.syncTest.name ?? "", notes: [Copy.syncTest]) {
+                    Task { await player.playSyncTest() }
+                }
                 SettingChoice(Copy.frameRateMatch, selection: frameRateMatchMilliseconds,
                               options: frameRateMatchOptions)
             }

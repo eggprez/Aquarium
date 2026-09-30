@@ -46,6 +46,12 @@ final class PlayerModel {
     private(set) var isBuffering = false
     /// Between asking for a stream and its first frame.
     private(set) var isOpening = false
+    /// Whether what the video view shows belongs to something else. The view
+    /// outlives the player screen, and mpv leaves its last frame on it when a
+    /// file stops — so without this, a new title opens over the last one's
+    /// final frame. Cleared by the new title's first frame. A reopen of the
+    /// same title (another track, another quality) keeps its picture up.
+    private(set) var pictureIsStale = true
     private(set) var position: Double = 0
     private(set) var duration: Double = 0
     /// How far ahead the cache reaches, in stream seconds.
@@ -66,7 +72,6 @@ final class PlayerModel {
     private(set) var segments: [MediaSegment] = [] {
         didSet { refreshCues() }
     }
-    private(set) var chapters: [Chapter] = []
 
     /// What mpv found in the stream.
     private(set) var tracks: [MPVEngine.Track] = []
@@ -146,6 +151,16 @@ final class PlayerModel {
     /// Bumped by everything that starts or ends a stream, so work begun for one
     /// stream never lands on the next. Read before an await, compared after.
     private var generation = 0
+    /// Between a stream being asked for and its file going to mpv: whatever
+    /// mpv says then is about the file before, and would be taken for the new
+    /// one's first frame, tracks and position.
+    private var awaitingLoad = false
+    /// Whether the display has been asked to match this stream's frame rate
+    /// — beforehand from the server's reading, or else from mpv's once the
+    /// file is open.
+    private var displayRequested = false
+    /// Waiting on the last seek's first frame — see `watchSeek`.
+    private var seekWatch: Task<Void, Never>?
 
     private var client: JellyfinClient { .shared }
     private var prefs: Preferences { .shared }
@@ -228,6 +243,15 @@ final class PlayerModel {
         self.isBuffering = true
         generation &+= 1
         let mine = generation
+        watchOpening(mine)
+        awaitingLoad = true
+        // Another title: its picture and sound stop now rather than playing
+        // on under this one's name while the server is asked. The same one
+        // reopened for a track or quality keeps going until the new file is in.
+        if !sameItem {
+            engine.stop()
+            pictureIsStale = true
+        }
 
         do {
             let src = try await client.resolvePlayback(
@@ -245,11 +269,30 @@ final class PlayerModel {
             }
             source = src
             isTranscoding = src.isTranscode
-            engine.audioDelay = prefs.audioDelay
+            Self.log.info("opening \(item.Id, privacy: .public): \(src.isTranscode ? "transcode" : "original", privacy: .public), container \(src.mediaSource.Container ?? "none", privacy: .public), \(src.url.path, privacy: .public)")
             engine.speed = speed
+            // The display switched to the file's frame rate before the file
+            // opens: see `DisplayMatch`.
+            if let video = src.mediaSource.streams.first(where: { $0.type == "Video" }),
+               let rate = video.RealFrameRate ?? video.AverageFrameRate {
+                displayRequested = true
+                await DisplayMatch.request(
+                    rate: rate, codec: video.Codec,
+                    size: CGSize(width: video.Width ?? 0, height: video.Height ?? 0)
+                )
+                guard generation == mine else {
+                    await release(src)
+                    return
+                }
+            }
+            engine.setVideoSync(displayRate: DisplayMatch.matchedRate)
+            // After the display request: whether the frame-rate offset
+            // applies depends on what was asked for.
+            engine.audioDelay = appliedAudioDelay
             // A Jellyfin HLS playlist covers the whole item from zero whatever
             // start the server was given, so a transcode is seeked the same
             // way as a file.
+            awaitingLoad = false
             engine.load(src.url, start: opts.live ? 0 : startSeconds, headers: client.authHeaders(for: src.url))
             // The encode and the tuner the last stream held.
             if let previous {
@@ -266,6 +309,7 @@ final class PlayerModel {
             await client.reportPlaybackStart(report(paused: false))
         } catch {
             guard generation == mine else { return }
+            awaitingLoad = false
             Self.log.error("start failed \(item.Id, privacy: .public): \(error.localizedDescription, privacy: .private)")
             errorMessage = error.localizedDescription
             isBuffering = false
@@ -292,6 +336,7 @@ final class PlayerModel {
         let previous = source
         resetStreamState()
         if !reopening { liveReopens = 0 }
+        if channel?.Id != item?.Id || channel == nil { pictureIsStale = true }
         item = channel
         fullItem = nil
         source = nil
@@ -310,9 +355,64 @@ final class PlayerModel {
         isOpening = true
         isBuffering = true
         generation &+= 1
-        engine.audioDelay = prefs.audioDelay
+        watchOpening(generation)
+        engine.audioDelay = appliedAudioDelay
         engine.speed = 1
+        awaitingLoad = false
         engine.load(streamURL, start: 0, headers: ["User-Agent": prefs.iptvUserAgentHeader])
+        if let previous { Task { await release(previous) } }
+    }
+
+    /// The sync test from Settings → Audio output: a clip in the app — a
+    /// line sweeping a millisecond ruler, a beep as it crosses 0 — looped,
+    /// and opened the way a film is: the display switched to 23.976 Hz
+    /// first, so the offset set over it is the one films need. Made by
+    /// `Tools/SyncTestClip/make-sync-test.swift`.
+    func playSyncTest() async {
+        guard let url = Bundle.main.url(forResource: "SyncTest", withExtension: "mov") else {
+            Self.log.error("SyncTest.mov is missing from the bundle")
+            return
+        }
+        MusicPlayer.shared.yield()
+        guard let engine = makeEngine() else {
+            errorMessage = "The player couldn't start."
+            isActive = true
+            return
+        }
+        let previous = source
+        resetStreamState()
+        pictureIsStale = true
+        item = nil
+        fullItem = nil
+        source = nil
+        options = StreamOptions()
+        externalStream = nil
+        // Nothing on a server to report to, and nothing to come after it.
+        isExternal = true
+        isLive = false
+        autoplayCancelled = true
+        upNextSettled = true
+        title = "Audio Sync Test"
+        subtitle = "The beep should land on the flash"
+        artworkURL = nil
+        currentBitrate = nil
+        wantedTracks = (nil, nil)
+        speed = 1
+        isActive = true
+        isOpening = true
+        isBuffering = true
+        generation &+= 1
+        let mine = generation
+        watchOpening(mine)
+        awaitingLoad = true
+        engine.stop()
+        displayRequested = true
+        await DisplayMatch.request(rate: 24000.0 / 1001, codec: "h264", size: CGSize(width: 1920, height: 1080))
+        guard generation == mine else { return }
+        engine.setVideoSync(displayRate: DisplayMatch.matchedRate)
+        engine.audioDelay = appliedAudioDelay
+        awaitingLoad = false
+        engine.load(url, start: 0, headers: [:], loop: true)
         if let previous { Task { await release(previous) } }
     }
 
@@ -324,7 +424,6 @@ final class PlayerModel {
         buffered = 0
         isPaused = false
         tracks = []
-        chapters = []
         segments = []
         trickplay = nil
         upNext = nil
@@ -334,6 +433,7 @@ final class PlayerModel {
         shouldShowUpNext = false
         videoSize = .zero
         frameRate = nil
+        displayRequested = false
         decoder = nil
         droppedFrames = 0
     }
@@ -347,10 +447,51 @@ final class PlayerModel {
         }
     }
 
+    /// How long a stream may take to show its first frame. A server that
+    /// can't make the segment asked for — a transcode started deep into a
+    /// file it can't cut there — has mpv retrying it for as long as it is
+    /// left to, behind a spinner and with no way to say so.
+    private static let openingPatience: Duration = .seconds(45)
+    private static let recoveryPoint: Duration = .seconds(15)
+
+    /// Give up on a stream still opening after `openingPatience`: a channel
+    /// is opened again, anything else stops and says why, with Try again.
+    private func watchOpening(_ mine: Int) {
+        Task { [weak self] in
+            // Part-way: a stream with plenty buffered and still no first
+            // frame isn't waiting on the server — mpv has the data. What it
+            // is waiting on is the audio output, which can stall when it was
+            // set up while the television was renegotiating HDMI for a frame
+            // rate switch. Do what Try again does, once, without asking:
+            // bring the audio output back and seek to where it is.
+            try? await Task.sleep(for: Self.recoveryPoint)
+            if let self, self.generation == mine, self.isActive, self.isOpening, self.errorMessage == nil,
+               self.buffered - self.position > 3 {
+                Self.log.notice("stalled with \(self.buffered - self.position, format: .fixed(precision: 1))s buffered; restarting audio output")
+                try? AVAudioSession.sharedInstance().setActive(true)
+                self.engine?.command(["ao-reload"])
+                self.engine?.seek(to: self.position)
+            }
+            try? await Task.sleep(for: Self.openingPatience - Self.recoveryPoint)
+            guard let self, self.generation == mine, self.isActive, self.isOpening,
+                  self.errorMessage == nil else { return }
+            Self.log.error("no first frame after \(Self.openingPatience, privacy: .public): \(self.title, privacy: .public)")
+            if self.isLive {
+                self.reopenLive()
+                return
+            }
+            self.generation &+= 1
+            self.engine?.stop()
+            self.errorMessage = "This is taking too long to start. The server may be struggling to prepare it."
+            self.isBuffering = false
+            self.isOpening = false
+        }
+    }
+
     // MARK: - Engine events
 
     private func handle(_ event: MPVEngine.Event) {
-        guard isActive else { return }
+        guard isActive, !awaitingLoad else { return }
         switch event {
         case .position(let seconds):
             position = seconds
@@ -382,14 +523,25 @@ final class PlayerModel {
                 tracksApplied = true
                 applyWantedTracks()
             }
-        case .chapters(let list):
-            chapters = list.enumerated().map { i, chapter in
-                Chapter(id: i, start: chapter.time, title: chapter.title ?? "Chapter \(i + 1)")
-            }
         case .videoSize(let size):
             videoSize = size
         case .frameRate(let rate):
             frameRate = rate > 0 ? rate : nil
+            // A stream the server couldn't say the rate of — a playlist
+            // channel, an unprobed file — is matched once mpv has read it.
+            // It is already playing, so the switch lands over the picture.
+            if rate > 0, !displayRequested {
+                displayRequested = true
+                let size = videoSize
+                Task {
+                    let switched = await DisplayMatch.request(rate: rate, codec: nil, size: size)
+                    // The audio output was opened before the switch, and
+                    // doesn't know how late HDMI now is: open it again.
+                    if switched { engine?.command(["ao-reload"]) }
+                    engine?.setVideoSync(displayRate: DisplayMatch.matchedRate)
+                    engine?.audioDelay = appliedAudioDelay
+                }
+            }
         case .decoder(let name):
             decoder = name
         case .droppedFrames(let count):
@@ -397,9 +549,13 @@ final class PlayerModel {
         case .fileLoaded:
             break
         case .playbackRestart:
+            seekWatch?.cancel()
+            seekWatch = nil
+            pictureIsStale = false
             if isOpening {
                 isOpening = false
-                Self.log.info("first frame: \(self.title, privacy: .public)")
+                let latency = AVAudioSession.sharedInstance().outputLatency
+                Self.log.info("first frame: \(self.title, privacy: .public); output latency \(Int((latency * 1000).rounded())) ms, offset \(Int((self.appliedAudioDelay * 1000).rounded())) ms")
                 NowPlaying.shared.update(from: self)
             }
             isBuffering = false
@@ -439,6 +595,97 @@ final class PlayerModel {
     }
 
     // MARK: - Live
+
+    /// The item the Info tab describes: the whole one once it has been
+    /// fetched, the channel on a channel.
+    var infoItem: BaseItem? { fullItem ?? item ?? externalStream?.channel }
+
+    /// The channel playing, as the guide lists it.
+    var currentChannel: BaseItem? {
+        guard isLive else { return nil }
+        return externalStream?.channel ?? item
+    }
+
+    /// The guide's channels, in the guide's order: what channel up and down
+    /// step through and the Channels tab lists.
+    var channelLineup: [BaseItem] { LiveTVStore.shared.channels }
+
+    /// Channel up (`+1`) or down (`-1`), wrapping at either end of the list.
+    func switchChannel(by offset: Int) {
+        let lineup = channelLineup
+        guard let current = currentChannel, !lineup.isEmpty,
+              let index = lineup.firstIndex(where: { $0.Id == current.Id }) else { return }
+        let next = lineup[((index + offset) % lineup.count + lineup.count) % lineup.count]
+        playChannel(next)
+    }
+
+    /// Tune a channel the way the guide does: a custom playlist's by its own
+    /// URL, a Jellyfin one through the server.
+    func playChannel(_ channel: BaseItem) {
+        guard channel.Id != currentChannel?.Id else { return }
+        if let raw = channel.ExternalStreamURL, let url = URL(string: raw) {
+            playExternal(
+                title: channel.title,
+                subtitle: channel.ChannelNumber.map { "Channel \($0)" } ?? "",
+                artworkURL: Artwork.channelLogo(channel, width: 600),
+                streamURL: url,
+                channel: channel
+            )
+        } else {
+            Task { await play(item: channel, options: StreamOptions(resume: false, live: true)) }
+        }
+    }
+
+    /// What is actually playing, in a line: how it arrives, the picture, the
+    /// sound, and whether the Apple TV is decoding it in hardware.
+    var streamSummary: [String] {
+        var parts: [String] = []
+        parts.append(isExternal ? "Direct stream" : isTranscoding ? "Transcoding" : "Direct play")
+        let streams = source?.mediaSource
+        if let container = streams?.Container?.split(separator: ",").first {
+            parts.append(container.uppercased())
+        }
+        if let video = streams?.streams.first(where: { $0.type == "Video" }) {
+            var picture = [String]()
+            if let height = video.Height ?? (videoSize.height > 0 ? Int(videoSize.height) : nil) {
+                picture.append(height >= 2000 ? "4K" : "\(height)p")
+            }
+            if let codec = video.Codec { picture.append(codec.uppercased()) }
+            if let rate = video.RealFrameRate ?? video.AverageFrameRate ?? frameRate, rate > 0 {
+                picture.append(Self.frameRateName(rate))
+            }
+            if let range = video.VideoRange, range != "SDR" { picture.append(range) }
+            if !picture.isEmpty { parts.append(picture.joined(separator: " ")) }
+        } else if videoSize.height > 0 {
+            var picture = ["\(Int(videoSize.height))p"]
+            if let frameRate { picture.append(Self.frameRateName(frameRate)) }
+            parts.append(picture.joined(separator: " "))
+        }
+        if isActive {
+            let latency = AVAudioSession.sharedInstance().outputLatency
+            if latency > 0 { parts.append("Audio latency \(Int((latency * 1000).rounded())) ms") }
+        }
+        if let matched = DisplayMatch.matchedRate {
+            parts.append("Display \(Self.frameRateName(matched, unit: "Hz"))")
+        }
+        let audio = tracks.first { $0.kind == .audio && $0.isSelected }
+        if let audio {
+            var sound = [audio.codec?.uppercased() ?? "Audio"]
+            if let channels = audio.channels {
+                sound.append(channels == 8 ? "7.1" : channels == 6 ? "5.1" : channels == 2 ? "Stereo" : "\(channels) ch")
+            }
+            parts.append(sound.joined(separator: " "))
+        }
+        if let decoder {
+            parts.append(decoder == "no" ? "Software decoding" : "Hardware decoding")
+        }
+        return parts
+    }
+
+    /// `23.976 fps`, `25 fps`, `59.94 fps`.
+    static func frameRateName(_ rate: Double, unit: String = "fps") -> String {
+        "\(rate.formatted(.number.precision(.fractionLength(0...3)))) \(unit)"
+    }
 
     /// A live stream that ended or failed is opened again — the playlist
     /// stopped, a tuner dropped — up to three times a minute.
@@ -483,6 +730,30 @@ final class PlayerModel {
         position = target
         engine?.seek(to: target)
         refreshCues()
+        watchSeek(to: target)
+    }
+
+    /// How long a seek may go without its first frame before the audio
+    /// output is suspected.
+    private static let seekPatience: Duration = .seconds(8)
+
+    /// A seek that lands on data already buffered and still shows nothing is
+    /// waiting on the audio output, not the server — the same stall
+    /// `watchOpening` recovers from. Recover the same way, once.
+    private func watchSeek(to target: Double) {
+        seekWatch?.cancel()
+        let mine = generation
+        seekWatch = Task { [weak self] in
+            try? await Task.sleep(for: Self.seekPatience)
+            guard !Task.isCancelled, let self, self.generation == mine, self.isActive,
+                  !self.isOpening, self.errorMessage == nil,
+                  self.buffered - target > 3 else { return }
+            self.seekWatch = nil
+            Self.log.notice("seek to \(target, format: .fixed(precision: 1)) stalled with \(self.buffered - target, format: .fixed(precision: 1))s buffered; restarting audio output")
+            try? AVAudioSession.sharedInstance().setActive(true)
+            self.engine?.command(["ao-reload"])
+            self.engine?.seek(to: target)
+        }
     }
 
     func seek(by delta: Double) {
@@ -525,6 +796,9 @@ final class PlayerModel {
         let closingSource = source
 
         engine?.stop()
+        pictureIsStale = true
+        engine?.setVideoSync(displayRate: nil)
+        DisplayMatch.reset()
         cancelSleepTimer()
         NowPlaying.shared.clear()
         resetStreamState()
@@ -583,7 +857,44 @@ final class PlayerModel {
     func setAudioDelay(milliseconds: Int) {
         let clamped = min(max(milliseconds, -Self.audioDelayReach), Self.audioDelayReach)
         prefs.audioDelay = Double(clamped) / 1000
-        engine?.audioDelay = prefs.audioDelay
+        engine?.audioDelay = appliedAudioDelay
+    }
+
+    /// Move the offset by `delta` from wherever it is at the press — not from
+    /// what it was when the button was drawn.
+    func nudgeAudioDelay(by delta: Int) {
+        setAudioDelay(milliseconds: audioDelayMilliseconds + delta)
+    }
+
+    /// The share of the offset that is there because the television was
+    /// switched out of 60 Hz for this video — Settings → Frame rate offset.
+    /// A television does different work at 24 Hz than at 60, and delays the
+    /// picture by a different amount; tvOS doesn't say by how much, so it is
+    /// set by hand. The same rule as the AVPlayer player had: any rate the
+    /// display was asked for that isn't 60 (or 59.94).
+    var frameRateAudioDelay: Double {
+        guard prefs.frameRateMatchDelay != 0, let rate = DisplayMatch.requested else { return 0 }
+        return abs(rate - 60) > 1 ? prefs.frameRateMatchDelay : 0
+    }
+
+    var frameRateAudioDelayMilliseconds: Int { Int((frameRateAudioDelay * 1000).rounded()) }
+
+    #if DEBUG
+    /// What mpv itself holds, for the debug hook to check against.
+    var debugEngineAudioDelay: Double { engine?.audioDelay ?? .nan }
+    /// mpv's own reading of sound against picture, in seconds: how far apart
+    /// it measured them last, with the delay taken into account — near zero
+    /// when it is holding them where the delay says.
+    var debugAVSync: String { engine?.get("avsync") ?? "none" }
+    #endif
+
+    /// What mpv is given: the offset set here, plus the frame-rate one.
+    var appliedAudioDelay: Double { prefs.audioDelay + frameRateAudioDelay }
+
+    /// Lift subtitles clear of the bar while it is up, and put them back at
+    /// the foot of the picture when it goes.
+    func raiseSubtitles(_ raised: Bool) {
+        engine?.subtitlePosition = raised ? 70 : 100
     }
 
     // MARK: - Tracks
@@ -926,6 +1237,7 @@ final class PlayerModel {
         let loadedSegments = (try? await segmentsTask) ?? []
         let loadedDetail = await detailTask ?? nil
         guard self.item?.Id == itemId else { return }
+        Self.log.info("segments for \(itemId, privacy: .public): \(loadedSegments.map { "\($0.type) \(Int($0.start))–\(Int($0.end))" }.joined(separator: ", "), privacy: .public)")
         segments = loadedSegments
         trickplay = JellyfinClient.trickplayInfo(for: loadedDetail ?? item)
         fullItem = loadedDetail ?? item
@@ -1125,6 +1437,16 @@ final class PlayerModel {
                 break
             }
         })
+        // The television renegotiating HDMI for a frame-rate switch can leave
+        // the audio output stalled, or holding the last mode's latency.
+        observers.append(centre.addObserver(
+            forName: .AVDisplayManagerModeSwitchEnd, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                Self.log.info("display mode switch ended; restarting audio output")
+                self?.recoverAudio()
+            }
+        })
         observers.append(centre.addObserver(
             forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -1187,11 +1509,6 @@ final class PlayerModel {
             return "\(series)\(label) · \(item.title)"
         }
         return item.title
-    }
-
-    /// The chapter containing `seconds`.
-    func chapter(at seconds: Double) -> Chapter? {
-        chapters.last { $0.start <= seconds }
     }
 }
 

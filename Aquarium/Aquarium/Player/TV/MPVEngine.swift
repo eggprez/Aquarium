@@ -103,11 +103,6 @@ final class MPVEngine: @unchecked Sendable {
         var externalURL: String?
     }
 
-    struct Chapter: Hashable, Sendable {
-        var title: String?
-        var time: Double
-    }
-
     enum EndReason: Sendable { case eof, stop, quit, error, redirect, unknown }
 
     enum Event: Sendable {
@@ -120,7 +115,6 @@ final class MPVEngine: @unchecked Sendable {
         /// How far the cache reaches, in stream seconds.
         case cachedUntil(Double)
         case tracks([Track])
-        case chapters([Chapter])
         /// The picture's display size, once there is one.
         case videoSize(CGSize)
         /// The stream's own frame rate, as the container declares it.
@@ -189,6 +183,15 @@ final class MPVEngine: @unchecked Sendable {
             // itself and sends PCM, so a soundbar gets 5.1 or 7.1 PCM rather
             // than a bitstream to decode on its own time.
             ("audio-channels", "auto"),
+            // A new audio output for every file. mpv's default keeps the one
+            // it has when the next file's format matches — which, for a
+            // library of 5.1 at 48 kHz, is every file for the life of the
+            // app — and that output has lived through the television
+            // switching 24 Hz → 60 → 24 around each title. It came out of
+            // each switch a little later than it thought it was, so the
+            // offset a film needed grew with every film opened. One opened
+            // after the switch knows where it is.
+            ("gapless-audio", "no"),
             // Subtitles in the file are chosen by the player from the
             // viewer's preferences, not by mpv from the file's flags.
             ("sid", "no"),
@@ -221,7 +224,6 @@ final class MPVEngine: @unchecked Sendable {
         observe("seeking", MPV_FORMAT_FLAG)
         observe("demuxer-cache-time", MPV_FORMAT_DOUBLE)
         observe("track-list", MPV_FORMAT_NONE)
-        observe("chapter-list", MPV_FORMAT_NONE)
         observe("dwidth", MPV_FORMAT_INT64)
         observe("dheight", MPV_FORMAT_INT64)
         observe("container-fps", MPV_FORMAT_DOUBLE)
@@ -252,7 +254,8 @@ final class MPVEngine: @unchecked Sendable {
 
     /// Open a URL, replacing whatever is playing. `start` is where in the
     /// stream to begin; `headers` go on every request mpv makes for it.
-    func load(_ url: URL, start: Double, headers: [String: String]) {
+    /// `loop` plays it round for ever, for this file only.
+    func load(_ url: URL, start: Double, headers: [String: String], loop: Bool = false) {
         guard handle != nil else { return }
         command(["change-list", "http-header-fields", "clr", ""])
         for (name, value) in headers.sorted(by: { $0.key < $1.key }) {
@@ -264,7 +267,13 @@ final class MPVEngine: @unchecked Sendable {
         // A property rather than a per-file option, because it is simplest to
         // set it every time: `none` for the top.
         setString("start", start > 0.5 ? String(format: "%.3f", start) : "none")
-        command(["loadfile", url.absoluteString, "replace"])
+        // `pause` outlives the file: a stream opened over a paused one would
+        // start paused, and the model — which begins every stream playing —
+        // would never hear otherwise, since the property didn't change.
+        setFlag("pause", false)
+        // Per-file options go after the index (-1: not placed in a playlist)
+        // and lapse with the file.
+        command(["loadfile", url.absoluteString, "replace", "-1"] + (loop ? ["loop-file=inf"] : []))
     }
 
     func stop() {
@@ -313,6 +322,28 @@ final class MPVEngine: @unchecked Sendable {
     func selectAudio(_ id: Int?) { setString("aid", id.map(String.init) ?? "no") }
     /// The subtitle track, by mpv id; nil for none.
     func selectSubtitle(_ id: Int?) { setString("sid", id.map(String.init) ?? "no") }
+
+    /// How frames are timed. Given the rate the display is known to be
+    /// running at, `display-resample` times them to its refreshes and nudges
+    /// the audio to keep up — no frame held for an extra refresh or dropped
+    /// to catch the sound up. Without one, mpv's default: frames timed to the
+    /// audio clock.
+    func setVideoSync(displayRate: Double?) {
+        if let displayRate {
+            setString("display-fps-override", String(format: "%.6f", displayRate))
+            setString("video-sync", "display-resample")
+        } else {
+            setString("video-sync", "audio")
+            setString("display-fps-override", "0")
+        }
+    }
+
+    /// Where the bottom of a subtitle sits, as a percentage of the picture's
+    /// height: 100 is mpv's own place at the foot of it.
+    var subtitlePosition: Double {
+        get { getDouble("sub-pos") }
+        set { setDouble("sub-pos", newValue) }
+    }
 
     /// Anything else, by name — subtitle styling and the like.
     func set(_ name: String, _ value: String) { setString(name, value) }
@@ -439,8 +470,6 @@ final class MPVEngine: @unchecked Sendable {
             deliver(.cachedUntil(double(p)))
         case ("track-list", _):
             deliver(.tracks(readTracks()))
-        case ("chapter-list", _):
-            deliver(.chapters(readChapters()))
         case ("dwidth", MPV_FORMAT_INT64), ("dheight", MPV_FORMAT_INT64):
             if let w = getInt("dwidth"), let h = getInt("dheight"), w > 0, h > 0 {
                 deliver(.videoSize(CGSize(width: w, height: h)))
@@ -515,16 +544,6 @@ final class MPVEngine: @unchecked Sendable {
                 channels: getInt(base + "demux-channel-count"),
                 fileIndex: getInt(base + "ff-index"),
                 externalURL: getString(base + "external-filename")
-            )
-        }
-    }
-
-    private func readChapters() -> [Chapter] {
-        let count = getInt("chapter-list/count") ?? 0
-        return (0..<count).map { i in
-            Chapter(
-                title: getString("chapter-list/\(i)/title"),
-                time: getDouble("chapter-list/\(i)/time")
             )
         }
     }

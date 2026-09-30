@@ -49,6 +49,13 @@ struct AquariumApp: App {
     }
     #endif
 
+    #if os(tvOS) && DEBUG
+    init() {
+        // Remote presses from a script — see Player/TV/RemoteDebugHook.swift.
+        RemoteDebugHook.start()
+    }
+    #endif
+
     var body: some Scene {
         // "main" is `MacMainWindow.id`, which the Mac finds and reopens it by.
         WindowGroup(id: "main") {
