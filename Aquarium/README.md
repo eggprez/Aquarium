@@ -19,7 +19,9 @@ embedded in the iPhone build the same way — see *Apple Watch* below.
 ## Building
 
 Requires Xcode 26 or later. Open `Aquarium.xcodeproj`, pick a destination and
-run — there are no package dependencies to resolve and nothing to install first.
+run. The one package dependency, [MPVKit](https://github.com/mpvkit/MPVKit)
+(its LGPL build), is resolved by Xcode on first open and linked for tvOS only —
+see *The Apple TV player* below.
 
 ```sh
 xcodebuild -project Aquarium.xcodeproj -scheme Aquarium \
@@ -80,6 +82,42 @@ Everything the Linux build does, with the exceptions listed further down.
   (everywhere but Apple TV, which is dark and only dark), offline mode with a
   backing-off reconnect probe, and progress reported to the server every 10 s.
 
+## The Apple TV player
+
+Apple TV plays video through **libmpv** (MPVKit) rather than AVPlayer. iPhone,
+iPad and Mac keep AVPlayer; everything in this section is tvOS only, and lives
+in `Player/TV/`.
+
+- **The original file, almost always.** The device profile asks the server for
+  the file as it is: MKV, DTS, TrueHD, PGS subtitles and the rest play direct,
+  with VideoToolbox decoding and mpv's `gpu-next` renderer drawing into a
+  Metal layer. The server only transcodes when you pick a lower quality.
+- **Siri Remote controls of its own.** With nothing open, the remote is read
+  directly: swipe on the touch surface to scrub (with trickplay thumbnails
+  from the server riding above the timeline), click the left or right edge to
+  jump ten seconds, click to play or pause (or to skip an intro, or start the
+  next episode when Up Next is showing), and Menu after a jump to go back to
+  where the playhead was.
+- **A panel on a swipe down**, with tabs: *Info* (the title, the episode, and
+  for Live TV what's on now), *Channels* (change channel without
+  leaving the player), *Audio*, *Subtitles*, *Quality*, *Speed* (0.5× to 2×)
+  and *Sync*.
+- **Match Frame Rate.** mpv draws into its own layer, so nobody asks tvOS to
+  switch the display for it; the player does, through `AVDisplayManager`,
+  before the file opens. A 23.976 fps film is shown at 24 Hz instead of
+  juddering at 60 when *Match Content → Match Frame Rate* is on.
+- **Audio delay, exact.** mpv's `audio-delay` moves the sound earlier or later
+  on every stream. *Settings → Audio → Sync test* plays a looping 23.976 fps
+  clip — a ruler, a sweeping line and a beep at 0 — and the Sync tab over it
+  sets the delay by ear. `Tools/SyncTestClip/make-sync-test.swift` renders the
+  clip. A separate offset covers televisions that lag more at 24 Hz than at 60.
+- **Carried over from the AVPlayer model:** per-series track memory, progress
+  reporting, skip intro and credits, Up Next with autoplay, the sleep timer,
+  Live TV reopening, and the Siri Remote's Now Playing controls.
+- **Default quality is per device** on every platform: what an Apple TV on
+  Ethernet can stream isn't what a phone on cellular can, so it no longer
+  syncs through iCloud.
+
 ## What is different on Apple TV
 
 A remote is not a finger, and the differences that follow from that are the
@@ -98,6 +136,10 @@ whole of it — nothing here is a reduced version of a feature:
   There is nothing to pull, and a tab keeps its view alive when you switch away
   from it, so Home would otherwise still be offering the episode you just
   finished.
+- **Every row on a title page leads back up.** The row of Play, Quality,
+  Favorite and the rest is one focus region as wide as the page, so a season,
+  a face in the cast or a title in More Like This, however far right, goes
+  up to it — and landing there scrolls the page back to its artwork.
 - **Focus is drawn from this app's own palette** — rows and tiles lift and take
   an accent border rather than the system's light focus background, which would
   put white text on a white field.
@@ -112,7 +154,8 @@ whole of it — nothing here is a reduced version of a feature:
 ## What Apple platforms add
 
 None of this was possible on the Linux build, and all of it comes from using
-AVFoundation rather than an embedded mpv window:
+AVFoundation rather than an embedded mpv window (Apple TV's player is mpv too
+now, and keeps the Now Playing and Siri Remote parts of this list):
 
 - **Quick Connect and finding the server.** The sign-in screen lists the
   Jellyfin servers that answer on the local network (the same UDP question
@@ -276,8 +319,10 @@ plays with the phone switched off, as long as it has been signed in once.
 ## What did not carry over, and why
 
 The Linux build drives mpv, which can open essentially anything and exposes
-every knob it has. AVFoundation is narrower, and rather than ship controls that
-would quietly do nothing, these are absent:
+every knob it has. AVFoundation, which the iPhone, iPad and Mac play through,
+is narrower, and rather than ship controls that would quietly do nothing, these
+are absent there. Apple TV plays through mpv (see *The Apple TV player*), so
+the MKV row doesn't apply to it:
 
 | Linux | Apple | Why |
 |---|---|---|
@@ -301,6 +346,8 @@ Aquarium/
                offline progress, image loading, BlurHash, shell state
   Player/      AVPlayer model, adaptive-quality policy, Now Playing, the
                player screen and its AVKit surface
+    TV/        Apple TV's mpv player: the engine, its model and screen,
+               remote input, the panel, Match Frame Rate, the sync clip
   Views/       Login, Home, Library, Search, Item detail, Favorites,
                Live TV, Downloads, Settings, shared components, theme
 Shared/        The one file the app and the TopShelf extension both compile

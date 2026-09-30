@@ -39,7 +39,7 @@ iOS:
 
 tvOS:
 
-    Your own films, shows and Live TV from your home media server, on the big screen, with your Next Up right on the Apple TV home screen.
+    A new player for your home media server: your files play as they are, MKV, DTS and TrueHD included, at your TV's own frame rate, with audio sync you set by ear.
 
 macOS:
 
@@ -109,8 +109,11 @@ ON THE BIG SCREEN
 • A rotating spotlight from your library, then Continue Watching, Next Up and what's new.
 
 WATCH
-• Direct play when Apple TV can open the file, and a stream from the server when it can't.
-• Adaptive quality steps down when a connection struggles and back up when it recovers.
+• Your files play as they are: MKV, DTS, TrueHD, Dolby Digital and PGS subtitles, with no conversion on the server. Pick a lower quality when you need one.
+• Swipe on the remote to scrub, with thumbnail previews. Click the edges to jump ten seconds.
+• Swipe down for audio, subtitles, quality, playback speed and Live TV channels, without stopping what's playing.
+• Films switch your TV to their own frame rate when Match Frame Rate is on, so a 24 fps film pans smoothly.
+• Audio sync for TVs and soundbars that lag: a built-in sync test lets you set it by ear, earlier or later.
 • Skip intro and credits, an Up Next card with autoplay, and a sleep timer.
 • Audio and subtitle choices remembered for each series.
 
@@ -181,7 +184,12 @@ iOS:
 tvOS:
 
 ```
-• Fixes and improvements to browsing and playback.
+• A new video player. Your files play as they are, MKV, DTS, TrueHD and PGS subtitles included, with no conversion on the server.
+• New remote controls: swipe to scrub with thumbnail previews, click the edges to skip ten seconds.
+• Swipe down during playback for audio, subtitles, quality, speed and Live TV channels.
+• Match Frame Rate: films play at their own frame rate for smooth motion.
+• Audio sync you can set by ear, with a new sync test in Settings > Audio.
+• Title pages: moving up from any row now always gets you back to the top.
 ```
 
 macOS:
@@ -218,5 +226,7 @@ TECHNICAL NOTES
 - App Transport Security: NSAllowsArbitraryLoads is set because a home media server is very often reached over plain HTTP on the local network (e.g. http://192.168.1.10:8096); refusing HTTP would make the app unusable for its audience. The sign-in screen warns when a connection is unencrypted and Settings shows an HTTP/HTTPS indicator. The demo server is HTTPS.
 - Background modes: "audio" only, on iPhone/iPad and on the watch — required for Picture in Picture, AirPlay, lock screen / Control Centre transport, and music or audiobooks continuing with the screen locked or the wrist down. Downloads use background URLSessions and need no mode.
 - The Apple TV build is the same app; it adds a Top Shelf extension showing Next Up posters once the user has signed in and opened Home. There are no downloads on tvOS.
+- Apple TV video playback uses libmpv (MPVKit, LGPL build, dynamically linked frameworks) instead of AVPlayer, so files the server would otherwise have to convert play directly. The demo server's films play the same way. Settings > Audio > Sync test opens a short bundled test clip (a ruler and a beep) for setting the audio delay; it needs no server.
+- Match Frame Rate: the tvOS player asks AVDisplayManager for the file's frame rate before playback, only when the user has turned on Match Content > Match Frame Rate in the Apple TV's own Settings.
 - Jellyfin is an open-source media server (jellyfin.org); Aquarium is an independent third-party client and says so in its description.
 ```
