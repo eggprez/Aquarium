@@ -65,7 +65,15 @@ struct ItemDetailView: View {
     /// stack when focus is inside the page and leaves the app when it is on
     /// the strip. Putting focus on the page's first action as soon as there is
     /// one fixes both.
-    private enum DetailFocus: Hashable { case play, favorite, episode(String) }
+    private enum DetailFocus: Hashable {
+        case play, quality, favorite, watched, trailer, episode(String)
+
+        /// One of the buttons under the artwork, rather than a row further down.
+        var isAction: Bool {
+            if case .episode = self { return false }
+            return true
+        }
+    }
     @FocusState private var focus: DetailFocus?
     /// Once only — after that the selector is the viewer's to move.
     @State private var placedFocus = false
@@ -271,7 +279,25 @@ struct ItemDetailView: View {
     @ViewBuilder
     private func scroll() -> some View {
         #if os(tvOS)
-        scrollCore()
+        ScrollViewReader { proxy in
+            scrollCore()
+                // Back to the top whenever the selector arrives on the buttons.
+                //
+                // The focus engine scrolls only as far as it takes to show what
+                // it has just focused, and the buttons are the first thing on
+                // the page it can focus — everything above them is artwork and
+                // text. Coming back up from the seasons or the cast, the page
+                // stopped with the buttons at its top edge and the hero, title
+                // and all, still scrolled away, with nothing further up for a
+                // press to reach. The buttons are the top of the page as far as
+                // the selector goes, so they show it as it opened.
+                .onChange(of: focus) { _, now in
+                    guard now?.isAction == true else { return }
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        proxy.scrollTo(Self.topAnchor, anchor: .top)
+                    }
+                }
+        }
         #else
         ScrollViewReader { proxy in
             scrollCore()
@@ -442,6 +468,7 @@ struct ItemDetailView: View {
     @ViewBuilder
     private func sections(_ item: BaseItem) -> some View {
         HeroHeader(item: item, style: .detail)
+            .id(Self.topAnchor)
         details(item)
         // A show is its seasons, and a season is its episodes. The two lists
         // never appear on the same page: mixing them is what made "which season
@@ -453,6 +480,8 @@ struct ItemDetailView: View {
     }
 
     private static let scrollSpace = "itemDetailScroll"
+    /// The hero, which is where the page starts.
+    private static let topAnchor = "itemDetailTop"
 
     #if os(iOS)
     /// Reports how far the page has been scrolled, which is the only thing the
@@ -688,7 +717,13 @@ struct ItemDetailView: View {
         }
         // On a television this row is the first thing on the page the selector
         // can hold, and it sits well below the artwork above it — see
-        // `focusRegion`.
+        // `focusRegion`. As wide as the page, not as its buttons: a region is
+        // its frame, and a row four buttons long left everything to the right
+        // of them — the later seasons, most of the cast — with nothing above
+        // it to go up to.
+        #if os(tvOS)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        #endif
         .focusRegion()
         #endif
     }
@@ -760,6 +795,7 @@ struct ItemDetailView: View {
                 Label("Quality", systemImage: "slider.horizontal.3")
             }
             .appButtonStyle()
+            .focused($focus, equals: .quality)
             #else
             Menu {
                 qualityMenu(playable)
@@ -797,6 +833,9 @@ struct ItemDetailView: View {
                 .symbolEffect(.bounce, value: item.userData.played)
             }
             .appButtonStyle()
+            #if os(tvOS)
+            .focused($focus, equals: .watched)
+            #endif
         }
 
         if Trailers.has(item) {
@@ -806,6 +845,9 @@ struct ItemDetailView: View {
                 Label("Trailer", systemImage: "film")
             }
             .appButtonStyle()
+            #if os(tvOS)
+            .focused($focus, equals: .trailer)
+            #endif
         }
 
         #if !os(tvOS)

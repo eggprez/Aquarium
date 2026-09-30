@@ -28,6 +28,9 @@
 //  action button. See `PlayerMacMenus`. What is drawn over the picture there
 //  sits on a material, like the panel, and keeps clear of it by its height.
 
+
+// The Apple TV has its own PlayerScreen, on mpv — see TV/TVPlayerScreen.swift.
+#if !os(tvOS)
 import AVKit
 import Observation
 import OSLog
@@ -1489,3 +1492,5 @@ struct BitrateBadge: View {
         .accessibilityElement(children: .combine)
     }
 }
+
+#endif

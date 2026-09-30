@@ -49,6 +49,13 @@ struct AquariumApp: App {
     }
     #endif
 
+    #if os(tvOS) && DEBUG
+    init() {
+        // Remote presses from a script — see Player/TV/RemoteDebugHook.swift.
+        RemoteDebugHook.start()
+    }
+    #endif
+
     var body: some Scene {
         // "main" is `MacMainWindow.id`, which the Mac finds and reopens it by.
         WindowGroup(id: "main") {
@@ -72,6 +79,9 @@ struct AquariumApp: App {
                 // The Apple TV home screen's top shelf comes back in here —
                 // see AppModel.handle.
                 .onOpenURL { app.handle($0) }
+                #if os(tvOS) && DEBUG
+                .task { player.playDebugStreamIfAsked() }
+                #endif
                 // A title picked from the system's search, and a film handed
                 // over from another device — see AppModel.continueActivity.
                 #if os(iOS) || os(macOS)

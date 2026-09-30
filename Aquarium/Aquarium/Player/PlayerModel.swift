@@ -151,6 +151,8 @@ struct Chapter: Identifiable, Hashable, Sendable {
     var title: String
 }
 
+// The Apple TV has its own PlayerModel, on mpv — see TV/TVPlayerModel.swift.
+#if !os(tvOS)
 @MainActor
 @Observable
 final class PlayerModel {
@@ -4233,3 +4235,5 @@ final class PlayerModel {
         return nil
     }
 }
+
+#endif

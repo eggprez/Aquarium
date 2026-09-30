@@ -34,6 +34,7 @@ struct MediaStream: Codable, Hashable, Sendable {
         case Index, Codec, Language, DisplayTitle, Title, Height, Width
         case Channels, ChannelLayout, IsDefault, IsForced, IsExternal, BitRate
         case BitDepth, Profile, RealFrameRate, AverageFrameRate, VideoRange
+        case DeliveryMethod, DeliveryUrl
         case type = "Type"
     }
     var Index: Int?
@@ -65,6 +66,12 @@ struct MediaStream: Codable, Hashable, Sendable {
     /// Only ever trusted alongside the codec — see
     /// `JellyfinClient.claimsHDRItCannotCarry`.
     var VideoRange: String?
+    /// How a subtitle reaches the client — `Embed`, `External`, `Hls`,
+    /// `Encode` — and, for `External`, the server path it is fetched from.
+    /// Only the mpv player on Apple TV reads these: it adds an external
+    /// subtitle to the stream by URL.
+    var DeliveryMethod: String?
+    var DeliveryUrl: String?
 
     var isForced: Bool { IsForced ?? false }
 

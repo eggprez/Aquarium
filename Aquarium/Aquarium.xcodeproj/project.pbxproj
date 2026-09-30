@@ -24,6 +24,7 @@
 		FE11A5D00000000000000224 /* AquariumWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000201 /* AquariumWatch.app */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FE11A5D00000000000000225 /* WatchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000301 /* WatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FE11A5D00000000000000226 /* WatchWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000302 /* WatchWidgets.swift */; };
+		FE11A5D00000000000000401 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; platformFilters = (tvos, ); productRef = FE11A5D00000000000000402 /* MPVKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -160,6 +161,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FE11A5D00000000000000401 /* MPVKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -275,6 +277,7 @@
 				D296FAB5302815340097E3E7 /* Resources */,
 				FE11A5D00000000000000033 /* Embed Foundation Extensions */,
 				FE11A5D00000000000000233 /* Embed Watch Content */,
+				FE11A5D00000000000000501 /* Make dSYMs for embedded frameworks */,
 			);
 			buildRules = (
 			);
@@ -288,6 +291,7 @@
 			);
 			name = Aquarium;
 			packageProductDependencies = (
+				FE11A5D00000000000000402 /* MPVKit */,
 			);
 			productName = Aquarium;
 			productReference = D296FAB7302815340097E3E7 /* Aquarium.app */;
@@ -410,6 +414,9 @@
 			);
 			mainGroup = D296FAAE302815340097E3E7;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				FE11A5D00000000000000403 /* XCRemoteSwiftPackageReference "MPVKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D296FAB8302815340097E3E7 /* Products */;
 			projectDirPath = "";
@@ -461,6 +468,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		FE11A5D00000000000000501 /* Make dSYMs for embedded frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Make dSYMs for embedded frameworks";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Archives only. The libraries MPVKit embeds come prebuilt and stripped,\n# with no dSYMs, and App Store Connect warns once per framework when the\n# archive has none to match. dsymutil on the stripped binary makes one with\n# the right UUID: it quiets the warning, though it carries no symbols to\n# read a crash inside mpv or ffmpeg with.\n[ \"$ACTION\" = \"install\" ] || exit 0\nframeworks=\"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\n[ -d \"$frameworks\" ] || exit 0\nfor framework in \"$frameworks\"/*.framework; do\n  name=$(basename \"$framework\" .framework)\n  binary=\"$framework/$name\"\n  [ -f \"$binary\" ] || continue\n  dsym=\"$DWARF_DSYM_FOLDER_PATH/$name.framework.dSYM\"\n  [ -d \"$dsym\" ] && continue\n  xcrun dsymutil \"$binary\" -o \"$dsym\" 2>/dev/null || echo \"warning: no dSYM made for $name\"\ndone\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		D296FAB3302815340097E3E7 /* Sources */ = {
@@ -680,6 +709,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
@@ -700,6 +730,11 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.3;
+				"OTHER_LDFLAGS[sdk=appletv*]" = (
+					"$(inherited)",
+					"-framework",
+					AVKit,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -734,6 +769,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
@@ -754,6 +790,11 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.3;
+				"OTHER_LDFLAGS[sdk=appletv*]" = (
+					"$(inherited)",
+					"-framework",
+					AVKit,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1080,6 +1121,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		FE11A5D00000000000000403 /* XCRemoteSwiftPackageReference "MPVKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mpvkit/MPVKit.git";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		FE11A5D00000000000000402 /* MPVKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FE11A5D00000000000000403 /* XCRemoteSwiftPackageReference "MPVKit" */;
+			productName = MPVKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = D296FAAF302815340097E3E7 /* Project object */;
 }

@@ -386,7 +386,10 @@ final class Preferences {
         didSet { write(autoplayNext, forKey: "autoplay_next") }
     }
 
-    /// Default quality for a new stream. `nil` is direct play.
+    /// Default quality for a new stream. `nil` is direct play. This device's
+    /// own, not synced: what a stream can carry depends on the network and
+    /// the screen it is on, and an Apple TV on Ethernet and a phone on
+    /// cellular want different answers.
     var defaultBitrate: Int? {
         didSet {
             if let defaultBitrate {
@@ -394,11 +397,6 @@ final class Preferences {
             } else {
                 defaults.removeObject(forKey: "default_bitrate")
             }
-            // Zero rather than nothing. Direct play is a choice somebody made,
-            // and a key that simply isn't there can't be told apart from a
-            // device that has never written one — so it would never travel.
-            guard syncsAcrossDevices, !isAdoptingRemote else { return }
-            CloudSync.set(defaultBitrate ?? 0, forKey: "default_bitrate")
         }
     }
 
@@ -783,7 +781,6 @@ final class Preferences {
         CloudSync.set(theme.rawValue, forKey: "theme")
         CloudSync.set(adaptiveQuality, forKey: "adaptive")
         CloudSync.set(autoplayNext, forKey: "autoplay_next")
-        CloudSync.set(defaultBitrate ?? 0, forKey: "default_bitrate")
         CloudSync.set(stereoDownmix, forKey: "stereo_downmix")
         CloudSync.set(resumePlayback, forKey: "resume_playback")
         CloudSync.set(audioLanguage, forKey: "audio_lang")
@@ -857,11 +854,6 @@ final class Preferences {
            let t = ThemePref(rawValue: v), t != theme { theme = t }
         if let v = CloudSync.object(forKey: "adaptive") as? Bool, v != adaptiveQuality { adaptiveQuality = v }
         if let v = CloudSync.object(forKey: "autoplay_next") as? Bool, v != autoplayNext { autoplayNext = v }
-        // Zero is direct play — see the property.
-        if let raw = (CloudSync.object(forKey: "default_bitrate") as? NSNumber)?.intValue {
-            let wanted: Int? = raw > 0 ? Quality.snapped(raw) : nil
-            if wanted != defaultBitrate { defaultBitrate = wanted }
-        }
         if let v = CloudSync.object(forKey: "stereo_downmix") as? Bool, v != stereoDownmix { stereoDownmix = v }
         if let v = CloudSync.object(forKey: "resume_playback") as? Bool, v != resumePlayback { resumePlayback = v }
         if let v = CloudSync.object(forKey: "audio_lang") as? String, v != audioLanguage { audioLanguage = v }

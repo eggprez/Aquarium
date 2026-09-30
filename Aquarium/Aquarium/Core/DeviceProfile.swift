@@ -380,6 +380,86 @@ struct DeviceProfile: Encodable, Sendable {
     private static let decodedAudio =
         "aac,mp3,alac,flac,opus,pcm_s16le,pcm_s24le,pcm_s16be,pcm_s24be"
 
+    /// The Apple TV's profile, now that it plays through mpv rather than
+    /// AVFoundation.
+    ///
+    /// Nearly everything above is about what AVFoundation can't open, and none
+    /// of it applies: mpv reads Matroska, DTS, TrueHD, PGS and the rest straight
+    /// from the file. So the original is asked for untouched — the least work
+    /// for the server, and no transcode to put the sound out of step with the
+    /// picture — unless a lower quality was chosen or the connection can't
+    /// carry the file, which is what `forceTranscode` and `maxBitrate` say.
+    /// Subtitles stay in the file (`Embed`) and mpv draws them; a sidecar the
+    /// server offers as `External` is added to the player by URL.
+    ///
+    /// The same shape as the Linux client's profile, which plays through the
+    /// same library.
+    static func buildMPV(forceTranscode: Bool, maxBitrate: Int?, stereoOnly: Bool) -> DeviceProfile {
+        let channels = stereoOnly ? "2" : "8"
+        let sizeConditions: [ProfileCondition] = {
+            guard let cap = Quality.cap(for: maxBitrate) else { return [] }
+            return [
+                .init(Condition: "LessThanEqual", Property: "Width",
+                      Value: String(cap.width), IsRequired: false),
+                .init(Condition: "LessThanEqual", Property: "Height",
+                      Value: String(cap.height), IsRequired: false),
+            ]
+        }()
+        let subtitles: [SubtitleProfile] =
+            ["srt", "subrip", "ass", "ssa", "vtt", "webvtt", "mov_text", "sub", "pgssub", "dvdsub", "dvbsub"]
+                .map { SubtitleProfile(Format: $0, Method: "Embed") }
+            + ["srt", "subrip", "ass", "ssa", "vtt", "webvtt"]
+                .map { SubtitleProfile(Format: $0, Method: "External") }
+        return DeviceProfile(
+            Name: "Aquarium (mpv)",
+            MaxStreamingBitrate: maxBitrate ?? 200_000_000,
+            MaxStaticBitrate: 200_000_000,
+            MusicStreamingTranscodingBitrate: 384_000,
+            DirectPlayProfiles: forceTranscode ? [] : [
+                .init(Container: "mp4,m4v,mkv,webm,mov,avi,wmv,asf,ts,m2ts,mpegts,flv,ogv,mpg,mpeg,3gp",
+                      type: "Video", VideoCodec: nil, AudioCodec: nil),
+                .init(Container: "mp3,aac,m4a,m4b,flac,alac,wav,aiff,aif,caf,opus,ogg", type: "Audio",
+                      VideoCodec: nil, AudioCodec: nil),
+            ],
+            TranscodingProfiles: [
+                // Keyframe-aligned segments for the reason on
+                // `BreakOnNonKeyFrames`: mpv answers a mid-GOP segment by
+                // staying black after a seek while the sound plays on.
+                .init(
+                    Container: "mp4", type: "Video", transportProtocol: "hls",
+                    VideoCodec: "hevc,h264",
+                    AudioCodec: stereoOnly ? "aac" : "aac,ac3,eac3",
+                    Context: "Streaming", MaxAudioChannels: channels,
+                    MinSegments: minSegments, BreakOnNonKeyFrames: false,
+                    EnableSubtitlesInManifest: false
+                ),
+                .init(
+                    Container: "ts", type: "Video", transportProtocol: "hls",
+                    VideoCodec: "h264",
+                    AudioCodec: stereoOnly ? "aac" : "aac,ac3",
+                    Context: "Streaming", MaxAudioChannels: channels,
+                    MinSegments: minSegments, BreakOnNonKeyFrames: false,
+                    EnableSubtitlesInManifest: false
+                ),
+                .init(
+                    Container: "mp3", type: "Audio", transportProtocol: "http",
+                    VideoCodec: nil, AudioCodec: "mp3",
+                    Context: "Streaming", MaxAudioChannels: "2",
+                    MinSegments: nil, BreakOnNonKeyFrames: nil,
+                    EnableSubtitlesInManifest: nil
+                ),
+            ],
+            // Only the size a chosen quality asks for. What the Apple TV can
+            // decode is no longer the server's question: mpv decodes in
+            // hardware what VideoToolbox takes and in software the rest.
+            CodecProfiles: sizeConditions.isEmpty ? [] : [
+                .init(type: "Video", Codec: "h264", Conditions: sizeConditions),
+                .init(type: "Video", Codec: "hevc", Conditions: sizeConditions),
+            ],
+            SubtitleProfiles: subtitles
+        )
+    }
+
     static func build(
         forceTranscode: Bool, maxBitrate: Int?, stereoOnly: Bool,
         decodeAudioLocally: Bool = false,

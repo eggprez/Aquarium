@@ -1622,6 +1622,10 @@ enum SettingsCopy {
         name: "Audio delay",
         text: "How far the sound is moved against the picture — the lag a television or soundbar adds, which is the same for everything watched through it. " + audioDelayPlayerHint + "Whatever is settled on is saved here and applied to everything you play. The sound can be moved earlier on any stream; moving it later needs a file the server can send untouched."
     )
+    static let syncTest = SettingNote(
+        name: "Sync test",
+        text: "Plays a short looping clip at 23.976 fps, the rate films are, so the television switches to the mode your films play in. A line sweeps across a ruler and a beep plays as it crosses 0. Swipe down for the Sync tab: if the beep comes before the flash, press −; after it, press +."
+    )
     static let frameRateMatch = SettingNote(
         name: "Match Frame Rate offset",
         text: "Extra sound delay for when Match Content → Match Frame Rate switches your television out of 60 Hz for a video. Many televisions show the picture later at 24 Hz than at 60, and tvOS can tell the app that matching is on but not how much later. Pick a value here; while a film the display switched for is playing, the audio delay controls in the player say how much is being added. Added on top of the audio delay, and only to videos the display switches for."
