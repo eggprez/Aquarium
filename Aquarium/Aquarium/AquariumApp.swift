@@ -72,6 +72,9 @@ struct AquariumApp: App {
                 // The Apple TV home screen's top shelf comes back in here —
                 // see AppModel.handle.
                 .onOpenURL { app.handle($0) }
+                #if os(tvOS) && DEBUG
+                .task { player.playDebugStreamIfAsked() }
+                #endif
                 // A title picked from the system's search, and a film handed
                 // over from another device — see AppModel.continueActivity.
                 #if os(iOS) || os(macOS)

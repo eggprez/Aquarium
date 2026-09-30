@@ -24,6 +24,7 @@
 		FE11A5D00000000000000224 /* AquariumWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000201 /* AquariumWatch.app */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FE11A5D00000000000000225 /* WatchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000301 /* WatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FE11A5D00000000000000226 /* WatchWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000302 /* WatchWidgets.swift */; };
+		FE11A5D00000000000000401 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; platformFilters = (tvos, ); productRef = FE11A5D00000000000000402 /* MPVKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -160,6 +161,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FE11A5D00000000000000401 /* MPVKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -288,6 +290,7 @@
 			);
 			name = Aquarium;
 			packageProductDependencies = (
+				FE11A5D00000000000000402 /* MPVKit */,
 			);
 			productName = Aquarium;
 			productReference = D296FAB7302815340097E3E7 /* Aquarium.app */;
@@ -410,6 +413,9 @@
 			);
 			mainGroup = D296FAAE302815340097E3E7;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				FE11A5D00000000000000403 /* XCRemoteSwiftPackageReference "MPVKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D296FAB8302815340097E3E7 /* Products */;
 			projectDirPath = "";
@@ -1080,6 +1086,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		FE11A5D00000000000000403 /* XCRemoteSwiftPackageReference "MPVKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mpvkit/MPVKit.git";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		FE11A5D00000000000000402 /* MPVKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FE11A5D00000000000000403 /* XCRemoteSwiftPackageReference "MPVKit" */;
+			productName = MPVKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = D296FAAF302815340097E3E7 /* Project object */;
 }

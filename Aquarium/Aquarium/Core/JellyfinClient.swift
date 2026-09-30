@@ -1643,6 +1643,18 @@ final class JellyfinClient {
         // A song is asked about with the music profile — a different set of
         // containers, no subtitles, an audio-only transcode — and answered
         // from the audio route. See `DeviceProfile.buildMusic`.
+        //
+        // Video on Apple TV plays through mpv, which opens what AVFoundation
+        // can't — see `DeviceProfile.buildMPV`.
+        #if os(tvOS)
+        let profile = audio
+            ? DeviceProfile.buildMusic(maxBitrate: maxBitrate)
+            : DeviceProfile.buildMPV(
+                forceTranscode: forceTranscode,
+                maxBitrate: maxBitrate,
+                stereoOnly: prefs.stereoDownmix
+            )
+        #else
         let profile = audio
             ? DeviceProfile.buildMusic(maxBitrate: maxBitrate)
             : DeviceProfile.build(
@@ -1652,6 +1664,7 @@ final class JellyfinClient {
                 decodeAudioLocally: prefs.decodeAudioLocally,
                 subtitlesInManifest: (subtitleStreamIndex ?? -1) >= 0
             )
+        #endif
         let body = PlaybackInfoBody(
             UserId: s.userId,
             StartTimeTicks: startTicks,
@@ -1753,7 +1766,13 @@ final class JellyfinClient {
         // built as `stream.mp4`, `static=true` would send the transport stream
         // underneath it unchanged, and AVFoundation would open a file it cannot
         // read. A live source that won't say what it is gets transcoded.
+        #if os(tvOS)
+        // mpv opens whatever the server offers untouched; only a song still
+        // goes through AVFoundation's check.
+        let playable = audio ? DeviceProfile.canDirectPlayAudio(ms) : true
+        #else
         let playable = audio ? DeviceProfile.canDirectPlayAudio(ms) : DeviceProfile.canDirectPlay(ms)
+        #endif
         if !forceTranscode,
            !playable || (live && (ms.Container ?? "").isEmpty) {
             if let escalated = try? await resolvePlayback(
