@@ -155,6 +155,18 @@ struct LibraryView: View {
             }
         }
 
+        /// `field` with the name after it, for sorts where many items share a
+        /// value — a batch added in the same second, a year of releases, no
+        /// rating at all. Without it the server is free to order those
+        /// differently for each page, so one page repeats what the last had
+        /// and skips others, and the list stops short of its total.
+        var tiebroken: String {
+            switch self {
+            case .name, .random: field
+            default: "\(field),SortName"
+            }
+        }
+
         var order: String {
             switch self {
             case .name, .runtime: "Ascending"
@@ -699,7 +711,7 @@ struct LibraryView: View {
             startIndex: startIndex,
             limit: limit,
             includeTypes: includeTypes,
-            sortBy: sort.field,
+            sortBy: sort.tiebroken,
             sortOrder: reversed ? (sort.order == "Ascending" ? "Descending" : "Ascending") : sort.order,
             unwatched: unwatchedOnly,
             favorites: favouritesOnly,
