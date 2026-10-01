@@ -81,11 +81,9 @@ func draw(frame n: Int, into ctx: CGContext) {
     ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
 
     text(ctx, "Audio Sync", size: 96, bold: true, x: Double(width) / 2, top: 110)
-    text(ctx, "SOUND EARLY · PRESS −", size: 34, bold: true, x: rulerLeft, top: 400, align: 0)
-    text(ctx, "SOUND LATE · PRESS +", size: 34, bold: true, x: rulerRight, top: 400, align: 1)
-    text(ctx, "−", size: 64, bold: true, x: centreX - 70, top: 382)
-    text(ctx, "0", size: 64, bold: true, x: centreX, top: 382)
-    text(ctx, "+", size: 64, bold: true, x: centreX + 70, top: 382)
+    // The player's Sync tab is one swipe down from the picture, and its
+    // steps are what the line under the dots means by − and +.
+    text(ctx, "Swipe down to adjust audio sync", size: 44, bold: true, x: Double(width) / 2, top: 392)
 
     // The ruler: a tick every 10 ms, longer every 50, labelled every 100.
     ctx.setFillColor(white)

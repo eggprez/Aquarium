@@ -272,7 +272,7 @@ struct PlayerScreen: View {
             }
             let vertical = abs(translation.y) > abs(translation.x) * 1.3
             if vertical, translation.y > 60 {
-                panel = .info
+                panel = openingTab
             } else if vertical, translation.y < -60 {
                 hideControls()
             }
@@ -299,12 +299,16 @@ struct PlayerScreen: View {
                 player.switchChannel(by: -1)
                 showControls()
             } else {
-                panel = .info
+                panel = openingTab
             }
         @unknown default:
             break
         }
     }
+
+    /// The tab a swipe or press down opens on. The sync test's picture says
+    /// a swipe down adjusts the sync, so there it is Sync rather than Info.
+    private var openingTab: PlayerTab { player.isSyncTest ? .sync : .info }
 
     private var canScrub: Bool { !player.isLive && player.duration > 0 && !player.isOpening }
 
