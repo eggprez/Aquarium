@@ -756,26 +756,33 @@ export function downloadLabel(item: any, q: api.DownloadQuality): string {
 /** Download entry for a context menu: a nested page of quality choices. */
 export function downloadAction(item: any): MenuAction {
   const isSeries = item.Type === "Series";
+  // A season is a container too: the server has no stream for it, and asking
+  // for one is a 400. Queue its episodes instead.
+  const isSeason = item.Type === "Season" && !!item.SeriesId;
+  const container = isSeries || isSeason;
   return {
-    label: isSeries ? "Download series" : "Download",
+    label: isSeries ? "Download series" : isSeason ? "Download season" : "Download",
     icon: "download",
     submenu: {
-      label: isSeries ? "Download every episode as" : "Download as",
+      label: container ? "Download every episode as" : "Download as",
       items: () =>
         api.DOWNLOAD_QUALITIES.map((q) => ({
-          label: isSeries ? q.label : downloadLabel(item, q),
+          label: container ? q.label : downloadLabel(item, q),
           run: async () => {
             try {
-              if (!isSeries) {
+              if (!container) {
                 await startDownload(item, q);
                 return;
               }
               toast("Collecting episodes…");
-              const { queued, skipped, seasons, cancelled } = await downloadSeries(item.Id, q);
+              const { queued, skipped, seasons, cancelled } = isSeason
+                ? await downloadSeries(item.SeriesId, q, [item])
+                : await downloadSeries(item.Id, q);
               if (cancelled) return;
               toast(
                 queued
-                  ? `Queued ${queued} episode${queued === 1 ? "" : "s"} from ${seasons} season${seasons === 1 ? "" : "s"}` +
+                  ? `Queued ${queued} episode${queued === 1 ? "" : "s"}` +
+                      (isSeason ? "" : ` from ${seasons} season${seasons === 1 ? "" : "s"}`) +
                       (skipped ? `, skipped ${skipped} already downloaded` : "")
                   : "Every episode is already downloaded or queued",
                 queued ? "ok" : "info"
@@ -799,7 +806,7 @@ export function itemActions(
   opts: { onChanged?: () => void; includeDetails?: boolean } = {}
 ): MenuAction[] {
   const isSeries = item.Type === "Series";
-  const playable = !isSeries;
+  const playable = !isSeries && item.Type !== "Season";
   const resumeTicks = item.UserData?.PlaybackPositionTicks ?? 0;
   const played = !!item.UserData?.Played;
   const favorite = !!item.UserData?.IsFavorite;
