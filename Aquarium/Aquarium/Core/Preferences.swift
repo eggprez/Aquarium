@@ -561,6 +561,13 @@ final class Preferences {
     var downloadConcurrency: Int {
         didSet { write(downloadConcurrency, forKey: "download_concurrency") }
     }
+    /// Never more than one transcoded download running, whatever Parallel
+    /// downloads is set to. A server encoding several at once shares its
+    /// encoder between them, and each finishes later than it would have in
+    /// turn. This device's, like the parallel count: not in `CloudSync`.
+    var transcodesOneAtATime: Bool {
+        didSet { write(transcodesOneAtATime, forKey: "downloads_one_transcode") }
+    }
     /// Only queue transfers while on Wi-Fi.
     var downloadsWiFiOnly: Bool {
         didSet { write(downloadsWiFiOnly, forKey: "downloads_wifi_only") }
@@ -725,6 +732,7 @@ final class Preferences {
         let c = d.integer(forKey: "download_concurrency")
         downloadConcurrency = (1...Preferences.maxDownloadConcurrency).contains(c) ? c : 1
         downloadsWiFiOnly = d.bool(forKey: "downloads_wifi_only")
+        transcodesOneAtATime = d.bool(forKey: "downloads_one_transcode")
         lastRoute = d.string(forKey: "last_route") ?? ""
         recentSearches = d.stringArray(forKey: "recent_searches") ?? []
         tabBarOrder = d.stringArray(forKey: "tab_bar_order") ?? []
@@ -801,7 +809,6 @@ final class Preferences {
         CloudSync.set(iptvUserAgent, forKey: "iptv_user_agent")
         CloudSync.set(iptvRefreshMinutes, forKey: "iptv_refresh_minutes")
         CloudSync.set(downloadQuality, forKey: "download_quality")
-        CloudSync.set(downloadConcurrency, forKey: "download_concurrency")
         CloudSync.set(downloadsWiFiOnly, forKey: "downloads_wifi_only")
         CloudSync.set(tabBarOrder, forKey: "tab_bar_order")
         publishSessionToCloud()
@@ -880,9 +887,6 @@ final class Preferences {
         if let v = CloudSync.object(forKey: "download_quality") as? String, v != downloadQuality {
             downloadQuality = v
         }
-        if let v = (CloudSync.object(forKey: "download_concurrency") as? NSNumber)?.intValue,
-           (1...Preferences.maxDownloadConcurrency).contains(v),
-           v != downloadConcurrency { downloadConcurrency = v }
         if let v = CloudSync.object(forKey: "downloads_wifi_only") as? Bool, v != downloadsWiFiOnly {
             downloadsWiFiOnly = v
         }

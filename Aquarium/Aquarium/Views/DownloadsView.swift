@@ -19,6 +19,11 @@ struct DownloadsView: View {
     @State private var downloads = DownloadManager.shared
     @State private var isSyncing = false
     @State private var pendingDeletion: DownloadDeletion?
+    /// The show whose poster is asking before it deletes. Kept apart from
+    /// `pendingDeletion` so the confirmation hangs off that poster: on an
+    /// iPhone it's a popover now, and one attached to the page pointed at
+    /// the middle of the screen whichever show it was about.
+    @State private var deletingShow: DownloadSeries.ID?
 
     #if os(iOS)
     /// Download All Music, in its two steps: the library being read, and then
@@ -211,10 +216,6 @@ struct DownloadsView: View {
         }
         .navigationTitle("Downloads")
         .paletteBar()
-        .downloadDeletionDialog($pendingDeletion) { ids in
-            let n = downloads.delete(ids)
-            app.toast("Deleted \(n) download\(n == 1 ? "" : "s")", tone: .ok)
-        }
         #if os(iOS)
         .alert(
             allMusicPlan?.title ?? "",
@@ -244,16 +245,17 @@ struct DownloadsView: View {
     // MARK: - Tiles
 
     private func seriesCard(_ show: DownloadSeries) -> some View {
-        Button {
+        let card = DownloadPosterCard(
+            title: show.title,
+            subtitle: show.subtitle,
+            posterURL: show.posterURL,
+            width: PosterGrid.cardWidth(wide: false, compact: isCompact),
+            unwatched: show.unwatched
+        )
+        return Button {
             app.push(.downloadedSeries(show.id))
         } label: {
-            DownloadPosterCard(
-                title: show.title,
-                subtitle: show.subtitle,
-                posterURL: show.posterURL,
-                width: PosterGrid.cardWidth(wide: false, compact: isCompact),
-                unwatched: show.unwatched
-            )
+            card
         }
         .buttonStyle(PosterButtonStyle())
         .contextMenu {
@@ -270,24 +272,34 @@ struct DownloadsView: View {
                     Label("Shuffle", systemImage: "shuffle")
                 }
             }
-            Button(role: .destructive) { pendingDeletion = .series(show) } label: {
+            Button(role: .destructive) { deletingShow = show.id } label: {
                 Label("Delete this show", systemImage: "trash")
             }
+        } preview: {
+            card.poster
+        }
+        .downloadDeletionDialog(Binding(
+            get: { deletingShow == show.id ? .series(show) : nil },
+            set: { if $0 == nil { deletingShow = nil } }
+        )) { ids in
+            let n = downloads.delete(ids)
+            app.toast("Deleted \(n) download\(n == 1 ? "" : "s")", tone: .ok)
         }
     }
 
     private func filmCard(_ film: DownloadRecord) -> some View {
-        Button {
+        let card = DownloadPosterCard(
+            title: film.title,
+            subtitle: film.quality,
+            posterURL: film.artURL ?? film.seriesArtURL,
+            width: PosterGrid.cardWidth(wide: false, compact: isCompact),
+            progress: film.watchedFraction,
+            watched: film.played
+        )
+        return Button {
             player.playLocal(film)
         } label: {
-            DownloadPosterCard(
-                title: film.title,
-                subtitle: film.quality,
-                posterURL: film.artURL ?? film.seriesArtURL,
-                width: PosterGrid.cardWidth(wide: false, compact: isCompact),
-                progress: film.watchedFraction,
-                watched: film.played
-            )
+            card
         }
         .buttonStyle(PosterButtonStyle())
         .contextMenu {
@@ -305,6 +317,8 @@ struct DownloadsView: View {
             Button(role: .destructive) { downloads.delete(film.itemId) } label: {
                 Label("Delete download", systemImage: "trash")
             }
+        } preview: {
+            card.poster
         }
     }
 
@@ -474,6 +488,29 @@ struct DownloadsView: View {
                 .labelsHidden()
                 .frame(maxWidth: 260)
             }
+
+            Toggle(isOn: $prefs.transcodesOneAtATime) {
+                // The badge is a symbol rather than a "1" in a drawn circle:
+                // it is sized by the font beside it, so it stays round and in
+                // line with the text at every Dynamic Type size and on every
+                // width of phone, where a fixed frame clipped or drifted.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "1.circle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.accent)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Transcode one at a time")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.text)
+                        Text("A server encoding several downloads at once takes longer than encoding them one after another.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textDim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .tint(Theme.accent)
         }
         .padding(Metrics.gutter)
         .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -531,6 +568,12 @@ struct DownloadsView: View {
                 .font(.title3)
         }
         .disabled(downloads.records.isEmpty && !offersAllMusic)
+        // On the menu rather than the page, so the popover points at the
+        // button that asked for it.
+        .downloadDeletionDialog($pendingDeletion) { ids in
+            let n = downloads.delete(ids)
+            app.toast("Deleted \(n) download\(n == 1 ? "" : "s")", tone: .ok)
+        }
     }
 
     /// Whether there is a music library to download, and a server to download
@@ -734,9 +777,7 @@ struct DownloadPosterCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            artwork
-                .cardChrome()
-                .overlay(alignment: .topTrailing) { badge }
+            poster
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
@@ -750,6 +791,15 @@ struct DownloadPosterCard: View {
             }
             .frame(maxWidth: width ?? .infinity, alignment: .leading)
         }
+    }
+
+    /// The artwork alone, badge and all: what a long press lifts. Lifting the
+    /// whole card brought the title and subtitle up with it, unbacked and
+    /// scaled, over the tiles on either side.
+    var poster: some View {
+        artwork
+            .cardChrome()
+            .overlay(alignment: .topTrailing) { badge }
     }
 
     @ViewBuilder

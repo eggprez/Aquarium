@@ -355,6 +355,24 @@ final class LiveActivityCenter {
             guard inFlight > 1 || single != "Audio" else { return }
             baseline = (tally.completeCount, tally.failed.count)
         }
+        // A stream download — every transcode — gets a Live Activity from
+        // iOS itself, with no way to turn it off short of letting the system
+        // put the transfer off until it pleases. Two activities for one
+        // download is one too many, so this one steps aside while any stream
+        // is running and comes back for what iOS doesn't cover: songs, files
+        // and a paused queue. The batch carries on counting underneath, and
+        // ending here rather than finishing means no "Downloaded" card after
+        // the system's own has gone.
+        if tally.running.contains(where: { $0.transport == .hls }) {
+            if let activity = downloading {
+                downloading = nil
+                downloadsSent = nil
+                downloadsTrailing?.cancel()
+                downloadsTrailing = nil
+                end(activity)
+            }
+            return
+        }
         let counts = batchCounts(tally)
         let total = counts.done + counts.failed + inFlight
 

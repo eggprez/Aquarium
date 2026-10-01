@@ -645,6 +645,7 @@ final class DownloadManager: NSObject {
         // here is what advances the queue when it lands.
         Task { await self.reconcile() }
         Task { await self.watchForStalls() }
+        watchConcurrency()
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
             Task { @MainActor [weak self] in self?.pathChanged(satisfied: satisfied) }
@@ -1309,6 +1310,9 @@ final class DownloadManager: NSObject {
     /// What a transfer stopped by a pause says in its row, and how its
     /// cancellation is told from a stall's when it comes back round.
     private static let pausedReason = "Paused"
+    /// What a transfer set aside by lowering Parallel downloads says, and why
+    /// its cancellation isn't counted against it either.
+    private static let yieldedReason = "Waiting for a free slot"
 
     /// Stop the queue where it is, or let it go again.
     ///
@@ -1334,6 +1338,78 @@ final class DownloadManager: NSObject {
             persistQueue()
             pump()
         }
+    }
+
+    // MARK: - Parallel downloads
+
+    /// Follows the Parallel downloads setting, from the Downloads page or
+    /// from Settings, and the switch that holds transcodes to one.
+    private func watchConcurrency() {
+        withObservationTracking {
+            _ = prefs.downloadConcurrency
+            _ = prefs.transcodesOneAtATime
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.applyConcurrencyLimit()
+                self.pump()
+                self.watchConcurrency()
+            }
+        }
+    }
+
+    /// Brings the running transfers down to the limit when it's lowered.
+    ///
+    /// The limit used to be read only when deciding whether to start the
+    /// next one, so going from 4 to 1 left all four running. The extras are
+    /// set aside the way a pause sets them aside — kept, to carry on from
+    /// where they got to — and go back to the front of the queue. The ones
+    /// furthest along keep going.
+    ///
+    /// Turning on one transcode at a time does the same to every running
+    /// transcode but the one furthest along.
+    private func applyConcurrencyLimit() {
+        func done(_ itemId: String) -> Double {
+            guard let rec = record(for: itemId) else { return 0 }
+            guard let total = rec.estimatedBytes, total > 0 else { return Double(rec.receivedBytes) }
+            return Double(rec.receivedBytes) / Double(total)
+        }
+        func setAside(_ itemId: String, because why: String) {
+            Self.log.notice("Setting \(itemId, privacy: .public) aside: \(why, privacy: .public)")
+            retryingAfterCancel[itemId] = Self.yieldedReason
+            cancelTasks(for: itemId, keepingProgress: true)
+        }
+        var running = active.filter { tasks.values.contains($0) && retryingAfterCancel[$0] == nil }
+        if prefs.transcodesOneAtATime {
+            let transcodes = running.intersection(startedAsTranscode)
+            for itemId in transcodes.sorted(by: { done($0) < done($1) }).dropLast() {
+                setAside(itemId, because: "one transcode at a time")
+                running.remove(itemId)
+            }
+        }
+        let excess = running.count - max(1, prefs.downloadConcurrency)
+        guard excess > 0 else { return }
+        for itemId in running.sorted(by: { done($0) < done($1) }).prefix(excess) {
+            setAside(itemId, because: "Parallel downloads lowered")
+        }
+    }
+
+    /// Whether the server encodes this download as it sends it: a video at
+    /// one of the transcoded rungs. Original quality is the file, or at most
+    /// the same streams in a new wrapper, and songs ignore the rungs.
+    private static func isTranscode(quality: String, type: String?) -> Bool {
+        type != "Audio" && type != "AudioBook" && !DownloadQualities.named(quality).original
+    }
+
+    /// The items that went in as transcodes when they were started. Read only
+    /// against `active`, so an entry outliving its transfer means nothing.
+    private var startedAsTranscode: Set<String> = []
+
+    /// Whether `entry` must wait for the running transcode to finish.
+    private func waitsForTranscode(_ entry: QueuedDownload) -> Bool {
+        prefs.transcodesOneAtATime
+            && Self.isTranscode(quality: entry.quality, type: entry.type)
+            && !active.isDisjoint(with: startedAsTranscode)
     }
 
     @discardableResult
@@ -1451,8 +1527,10 @@ final class DownloadManager: NSObject {
         // The first entry that is *due*, not the first entry: a retry waiting
         // out its delay at the front of the queue must not hold up everything
         // behind it, and must not be started early either.
+        // A transcode held back by the one-at-a-time switch is passed over in
+        // the same way, so a song or an original behind it still starts.
         while active.count < max(1, prefs.downloadConcurrency),
-              let i = queue.firstIndex(where: { $0.isDue(at: now) }) {
+              let i = queue.firstIndex(where: { $0.isDue(at: now) && !waitsForTranscode($0) }) {
             let next = queue.remove(at: i)
             persistQueue()
             start(next)
@@ -1461,6 +1539,11 @@ final class DownloadManager: NSObject {
 
     private func start(_ entry: QueuedDownload) {
         active.insert(entry.itemId)
+        if Self.isTranscode(quality: entry.quality, type: entry.type) {
+            startedAsTranscode.insert(entry.itemId)
+        } else {
+            startedAsTranscode.remove(entry.itemId)
+        }
         forgetProgressThrottle(entry.itemId)
         // The clock the stall sweep measures against starts here, so a transfer
         // that never produces a single byte is caught too.
@@ -1615,7 +1698,9 @@ final class DownloadManager: NSObject {
             Self.log.notice("Resuming stream \(record.itemId, privacy: .public) from its package")
         } else {
             streamByteBase[record.itemId] = nil
-            asset = AVURLAsset(url: JellyfinClient.shared.authorized(url))
+            // Records saved before downloads carried a session of their own
+            // get one here; see `JellyfinClient.withPlaySession`.
+            asset = AVURLAsset(url: JellyfinClient.shared.authorized(JellyfinClient.withPlaySession(url)))
         }
         let configuration = AVAssetDownloadConfiguration(asset: asset, title: record.title)
         let session = prefs.downloadsWiFiOnly ? wifiAssetSession : assetSession
@@ -1692,9 +1777,28 @@ final class DownloadManager: NSObject {
             try? FileManager.default.removeItem(at: url)
             guard var broken = record(for: itemId) else { return }
             broken.hlsPath = nil
+            broken.loadedFraction = nil
+            broken.receivedBytes = 0
+            broken.verifyFailures += 1
             broken.status = .error
-            broken.errorMessage = "The download finished but wouldn't open"
             save(broken)
+            Self.log.error("\(itemId, privacy: .public) finished as a package that won't open (\(broken.verifyFailures))")
+            // Once is worth a clean start, the way a file that won't open
+            // gets one in `verifyAndComplete`. A package is most often left
+            // like this by a transfer that was interrupted and carried on —
+            // its segments from an encode the server stopped, and the rest
+            // from the one it started in its place — and a copy made in one
+            // go doesn't have that seam.
+            if broken.verifyFailures <= 1 {
+                retry(itemId)
+                if var queued = record(for: itemId) {
+                    queued.errorMessage = "The first copy wouldn't open"
+                    save(queued)
+                }
+            } else {
+                broken.errorMessage = "The download finished but wouldn't open, twice"
+                save(broken)
+            }
             return
         }
         var excluded = url
@@ -2286,6 +2390,13 @@ extension DownloadManager: URLSessionDownloadDelegate {
                     self.scheduleAutomaticRetry(itemId, reason: "Server answered \(status)", countsAsAttempt: true)
                     return
                 }
+                // Not found, timed out, too many at once: on a first go these
+                // are as often the server catching up as a real refusal, and
+                // the retry by hand that fixed them costs nothing to make here.
+                if [404, 408, 429].contains(status), rec.autoRetries == 0 {
+                    self.scheduleAutomaticRetry(itemId, reason: "Server answered \(status)", countsAsAttempt: true)
+                    return
+                }
                 rec.status = .error
                 rec.errorMessage = "Server answered \(status)"
                 self.save(rec)
@@ -2374,7 +2485,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
             // The stall sweep's own cancel, coming back round — or a pause's,
             // which is nobody's failure and is not counted as one.
             if let reason = self.retryingAfterCancel.removeValue(forKey: itemId) {
-                self.scheduleAutomaticRetry(itemId, reason: reason, countsAsAttempt: reason != Self.pausedReason)
+                self.scheduleAutomaticRetry(itemId, reason: reason, countsAsAttempt: reason != Self.pausedReason && reason != Self.yieldedReason)
                 return
             }
 
@@ -2384,7 +2495,21 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 stopped.status = .canceled
                 stopped.errorMessage = nil
                 self.save(stopped)
+                // The system's stop button means stop: left alone, the pump
+                // would start the next in the queue and put the activity
+                // straight back. Paused rather than cleared, so what was
+                // waiting is still there to resume from the Downloads page.
+                if failure.fromSystemControls { self.setPaused(true) }
             case .permanent:
+                // Jellyfin starts encoding when the first request comes in,
+                // and can answer it with a 404 before there's anything to
+                // send — which AVFoundation reports as "not found on this
+                // server". A retry by hand always worked, so one goes by
+                // itself; a second "not found" is believed.
+                if isStream, received == 0, failure.notFound, rec.autoRetries == 0 {
+                    self.scheduleAutomaticRetry(itemId, reason: "The server wasn't ready", countsAsAttempt: true)
+                    return
+                }
                 var broken = rec
                 broken.status = .error
                 broken.errorMessage = failure.summary
@@ -2414,6 +2539,12 @@ extension DownloadManager: URLSessionDownloadDelegate {
         var summary: String
         /// For the log: every layer of the error, with its codes.
         var detail: String
+        /// The server said there was nothing at the address. Permanent in
+        /// the end, but on a stream's first request it is usually a transcode
+        /// that hasn't written its first segment yet.
+        var notFound: Bool = false
+        /// Stopped from the system's Live Activity rather than from the app.
+        var fromSystemControls: Bool = false
     }
 
     /// Sort an error into "someone stopped it", "worth another go" and
@@ -2433,8 +2564,16 @@ extension DownloadManager: URLSessionDownloadDelegate {
         let detail = layers.map { "\($0.domain) \($0.code): \($0.localizedDescription)" }.joined(separator: " ← ")
         let urlErrors = layers.filter { $0.domain == NSURLErrorDomain }.map { URLError.Code(rawValue: $0.code) }
 
-        if urlErrors.contains(.cancelled) {
-            return Failure(kind: .cancelled, isConnectivity: false, summary: "Cancelled", detail: detail)
+        // The system's own Live Activity for stream downloads has a cancel
+        // button, and what it hands back is Cocoa's user-cancelled rather
+        // than URLError's: without this it read as a hiccup and every
+        // download the person had just cancelled was started again.
+        let systemCancel = layers.contains { $0.domain == NSCocoaErrorDomain && $0.code == NSUserCancelledError }
+        if urlErrors.contains(.cancelled) || systemCancel {
+            return Failure(
+                kind: .cancelled, isConnectivity: false, summary: "Cancelled", detail: detail,
+                fromSystemControls: systemCancel
+            )
         }
         let connectivity: Set<URLError.Code> = [
             .notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotConnectToHost,
@@ -2454,7 +2593,10 @@ extension DownloadManager: URLSessionDownloadDelegate {
             .cannotCreateFile, .cannotWriteToFile, .noPermissionsToReadFile, .cannotOpenFile,
         ]
         if urlErrors.contains(where: permanent.contains) {
-            return Failure(kind: .permanent, isConnectivity: false, summary: error.localizedDescription, detail: detail)
+            return Failure(
+                kind: .permanent, isConnectivity: false, summary: error.localizedDescription, detail: detail,
+                notFound: urlErrors.contains(.fileDoesNotExist)
+            )
         }
         if layers.contains(where: { $0.domain == NSCocoaErrorDomain && $0.code == NSFileWriteOutOfSpaceError }) {
             return Failure(kind: .permanent, isConnectivity: false, summary: "This device is out of space", detail: detail)
