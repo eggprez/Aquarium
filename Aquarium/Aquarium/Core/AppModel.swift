@@ -696,7 +696,20 @@ final class AppModel {
     /// than being silently left out. Nil until somebody has customized
     /// anything, so every reader falls back to the computed order.
     private var customOrder: [AppSection]? {
-        let saved = Preferences.shared.tabBarOrder
+        resolvedOrder(heldTabOrder ?? Preferences.shared.tabBarOrder)
+    }
+
+    /// The order the bar had when Settings → Tab Bar was opened on a phone,
+    /// kept until that page is left. A change to the set of tabs rebuilds the
+    /// whole bar (see `RootView.tabShell`), and the Tab Bar page isn't on any
+    /// stack's path, so each drag that moved something into or out of the bar
+    /// threw the person out of the page they were dragging in.
+    private var heldTabOrder: [String]?
+
+    func holdTabBar() { heldTabOrder = Preferences.shared.tabBarOrder }
+    func releaseTabBar() { heldTabOrder = nil }
+
+    private func resolvedOrder(_ saved: [String]) -> [AppSection]? {
         guard !saved.isEmpty else { return nil }
         var remaining = customizableSections
         var out: [AppSection] = []
@@ -752,8 +765,11 @@ final class AppModel {
 
     /// The customizable sections in the order the bar and More are using —
     /// what Settings → Tab Bar shows, and what it writes back reordered.
+    ///
+    /// Always the order as saved, never the held one: the page shows what
+    /// it's being dragged into while the bar waits.
     var tabOrder: [AppSection] {
-        if let customOrder { return customOrder }
+        if let saved = resolvedOrder(Preferences.shared.tabBarOrder) { return saved }
         let primary = defaultPrimaryOrder
         return primary + customizableSections.filter { !primary.contains($0) }
     }
