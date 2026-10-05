@@ -787,6 +787,11 @@ struct MusicItemMenu: View {
                 Label("Go to Artist", systemImage: "music.mic")
             }
         }
+        if item.isSong {
+            Button { SongInfoPrompt.shared.item = item } label: {
+                Label("Song Info", systemImage: "info.circle")
+            }
+        }
         Divider()
         // Playlists are the server's to change; with it gone the menu would
         // only offer something that fails.
@@ -1049,6 +1054,135 @@ enum MusicDownloads {
                 "Downloading \(result.queued) \(result.queued == 1 ? "track" : "tracks")", tone: .ok
             )
         }
+    }
+}
+
+// MARK: - A song's tags, from a menu
+
+/// Which song's tags are being shown. Raised from a menu and presented by
+/// whoever hosts the shell, like `PlaylistPrompt` — and by Now Playing too,
+/// which is itself a sheet over the shell and has to present its own.
+@MainActor
+@Observable
+final class SongInfoPrompt {
+    static let shared = SongInfoPrompt()
+    var item: BaseItem?
+    private init() {}
+}
+
+struct SongInfoHost: ViewModifier {
+    /// Whether this host is the one inside Now Playing. Only one of the two
+    /// presents: the one on top.
+    let overNowPlaying: Bool
+
+    @Environment(MusicPlayer.self) private var music
+    @State private var prompt = SongInfoPrompt.shared
+    @State private var nowPlaying = NowPlayingPresentation.shared
+
+    private var isPresented: Binding<Bool> {
+        Binding(
+            get: { prompt.item != nil && overNowPlaying == (nowPlaying.isPresented && music.isActive) },
+            set: { if !$0 { prompt.item = nil } }
+        )
+    }
+
+    func body(content: Content) -> some View {
+        content.sheet(isPresented: isPresented) {
+            if let song = prompt.item {
+                SongInfoSheet(song: song)
+                    .presentationDetents([.medium, .large])
+                    .presentationBackground(Theme.background)
+            }
+        }
+    }
+}
+
+/// What the tags say about a song, and what they don't. The artist, genre
+/// and year are what a station measures a song by (see `MixProfile`), so one
+/// of those left empty is called out rather than left blank.
+struct SongInfoSheet: View {
+    @State var song: BaseItem
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    row("Title", song.title)
+                    row("Artist", Self.joined((song.ArtistItems ?? []).compactMap(\.Name)) ?? Self.joined(song.Artists), stationsReadIt: true)
+                    row("Album artist", song.AlbumArtist ?? Self.joined((song.AlbumArtists ?? []).compactMap(\.Name)))
+                    row("Album", song.Album)
+                    row("Genre", Self.joined(song.Genres), stationsReadIt: true)
+                    row("Year", song.ProductionYear.map(String.init), stationsReadIt: true)
+                    row("Track", song.IndexNumber.map(String.init))
+                    row("Disc", song.ParentIndexNumber.map(String.init))
+                    row("Length", song.runtimeSeconds > 0 ? Format.clock(song.runtimeSeconds) : nil)
+                } header: {
+                    Text("Tags")
+                } footer: {
+                    if missesWhatStationsRead {
+                        Text("Stations measure a song by its artist, genre and year. One that is missing earns nothing from the points spent on it.")
+                    }
+                }
+
+                Section("Your listening") {
+                    row("Plays", String(song.userData.PlayCount ?? 0))
+                    row("Last played", Self.day(song.userData.LastPlayedDate))
+                    row("Favourite", song.userData.isFavorite ? "Yes" : "No")
+                    row("Added", Self.day(song.DateCreated))
+                }
+
+                if let source = song.MediaSources?.first {
+                    let audio = source.streams.first { $0.type == "Audio" }
+                    Section("File") {
+                        row("Format", (audio?.Codec ?? source.Container)?.uppercased())
+                        row("Bitrate", (source.Bitrate ?? audio?.BitRate).map { "\($0 / 1000) kbps" })
+                        row("Bit depth", audio?.BitDepth.map { "\($0)-bit" })
+                        row("Channels", audio?.Channels.map(String.init))
+                        row("Size", source.Size.map(Format.bytes))
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Song Info")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+        // The list a song was pressed in carries what a row draws; the file
+        // facts come with the song asked for on its own.
+        .task {
+            let client = JellyfinClient.shared
+            guard !client.showsOffline, !song.Id.hasPrefix("local-"),
+                  let full = try? await client.musicItem(song.Id) else { return }
+            song = full
+        }
+    }
+
+    private var missesWhatStationsRead: Bool {
+        MusicKeys.artists(of: song).isEmpty || MusicKeys.genres(of: song).isEmpty || song.ProductionYear == nil
+    }
+
+    private func row(_ name: String, _ value: String?, stationsReadIt: Bool = false) -> some View {
+        LabeledContent(name) {
+            if let value, !value.isEmpty {
+                Text(value).multilineTextAlignment(.trailing)
+            } else if stationsReadIt {
+                Label("Missing", systemImage: "exclamationmark.triangle").foregroundStyle(Theme.warn)
+            } else {
+                Text("—").foregroundStyle(Theme.textDim)
+            }
+        }
+    }
+
+    private static func joined(_ names: [String]?) -> String? {
+        guard let names, !names.isEmpty else { return nil }
+        return names.joined(separator: ", ")
+    }
+
+    private static func day(_ stamp: String?) -> String? {
+        Format.parseDate(stamp)?.formatted(date: .abbreviated, time: .omitted)
     }
 }
 
