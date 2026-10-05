@@ -1664,12 +1664,12 @@ enum SettingsCopy {
     )
     static func mixDial(_ dial: MixPoints.Dial) -> SettingNote {
         switch dial {
-        case .artist: SettingNote(name: "Same artist", text: "More songs by the artist the station started from.")
+        case .artist: SettingNote(name: "Same artist", text: "More songs by the artist the station started from. A genre station has no artist to keep to.")
         case .genre: SettingNote(name: "Genre", text: "Keeps closer to the genre the station started from.")
         case .era: SettingNote(name: "Era", text: "Keeps closer to the years the station started from. Artist and genre stations have no era to keep to.")
         case .favorites: SettingNote(name: "Favourites", text: "Songs you have starred come up more.")
         case .mostPlayed: SettingNote(name: "Most played", text: "Songs you play a lot come up more.")
-        case .discovery: SettingNote(name: "Discovery", text: "Songs you have never played come up more.")
+        case .discovery: SettingNote(name: "Discovery", text: "Songs you have never played come up more. Deep Cuts plays nothing else, so these points do nothing there.")
         case .surprise: SettingNote(name: "Surprise", text: "A less predictable order.")
         }
     }

@@ -34,6 +34,9 @@ final class LiveStation {
     var session = StationSession()
     /// Songs the pool has already been widened from.
     @ObservationIgnored fileprivate var widenedFrom = Set<String>()
+    /// Each song's luck, 0..<1, drawn once: the Surprise dial says how much
+    /// it counts, and a re-deal moves only what the listener gave it cause to.
+    @ObservationIgnored private var luck: [String: Double] = [:]
 
     init(title: String, seed: BaseItem, profile: MixProfile, isLocal: Bool, pool: [BaseItem]) {
         self.title = title
@@ -50,7 +53,10 @@ final class LiveStation {
     /// What should play next, `count` of it, after `history`.
     func upcoming(count: Int, after history: [BaseItem], exclude: Set<String> = []) -> [BaseItem] {
         let skip = exclude.union(history.map(\.Id)).union(session.passed)
-        let scored = StationRanker.score(Array(pool.values), profile: profile, session: session, exclude: skip)
+        for id in pool.keys where luck[id] == nil { luck[id] = Double.random(in: 0..<1) }
+        let scored = StationRanker.score(
+            Array(pool.values), profile: profile, session: session, exclude: skip, luck: luck
+        )
         return StationRanker.sequence(scored, count: count, profile: profile, after: history)
     }
 
@@ -282,18 +288,21 @@ enum StationBuilder {
     // MARK: Widening
 
     /// Pull in more like `song` — after a thumbs-up, or when the pool runs
-    /// low. Once per song.
-    static func widen(_ station: LiveStation, from song: BaseItem) async {
-        guard !station.widenedFrom.contains(song.Id) else { return }
+    /// low. Once per song. False when the pool is no bigger for it.
+    @discardableResult
+    static func widen(_ station: LiveStation, from song: BaseItem) async -> Bool {
+        guard !station.widenedFrom.contains(song.Id) else { return false }
         station.widenedFrom.insert(song.Id)
         let client = JellyfinClient.shared
         #if !os(tvOS)
-        guard !station.isLocal, !client.isOffline else { return }
+        guard !station.isLocal, !client.isOffline else { return false }
         #endif
         let artistId = (song.AlbumArtists?.first ?? song.ArtistItems?.first)?.Id
         async let mix = try? client.instantMix(from: song.Id, limit: 60)
         async let similar = similarArtistSongs(artistId)
+        let before = station.pool.count
         station.add((await mix ?? []) + (await similar))
+        return station.pool.count > before
     }
 
     // MARK: On this device
@@ -307,7 +316,12 @@ enum StationBuilder {
         if let special = SpecialStation(seed: seed) {
             switch special {
             case .rediscover:
-                pool = songs.filter { $0.userData.isFavorite && isForgotten($0) }
+                // As the server's: what is starred, and what is played most.
+                let top = songs.filter { ($0.userData.PlayCount ?? 0) > 0 }
+                    .sorted { ($0.userData.PlayCount ?? 0) > ($1.userData.PlayCount ?? 0) }
+                    .prefix(150)
+                let wanted = Set(top.map(\.Id))
+                pool = songs.filter { ($0.userData.isFavorite || wanted.contains($0.Id)) && isForgotten($0) }
                 profile = MixProfile(open: true)
             case .deepCuts:
                 // The artists of what is starred and what is played most.

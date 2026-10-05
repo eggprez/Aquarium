@@ -881,7 +881,10 @@ final class MusicPlayer {
                 heardSeconds = 0
                 lastTickPosition = nil
             }
-            if hasNext { skipNext() } else { scheduleRestation() }
+            // `learn` won't ask for the re-deal, having been told the song is
+            // already accounted for.
+            if hasNext { skipNext() }
+            scheduleRestation()
         } else if value == 1 {
             // More like this, as well as more of this.
             Task {
@@ -949,8 +952,10 @@ final class MusicPlayer {
         // Running low: reach for more like what is playing now.
         if let playing = current, station.remaining(excluding: Set(queue.map(\.item.Id))) < 15 {
             Task {
-                await StationBuilder.widen(station, from: playing)
-                if self.station === station { scheduleRestation() }
+                // Only when it found something: a pool that can't grow would
+                // otherwise ask again after every deal, for ever.
+                let grew = await StationBuilder.widen(station, from: playing)
+                if grew, self.station === station { scheduleRestation() }
             }
         }
     }
