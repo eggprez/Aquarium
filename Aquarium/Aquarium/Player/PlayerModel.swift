@@ -1177,6 +1177,18 @@ final class PlayerModel {
     /// Play a server item. `meta.inherited` marks a start that carried its
     /// bitrate over rather than the user choosing one.
     func play(item: BaseItem, options: StreamOptions = .init(), meta: StartMeta = .init()) async {
+        #if !os(tvOS)
+        // A copy on this device is played in preference to asking the server
+        // for the same thing again — see `downloadToPlay`.
+        if let record = downloadToPlay(for: item, options: options, meta: meta) {
+            let start: Double = {
+                if let explicit = options.startSeconds { return explicit.isFinite ? max(0, explicit) : 0 }
+                return options.resume && prefs.resumePlayback ? record.resumeSeconds : 0
+            }()
+            playLocal(record, startAt: start)
+            return
+        }
+        #endif
         // Read before anything below is touched: whether there is a picture on
         // screen right now, of this very title, that is worth leaving there
         // while its replacement is built. See `handOver`.
@@ -1452,9 +1464,31 @@ final class PlayerModel {
     }
 
     #if !os(tvOS)
+    /// The finished download of `item`, where playing it is what was meant.
+    ///
+    /// Not when a stream was asked for in so many words — a rung from the
+    /// quality menu, a re-encode — and not when this very item is already
+    /// playing as a stream: every reopen of that (a quality step, another
+    /// audio track, a recovery) is the same stream carrying on, and must not
+    /// turn into the file half way through. A bitrate that was only carried
+    /// over from the last episode is nobody's choice and does not count.
+    private func downloadToPlay(for item: BaseItem, options: StreamOptions, meta: StartMeta) -> DownloadRecord? {
+        guard !options.live, !meta.recovering, !meta.reopening else { return nil }
+        if isActive, !isLocal, self.item?.Id == item.Id { return nil }
+        let askedForAStream = options.maxBitrate != nil || options.bitrateIsChosen
+            || options.forceTranscode || options.forceFullEncode
+        if askedForAStream, !meta.inherited { return nil }
+        // A record whose file has gone is left for the Downloads page to
+        // report; here it is simply not an option, and the item streams.
+        guard let record = DownloadManager.shared.record(for: item.Id), !record.isAudio,
+              DownloadManager.shared.mediaURL(for: record) != nil else { return nil }
+        return record
+    }
+
     /// Play a downloaded file. Everything about it comes from the record on
-    /// disk, so this works with no server at all.
-    func playLocal(_ record: DownloadRecord, keepShuffle: Bool = false) {
+    /// disk, so this works with no server at all. `startAt` is for a start
+    /// that names its own position; otherwise it is the record's resume point.
+    func playLocal(_ record: DownloadRecord, keepShuffle: Bool = false, startAt: Double? = nil) {
         guard let url = DownloadManager.shared.mediaURL(for: record) else {
             // `errorMessage` is drawn by the player, and the player is exactly
             // what isn't opening — setting it here made a tap on the tile do
@@ -1503,7 +1537,7 @@ final class PlayerModel {
         fullItem = nil
         isActive = true
         isBuffering = true
-        attach(url: url, startAt: record.resumeSeconds, headers: [:])
+        attach(url: url, startAt: startAt ?? record.resumeSeconds, headers: [:])
         Task { await refreshLocalUpNext(after: record) }
     }
     #endif
@@ -3176,6 +3210,17 @@ final class PlayerModel {
     private func maybeReport() {
         #if !os(tvOS)
         if isActive { PlaybackHandoff.shared.update(position: position) }
+        // A download keeps the same beat a stream does: where it has got to
+        // is written to its record and, while there is a server to tell, sent
+        // on. Left for the player closing, a connection that went away
+        // mid-film took the whole sitting's progress with it.
+        if isActive, let localRecordId {
+            guard Date().timeIntervalSince(lastReportAt) >= Self.reportInterval else { return }
+            lastReportAt = Date()
+            DownloadManager.shared.noteProgress(itemId: localRecordId, positionSeconds: position)
+            Task { await OfflineProgress.push(localRecordId) }
+            return
+        }
         #endif
         guard isActive, !isLocal, !isExternal,
               Date().timeIntervalSince(lastReportAt) >= Self.reportInterval else { return }
@@ -3188,6 +3233,7 @@ final class PlayerModel {
         #if !os(tvOS)
         if let localRecordId {
             DownloadManager.shared.noteProgress(itemId: localRecordId, positionSeconds: position)
+            await OfflineProgress.push(localRecordId)
             return
         }
         #endif
