@@ -194,6 +194,15 @@ it exists on the Linux build.
   played last, stations the server builds from the artists and genres you play
   most (Jellyfin's Instant Mix), your top songs, what was added, what you have
   starred, and a random draw from the shelves.
+- **Station mix** — twenty points to spend on what stations favour, across
+  seven dials: same artist, genre, era, favourites, most played, discovery
+  (songs never played) and surprise. A dial can only take what the budget has
+  left, so more of one is less of another. Balanced, Familiar and Discovery
+  are presets; Balanced is where everyone starts. Every station, autoplay and
+  offline mix reads the same points, and they travel over iCloud with the
+  other settings. A dial whose tag is often missing in recent stations says
+  so, since a song with no genre or year earns nothing from those points.
+  Under Settings on iPhone, iPad, Mac and Apple TV.
 - **Library** — playlists, artists, albums, songs, genres, favourites and
   what is downloaded, each with a filter field and a sort menu; then the
   covers most recently added.
@@ -223,7 +232,9 @@ it exists on the Linux build.
 - **Playing** — a mini player above the tab bar on every screen, opening into
   Now Playing: blurred cover, scrubber, previous/play/next, the system volume
   slider, AirPlay, shuffle, repeat, a reorderable Up Next, a sleep timer, and
-  Play Next / Play Later / Start Station on every press-and-hold. Tracks join
+  Play Next / Play Later / Start Station on every press-and-hold. A song's
+  menu also has Song Info: its tags, your plays of it and the file's format,
+  with a missing artist, genre or year called out. Tracks join
   gaplessly; when the queue runs out it carries on with songs like the last one
   unless told not to in Settings. Starting a film stops the music and the other
   way round.
