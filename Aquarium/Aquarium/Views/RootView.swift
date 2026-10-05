@@ -102,6 +102,16 @@ struct RootView: View {
                 client.beginRecheck()
                 Task {
                     await app.refreshConnectivity()
+                    #if !os(tvOS)
+                    // Both ways, each time the app is come back to: what was
+                    // watched here goes up, and what was watched elsewhere
+                    // comes down onto the downloads while there is still a
+                    // server to ask — the next thing may be a flight.
+                    if !client.isOffline {
+                        await OfflineProgress.sync()
+                        await OfflineProgress.refreshFromServer()
+                    }
+                    #endif
                     await LibraryIndex.shared.sync()
                 }
             } else {
