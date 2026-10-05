@@ -458,10 +458,12 @@ enum StationRanker {
     /// Every candidate scored: likeness to the seed, what has been done in
     /// *this* station so far, and a little luck — each worth what the
     /// listener's points give it. Songs passed on in this station arrive in
-    /// `exclude` and are left out entirely.
+    /// `exclude` and are left out entirely. `luck` is each song's draw,
+    /// 0..<1, kept by the station so that scoring again doesn't draw again.
     static func score(
         _ pool: [BaseItem], profile: MixProfile, session: StationSession? = nil,
-        exclude: Set<String> = [], points: MixPoints = Preferences.shared.mixPoints
+        exclude: Set<String> = [], points: MixPoints = Preferences.shared.mixPoints,
+        luck: [String: Double] = [:]
     ) -> [Scored] {
         let jitter = points.weight(.surprise)
         return pool.compactMap { song in
@@ -475,7 +477,7 @@ enum StationRanker {
             if song.userData.isFavorite { score += points.weight(.favorites) }
             score += points.weight(.mostPlayed) * min(1, log2(1 + Double(plays)) / 4)
             if plays == 0 { score += points.weight(.discovery) }
-            if jitter > 0 { score += Double.random(in: 0..<jitter) }
+            if jitter > 0 { score += jitter * (luck[song.Id] ?? Double.random(in: 0..<1)) }
             return Scored(song: song, score: score, alike: likeness != nil, artist: MusicKeys.lead(of: song))
         }
         .sorted { $0.score > $1.score }
