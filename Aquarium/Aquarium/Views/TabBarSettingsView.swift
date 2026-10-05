@@ -43,10 +43,17 @@ struct TabBarSettingsView: View {
             } header: {
                 Text("Then, in this order")
             } footer: {
-                Text("Drag to reorder. The first \(slots) are in the tab bar; everything after them is listed under More. Search stays reachable either way — from More when it isn't in the bar. On an iPad this is the order of the sidebar.")
+                Text(AppModel.usesSidebar
+                    ? "Drag to reorder. On an iPad this is the order of the sidebar; on an iPhone the first \(slots) are in the tab bar and the rest are listed under More."
+                    : "Drag to reorder. The first \(slots) are in the tab bar; everything after them is listed under More. Search stays reachable either way — from More when it isn't in the bar. The tab bar changes when you leave this page.")
             }
         }
         .environment(\.editMode, .constant(.active))
+        // The phone's bar is rebuilt whenever its tabs change, which would
+        // take this page down with it mid-drag; it waits until the page is
+        // left instead. An iPad's sidebar follows along live.
+        .onAppear { if !AppModel.usesSidebar { app.holdTabBar() } }
+        .onDisappear { app.releaseTabBar() }
         .screenTitle("Tab Bar")
         .paletteBar()
         .toolbar {

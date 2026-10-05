@@ -36,13 +36,15 @@ enum CloudSync {
         "adaptive", "autoplay_next", "stereo_downmix",
         // No `audio_delay`: it is the lag of one room's soundbar, and two
         // Apple TVs are two rooms. No `default_bitrate` either: the quality a
-        // device can stream at is its network's, not the household's.
+        // device can stream at is its network's, not the household's. Nor
+        // `download_concurrency`: how many transfers at once suits an iPad on
+        // home Wi-Fi is not what suits a phone on cellular.
         "resume_playback",
         "audio_lang", "sub_lang", "subs_forced_only",
         "sub_font_size", "sub_bg",
         "fill_screen",
         "livetv_source", "iptv_playlist_url", "iptv_guide_url", "iptv_refresh_minutes", "iptv_user_agent",
-        "download_quality", "download_concurrency", "downloads_wifi_only",
+        "download_quality", "downloads_wifi_only",
         "music_lossless_cellular", "music_autoplay", "music_normalize", "audiobook_speed",
         "smart_playlists",
         "tab_bar_order",

@@ -2039,7 +2039,7 @@ final class JellyfinClient {
             ]
             if let id = source?.Id { q.append(URLQueryItem(name: "MediaSourceId", value: id)) }
             guard let url = URL(string: "\(s.server)/Audio/\(Self.pathId(item.Id))/master.m3u8?\(Self.encode(q))") else { return nil }
-            return (url, safe, .hls)
+            return (Self.withPlaySession(url), safe, .hls)
         }
 
         // An encode that would come out bigger than the file it is made from is
@@ -2097,7 +2097,27 @@ final class JellyfinClient {
 
         guard let url = URL(string: "\(s.server)/Videos/\(Self.pathId(item.Id))/master.m3u8?\(Self.encode(q))") else { return nil }
         let suffix = quality.original ? "" : " (\(quality.maxHeight ?? 0)p)"
-        return (url, "\(safe)\(suffix)", .hls)
+        return (Self.withPlaySession(url), "\(safe)\(suffix)", .hls)
+    }
+
+    /// `url` with a `PlaySessionId` of its own, if it hasn't one already.
+    ///
+    /// Every encode this device asks for carries the same `deviceId`, and
+    /// Jellyfin's `KillTranscodingJobs` — run whenever a stream's encode is
+    /// restarted — takes an empty `PlaySessionId` to mean *every* job for that
+    /// device. So each download that started or restarted its encode could
+    /// kill the others', which then answered their next segment with a 500.
+    /// With a session each, a restart only reaches its own.
+    nonisolated static func withPlaySession(_ url: URL) -> URL {
+        // Appended to the encoded query as it stands rather than rebuilt from
+        // `queryItems`, which would undo `encode`'s escaping of '+'.
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              !(parts.queryItems ?? []).contains(where: { $0.name.caseInsensitiveCompare("PlaySessionId") == .orderedSame })
+        else { return url }
+        let id = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let query = parts.percentEncodedQuery ?? ""
+        parts.percentEncodedQuery = (query.isEmpty ? "" : query + "&") + "PlaySessionId=" + id
+        return parts.url ?? url
     }
 
     /// A title turned into something a file system will take. Trimmed by *bytes*

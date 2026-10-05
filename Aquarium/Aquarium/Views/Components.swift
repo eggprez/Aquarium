@@ -1646,7 +1646,11 @@ struct MediaGrid: View {
     /// Ghost tiles drawn after the real ones while the next page is in flight.
     var pendingCount: Int = 0
     var onSelect: (BaseItem) -> Void
-    /// Called when the last row comes into view, for paging.
+    /// Called as the last rows come into view, for paging — by any of the
+    /// last `reachAhead` tiles rather than only the very last. One tile's
+    /// appearance is one chance: if it came while a page was already on its
+    /// way, or the page failed, the list sat at "62 of 92" until that tile was
+    /// scrolled away and back. The callers' own guards drop the repeats.
     var onReachEnd: (() -> Void)?
     /// The selected item ids, for a caller that wants them. Nil leaves the
     /// grid to keep its own. Nothing anywhere but the Mac.
@@ -1674,6 +1678,10 @@ struct MediaGrid: View {
         #endif
     }
 
+    /// How many tiles from the end start the next page: a couple of rows on
+    /// any of the grids, and the page is usually there before the end is.
+    private static let reachAhead = 12
+
     private var columns: [GridItem] { PosterGrid.columns(wide: wide, compact: isCompact) }
 
     private var cardWidth: CGFloat? { PosterGrid.cardWidth(wide: wide, compact: isCompact) }
@@ -1683,7 +1691,9 @@ struct MediaGrid: View {
             ForEach(items) { item in
                 tile(item)
                     .onAppear {
-                        if item.Id == items.last?.Id { onReachEnd?() }
+                        if onReachEnd != nil, items.suffix(Self.reachAhead).contains(where: { $0.Id == item.Id }) {
+                            onReachEnd?()
+                        }
                     }
             }
             if pendingCount > 0 {

@@ -40,8 +40,8 @@ final class PlayerModel {
 
     // MARK: - Published state
 
-    private(set) var isActive = false
-    private(set) var isPaused = false
+    private(set) var isActive = false { didSet { holdScreenAwake() } }
+    private(set) var isPaused = false { didSet { holdScreenAwake() } }
     /// Waiting on the network, or opening: the spinner.
     private(set) var isBuffering = false
     /// Between asking for a stream and its first frame.
@@ -62,6 +62,9 @@ final class PlayerModel {
     /// A channel from an M3U playlist rather than Jellyfin: no session on the
     /// other end, so nothing is reported for it.
     private(set) var isExternal = false
+    /// The clip from Settings → Audio output, which says to swipe down for
+    /// the Sync tab and so opens the panel there.
+    private(set) var isSyncTest = false
     private(set) var errorMessage: String?
 
     private(set) var item: BaseItem?
@@ -389,6 +392,7 @@ final class PlayerModel {
         externalStream = nil
         // Nothing on a server to report to, and nothing to come after it.
         isExternal = true
+        isSyncTest = true
         isLive = false
         autoplayCancelled = true
         upNextSettled = true
@@ -416,9 +420,21 @@ final class PlayerModel {
         if let previous { Task { await release(previous) } }
     }
 
+    /// Keeps the screensaver off while something is playing, and lets it
+    /// back on once it's paused or put away. AVPlayer did this by itself;
+    /// mpv draws into a layer tvOS knows nothing about, so the idle timer ran
+    /// on through a film and the screensaver came up over it.
+    private func holdScreenAwake() {
+        let playing = isActive && !isPaused
+        if UIApplication.shared.isIdleTimerDisabled != playing {
+            UIApplication.shared.isIdleTimerDisabled = playing
+        }
+    }
+
     /// Everything that belongs to one stream, cleared before the next opens.
     private func resetStreamState() {
         errorMessage = nil
+        isSyncTest = false
         position = 0
         duration = 0
         buffered = 0
