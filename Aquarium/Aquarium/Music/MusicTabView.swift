@@ -257,6 +257,7 @@ extension View {
     func withMiniPlayer() -> some View {
         safeAreaInset(edge: .bottom, spacing: 0) { MiniPlayerBar() }
             .modifier(PlaylistPromptHost())
+            .modifier(SongInfoHost(overNowPlaying: false))
     }
 
     /// The full Now Playing screen, presented over the whole shell.

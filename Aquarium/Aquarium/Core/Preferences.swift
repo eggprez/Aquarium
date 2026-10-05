@@ -590,6 +590,10 @@ final class Preferences {
     var musicRomanizeNames: Bool {
         didSet { write(musicRomanizeNames, forKey: "music_romanize") }
     }
+    /// What stations favour, as points spent across the dials of `MixPoints`.
+    var mixPoints: MixPoints {
+        didSet { write(mixPoints.stored, forKey: "music_mix_points") }
+    }
     /// Level tracks against each other using the gain the server measured.
     var normalizeVolume: Bool {
         didSet { write(normalizeVolume, forKey: "music_normalize") }
@@ -746,6 +750,7 @@ final class Preferences {
         // only while they play now, and the switch went with that.
         d.removeObject(forKey: "music_learns")
         musicRomanizeNames = d.object(forKey: "music_romanize") == nil ? true : d.bool(forKey: "music_romanize")
+        mixPoints = MixPoints(stored: d.dictionary(forKey: "music_mix_points")) ?? .balanced
         musicRepeat = d.string(forKey: "music_repeat") ?? "off"
         let bookSpeed = d.double(forKey: "audiobook_speed")
         audiobookSpeed = bookSpeed > 0 ? bookSpeed : 1
@@ -800,6 +805,7 @@ final class Preferences {
         CloudSync.set(musicAutoplay, forKey: "music_autoplay")
         CloudSync.set(normalizeVolume, forKey: "music_normalize")
         CloudSync.set(musicRomanizeNames, forKey: "music_romanize")
+        CloudSync.set(mixPoints.stored, forKey: "music_mix_points")
         CloudSync.set(audiobookSpeed, forKey: "audiobook_speed")
         CloudSync.set(defaults.data(forKey: "smart_playlists"), forKey: "smart_playlists")
         CloudSync.set(fillScreen, forKey: "fill_screen")
@@ -896,6 +902,7 @@ final class Preferences {
         if let v = CloudSync.object(forKey: "music_autoplay") as? Bool, v != musicAutoplay { musicAutoplay = v }
         if let v = CloudSync.object(forKey: "music_normalize") as? Bool, v != normalizeVolume { normalizeVolume = v }
         if let v = CloudSync.object(forKey: "music_romanize") as? Bool, v != musicRomanizeNames { musicRomanizeNames = v }
+        if let v = MixPoints(stored: CloudSync.object(forKey: "music_mix_points")), v != mixPoints { mixPoints = v }
         if let v = (CloudSync.object(forKey: "audiobook_speed") as? NSNumber)?.doubleValue, v > 0,
            abs(v - audiobookSpeed) > 0.01 { audiobookSpeed = v }
         if let data = CloudSync.data(forKey: "smart_playlists"), data != defaults.data(forKey: "smart_playlists") {

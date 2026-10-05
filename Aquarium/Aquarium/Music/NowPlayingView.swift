@@ -179,6 +179,7 @@ struct NowPlayingView: View {
         // Dragging the card down is the card's, not the whole screen's.
         .interactiveDismissDisabled(showQueue)
         .preferredColorScheme(.dark)
+        .modifier(SongInfoHost(overNowPlaying: true))
     }
 
     /// Where the queue card's top edge sits: just under the top bar, so where

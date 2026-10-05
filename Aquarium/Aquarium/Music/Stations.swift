@@ -14,9 +14,9 @@
 //  A thumbs-up also widens the pool towards the song it was given to.
 //
 //  Nothing outlives the station. A thumb is advice to the mix playing, not
-//  a verdict on the song: the next station starts from the seed and the
-//  server's own record of the account — favourites, play counts — and
-//  nothing this app remembers.
+//  a verdict on the song: the next station starts from the seed, the
+//  server's own record of the account — favourites, play counts — and the
+//  points the listener has spent on what stations favour (`MixPoints`).
 
 import Foundation
 import Observation
@@ -138,6 +138,12 @@ enum StationBuilder {
     /// A station from `seed`: the server's when there is a server, this
     /// device's downloads when there isn't or the server has nothing.
     static func build(from seed: BaseItem, title: String) async -> LiveStation? {
+        let station = await remoteOrLocal(from: seed, title: title)
+        if let station { TagCoverage.record(station.pool.values) }
+        return station
+    }
+
+    private static func remoteOrLocal(from seed: BaseItem, title: String) async -> LiveStation? {
         let client = JellyfinClient.shared
         #if !os(tvOS)
         if client.isOffline || seed.Id.hasPrefix("local-") {
@@ -326,6 +332,66 @@ enum StationBuilder {
         return LiveStation(title: title, seed: seed, profile: profile, isLocal: true, pool: pool)
     }
     #endif
+}
+
+// MARK: - What the tags leave out
+
+/// How many of the songs recent stations chose from had no artist, genre or
+/// year. A song missing a tag scores nothing on the dial that reads it, so
+/// the more of them there are, the less that dial's points can do — and the
+/// page where points are spent says so (see `note(for:)`). Counted from the
+/// pools the server answered with; nothing is fetched for it.
+struct TagCoverage: Sendable {
+    var songs = 0
+    var noArtist = 0
+    var noGenre = 0
+    var noYear = 0
+
+    private static let key = "music_tag_coverage"
+    /// How many stations back "recent" goes.
+    private static let depth = 5
+
+    /// The last few stations' pools, added together.
+    static var recent: TagCoverage {
+        var out = TagCoverage()
+        for counts in stored where counts.count == 4 {
+            out.songs += counts[0]
+            out.noArtist += counts[1]
+            out.noGenre += counts[2]
+            out.noYear += counts[3]
+        }
+        return out
+    }
+
+    static func record(_ pool: some Collection<BaseItem>) {
+        guard !pool.isEmpty else { return }
+        let counts = [
+            pool.count,
+            pool.count { MusicKeys.artists(of: $0).isEmpty },
+            pool.count { MusicKeys.genres(of: $0).isEmpty },
+            pool.count { $0.ProductionYear == nil },
+        ]
+        UserDefaults.standard.set(Array((stored + [counts]).suffix(depth)), forKey: key)
+    }
+
+    private static var stored: [[Int]] { UserDefaults.standard.array(forKey: key) as? [[Int]] ?? [] }
+
+    /// A sentence for the dial's row when enough songs lack what it reads to
+    /// be worth saying. Nil for a dial that reads no tag, and before any
+    /// station has played.
+    func note(for dial: MixPoints.Dial) -> String? {
+        let (missing, tag): (Int, String)
+        switch dial {
+        case .artist: (missing, tag) = (noArtist, "artist")
+        case .genre: (missing, tag) = (noGenre, "genre")
+        case .era: (missing, tag) = (noYear, "year")
+        case .favorites, .mostPlayed, .discovery, .surprise: return nil
+        }
+        guard songs > 0 else { return nil }
+        let percent = Int((100 * Double(missing) / Double(songs)).rounded())
+        guard percent >= 5 else { return nil }
+        return "\(percent)% of the songs your recent stations chose from have no \(tag) tag, so these points have less to work with."
+    }
 }
 
 // MARK: - One station, while it plays

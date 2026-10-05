@@ -64,6 +64,14 @@ struct SettingsView: View {
                 }
             }
 
+            if app.hasAudio {
+                SettingGroup("Music", symbol: "music.note") {
+                    SettingLink(Copy.stationMix, value: prefs.mixPoints.presetName) {
+                        StationMixSettingsPage()
+                    }
+                }
+            }
+
             SettingGroup("Live TV", symbol: "antenna.radiowaves.left.and.right") {
                 SettingLink(Self.liveTVRow, value: prefs.liveTVSource == .custom ? "Custom playlist" : "Jellyfin") {
                     LiveTVSettingsPage()
@@ -362,6 +370,52 @@ private struct LiveTVSettingsPage: View {
                 }
             }
         }
+    }
+}
+
+/// The points stations are weighed by. Each dial's list stops at what the
+/// budget has left, so spending on one is taking from another.
+private struct StationMixSettingsPage: View {
+    @Environment(Preferences.self) private var prefs
+
+    private static let symbol = "slider.horizontal.3"
+
+    var body: some View {
+        let points = prefs.mixPoints
+        let coverage = TagCoverage.recent
+        var presets = MixPoints.presets.map { ($0.name, $0.name) }
+        if points.presetName == MixPoints.customName { presets.append((MixPoints.customName, MixPoints.customName)) }
+        return SettingsColumns(title: Copy.stationMix.name, intro: SettingDescription(
+            title: Copy.stationMix.name ?? "", symbol: Self.symbol, notes: [Copy.stationMix]
+        )) {
+            SettingGroup(nil, symbol: Self.symbol) {
+                SettingChoice(Copy.mixPreset, selection: preset, options: presets, isFirst: true)
+                SettingInfo("Points left", value: "\(points.remaining) of \(MixPoints.budget)",
+                            notes: [SettingNote(text: Copy.mixPointsLeft(points)), Copy.stationMix])
+            }
+            SettingGroup("Points", symbol: Self.symbol) {
+                ForEach(MixPoints.Dial.allCases) { dial in
+                    SettingChoice(
+                        Copy.mixDial(dial), selection: binding(dial),
+                        options: (0...(points[dial] + points.remaining)).map { ($0, "\($0)") },
+                        also: coverage.note(for: dial).map { [SettingNote(text: $0)] } ?? []
+                    )
+                }
+            }
+        }
+    }
+
+    private var preset: Binding<String> {
+        Binding(
+            get: { prefs.mixPoints.presetName },
+            set: { name in
+                if let preset = MixPoints.presets.first(where: { $0.name == name }) { prefs.mixPoints = preset.points }
+            }
+        )
+    }
+
+    private func binding(_ dial: MixPoints.Dial) -> Binding<Int> {
+        Binding(get: { prefs.mixPoints[dial] }, set: { prefs.mixPoints[dial] = $0 })
     }
 }
 
