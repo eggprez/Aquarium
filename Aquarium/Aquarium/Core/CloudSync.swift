@@ -46,6 +46,7 @@ enum CloudSync {
         "livetv_source", "iptv_playlist_url", "iptv_guide_url", "iptv_refresh_minutes", "iptv_user_agent",
         "download_quality", "downloads_wifi_only",
         "music_lossless_cellular", "music_autoplay", "music_normalize", "audiobook_speed",
+        "music_mix_points",
         "smart_playlists",
         "tab_bar_order",
         Self.sessionKey,

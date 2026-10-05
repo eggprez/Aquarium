@@ -13,6 +13,10 @@
 //  the listener does while it plays decides what comes first. Nothing is
 //  carried from one station to the next — the server's favourites and play
 //  counts nudge, and that is all the history a station reads.
+//
+//  How much each of those counts is the listener's to say: `MixPoints` is a
+//  budget of points spent across seven dials, and the ranker reads its
+//  weights from there.
 
 import Foundation
 
@@ -226,6 +230,84 @@ enum MusicKeys {
     }
 }
 
+// MARK: - The listener's points
+
+/// What a listener wants more of from a station: a budget of points spent
+/// across seven dials. Every station reads the same allocation, and it
+/// follows the iCloud account (see `Preferences.mixPoints`).
+struct MixPoints: Equatable, Sendable {
+    enum Dial: String, CaseIterable, Identifiable, Sendable {
+        case artist, genre, era, favorites, mostPlayed, discovery, surprise
+
+        var id: String { rawValue }
+
+        /// What one point is worth in the ranker's score. Set so that
+        /// `balanced` comes to exactly the weights stations had before there
+        /// were points to spend.
+        fileprivate var unit: Double {
+            switch self {
+            case .artist: 3.0 / 5
+            case .genre: 4.0 / 6
+            case .era: 1.5 / 3
+            case .favorites, .mostPlayed: 0.6 / 2
+            case .discovery: 0.4
+            case .surprise: 1.2 / 2
+            }
+        }
+    }
+
+    static let budget = 20
+
+    private var spentOn: [Dial: Int] = [:]
+
+    init(_ points: [Dial: Int] = [:]) {
+        // In the dials' own order, so an allocation over the budget loses
+        // the same points wherever it is read.
+        for dial in Dial.allCases { self[dial] = points[dial] ?? 0 }
+    }
+
+    /// Points on a dial. Setting more than the budget has left sets what is
+    /// left.
+    subscript(dial: Dial) -> Int {
+        get { spentOn[dial] ?? 0 }
+        set { spentOn[dial] = max(0, min(newValue, self[dial] + remaining)) }
+    }
+
+    var remaining: Int { Self.budget - spentOn.values.reduce(0, +) }
+
+    /// What a dial adds to a song's score at most.
+    func weight(_ dial: Dial) -> Double { Double(self[dial]) * dial.unit }
+
+    // MARK: Presets
+
+    /// How stations chose before there were points, and where everyone starts.
+    static let balanced = MixPoints([.artist: 5, .genre: 6, .era: 3, .favorites: 2, .mostPlayed: 2, .surprise: 2])
+    static let familiar = MixPoints([.artist: 5, .genre: 4, .era: 1, .favorites: 5, .mostPlayed: 5])
+    static let discovery = MixPoints([.artist: 2, .genre: 5, .era: 2, .discovery: 8, .surprise: 3])
+
+    static let presets: [(name: String, points: MixPoints)] = [
+        ("Balanced", .balanced), ("Familiar", .familiar), ("Discovery", .discovery),
+    ]
+    static let customName = "Custom"
+
+    /// The preset this is, or `customName`.
+    var presetName: String { Self.presets.first { $0.points == self }?.name ?? Self.customName }
+
+    // MARK: Stored
+
+    /// As it is kept in defaults and in iCloud: points by dial name.
+    var stored: [String: Int] {
+        Dictionary(uniqueKeysWithValues: Dial.allCases.map { ($0.rawValue, self[$0]) })
+    }
+
+    init?(stored: Any?) {
+        guard let stored = stored as? [String: Any] else { return nil }
+        var points: [Dial: Int] = [:]
+        for dial in Dial.allCases { points[dial] = (stored[dial.rawValue] as? NSNumber)?.intValue }
+        self.init(points)
+    }
+}
+
 // MARK: - The seed
 
 /// What a station is measured against: the seed, reduced to artists, genres
@@ -305,15 +387,18 @@ struct MixProfile: Sendable {
         return min(1, max(whole, partial))
     }
 
-    /// 0…~9: how like the seed a song is. Zero means nothing in common.
-    func likeness(_ song: BaseItem) -> Double {
+    /// How like the seed a song is, each part of it worth what `points`
+    /// gives that dial. Nil means nothing in common — which the points don't
+    /// decide: a dial at zero stops counting, it doesn't stop a song being
+    /// by the same artist.
+    func likeness(_ song: BaseItem, points: MixPoints) -> Double? {
         if isOpen { return 1 }
         let sameArtist = !artists.isDisjoint(with: MusicKeys.artists(of: song))
         let genre = genreAffinity(MusicKeys.genres(of: song))
-        guard sameArtist || genre > 0 else { return 0 }
-        var score = (sameArtist ? 3.0 : 0) + 4.0 * genre
+        guard sameArtist || genre > 0 else { return nil }
+        var score = (sameArtist ? points.weight(.artist) : 0) + points.weight(.genre) * genre
         if let a = year, let b = song.ProductionYear {
-            score += 1.5 * max(0, 1 - Double(abs(a - b)) / 15)
+            score += points.weight(.era) * max(0, 1 - Double(abs(a - b)) / 15)
         }
         if let albumId, song.AlbumId == albumId { score += 0.5 }
         return score
@@ -371,24 +456,27 @@ enum StationRanker {
     }
 
     /// Every candidate scored: likeness to the seed, what has been done in
-    /// *this* station so far, and a little luck. Songs passed on in this
-    /// station arrive in `exclude` and are left out entirely.
+    /// *this* station so far, and a little luck — each worth what the
+    /// listener's points give it. Songs passed on in this station arrive in
+    /// `exclude` and are left out entirely.
     static func score(
         _ pool: [BaseItem], profile: MixProfile, session: StationSession? = nil,
-        exclude: Set<String> = [], jitter: Double = 1.2
+        exclude: Set<String> = [], points: MixPoints = Preferences.shared.mixPoints
     ) -> [Scored] {
-        pool.compactMap { song in
+        let jitter = points.weight(.surprise)
+        return pool.compactMap { song in
             guard !exclude.contains(song.Id), song.Id != profile.songId else { return nil }
-            let likeness = profile.likeness(song)
-            var score = likeness
-            if likeness == 0 { score -= 4 }
+            let likeness = profile.likeness(song, points: points)
+            var score = likeness ?? -4
             if let session { score += session.lean(for: song) }
-            // Small nudges from the server's own record of the song: starred,
-            // and how often it has been played anywhere.
-            if song.userData.isFavorite { score += 0.6 }
-            score += min(0.6, log2(1 + Double(song.userData.PlayCount ?? 0)) * 0.15)
-            score += Double.random(in: 0..<jitter)
-            return Scored(song: song, score: score, alike: likeness > 0, artist: MusicKeys.lead(of: song))
+            // The server's own record of the song: starred, and how often it
+            // has been played anywhere — or that it never has been.
+            let plays = song.userData.PlayCount ?? 0
+            if song.userData.isFavorite { score += points.weight(.favorites) }
+            score += points.weight(.mostPlayed) * min(1, log2(1 + Double(plays)) / 4)
+            if plays == 0 { score += points.weight(.discovery) }
+            if jitter > 0 { score += Double.random(in: 0..<jitter) }
+            return Scored(song: song, score: score, alike: likeness != nil, artist: MusicKeys.lead(of: song))
         }
         .sorted { $0.score > $1.score }
     }

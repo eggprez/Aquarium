@@ -174,6 +174,7 @@ struct SettingsView: View {
             if shows(.music), app.hasAudio {
                 musicSection
                 stationsSection
+                StationMixSection()
             }
 
             if shows(.liveTV) {
@@ -725,6 +726,12 @@ struct SettingsView: View {
                     Toggle(isOn: $prefs.musicAutoplay) { SettingLabel(Copy.musicAutoplay) }
                     Toggle(isOn: $prefs.normalizeVolume) { SettingLabel(Copy.normalizeVolume) }
                     Toggle(isOn: $prefs.musicRomanizeNames) { SettingLabel(Copy.musicRomanize) }
+                    NavigationLink {
+                        StationMixSettingsPage()
+                        .clearsBottomChrome()
+                    } label: {
+                        LabeledContent(Copy.stationMix.name ?? "", value: prefs.mixPoints.presetName)
+                    }
                 }
             }
 
@@ -1136,6 +1143,17 @@ private struct LibraryCopySettingsPage: View {
     }
 }
 
+private struct StationMixSettingsPage: View {
+    var body: some View {
+        Form {
+            StationMixSection()
+        }
+        .formStyle(.grouped)
+        .screenTitle(Copy.stationMix.name ?? "")
+        .paletteBar()
+    }
+}
+
 private struct AboutSettingsPage: View {
     var body: some View {
         Form {
@@ -1308,6 +1326,84 @@ struct AccountsSection: View {
         }
     }
     #endif
+}
+
+/// The points stations are weighed by: a preset, then a stepper a dial. A
+/// dial can only go as high as the budget has points left, so spending on one
+/// is taking from another.
+struct StationMixSection: View {
+    @Environment(Preferences.self) private var prefs
+
+    var body: some View {
+        let points = prefs.mixPoints
+        let coverage = TagCoverage.recent
+        Section {
+            Picker(selection: preset) {
+                ForEach(MixPoints.presets, id: \.name) { Text($0.name).tag($0.name) }
+                if points.presetName == MixPoints.customName {
+                    Text(MixPoints.customName).tag(MixPoints.customName)
+                }
+            } label: {
+                #if os(macOS)
+                MacSettingLabel(SettingsCopy.mixPreset)
+                #else
+                Text(SettingsCopy.mixPreset.name ?? "")
+                #endif
+            }
+            .note(SettingsCopy.mixPreset)
+
+            ForEach(MixPoints.Dial.allCases) { dial in
+                let note = SettingsCopy.mixDial(dial)
+                VStack(alignment: .leading, spacing: 6) {
+                    #if os(macOS)
+                    LabeledContent {
+                        Stepper(value: binding(dial), in: 0...(points[dial] + points.remaining)) {
+                            Text("\(points[dial])")
+                                .monospacedDigit()
+                                .frame(minWidth: 16, alignment: .trailing)
+                        }
+                    } label: {
+                        MacSettingLabel(note)
+                    }
+                    #else
+                    Stepper(value: binding(dial), in: 0...(points[dial] + points.remaining)) {
+                        HStack {
+                            Text(note.name ?? "")
+                            Spacer()
+                            Text("\(points[dial])")
+                                .foregroundStyle(Theme.textDim)
+                                .monospacedDigit()
+                        }
+                    }
+                    #endif
+                    if let warning = coverage.note(for: dial) {
+                        Label(warning, systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(Theme.warn)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .note(note)
+            }
+        } header: {
+            Text(SettingsCopy.stationMix.name ?? "")
+        } footer: {
+            Text("\(SettingsCopy.mixPointsLeft(points)) \(SettingsCopy.stationMix.text)")
+        }
+    }
+
+    private var preset: Binding<String> {
+        Binding(
+            get: { prefs.mixPoints.presetName },
+            set: { name in
+                if let preset = MixPoints.presets.first(where: { $0.name == name }) { prefs.mixPoints = preset.points }
+            }
+        )
+    }
+
+    private func binding(_ dial: MixPoints.Dial) -> Binding<Int> {
+        Binding(get: { prefs.mixPoints[dial] }, set: { prefs.mixPoints[dial] = $0 })
+    }
 }
 
 private extension View {
@@ -1558,6 +1654,28 @@ enum SettingsCopy {
         name: "Romanize artist names",
         text: "Name stations after an artist in Latin letters when the server has a romanized name or the script has a reliable transliteration. Japanese names written in kanji are left as they are."
     )
+    static let stationMix = SettingNote(
+        name: "Station mix",
+        text: "\(MixPoints.budget) points to spend on what stations favour. Every station uses them, autoplay and downloads included, and they follow your iCloud account. Rediscover and Deep Cuts have nothing to be like, so the first three do nothing there."
+    )
+    static let mixPreset = SettingNote(
+        name: "Preset",
+        text: "Balanced is how stations have always chosen. Familiar leans on what you star and play most. Discovery leans on what you have never played."
+    )
+    static func mixDial(_ dial: MixPoints.Dial) -> SettingNote {
+        switch dial {
+        case .artist: SettingNote(name: "Same artist", text: "More songs by the artist the station started from.")
+        case .genre: SettingNote(name: "Genre", text: "Keeps closer to the genre the station started from.")
+        case .era: SettingNote(name: "Era", text: "Keeps closer to the years the station started from. Artist and genre stations have no era to keep to.")
+        case .favorites: SettingNote(name: "Favourites", text: "Songs you have starred come up more.")
+        case .mostPlayed: SettingNote(name: "Most played", text: "Songs you play a lot come up more.")
+        case .discovery: SettingNote(name: "Discovery", text: "Songs you have never played come up more.")
+        case .surprise: SettingNote(name: "Surprise", text: "A less predictable order.")
+        }
+    }
+    static func mixPointsLeft(_ points: MixPoints) -> String {
+        "\(points.remaining) of \(MixPoints.budget) points left to spend."
+    }
     static let normalizeVolume = SettingNote(
         name: "Sound check",
         text: "Level tracks against each other using the loudness the server measured, so a quiet album isn't followed by a loud one."
