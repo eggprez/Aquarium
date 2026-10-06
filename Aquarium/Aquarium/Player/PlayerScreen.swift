@@ -1123,8 +1123,8 @@ struct VideoSurface: UIViewControllerRepresentable {
                         fillScreen: Preferences.shared.fillScreen,
                         canResync: player.canResync,
                         canReencodeForSync: player.canReencodeForSync,
-                        canDelayAudio: player.canDelayAudio,
-                        audioDelayMilliseconds: player.audioDelayMilliseconds,
+                        audioLanguage: Preferences.shared.audioLanguage,
+                        subtitleLanguage: Preferences.shared.subtitleLanguage,
                         audio: player.audioOptions.map { option in
                             TransportBarExtras.State.Track(
                                 id: option.id, title: option.label,
@@ -1171,8 +1171,26 @@ struct VideoSurface: UIViewControllerRepresentable {
             extras.onReencodeForSync = {
                 Task { @MainActor in await player.reencodeForSync() }
             }
-            extras.onAudioDelay = { milliseconds in
-                Task { @MainActor in player.setAudioDelay(milliseconds: milliseconds) }
+            // A language chosen here is the setting, kept for everything
+            // played after — and this video switches to it now when the file
+            // has a track in it, reopening the stream if the track isn't in
+            // what is playing, as choosing it from the track menu would.
+            extras.onAudioLanguage = { code in
+                Preferences.shared.audioLanguage = code
+                guard let option = player.audioOptions.first(where: { Languages.matches(preference: code, tag: $0.language) }),
+                      option.id != player.selectedAudioOption else { return }
+                player.selectAudio(option)
+            }
+            extras.onSubtitleLanguage = { code in
+                Preferences.shared.subtitleLanguage = code
+                if code == "off" {
+                    if player.selectedSubtitleOption != nil { player.selectSubtitles(nil) }
+                    return
+                }
+                let matching = player.subtitleOptions.filter { Languages.matches(preference: code, tag: $0.language) }
+                guard let option = matching.first(where: { !$0.isForced }) ?? matching.first,
+                      option.id != player.selectedSubtitleOption else { return }
+                player.selectSubtitles(option)
             }
         }
 

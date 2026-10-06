@@ -1000,13 +1000,6 @@ private struct AudioSubtitleSettingsPage: View {
             Section("Audio") {
                 Toggle(Copy.downmix.name ?? "", isOn: $prefs.stereoDownmix)
                     .note(Copy.downmix)
-
-                Picker(Copy.audioDelay.name ?? "", selection: SettingsView.audioDelayBinding) {
-                    ForEach(SettingsView.audioDelayChoices, id: \.self) { milliseconds in
-                        Text(PlayerModel.audioDelayName(milliseconds)).tag(milliseconds)
-                    }
-                }
-                .note(Copy.audioDelay)
             }
 
             Section("Subtitles") {
@@ -1740,13 +1733,17 @@ enum SettingsCopy {
         name: "Audio delay",
         text: "How far the sound is moved against the picture — the lag a television or soundbar adds, which is the same for everything watched through it. " + audioDelayPlayerHint + "Whatever is settled on is saved here and applied to everything you play. The sound can be moved earlier on any stream; moving it later needs a file the server can send untouched."
     )
-    static let syncTest = SettingNote(
-        name: "Sync test",
-        text: "Plays a short looping clip at 23.976 fps, the rate films are, so the television switches to the mode your films play in. A line sweeps across a ruler and a beep plays as it crosses 0. Swipe down for the Sync tab: if the beep comes before the flash, press −; after it, press +."
+    static let matchedAudioDelay = SettingNote(
+        name: "Audio delay at 24 Hz",
+        text: "The offset used instead when Match Content → Match Frame Rate switches your television out of 60 Hz for a video — a film, mostly. Many televisions show the picture later at 24 Hz than at 60, and tvOS can tell the app that matching is on but not how much later, so this is measured on its own with the Match Frame Rate sync test. Until it has been, films get the standard delay. The player's Sync tab moves this one while a video the display switched for is playing."
     )
-    static let frameRateMatch = SettingNote(
-        name: "Match Frame Rate offset",
-        text: "Extra sound delay for when Match Content → Match Frame Rate switches your television out of 60 Hz for a video. Many televisions show the picture later at 24 Hz than at 60, and tvOS can tell the app that matching is on but not how much later. Pick a value here; while a film the display switched for is playing, the audio delay controls in the player say how much is being added. Added on top of the audio delay, and only to videos the display switches for."
+    static let syncTestStandard = SettingNote(
+        name: "Sync test · standard frame rate",
+        text: "Plays a short looping clip at 60 fps, which leaves the television in the mode the Home screen runs in — what shows and most Live TV play in. A line sweeps across a ruler and a beep plays as it crosses 0. Swipe down for the Sync tab: if the beep comes before the flash, press −; after it, press +. What is settled on becomes the audio delay."
+    )
+    static let syncTestMatched = SettingNote(
+        name: "Sync test · Match Frame Rate",
+        text: "The same clip at 23.976 fps, the rate films are, so with Match Content → Match Frame Rate on the television switches to the mode your films play in and the test measures that mode's lag. What is settled on becomes the audio delay at 24 Hz, and is used for every video the display switches for. With Match Frame Rate off there is no switch, and the test sets the standard delay instead."
     )
     static let audioLanguage = SettingNote(
         name: "Audio",
@@ -1845,7 +1842,7 @@ enum SettingsCopy {
     /// the footer pointed at a panel that isn't there.
     private static var audioDelayPlayerHint: String {
         #if os(tvOS)
-        "Easier to set from inside the player: Audio sync in the player's settings puts the controls over whatever is playing, so the sound can be nudged while watching a line of dialogue. "
+        "Set from inside the player: the Sync tab puts the controls over whatever is playing, so the sound can be nudged while watching a line of dialogue, or over the sync test's clip. Used while the television is in its usual 60 Hz mode; a video the display is switched for gets the delay at 24 Hz instead. "
         #else
         ""
         #endif

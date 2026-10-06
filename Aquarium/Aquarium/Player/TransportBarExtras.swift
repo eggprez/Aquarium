@@ -47,8 +47,11 @@ final class TransportBarExtras {
     var onResync: () -> Void = {}
     /// Ask the server to encode this stream without copying either bitstream.
     var onReencodeForSync: () -> Void = {}
-    /// Shift the sound against the picture, in milliseconds.
-    var onAudioDelay: (Int) -> Void = { _ in }
+    /// Make a language the preferred one for audio, by its code in
+    /// `Languages.audioChoices`; "" for the file's own order.
+    var onAudioLanguage: (String) -> Void = { _ in }
+    /// The same for subtitles, from `Languages.subtitleChoices`.
+    var onSubtitleLanguage: (String) -> Void = { _ in }
     /// Play another of the file's audio tracks, by `TrackOption.id`.
     var onAudio: (Int) -> Void = { _ in }
     /// Show one of the file's subtitle tracks, by `TrackOption.id`; nil for
@@ -95,8 +98,9 @@ final class TransportBarExtras {
         var fillScreen = false
         var canResync = false
         var canReencodeForSync = false
-        var canDelayAudio = false
-        var audioDelayMilliseconds = 0
+        /// The preferred languages, as `Preferences` holds them.
+        var audioLanguage = ""
+        var subtitleLanguage = ""
         /// Every audio and subtitle track the *file* has, and which of each is
         /// on — see `PlayerModel.audioOptions` for why that is more than the
         /// stream carries.
@@ -416,48 +420,39 @@ final class TransportBarExtras {
         }
     }
 
-    /// The offsets, or a couple of lines saying why there are none.
-    ///
-    /// Shown either way rather than dropped when it can't be used. Somebody
-    /// looking for this control and finding nothing concludes the app has lost
-    /// it; finding it greyed out with a reason is the answer they came for.
-    ///
-    /// The second line only appears when an offset is actually set, and it is
-    /// the one that matters now the setting is kept: an offset chosen weeks ago
-    /// on a direct play, silently not applied to tonight's transcode, is
-    /// otherwise a difference with nothing on screen to explain it.
-    private func audioDelayMenu(_ state: State) -> UIMenu {
-        let image = UIImage(systemName: "arrow.left.arrow.right")
-        guard state.canDelayAudio else {
-            var children: [UIMenuElement] = [
-                UIAction(title: "Only on a direct-played file", attributes: .disabled) { _ in }
-            ]
-            if state.audioDelayMilliseconds != 0 {
-                children.append(UIAction(
-                    title: "Set to \(PlayerModel.audioDelayShortName(state.audioDelayMilliseconds))"
-                        + " — not applied here",
-                    attributes: .disabled
-                ) { _ in })
+    /// The preferred languages — the same two settings as Settings → Audio
+    /// & Subtitles, reachable without leaving the picture. Each submenu says
+    /// what it is set to, and choosing one is kept for everything played
+    /// after, and switched to now when this file has a track in it.
+    private func languagesMenu(_ state: State) -> UIMenu {
+        let audio = UIMenu(
+            title: "Audio",
+            subtitle: Self.choiceName(state.audioLanguage, in: Languages.audioChoices),
+            image: UIImage(systemName: "speaker.wave.2"),
+            children: Languages.audioChoices.map { choice in
+                UIAction(title: choice.name, state: choice.code == state.audioLanguage ? .on : .off) { [weak self] _ in
+                    self?.onAudioLanguage(choice.code)
+                }
             }
-            return UIMenu(title: "Audio delay", image: image, children: children)
-        }
-        var children: [UIMenuElement] = []
-        // A value from the sync test in Settings can be any multiple of ten;
-        // one that isn't a preset is shown ticked at the top rather than
-        // leaving the menu with nothing on.
-        let current = state.audioDelayMilliseconds
-        if !PlayerModel.audioDelays.contains(current) {
-            children.append(UIAction(title: PlayerModel.audioDelayName(current), state: .on) { _ in })
-        }
-        children += PlayerModel.audioDelays.map { milliseconds in
-            UIAction(
-                title: PlayerModel.audioDelayName(milliseconds),
-                state: milliseconds == current ? .on : .off
-            ) { [weak self] _ in
-                self?.onAudioDelay(milliseconds)
+        )
+        let subtitles = UIMenu(
+            title: "Subtitles",
+            subtitle: Self.choiceName(state.subtitleLanguage, in: Languages.subtitleChoices),
+            image: UIImage(systemName: "captions.bubble"),
+            children: Languages.subtitleChoices.map { choice in
+                UIAction(title: choice.name, state: choice.code == state.subtitleLanguage ? .on : .off) { [weak self] _ in
+                    self?.onSubtitleLanguage(choice.code)
+                }
             }
-        }
-        return UIMenu(title: "Audio delay", image: image, children: children)
+        )
+        return UIMenu(title: "Languages", image: UIImage(systemName: "globe"), children: [audio, subtitles])
+    }
+
+    /// The name of a choice, for the submenu's line under its title — the
+    /// first word or two of a long one, since that line is a summary.
+    private static func choiceName(_ code: String, in choices: [(code: String, name: String)]) -> String {
+        guard let name = choices.first(where: { $0.code == code })?.name else { return code }
+        return name.components(separatedBy: " — ").first ?? name
     }
 
     /// The file's audio tracks, each one, with the one playing ticked.
@@ -509,10 +504,9 @@ final class TransportBarExtras {
     private func extrasItems() -> [UIMenuElement] {
         let state = state()
 
-        // First in the menu, ahead of the two settings under it, because this
-        // is the entry somebody opens the menu *looking* for: sleep and fill
-        // are preferences you set when nothing is wrong, and this is the one
-        // you go hunting for when something is.
+        // The repairs, when the stream offers any: ahead of the settings
+        // under them, because this is the entry somebody opens the menu
+        // *looking* for when something is wrong.
         var sync: [UIMenuElement] = []
         if state.canResync {
             sync.append(UIAction(
@@ -530,7 +524,6 @@ final class TransportBarExtras {
                 self?.onReencodeForSync()
             })
         }
-        sync.append(audioDelayMenu(state))
 
         var sleep: [UIAction] = []
         if let left = state.sleepMinutesRemaining {
@@ -555,6 +548,7 @@ final class TransportBarExtras {
         // the one AVKit's own menu answers wrongly on a transcode.
         if let audio = audioMenu(state) { items.append(audio) }
         if let subtitles = subtitlesMenu(state) { items.append(subtitles) }
+        items.append(languagesMenu(state))
         if !sync.isEmpty {
             items.append(UIMenu(
                 title: "Audio sync", image: UIImage(systemName: "waveform"), children: sync

@@ -100,10 +100,17 @@ struct SettingsView: View {
         return "\(session.userName) · \(client.isOffline ? "Offline" : "Connected")"
     }
 
+    /// The offsets that are set, if either is: "40 ms earlier", and the
+    /// Match Frame Rate one after it when it has been measured.
     private var audioSummary: String? {
-        prefs.audioDelay == 0
-            ? nil
-            : PlayerModel.audioDelayShortName(Int((prefs.audioDelay * 1000).rounded()))
+        var parts: [String] = []
+        if prefs.audioDelay != 0 {
+            parts.append(PlayerModel.audioDelayShortName(Int((prefs.audioDelay * 1000).rounded())))
+        }
+        if let matched = prefs.matchedAudioDelay {
+            parts.append("24 Hz \(PlayerModel.audioDelayShortName(Int((matched * 1000).rounded())))")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     static let audioLanguageOptions: [(String, String)] =
@@ -244,56 +251,28 @@ private struct AudioSettingsPage: View {
                 // bitstream through to something else, and so the only one on
                 // which decoding it here changes anything.
                 SettingToggle(Copy.soundbar, isOn: $prefs.decodeAudioLocally)
-                // The list is the fallback; the place to set this is the
-                // player, over the picture — see `AudioDelayOverlay`.
-                SettingChoice(Copy.audioDelay, selection: audioDelayMilliseconds,
-                              options: audioDelayOptions)
-                // Opens the player on a looped test clip; the Sync tab sets
-                // the delay over it.
-                SettingButton(Copy.syncTest.name ?? "", notes: [Copy.syncTest]) {
-                    Task { await player.playSyncTest() }
+                // The two offsets, read-only here: each is set in the
+                // player, over the clip that measures it — the Sync tab.
+                SettingInfo(Copy.audioDelay.name ?? "", value: delayName(prefs.audioDelay),
+                            notes: [Copy.audioDelay, Copy.syncTestStandard])
+                SettingInfo(Copy.matchedAudioDelay.name ?? "", value: prefs.matchedAudioDelay.map(delayName) ?? "Not set",
+                            notes: [Copy.matchedAudioDelay, Copy.syncTestMatched])
+                // Each opens the player on a looped test clip at its rate;
+                // the Sync tab sets the matching offset over it.
+                SettingButton(Copy.syncTestStandard.name ?? "", notes: [Copy.syncTestStandard]) {
+                    Task { await player.playSyncTest(.standard) }
                 }
-                SettingChoice(Copy.frameRateMatch, selection: frameRateMatchMilliseconds,
-                              options: frameRateMatchOptions)
+                SettingButton(Copy.syncTestMatched.name ?? "", notes: [Copy.syncTestMatched]) {
+                    Task { await player.playSyncTest(.matched) }
+                }
             }
         }
     }
 
-    /// Stored in seconds like the player reads it; chosen in milliseconds
+    /// Stored in seconds like the player reads it; shown in milliseconds
     /// like the player names it.
-    private var audioDelayMilliseconds: Binding<Int> {
-        Binding(
-            get: { Int((prefs.audioDelay * 1000).rounded()) },
-            set: { prefs.audioDelay = Double($0) / 1000 }
-        )
-    }
-
-    /// The presets in steps of fifty, plus whatever is set if it isn't one of
-    /// them — the player nudges in tens, and a list with no row ticked reads
-    /// as a setting that broke.
-    private var audioDelayOptions: [(Int, String)] {
-        var values = PlayerModel.audioDelays
-        let current = audioDelayMilliseconds.wrappedValue
-        if !values.contains(current) { values.append(current); values.sort() }
-        return values.map { ($0, PlayerModel.audioDelayName($0)) }
-    }
-
-    /// Stored in seconds like the audio delay; chosen in milliseconds.
-    private var frameRateMatchMilliseconds: Binding<Int> {
-        Binding(
-            get: { Int((prefs.frameRateMatchDelay * 1000).rounded()) },
-            set: { prefs.frameRateMatchDelay = Double($0) / 1000 }
-        )
-    }
-
-    /// Mostly earlier — a television switched to 24 Hz is slower with the
-    /// picture, not faster — in steps of ten. A value set outside the list
-    /// is added so the row never reads blank.
-    private var frameRateMatchOptions: [(Int, String)] {
-        var values = Array(stride(from: -300, through: 100, by: 10))
-        let current = frameRateMatchMilliseconds.wrappedValue
-        if !values.contains(current) { values.append(current); values.sort() }
-        return values.map { ($0, $0 == 0 ? "None" : PlayerModel.audioDelayName($0)) }
+    private func delayName(_ seconds: Double) -> String {
+        PlayerModel.audioDelayName(Int((seconds * 1000).rounded()))
     }
 }
 

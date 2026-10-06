@@ -216,6 +216,15 @@ enum Languages {
         ("tha", "Thai"), ("vie", "Vietnamese"),
     ]
 
+    /// What `Preferences.audioLanguage` can be, each with its name: the
+    /// file's own order first, then the languages.
+    static let audioChoices: [(code: String, name: String)] =
+        [("", "Whatever the file lists first")] + all
+    /// What `Preferences.subtitleLanguage` can be: the file's own choice,
+    /// never, then the languages.
+    static let subtitleChoices: [(code: String, name: String)] =
+        [("", "Only when the file turns them on"), ("off", "Never — no subtitles")] + all
+
     /// A readable name for a track's language tag, for the times a file names
     /// its tracks by code and nothing else. Anything not on the list above
     /// keeps the code it came with — a wrong name is worse than a bare `nor`.
@@ -455,18 +464,27 @@ final class Preferences {
         didSet { defaults.set(audioDelay, forKey: "audio_delay") }
     }
 
-    /// A second offset, in seconds, added to `audioDelay` when the Apple TV
-    /// switches the television out of its usual 60 Hz for a video — Match
-    /// Content → Match Frame Rate.
+    /// The offset used instead of `audioDelay`, in seconds, while the Apple
+    /// TV has switched the television out of its usual 60 Hz for a video —
+    /// Match Content → Match Frame Rate, on a film.
     ///
-    /// Separate because a television does different work at 24 Hz than at
-    /// 60: frame-rate conversion, a different motion mode, a different game
-    /// or low-latency setting. The picture comes out later by an amount that
-    /// is nothing to do with the soundbar, and tvOS reports only that
-    /// matching is switched on, never what it costs. Set by hand in Settings.
-    /// Not shared between devices: another room is another television.
-    var frameRateMatchDelay: Double {
-        didSet { defaults.set(frameRateMatchDelay, forKey: "frame_rate_match_delay") }
+    /// Its own value because a television does different work at 24 Hz than
+    /// at 60: frame-rate conversion, a different motion mode, a different
+    /// game or low-latency setting. The picture comes out later by an amount
+    /// that is nothing to do with the soundbar, and tvOS reports only that
+    /// matching is switched on, never what it costs. So it is measured the
+    /// same way as the other: the Match Frame Rate sync test switches the
+    /// display and the Sync tab sets this over it. Nil until that has been
+    /// done, and `audioDelay` stands in. Not shared between devices: another
+    /// room is another television.
+    var matchedAudioDelay: Double? {
+        didSet {
+            if let matchedAudioDelay {
+                defaults.set(matchedAudioDelay, forKey: "matched_audio_delay")
+            } else {
+                defaults.removeObject(forKey: "matched_audio_delay")
+            }
+        }
     }
 
     // ---- Languages ----
@@ -720,7 +738,10 @@ final class Preferences {
         resumePlayback = d.object(forKey: "resume_playback") == nil ? true : d.bool(forKey: "resume_playback")
         volume = d.object(forKey: "volume") == nil ? 1.0 : d.double(forKey: "volume")
         audioDelay = d.double(forKey: "audio_delay")
-        frameRateMatchDelay = d.double(forKey: "frame_rate_match_delay")
+        matchedAudioDelay = d.object(forKey: "matched_audio_delay") as? Double
+        // The offset this replaced was added to the other rather than used
+        // instead of it, so it doesn't carry over.
+        d.removeObject(forKey: "frame_rate_match_delay")
         audioLanguage = d.string(forKey: "audio_lang") ?? ""
         subtitleLanguage = d.string(forKey: "sub_lang") ?? ""
         forcedSubtitlesOnly = d.bool(forKey: "subs_forced_only")

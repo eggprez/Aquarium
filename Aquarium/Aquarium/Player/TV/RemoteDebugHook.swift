@@ -48,7 +48,7 @@ enum RemoteDebugHook {
         registered = true
         PlayerModel.log.notice("remote hook listening")
         let center = CFNotificationCenterGetDarwinNotifyCenter()
-        let debug = ["debug.items", "debug.state", "debug.nearEnd", "debug.channel", "debug.audio.next", "debug.subs.next", "debug.subs.off", "debug.syncTest"]
+        let debug = ["debug.items", "debug.state", "debug.nearEnd", "debug.channel", "debug.audio.next", "debug.subs.next", "debug.subs.off", "debug.syncTest", "debug.syncTest.standard"]
             + (0..<16).map { "debug.play.\($0)" }
             + (PlayerTab.allCases.map(\.rawValue) + ["none"]).map { "debug.tab.\($0)" }
         for name in names + debug {
@@ -101,7 +101,7 @@ enum RemoteDebugHook {
         case "aquarium.debug.state":
             let focused = target?.window?.windowScene?.focusSystem?.focusedItem
             PlayerModel.log.notice("focus: \(focused.map { String(describing: type(of: $0)) + " " + String(describing: $0).prefix(160) } ?? "nothing", privacy: .public)")
-            PlayerModel.log.notice("state: active=\(player.isActive) opening=\(player.isOpening) buffering=\(player.isBuffering) paused=\(player.isPaused) position=\(player.position, format: .fixed(precision: 1)) duration=\(player.duration, format: .fixed(precision: 1)) error=\(player.errorMessage ?? "none", privacy: .public) delay=\(player.audioDelayMilliseconds)ms applied=\(Int((player.appliedAudioDelay * 1000).rounded()))ms mpv=\(Int((player.debugEngineAudioDelay * 1000).rounded()))ms avsync=\(player.debugAVSync, privacy: .public)s")
+            PlayerModel.log.notice("state: active=\(player.isActive) opening=\(player.isOpening) buffering=\(player.isBuffering) paused=\(player.isPaused) position=\(player.position, format: .fixed(precision: 1)) duration=\(player.duration, format: .fixed(precision: 1)) error=\(player.errorMessage ?? "none", privacy: .public) delay=\(player.audioDelayMilliseconds)ms \(player.usesMatchedDelay ? "matched" : "standard", privacy: .public) mpv=\(Int((player.debugEngineAudioDelay * 1000).rounded()))ms avsync=\(player.debugAVSync, privacy: .public)s")
             return
         case "aquarium.debug.channel":
             // The guide's first channel, the way the guide tunes it.
@@ -116,7 +116,10 @@ enum RemoteDebugHook {
             }
             return
         case "aquarium.debug.syncTest":
-            Task { await player.playSyncTest() }
+            Task { await player.playSyncTest(.matched) }
+            return
+        case "aquarium.debug.syncTest.standard":
+            Task { await player.playSyncTest(.standard) }
             return
         case "aquarium.debug.nearEnd":
             player.seek(to: max(0, player.duration - 75))
