@@ -833,8 +833,8 @@ final class PlayerModel {
     // rebuilds the composition rather than selecting within the item. And the
     // offset outlives the stream: it lives in `Preferences.audioDelay`, because
     // what it corrects is almost always the room — a soundbar's lag — and the
-    // room is the same for the next film. On tvOS it is set from inside the
-    // player, over the picture — see `AudioDelayOverlay`.
+    // room is the same for the next film. The Apple TV has its own model and
+    // sets it from inside the player, over the picture — the Sync tab.
 
     /// The offsets the menu offers, in milliseconds: fifty at a time either
     /// side of zero. Positive means the sound plays later than the picture.
@@ -861,54 +861,12 @@ final class PlayerModel {
     /// The same, as the menu spells it.
     var audioDelayMilliseconds: Int { Int((audioDelay * 1000).rounded()) }
 
-    /// What is actually built into the stream: the offset that is set, plus
-    /// the frame-rate one while the television has been switched for this
-    /// video. The menus move `audioDelay`; everything that makes the offset
-    /// reads this.
-    var appliedAudioDelay: Double { audioDelay + frameRateMatchDelay }
+    /// What is actually built into the stream. The same as `audioDelay` here;
+    /// the name is kept because everything that makes the offset reads this
+    /// and nothing else, so what is set and what is applied can't drift.
+    var appliedAudioDelay: Double { audioDelay }
 
     var appliedAudioDelayMilliseconds: Int { Int((appliedAudioDelay * 1000).rounded()) }
-
-    /// The share of `appliedAudioDelay` that is there for Match Frame Rate —
-    /// zero unless it is set, matching is on, and this video is one the
-    /// display switches for.
-    var frameRateMatchDelay: Double {
-        #if os(tvOS)
-        guard prefs.frameRateMatchDelay != 0, Self.displayMatchesFrameRate,
-              let rate = contentFrameRate else { return 0 }
-        // The home screen runs at 60 Hz, and Match Frame Rate leaves 59.94
-        // and 60 where they are. Anything else — 23.976, 24, 25, 29.97, 50 —
-        // is a switch, and a switch is what costs the television time.
-        return abs(rate - 60) > 1 ? prefs.frameRateMatchDelay : 0
-        #else
-        return 0
-        #endif
-    }
-
-    var frameRateMatchMilliseconds: Int { Int((frameRateMatchDelay * 1000).rounded()) }
-
-    #if os(tvOS)
-    /// Whether Settings → Video and Audio → Match Content is on. tvOS reports
-    /// one answer for Match Frame Rate and Match Dynamic Range together, and
-    /// nothing at all about how long the television takes once it switches —
-    /// which is why the amount is a setting rather than a reading.
-    static var displayMatchesFrameRate: Bool {
-        let window = UIApplication.shared.connectedScenes
-            .compactMap { ($0 as? UIWindowScene)?.keyWindow }
-            .first
-        return window?.avDisplayManager.isDisplayCriteriaMatchingEnabled ?? false
-    }
-
-    /// The video's frame rate as the server read it. Nil for a channel from an
-    /// M3U playlist and anything else the server hasn't probed; with no rate
-    /// there is no telling whether the display will switch, so no frame-rate
-    /// offset is added.
-    private var contentFrameRate: Double? {
-        guard let video = source?.mediaSource.streams.first(where: { $0.type == "Video" })
-        else { return nil }
-        return (video.RealFrameRate ?? video.AverageFrameRate).flatMap { $0 > 0 ? $0 : nil }
-    }
-    #endif
 
     /// Whether the item now in the player actually carries the offset.
     ///

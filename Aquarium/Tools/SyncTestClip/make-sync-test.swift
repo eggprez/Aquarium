@@ -1,18 +1,24 @@
-//  Renders the Apple TV's audio sync test clip.
+//  Renders the Apple TV's audio sync test clips, one for each mode the
+//  television can be in:
 //
-//      swift Tools/SyncTestClip/make-sync-test.swift Aquarium/Player/TV/SyncTest.mov
+//      swift Tools/SyncTestClip/make-sync-test.swift 60 Aquarium/Player/TV/SyncTest-60.mov
+//      swift Tools/SyncTestClip/make-sync-test.swift 24 Aquarium/Player/TV/SyncTest-24.mov
 //
 //  A ruler of milliseconds, −300 to +300, with a line sweeping across it in
 //  real time: the line crosses 0 on the frame the beep starts on, so where the
 //  line is when the beep is heard is how far out the sound is. Four dots count
 //  in to each beat, and a bar and a disc flash on the beat frame alone.
 //
-//  23.976 fps, the rate films are, so the television switches to the mode the
-//  library plays in and the test measures that mode's lag. The beat is always
-//  on a frame boundary (2002 samples a frame at 48 kHz), so picture and sound
-//  agree to the sample. The audio is ALAC, not AAC: AAC's encoder priming
-//  would move the beep ~21 ms against the picture in any player that ignored
-//  the edit list, and a sync test can't carry an error of its own.
+//  The 60 fps clip leaves the display as the Home screen has it and measures
+//  the lag of that mode; the 23.976 fps one is the rate films are, so with
+//  Match Frame Rate on the television switches to the mode the library plays
+//  in and the test measures that mode's lag instead — a television does
+//  different work at 24 Hz than at 60, and is often later with the picture.
+//  The beat is always on a frame boundary (2002 samples a frame at 48 kHz at
+//  23.976, 800 at 60), so picture and sound agree to the sample. The audio
+//  is ALAC, not AAC: AAC's encoder priming would move the beep ~21 ms against
+//  the picture in any player that ignored the edit list, and a sync test
+//  can't carry an error of its own.
 //
 //  After writing, the clip is read back and every beep's first sample checked
 //  against its beat frame's time.
@@ -22,23 +28,29 @@ import CoreGraphics
 import CoreText
 import Foundation
 
-let width = 1920, height = 1080
-let timescale: CMTimeScale = 24000
-let frameTicks: Int64 = 1001            // 23.976 fps
-let framesPerCycle = 48                 // a beat every 2.002 s
-let beatFrame = 24                      // mid-cycle, away from the loop point
-let cycles = 15                         // ~30 s, then mpv loops it
-let totalFrames = framesPerCycle * cycles
-let sampleRate = 48000
-let samplesPerFrame = 2002              // 48000 × 1001 / 24000
-let beepHz = 1000.0
-
-guard CommandLine.arguments.count == 2 else {
-    print("usage: make-sync-test.swift <output.mov>")
+guard CommandLine.arguments.count == 3, ["24", "60"].contains(CommandLine.arguments[1]) else {
+    print("usage: make-sync-test.swift <24|60> <output.mov>")
     exit(1)
 }
-let outURL = URL(fileURLWithPath: CommandLine.arguments[1])
+/// 24 is 23.976 — 24000/1001 — the rate films are; 60 is exactly 60.
+let is24 = CommandLine.arguments[1] == "24"
+let outURL = URL(fileURLWithPath: CommandLine.arguments[2])
 try? FileManager.default.removeItem(at: outURL)
+
+let width = 1920, height = 1080
+let timescale: CMTimeScale = 24000
+let frameTicks: Int64 = is24 ? 1001 : 400  // 23.976 fps, or 60
+let framesPerCycle = is24 ? 48 : 120     // a beat every 2 s or so
+let beatFrame = framesPerCycle / 2       // mid-cycle, away from the loop point
+let cycles = 15                          // ~30 s, then mpv loops it
+let totalFrames = framesPerCycle * cycles
+let sampleRate = 48000
+let samplesPerFrame = is24 ? 2002 : 800  // 48000 × frameTicks / 24000
+/// One 23.976 frame long, whichever clip: long enough to hear at 60 fps,
+/// where a frame is 17 ms.
+let beepLength = 2002
+let beepHz = 1000.0
+let modeName = is24 ? "Match Frame Rate · 23.976 fps" : "Standard frame rate · 60 fps"
 
 // MARK: - Drawing
 
@@ -81,6 +93,7 @@ func draw(frame n: Int, into ctx: CGContext) {
     ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
 
     text(ctx, "Audio Sync", size: 96, bold: true, x: Double(width) / 2, top: 110)
+    text(ctx, modeName, size: 40, colour: dim, x: Double(width) / 2, top: 236)
     // The player's Sync tab is one swipe down from the picture, and its
     // steps are what the line under the dots means by − and +.
     text(ctx, "Swipe down to adjust audio sync", size: 44, bold: true, x: Double(width) / 2, top: 392)
@@ -110,7 +123,7 @@ func draw(frame n: Int, into ctx: CGContext) {
     let dotTop = 800.0
     for k in 0..<4 {
         let rect = CGRect(x: 250 + Double(k) * 110 - 36, y: y(dotTop) - 36, width: 72, height: 72)
-        let filled = f < beatFrame && f >= k * 6
+        let filled = f < beatFrame && f >= k * (framesPerCycle / 8)
         ctx.setStrokeColor(white)
         ctx.setLineWidth(10)
         if filled {
@@ -141,16 +154,16 @@ func draw(frame n: Int, into ctx: CGContext) {
 
 // MARK: - Sound
 
-/// The whole track, stereo Int16: a 1 kHz beep one frame long on every beat,
-/// with 2 ms ramps so it clicks on neither edge. The ramp-in starts on the
-/// beat's first sample.
+/// The whole track, stereo Int16: a 1 kHz beep `beepLength` samples long on
+/// every beat, with 2 ms ramps so it clicks on neither edge. The ramp-in
+/// starts on the beat's first sample.
 func beepSamples() -> [Int16] {
     var out = [Int16](repeating: 0, count: totalFrames * samplesPerFrame * 2)
     let ramp = sampleRate / 500
     for cycle in 0..<cycles {
         let start = (cycle * framesPerCycle + beatFrame) * samplesPerFrame
-        for i in 0..<samplesPerFrame {
-            let envelope = min(1, Double(min(i, samplesPerFrame - 1 - i)) / Double(ramp))
+        for i in 0..<beepLength {
+            let envelope = min(1, Double(min(i, beepLength - 1 - i)) / Double(ramp))
             let value = sin(2 * .pi * beepHz * Double(i) / Double(sampleRate)) * envelope * 0.5
             let sample = Int16(value * Double(Int16.max))
             out[(start + i) * 2] = sample
@@ -176,7 +189,7 @@ let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
     AVVideoCompressionPropertiesKey: [
         AVVideoAverageBitRateKey: 1_500_000,
         AVVideoMaxKeyFrameIntervalKey: framesPerCycle,
-        AVVideoExpectedSourceFrameRateKey: 24,
+        AVVideoExpectedSourceFrameRateKey: is24 ? 24 : 60,
         AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
         AVVideoAllowFrameReorderingKey: false,
     ],
@@ -318,7 +331,7 @@ while i < decoded.count / 2 {
         let expected = (found * framesPerCycle + beatFrame) * samplesPerFrame
         worst = max(worst, abs(start - expected))
         found += 1
-        i = start + samplesPerFrame + 1
+        i = start + beepLength + 1
     } else {
         i += 1
     }

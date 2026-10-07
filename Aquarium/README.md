@@ -106,11 +106,15 @@ in `Player/TV/`.
   switch the display for it; the player does, through `AVDisplayManager`,
   before the file opens. A 23.976 fps film is shown at 24 Hz instead of
   juddering at 60 when *Match Content → Match Frame Rate* is on.
-- **Audio delay, exact.** mpv's `audio-delay` moves the sound earlier or later
-  on every stream. *Settings → Audio → Sync test* plays a looping 23.976 fps
-  clip — a ruler, a sweeping line and a beep at 0 — and the Sync tab over it
-  sets the delay by ear. `Tools/SyncTestClip/make-sync-test.swift` renders the
-  clip. A separate offset covers televisions that lag more at 24 Hz than at 60.
+- **Audio delay, exact, per display mode.** mpv's `audio-delay` moves the
+  sound earlier or later on every stream. *Settings → Audio output* has two
+  sync tests, each a looping clip — a ruler, a sweeping line and a beep at 0 —
+  with the Sync tab over it setting the delay by ear: one at 60 fps for the
+  mode the Home screen runs in, one at 23.976 fps that switches the display
+  the way a film does, for televisions that lag more at 24 Hz than at 60. The
+  player applies whichever offset the display is in, and the Sync tab during
+  a video moves that one. `Tools/SyncTestClip/make-sync-test.swift` renders
+  the clips.
 - **Carried over from the AVPlayer model:** per-series track memory, progress
   reporting, skip intro and credits, Up Next with autoplay, the sleep timer,
   Live TV reopening, and the Siri Remote's Now Playing controls.

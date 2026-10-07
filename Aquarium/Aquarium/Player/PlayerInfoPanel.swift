@@ -119,10 +119,7 @@ struct PlayerStreamRows {
         // something about a setting rather than about the file.
         if player.appliedAudioDelayMilliseconds != 0 {
             let ms = player.appliedAudioDelayMilliseconds
-            var value = "\(ms > 0 ? "+" : "")\(ms) ms"
-            let matched = player.frameRateMatchMilliseconds
-            if matched != 0 { value += " (\(matched > 0 ? "+" : "")\(matched) for frame rate)" }
-                        rows.append(("Audio delay", value))
+            rows.append(("Audio delay", "\(ms > 0 ? "+" : "")\(ms) ms"))
         }
         if let index = player.selectedAudioTrack, index < player.audioTracks.count {
             rows.append(("Audio track", player.audioTracks[index].label))
