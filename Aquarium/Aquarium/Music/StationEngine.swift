@@ -35,12 +35,25 @@ enum MusicNames {
     }
 
     /// The name to show for a genre: the English name when it is one this
-    /// table knows, otherwise the tag as written, capitalised if it is Latin.
+    /// table knows, otherwise the tag as written, capitalised if it is
+    /// Latin. A tag in another script is shown by the Latin spelling the
+    /// library has for the same genre, if it has one (see `GenreCatalog`),
+    /// else transliterated the way artists' names are — so a station is
+    /// not called "Рок Mix" on a phone whose owner reads "Rock".
     static func genreName(_ raw: String) -> String {
         let key = genreKey(raw)
         if let name = displayNames[key] { return name }
-        if isLatin(raw) { return raw.split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ") }
+        if isLatin(raw) { return capitalized(raw) }
+        if let latin = GenreCatalog.latinSpelling(forKey: key) { return capitalized(latin) }
+        if let latin = raw.applyingTransform(.toLatin, reverse: false)?.applyingTransform(.stripDiacritics, reverse: false),
+           isLatin(latin), !latin.isEmpty {
+            return capitalized(latin)
+        }
         return raw
+    }
+
+    private static func capitalized(_ s: String) -> String {
+        s.split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
     }
 
     /// An artist's name in Latin letters when a fair one can be had: the
@@ -324,8 +337,14 @@ struct MixProfile: Sendable {
     /// be like.
     var isOpen = false
     var isArtistStation = false
+    /// Surprise Me: a shuffle to begin with, that becomes a mix as the
+    /// listener reacts — see `StationRanker.score`.
+    var isSurprise = false
 
-    init(open: Bool) { isOpen = open }
+    init(open: Bool, surprise: Bool = false) {
+        isOpen = open
+        isSurprise = surprise
+    }
 
     /// `members` are the seed's own songs where it has some to hand — an
     /// album's tracks, an artist's songs — and what its genres and years are
@@ -465,7 +484,15 @@ enum StationRanker {
         exclude: Set<String> = [], points: MixPoints = Preferences.shared.mixPoints,
         luck: [String: Double] = [:]
     ) -> [Scored] {
-        let jitter = points.weight(.surprise)
+        var jitter = points.weight(.surprise)
+        if profile.isSurprise {
+            // A shuffle first: luck outweighs everything else the score
+            // reads. Each reaction wears it down, and what the listener has
+            // finished and skipped — `session.lean` — takes over, so the
+            // shuffle turns into a mix of its own over an hour or so.
+            let reactions = Double(session?.reactions ?? 0)
+            jitter = max(jitter, 5 * exp(-reactions / 8))
+        }
         return pool.compactMap { song in
             guard !exclude.contains(song.Id), song.Id != profile.songId else { return nil }
             let likeness = profile.likeness(song, points: points)

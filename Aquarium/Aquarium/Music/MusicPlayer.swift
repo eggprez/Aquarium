@@ -843,6 +843,14 @@ final class MusicPlayer {
               )
         else { return }
         station.session.note(prepared.item, reaction)
+        // A Surprise Mix grows towards what is heard to the end: more like
+        // it joins the pool, once per song, and the next deal can reach it.
+        if station.profile.isSurprise, reaction == .finished {
+            Task {
+                let grew = await StationBuilder.widen(station, from: prepared.item)
+                if grew, self.station === station { self.scheduleRestation() }
+            }
+        }
         scheduleRestation()
     }
 

@@ -232,6 +232,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         async let recent = client.recentlyPlayedSongs(limit: 30)
         async let books = client.resumeAudio()
         let started = ((try? await books) ?? []).filter(\.isAudiobook)
+        await GenreCatalog.prime()
         let stations = ((try? await recent).map {
             ListenNowView.stations(recent: $0, top: [], favoriteArtists: [], random: []).map { ($0.title, $0.subtitle, $0.seed) }
         }) ?? []
@@ -276,12 +277,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         let shuffle = CPListItem(text: "Shuffle All", detailText: nil, image: UIImage(systemName: "shuffle"))
         shuffle.handler = { [weak self] _, done in
             Task { @MainActor in
-                var started = false
-                if let station = stations.randomElement() {
-                    started = await MusicMixes.startStation(from: station.seed, title: station.title).started
-                } else if let album = await randomAlbum() {
-                    started = await MusicMixes.startStation(from: album, title: "Surprise Mix").started
-                }
+                let started = await MusicMixes.startSurprise(cover: await randomAlbum()).started
                 if started { self?.showNowPlaying() } else { self?.alert("Couldn't build a mix", "There's nothing in the library to mix from yet.") }
                 done()
             }

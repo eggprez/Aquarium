@@ -736,10 +736,20 @@ enum MusicMixes {
         var isLocal: Bool
     }
 
+    /// Surprise Me: a shuffle of what the listener plays that becomes a mix
+    /// of its own as songs are finished and skipped — see `SpecialStation`.
+    /// `cover` is what the station's tile wears, if anything.
     @discardableResult
-    static func startStation(from seed: BaseItem, title: String) async -> Started {
-        guard let station = await StationBuilder.build(from: seed, title: title) else {
-            return Started(started: false, isLocal: JellyfinClient.shared.isOffline)
+    static func startSurprise(cover: BaseItem? = nil, localOnly: Bool = false) async -> Started {
+        let special = SpecialStation.surprise
+        return await startStation(from: special.seed(cover: cover), title: special.title, localOnly: localOnly)
+    }
+
+    /// `localOnly` builds from downloads even with the server in reach.
+    @discardableResult
+    static func startStation(from seed: BaseItem, title: String, localOnly: Bool = false) async -> Started {
+        guard let station = await StationBuilder.build(from: seed, title: title, localOnly: localOnly) else {
+            return Started(started: false, isLocal: localOnly || JellyfinClient.shared.isOffline)
         }
         var first: [BaseItem] = []
         if seed.isSong { first = [station.pool[seed.Id] ?? seed] }
