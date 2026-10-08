@@ -1505,14 +1505,14 @@ final class JellyfinClient {
     }
 
     /// Items for a batch of ids, 50 per request.
-    func itemsByIds(_ ids: [String], fields: String = "") async throws -> [BaseItem] {
+    func itemsByIds(_ ids: [String], fields: String = "", countsForOffline: Bool = true) async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
         var out: [BaseItem] = []
         for chunk in stride(from: 0, to: ids.count, by: 50) {
             let slice = ids[chunk..<min(chunk + 50, ids.count)].joined(separator: ",")
             var path = "/Users/\(s.userId)/Items?Ids=\(slice)"
             if !fields.isEmpty { path += "&Fields=\(fields)" }
-            out += try await get(ItemsResponse.self, path).items
+            out += try await get(ItemsResponse.self, path, countsForOffline: countsForOffline).items
         }
         return out
     }

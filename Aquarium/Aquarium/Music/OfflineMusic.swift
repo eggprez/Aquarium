@@ -243,7 +243,8 @@ final class OfflineMusicIndex {
 
     /// Bring the facts up to date while there is a server to ask: send the
     /// stars that were waiting, then read back genres, counts and stars for
-    /// everything downloaded, and keep the words of any song that has them.
+    /// everything downloaded — refreshing each download's name, album and
+    /// cover on the way — and keep the words of any song that has them.
     ///
     /// Asked for at launch, on the way back online and after a download
     /// lands. It does the full read a few times a day at most; in between it
@@ -277,17 +278,26 @@ final class OfflineMusicIndex {
             touch()
         }
 
+        let due = force || lastRefresh.map { Date().timeIntervalSince($0) > 6 * 3600 } ?? true
+
         // A book's page is its chapters and its blurb, neither of which a
-        // download record carries: the whole item is kept beside the file.
-        for id in downloadedBookIds where !OfflineBooks.isKept(id) {
+        // download record carries: the whole item is kept beside the file —
+        // and kept again on the full read, so a blurb or a chapter list
+        // corrected on the server reaches the copy here.
+        let books = downloadedBookIds
+        for id in books where due || !OfflineBooks.isKept(id) {
             guard !Task.isCancelled, !client.isOffline else { break }
             if let full = try? await client.musicItem(id) { OfflineBooks.keep(full) }
         }
 
-        let due = force || lastRefresh.map { Date().timeIntervalSince($0) > 6 * 3600 } ?? true
-        let wanted = due ? ids : ids.filter { facts[$0]?.refreshedAt == nil }
+        // Through the download manager rather than straight to the server:
+        // the same answer refreshes each download's own description — its
+        // name, its album, its cover — on the way past (`DownloadManager.
+        // describe`). The books ride along on the full read for that reason
+        // alone; `note` has no use for them.
+        let wanted = due ? ids + books : ids.filter { facts[$0]?.refreshedAt == nil }
         if !wanted.isEmpty {
-            guard let items = try? await client.songs(ids: wanted) else { return }
+            guard let items = try? await DownloadManager.shared.describe(ids: wanted) else { return }
             note(items)
         }
 
