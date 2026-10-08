@@ -54,7 +54,7 @@ struct TabBarSettingsView: View {
         // left instead. An iPad's sidebar follows along live.
         .onAppear { if !AppModel.usesSidebar { app.holdTabBar() } }
         .onDisappear { app.releaseTabBar() }
-        .screenTitle("Tab Bar")
+        .screenTitle(AppModel.usesSidebar ? "Sidebar" : "Tab Bar")
         .paletteBar()
         .toolbar {
             if !prefs.tabBarOrder.isEmpty {

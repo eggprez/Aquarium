@@ -43,33 +43,38 @@ struct SettingNote: Identifiable {
 }
 
 #if os(macOS)
-/// The tabs of the Settings window, in the order they appear.
+/// The tabs of the Settings window, in the order they appear: the shared map
+/// (`SettingsPage`), with Appearance and iCloud folded into General, and
+/// Downloads and Library copy sharing Storage — which is what the two are both
+/// about: what this Mac keeps on disk.
 enum MacSettingsPane: String, CaseIterable, Identifiable {
-    case general, account, playback, audio, music, liveTV, downloads
+    case general, account, video, audio, subtitles, music, liveTV, storage
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .general: "General"
-        case .account: "Account"
-        case .playback: "Playback"
-        case .audio: "Audio & Subtitles"
-        case .music: "Music"
-        case .liveTV: "Live TV"
-        case .downloads: "Downloads"
+        case .account: SettingsPage.account.title
+        case .video: SettingsPage.video.title
+        case .audio: SettingsPage.audio.title
+        case .subtitles: SettingsPage.subtitles.title
+        case .music: SettingsPage.music.title
+        case .liveTV: SettingsPage.liveTV.title
+        case .storage: "Storage"
         }
     }
 
     var symbol: String {
         switch self {
         case .general: "gearshape"
-        case .account: "person.crop.circle"
-        case .playback: "play.rectangle"
-        case .audio: "captions.bubble"
-        case .music: "music.note"
-        case .liveTV: "antenna.radiowaves.left.and.right"
-        case .downloads: "arrow.down.circle"
+        case .account: SettingsPage.account.symbol
+        case .video: SettingsPage.video.symbol
+        case .audio: SettingsPage.audio.symbol
+        case .subtitles: SettingsPage.subtitles.symbol
+        case .music: SettingsPage.music.symbol
+        case .liveTV: SettingsPage.liveTV.symbol
+        case .storage: "internaldrive"
         }
     }
 }
@@ -102,27 +107,35 @@ struct MacSettingsWindow: View {
     }
 }
 
-/// A setting's name over the sentence that says what it does: the two-line
-/// label a grouped form draws its rows with, so the explanation belongs to
-/// its control rather than sitting in a row of its own and reading as one
-/// more setting. The whole paragraph is the row's tooltip — see `note`.
+/// A control's label: its name, on one line. The sentence about the control
+/// is the footer of the section it sits in (`MacSettingFooter`) and the row's
+/// tooltip (`note`), so a row is a row and not a paragraph.
 struct MacSettingLabel: View {
     var title: String
-    var summary: String
 
     init(_ note: SettingNote, _ more: SettingNote..., title: String? = nil) {
         self.title = title ?? note.name ?? ""
-        self.summary = ([note] + more).map(\.summary).joined(separator: " ")
     }
 
-    init(title: String, summary: String) {
+    init(title: String, summary: String = "") {
         self.title = title
-        self.summary = summary
     }
 
     var body: some View {
         Text(title)
-        Text(summary)
+    }
+}
+
+/// Under a section: the first sentence about each control in it, as one
+/// short paragraph. The whole of each note is on hover over its row.
+struct MacSettingFooter: View {
+    let notes: [SettingNote]
+
+    init(_ notes: SettingNote...) { self.notes = notes }
+    init(notes: [SettingNote]) { self.notes = notes }
+
+    var body: some View {
+        Text(notes.map(\.summary).joined(separator: " "))
     }
 }
 #endif
@@ -148,7 +161,6 @@ struct SettingsView: View {
         Form {
             if shows(.general) {
                 appearanceSection
-                libraryCopySection
                 cloudSection
             }
 
@@ -160,14 +172,19 @@ struct SettingsView: View {
                 }
             }
 
-            if shows(.playback) {
-                playbackSection
+            if shows(.video) {
+                qualitySection
                 pictureSection
+                playingSection
             }
 
             if shows(.audio) {
-                audioSection
-                subtitlesSection
+                audioLanguageSection
+                audioOutputSection
+            }
+
+            if shows(.subtitles) {
+                subtitleLanguageSection
                 subtitleAppearanceSection
             }
 
@@ -181,8 +198,9 @@ struct SettingsView: View {
                 liveTVSections
             }
 
-            if shows(.downloads) {
+            if shows(.storage) {
                 downloadsSection
+                libraryCopySection
             }
         }
         .formStyle(.grouped)
@@ -221,7 +239,7 @@ struct SettingsView: View {
 
     private var appearanceSection: some View {
         @Bindable var prefs = prefs
-        return Section("Appearance") {
+        return Section {
             Picker(selection: $prefs.theme) {
                 Text("System").tag(ThemePref.auto)
                 Text("Light").tag(ThemePref.light)
@@ -231,64 +249,25 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
             .note(Copy.theme)
-        }
-    }
-
-    private var libraryCopySection: some View {
-        @Bindable var prefs = prefs
-        return Section("Library Copy") {
-            Toggle(isOn: $prefs.keepsLibraryCopy) { MacSettingLabel(Copy.libraryCopy) }
-                .onChange(of: prefs.keepsLibraryCopy) { _, on in LibraryIndex.shared.setEnabled(on) }
-                .note(Copy.libraryCopy)
-            if prefs.keepsLibraryCopy {
-                let index = LibraryIndex.shared
-                LabeledContent {
-                    Text(LibraryCopyText.status(index))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
-                } label: {
-                    MacSettingLabel(Copy.libraryCopyStatus)
-                }
-                .note(Copy.libraryCopyStatus)
-                LabeledContent {
-                    Text(LibraryCopyText.contents(index))
-                        .foregroundStyle(.secondary)
-                } label: {
-                    MacSettingLabel(Copy.libraryCopyContents)
-                }
-                .note(Copy.libraryCopyContents)
-                LabeledContent {
-                    HStack(spacing: 8) {
-                        if index.isSyncing { ProgressView().controlSize(.small) }
-                        Button("Sync Now") {
-                            Task { await LibraryIndex.shared.sync(force: true) }
-                        }
-                        .disabled(index.isSyncing)
-                    }
-                } label: {
-                    MacSettingLabel(Copy.syncNow, title: "Sync")
-                }
-                .note(Copy.syncNow)
-                LabeledContent {
-                    Button("Delete the Copy…") { confirmDeleteCopy = true }
-                } label: {
-                    MacSettingLabel(Copy.deleteCopy, title: "Saved Copy")
-                }
-                .note(Copy.deleteCopy)
-            }
+        } header: {
+            Text("Appearance")
+        } footer: {
+            MacSettingFooter(Copy.theme)
         }
     }
 
     private var cloudSection: some View {
         @Bindable var prefs = prefs
         return Section {
-            Toggle(isOn: cloudSyncBinding) { MacSettingLabel(Copy.cloudSync) }
+            Toggle(isOn: Self.cloudSyncBinding) { MacSettingLabel(Copy.cloudSync) }
                 .disabled(!prefs.cloudIsAvailable)
                 .note(Copy.cloudSync)
         } header: {
             Text("iCloud")
         } footer: {
-            if !prefs.cloudIsAvailable {
+            if prefs.cloudIsAvailable {
+                MacSettingFooter(Copy.cloudSync)
+            } else {
                 Text(Copy.cloudUnavailable.text)
             }
         }
@@ -365,11 +344,11 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Playback
+    // MARK: - Video
 
-    private var playbackSection: some View {
+    private var qualitySection: some View {
         @Bindable var prefs = prefs
-        return Section("Playback") {
+        return Section {
             Picker(selection: Self.bitrateBinding) {
                 ForEach(Quality.choices) { Text($0.label).tag($0.maxBitrate) }
             } label: {
@@ -379,18 +358,16 @@ struct SettingsView: View {
 
             Toggle(isOn: $prefs.adaptiveQuality) { MacSettingLabel(Copy.adaptiveQuality) }
                 .note(Copy.adaptiveQuality)
-
-            Toggle(isOn: $prefs.resumePlayback) { MacSettingLabel(Copy.resume) }
-                .note(Copy.resume)
-
-            Toggle(isOn: $prefs.autoplayNext) { MacSettingLabel(Copy.autoplayNext) }
-                .note(Copy.autoplayNext)
+        } header: {
+            Text("Quality")
+        } footer: {
+            MacSettingFooter(Copy.defaultQuality, Copy.adaptiveQuality)
         }
     }
 
     private var pictureSection: some View {
         @Bindable var prefs = prefs
-        return Section("Picture") {
+        return Section {
             Picker(selection: $prefs.fillScreen) {
                 Text("Fit — show the whole frame").tag(false)
                 Text("Fill — crop to the screen").tag(true)
@@ -399,14 +376,33 @@ struct SettingsView: View {
             }
             .pickerStyle(.radioGroup)
             .note(Copy.framing, Copy.pictureControls)
+        } header: {
+            Text("Picture")
+        } footer: {
+            MacSettingFooter(Copy.framing, Copy.pictureControls)
         }
     }
 
-    // MARK: - Audio & Subtitles
-
-    private var audioSection: some View {
+    private var playingSection: some View {
         @Bindable var prefs = prefs
-        return Section("Audio") {
+        return Section {
+            Toggle(isOn: $prefs.resumePlayback) { MacSettingLabel(Copy.resume) }
+                .note(Copy.resume)
+
+            Toggle(isOn: $prefs.autoplayNext) { MacSettingLabel(Copy.autoplayNext) }
+                .note(Copy.autoplayNext)
+        } header: {
+            Text("Playing")
+        } footer: {
+            MacSettingFooter(Copy.resume, Copy.autoplayNext)
+        }
+    }
+
+    // MARK: - Audio
+
+    private var audioLanguageSection: some View {
+        @Bindable var prefs = prefs
+        return Section {
             Picker(selection: $prefs.audioLanguage) {
                 Text("Whatever the file lists first").tag("")
                 ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
@@ -414,7 +410,16 @@ struct SettingsView: View {
                 MacSettingLabel(Copy.audioLanguage, title: "Language")
             }
             .note(Copy.audioLanguage)
+        } header: {
+            Text("Language")
+        } footer: {
+            MacSettingFooter(Copy.audioLanguage)
+        }
+    }
 
+    private var audioOutputSection: some View {
+        @Bindable var prefs = prefs
+        return Section {
             Toggle(isOn: $prefs.stereoDownmix) { MacSettingLabel(Copy.downmix) }
                 .note(Copy.downmix)
 
@@ -426,12 +431,18 @@ struct SettingsView: View {
                 MacSettingLabel(Copy.audioDelay)
             }
             .note(Copy.audioDelay)
+        } header: {
+            Text("Output")
+        } footer: {
+            MacSettingFooter(Copy.downmix, Copy.audioDelay)
         }
     }
 
-    private var subtitlesSection: some View {
+    // MARK: - Subtitles
+
+    private var subtitleLanguageSection: some View {
         @Bindable var prefs = prefs
-        return Section("Subtitles") {
+        return Section {
             Picker(selection: $prefs.subtitleLanguage) {
                 Text("Only when the file turns them on").tag("")
                 Text("Never — no subtitles").tag("off")
@@ -443,12 +454,16 @@ struct SettingsView: View {
 
             Toggle(isOn: $prefs.forcedSubtitlesOnly) { MacSettingLabel(Copy.forcedOnly, Copy.trackMemory) }
                 .note(Copy.forcedOnly, Copy.trackMemory)
+        } header: {
+            Text("Language")
+        } footer: {
+            MacSettingFooter(Copy.subtitleLanguage, Copy.forcedOnly, Copy.trackMemory)
         }
     }
 
     private var subtitleAppearanceSection: some View {
         @Bindable var prefs = prefs
-        return Section("Subtitle Appearance") {
+        return Section {
             LabeledContent {
                 HStack(spacing: 10) {
                     Slider(value: $prefs.subtitleSize, in: 60...180, step: 5) {
@@ -478,6 +493,10 @@ struct SettingsView: View {
             }
             .onChange(of: prefs.subtitleBackground) { _, _ in player.refreshSubtitleStyling() }
             .note(Copy.subtitleBackground)
+        } header: {
+            Text("Appearance")
+        } footer: {
+            MacSettingFooter(Copy.subtitleSize, Copy.subtitleBackground)
         }
     }
 
@@ -487,11 +506,15 @@ struct SettingsView: View {
     /// Mac has no say in.
     private var musicSection: some View {
         @Bindable var prefs = prefs
-        return Section("Music & Audiobooks") {
+        return Section {
             Toggle(isOn: $prefs.musicAutoplay) { MacSettingLabel(Copy.musicAutoplay) }
                 .note(Copy.musicAutoplay)
             Toggle(isOn: $prefs.normalizeVolume) { MacSettingLabel(Copy.normalizeVolume) }
                 .note(Copy.normalizeVolume)
+        } header: {
+            Text("Playing")
+        } footer: {
+            MacSettingFooter(Copy.musicAutoplay, Copy.normalizeVolume)
         }
     }
 
@@ -499,9 +522,13 @@ struct SettingsView: View {
     /// nothing kept here to count or forget.
     private var stationsSection: some View {
         @Bindable var prefs = prefs
-        return Section("Stations") {
+        return Section {
             Toggle(isOn: $prefs.musicRomanizeNames) { MacSettingLabel(Copy.musicRomanize) }
                 .note(Copy.musicRomanize)
+        } header: {
+            Text("Stations")
+        } footer: {
+            MacSettingFooter(Copy.musicRomanize)
         }
     }
 
@@ -510,13 +537,17 @@ struct SettingsView: View {
     @ViewBuilder
     private var liveTVSections: some View {
         @Bindable var prefs = prefs
-        Section("Source") {
+        Section {
             Picker(selection: $prefs.liveTVSource) {
                 ForEach(LiveTVSource.allCases, id: \.self) { Text($0.label).tag($0) }
             } label: {
                 MacSettingLabel(Copy.liveTVSource)
             }
             .note(Copy.liveTVSource)
+        } header: {
+            Text("Source")
+        } footer: {
+            MacSettingFooter(Copy.liveTVSource)
         }
 
         if prefs.liveTVSource == .custom {
@@ -567,6 +598,8 @@ struct SettingsView: View {
                 // apart by looking at the guide. This tells them apart.
                 if let summary = LiveTVStore.shared.summary {
                     Text("Last read: " + Self.playlistSummary(summary))
+                } else {
+                    MacSettingFooter(Copy.iptvPlaylist, Copy.iptvGuide)
                 }
             }
         }
@@ -581,14 +614,16 @@ struct SettingsView: View {
                 MacSettingLabel(Copy.refreshNow, title: "Channel List & Guide")
             }
             .note(Copy.refreshNow)
+        } footer: {
+            MacSettingFooter(Copy.refreshNow)
         }
     }
 
-    // MARK: - Downloads
+    // MARK: - Storage
 
     private var downloadsSection: some View {
         @Bindable var prefs = prefs
-        return Section("Downloads") {
+        return Section {
             Picker("Default Quality", selection: $prefs.downloadQuality) {
                 ForEach(DownloadQualities.all) { Text($0.label).tag($0.label) }
             }
@@ -609,9 +644,60 @@ struct SettingsView: View {
                     .help(DownloadManager.root.path)
             } label: {
                 Text("Kept In")
-                Text(DownloadManager.root.path)
-                    .truncationMode(.middle)
             }
+        } header: {
+            Text("Downloads")
+        } footer: {
+            MacSettingFooter(Copy.concurrency, Copy.wifiOnly)
+        }
+    }
+
+    private var libraryCopySection: some View {
+        @Bindable var prefs = prefs
+        return Section {
+            Toggle(isOn: $prefs.keepsLibraryCopy) { MacSettingLabel(Copy.libraryCopy) }
+                .onChange(of: prefs.keepsLibraryCopy) { _, on in LibraryIndex.shared.setEnabled(on) }
+                .note(Copy.libraryCopy)
+            if prefs.keepsLibraryCopy {
+                let index = LibraryIndex.shared
+                LabeledContent {
+                    Text(LibraryCopyText.status(index))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                } label: {
+                    MacSettingLabel(Copy.libraryCopyStatus)
+                }
+                .note(Copy.libraryCopyStatus)
+                LabeledContent {
+                    Text(LibraryCopyText.contents(index))
+                        .foregroundStyle(.secondary)
+                } label: {
+                    MacSettingLabel(Copy.libraryCopyContents)
+                }
+                .note(Copy.libraryCopyContents)
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        if index.isSyncing { ProgressView().controlSize(.small) }
+                        Button("Sync Now") {
+                            Task { await LibraryIndex.shared.sync(force: true) }
+                        }
+                        .disabled(index.isSyncing)
+                    }
+                } label: {
+                    MacSettingLabel(Copy.syncNow, title: "Sync")
+                }
+                .note(Copy.syncNow)
+                LabeledContent {
+                    Button("Delete the Copy…") { confirmDeleteCopy = true }
+                } label: {
+                    MacSettingLabel(Copy.deleteCopy, title: "Saved Copy")
+                }
+                .note(Copy.deleteCopy)
+            }
+        } header: {
+            Text("Library Copy")
+        } footer: {
+            MacSettingFooter(Copy.libraryCopy)
         }
     }
 }
@@ -621,293 +707,304 @@ struct SettingsView: View {
 #if os(iOS)
 private typealias Copy = SettingsCopy
 
-/// The page on a phone and an iPad: short, the way the television's is.
+/// The page on a phone and an iPad: a table of contents.
 ///
-/// What people change — quality, resume, autoplay, the theme — is on the first
-/// page with nothing but the control to look at; the sentence about a setting
-/// is behind the (i) beside its name, read when asked for rather than laid out
-/// under every row at once. The groups nobody touches twice — the server's
-/// details, the audio and subtitle plumbing, a Live TV source, the library
-/// copy, About — are a row each that opens a page of its own, where the
-/// sentences sit under the controls the way the Mac's page still has them.
+/// Every row on the first page is a page — an icon, a name, and where the
+/// page stands in grey — and nothing on it is a control, so nothing on it
+/// needs a sentence. The controls are one level down, four to eight to a
+/// page, grouped in short sections with the sentence about each group as its
+/// footer, which is how the system's own Settings reads. The one exception
+/// is iCloud sync, a switch, because a switch is the clearest way to show it.
+///
+/// On an iPad with the room, the list is the left column and the chosen page
+/// the right (`SettingsSplitPage`), the way iPadOS Settings works; narrower,
+/// it is the phone's page.
 struct SettingsView: View {
-    @Environment(AppModel.self) private var app
-    @Environment(JellyfinClient.self) private var client
-    @Environment(Preferences.self) private var prefs
-    /// Read again on the way back from the picker; nothing announces a change.
-    @State private var iconTitle = AppIconChoice.current.title
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
-        @Bindable var prefs = prefs
+        if AppModel.usesSidebar && sizeClass == .regular {
+            SettingsSplitPage()
+        } else {
+            SettingsListPage()
+        }
+    }
+}
+
+/// The first page as one list, every row opening its page.
+private struct SettingsListPage: View {
+    var body: some View {
         Form {
-            Section {
-                NavigationLink {
-                    ServerSettingsPage()
-                    .clearsBottomChrome()
-                } label: {
-                    LabeledContent("Server", value: serverSummary)
-                }
-                NavigationLink {
-                    TabBarSettingsView()
-                    .clearsBottomChrome()
-                } label: {
-                    LabeledContent("Tab Bar", value: prefs.tabBarOrder.isEmpty ? "Default" : "Custom")
-                }
-            }
-
-            Section("Appearance") {
-                Picker(selection: $prefs.theme) {
-                    ForEach(ThemePref.allCases, id: \.self) { Text($0.label).tag($0) }
-                } label: {
-                    SettingLabel(Copy.theme)
-                }
-                if UIApplication.shared.supportsAlternateIcons {
-                    NavigationLink {
-                        AppIconSettingsView()
-                        .clearsBottomChrome()
-                    } label: {
-                        LabeledContent("App Icon", value: iconTitle)
-                    }
-                }
-            }
-
-            Section("Playback") {
-                Picker(selection: Self.bitrateBinding) {
-                    ForEach(Quality.choices) { Text($0.label).tag($0.maxBitrate) }
-                } label: {
-                    SettingLabel(Copy.defaultQuality)
-                }
-                Toggle(isOn: $prefs.adaptiveQuality) { SettingLabel(Copy.adaptiveQuality) }
-                Toggle(isOn: $prefs.resumePlayback) { SettingLabel(Copy.resume) }
-                Toggle(isOn: $prefs.autoplayNext) { SettingLabel(Copy.autoplayNext) }
-                Picker(selection: $prefs.fillScreen) {
-                    Text("Fit — show the whole frame").tag(false)
-                    Text("Fill — crop to the screen").tag(true)
-                } label: {
-                    SettingLabel(Copy.framing, Copy.pictureControls)
-                }
-                // The two languages are on the first page, not the sub-page:
-                // they are what everyone who watches in more than one
-                // language comes to Settings for, and they were the one
-                // thing on the Audio & Subtitles page that isn't plumbing.
-                Picker(selection: $prefs.audioLanguage) {
-                    Text("File's choice").tag("")
-                    ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
-                } label: {
-                    SettingLabel(Self.audioLanguageRow)
-                }
-                Picker(selection: $prefs.subtitleLanguage) {
-                    Text("File's choice").tag("")
-                    Text("Never").tag("off")
-                    ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
-                } label: {
-                    SettingLabel(Self.subtitleLanguageRow)
-                }
-                NavigationLink {
-                    AudioSubtitleSettingsPage()
-                    .clearsBottomChrome()
-                } label: {
-                    LabeledContent("Audio & Subtitles", value: audioSummary)
-                }
-            }
-
-            Section("Live TV") {
-                NavigationLink {
-                    LiveTVSettingsPage()
-                    .clearsBottomChrome()
-                } label: {
-                    LabeledContent("Source", value: prefs.liveTVSource == .custom ? "Custom playlist" : "Jellyfin")
-                }
-            }
-
-            if app.hasAudio {
-                Section("Music and audiobooks") {
-                    Toggle(isOn: $prefs.losslessOnCellular) { SettingLabel(Copy.losslessOnCellular) }
-                    Toggle(isOn: $prefs.musicAutoplay) { SettingLabel(Copy.musicAutoplay) }
-                    Toggle(isOn: $prefs.normalizeVolume) { SettingLabel(Copy.normalizeVolume) }
-                    Toggle(isOn: $prefs.musicRomanizeNames) { SettingLabel(Copy.musicRomanize) }
-                    NavigationLink {
-                        StationMixSettingsPage()
-                        .clearsBottomChrome()
-                    } label: {
-                        LabeledContent(Copy.stationMix.name ?? "", value: prefs.mixPoints.presetName)
-                    }
-                }
-            }
-
-            Section("Downloads") {
-                Picker("Default quality", selection: $prefs.downloadQuality) {
-                    ForEach(DownloadQualities.all) { Text($0.label).tag($0.label) }
-                }
-                Stepper(value: $prefs.downloadConcurrency, in: 1...Preferences.maxDownloadConcurrency) {
-                    HStack {
-                        SettingLabel(Copy.concurrency)
-                        Spacer()
-                        Text("\(prefs.downloadConcurrency)")
-                            .foregroundStyle(Theme.textDim)
-                            .monospacedDigit()
-                    }
-                }
-                Toggle(isOn: $prefs.downloadsWiFiOnly) { SettingLabel(Copy.wifiOnly) }
-                LabeledContent("Kept in", value: "On this device")
-                    // The sandbox path itself is only useful for support or
-                    // debugging, never for reading at a glance — long-press
-                    // to get at it instead of spelling it out on the row.
-                    .contextMenu {
-                        Button {
-                            let path = DownloadManager.root.path
-                            #if os(macOS)
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(path, forType: .string)
-                            #else
-                            UIPasteboard.general.string = path
-                            #endif
-                        } label: {
-                            Label("Copy Folder Path", systemImage: "doc.on.doc")
-                        }
-                    }
-            }
-
-            #if os(iOS)
-            Section {
-                NavigationLink {
-                    WatchSettingsView()
-                    .clearsBottomChrome()
-                } label: {
-                    LabeledContent("Apple Watch", value: watchSummary)
-                }
-            } footer: {
-                Text("Audiobooks and music on the watch, and what it reports back.")
-            }
-            #endif
-
-            Section("General") {
-                Toggle(isOn: cloudSyncBinding) { SettingLabel(Copy.cloudSync) }
-                    .disabled(!prefs.cloudIsAvailable)
-                if !prefs.cloudIsAvailable {
-                    Text(Copy.cloudUnavailable.text)
-                        .font(.caption)
-                        .foregroundStyle(Theme.textDim)
-                }
-                NavigationLink {
-                    LibraryCopySettingsPage()
-                    .clearsBottomChrome()
-                } label: {
-                    LabeledContent("Library copy", value: prefs.keepsLibraryCopy ? "On" : "Off")
-                }
-                NavigationLink {
-                    AboutSettingsPage()
-                    .clearsBottomChrome()
-                } label: {
-                    LabeledContent("About", value: Bundle.appVersion)
-                }
-            }
+            SettingsMapRows()
         }
         .formStyle(.grouped)
         .screenTitle("Settings")
         .paletteBar()
-        .onAppear { iconTitle = AppIconChoice.current.title }
+    }
+}
+
+/// The first page beside the page it opens, for an iPad in a regular width.
+///
+/// Not a `NavigationSplitView`: this already sits in the detail column of the
+/// app's own, and one inside another is not a thing SwiftUI does. A list with
+/// a selection and the page beside it is the same shape without the
+/// machinery. Pages a page opens — Station mix, the app icon, the sidebar's
+/// order — push onto the stack this view is in, as they would on a phone.
+private struct SettingsSplitPage: View {
+    @State private var page: SettingsPage = .video
+
+    var body: some View {
+        HStack(spacing: 0) {
+            List(selection: Binding(get: { Optional(page) }, set: { if let new = $0 { page = new } })) {
+                SettingsMapRows(selectable: true)
+            }
+            .listStyle(.insetGrouped)
+            .frame(width: 320)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(page.title)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                    Text(page.note)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 36)
+                .padding(.top, 24)
+                .padding(.bottom, 4)
+                SettingsPageView(page: page)
+            }
+            .frame(maxWidth: .infinity)
+            .id(page)
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .screenTitle("Settings")
+        .paletteBar()
+    }
+}
+
+/// The rows of the first page, in their groups. `selectable` makes each a
+/// tagged row for a list with a selection; otherwise each is a link.
+private struct SettingsMapRows: View {
+    var selectable = false
+
+    @Environment(AppModel.self) private var app
+    @Environment(JellyfinClient.self) private var client
+    @Environment(Preferences.self) private var prefs
+
+    var body: some View {
+        Section {
+            row(.account) { SettingsAccountCard() }
+        }
+
+        Section {
+            row(.appearance, value: prefs.theme.label)
+        }
+
+        Section("Playing") {
+            row(.video, value: SettingsSummary.video(prefs))
+            row(.audio, value: SettingsSummary.audio(prefs))
+            row(.subtitles, value: SettingsSummary.subtitles(prefs))
+            if app.hasAudio {
+                row(.music)
+            }
+            row(.liveTV, value: SettingsSummary.liveTV(prefs))
+        }
+
+        Section("Storage") {
+            row(.downloads, value: SettingsSummary.downloads(prefs))
+            row(.libraryCopy, value: SettingsSummary.libraryCopy(prefs))
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                row(.watch, value: Self.watchSummary)
+            }
+        }
+
+        Section {
+            Toggle(isOn: SettingsView.cloudSyncBinding) {
+                HStack(spacing: 12) {
+                    SettingsTile(page: .about, symbol: "icloud.fill", tint: Color(hex: 0x0EA5E9))
+                    Text("Sync settings with iCloud")
+                        .foregroundStyle(Theme.text)
+                }
+            }
+            .disabled(!prefs.cloudIsAvailable)
+            row(.about, value: Bundle.appVersion)
+        } header: {
+            Text("General")
+        } footer: {
+            Text(prefs.cloudIsAvailable ? Copy.cloudSync.summary : Copy.cloudUnavailable.text)
+        }
     }
 
-    private var serverSummary: String {
-        guard let session = client.session else { return "Not connected" }
-        return "\(session.userName) · \(client.isOffline ? "Offline" : "Connected")"
+    /// A page's row: a link to it, or a selectable row standing for it.
+    @ViewBuilder
+    private func row(_ page: SettingsPage, value: String? = nil) -> some View {
+        row(page) { SettingsRow(page: page, value: value) }
     }
 
-    #if os(iOS)
-    private var watchSummary: String {
+    @ViewBuilder
+    private func row<Label: View>(_ page: SettingsPage, @ViewBuilder label: () -> Label) -> some View {
+        if selectable {
+            label().tag(page)
+        } else {
+            NavigationLink {
+                SettingsPageView(page: page)
+                    .settingsPushed(page)
+            } label: {
+                label()
+            }
+        }
+    }
+
+    private static var watchSummary: String {
         let link = WatchLink.shared
         guard link.isPaired else { return "Not paired" }
         guard link.isWatchAppInstalled else { return "Not installed" }
         guard let inventory = link.inventory else { return "Installed" }
         return inventory.itemCount == 0 ? "Nothing on it" : "\(inventory.itemCount) item\(inventory.itemCount == 1 ? "" : "s") · \(Format.bytes(inventory.totalBytes))"
     }
-    #endif
-
-    /// What is set beyond the defaults, or nothing: a downmix, a delay,
-    /// forced-only. The languages are on this page now, so not those.
-    private var audioSummary: String {
-        var parts: [String] = []
-        if prefs.forcedSubtitlesOnly { parts.append("Forced only") }
-        if prefs.stereoDownmix { parts.append("Stereo") }
-        if prefs.audioDelay != 0 {
-            parts.append(PlayerModel.audioDelayShortName(Int((prefs.audioDelay * 1000).rounded())))
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    /// The language rows, named in full: on the Audio & Subtitles page they
-    /// sat under headings that said which was which, and here they don't.
-    private static let audioLanguageRow = SettingNote(name: "Audio language", text: Copy.audioLanguage.text)
-    private static let subtitleLanguageRow = SettingNote(name: "Subtitle language", text: Copy.subtitleLanguage.text)
 }
 
-/// A setting's name and, beside it, the (i) that says what the setting does.
-private struct SettingLabel: View {
+/// The page a first-page row opens.
+struct SettingsPageView: View {
+    let page: SettingsPage
+
+    var body: some View {
+        switch page {
+        case .account: AccountSettingsPage()
+        case .appearance: AppearanceSettingsPage()
+        case .video: VideoSettingsPage()
+        case .audio: AudioSettingsPage()
+        case .subtitles: SubtitlesSettingsPage()
+        case .music: MusicSettingsPage()
+        case .liveTV: LiveTVSettingsPage()
+        case .downloads: DownloadsSettingsPage()
+        case .libraryCopy: LibraryCopySettingsPage()
+        case .watch: WatchSettingsView()
+        case .about: AboutSettingsPage()
+        }
+    }
+}
+
+extension View {
+    /// What a settings page wears when it is pushed onto the stack rather than
+    /// shown beside the list: its title in the bar, the bar in the app's
+    /// colour, and room at the foot for the mini player.
+    func settingsPushed(_ page: SettingsPage) -> some View {
+        self
+            .screenTitle(page.title)
+            .paletteBar()
+            .clearsBottomChrome()
+    }
+}
+
+/// A first-page row: the page's tile, its name, and where it stands.
+///
+/// The name has the room and the value gives way: a long value is cut short
+/// rather than pushing the name into the tile or wrapping it under the value.
+struct SettingsRow: View {
+    let page: SettingsPage
+    var value: String?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SettingsTile(page: page)
+            Text(page.title)
+                .foregroundStyle(Theme.text)
+                .layoutPriority(1)
+            Spacer(minLength: 12)
+            if let value, !value.isEmpty {
+                Text(value)
+                    .foregroundStyle(Theme.textDim)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A page's symbol on a rounded square of its colour, the way the system's
+/// Settings marks its rows.
+struct SettingsTile: View {
+    let page: SettingsPage
+    var symbol: String?
+    var tint: Color?
+    var size: CGFloat = 29
+
+    var body: some View {
+        Image(systemName: symbol ?? page.symbol)
+            .font(.system(size: size * 0.52, weight: .medium))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(tint ?? page.tint, in: RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+            .accessibilityHidden(true)
+    }
+}
+
+/// The first row: who is signed in, where, and whether the server answered.
+struct SettingsAccountCard: View {
+    @Environment(JellyfinClient.self) private var client
+
+    var body: some View {
+        HStack(spacing: 14) {
+            if let session = client.session {
+                AccountAvatar(account: session, size: 48)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.userName.isEmpty ? "Unnamed user" : session.userName)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(1)
+                    Text(session.serverLabel)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textDim)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 8)
+                StatusPill(text: client.isOffline ? "Offline" : "Connected", tone: client.isOffline ? .warn : .ok)
+            } else {
+                SettingsTile(page: .account, size: 48)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Not connected")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(Theme.text)
+                    Text("No Jellyfin server is signed in.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textDim)
+                }
+                Spacer(minLength: 8)
+            }
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Under a section: the sentences about the controls in it, a paragraph each.
+private struct SettingsFooter: View {
     let notes: [SettingNote]
-    @State private var isExplaining = false
 
     init(_ notes: SettingNote...) { self.notes = notes }
 
     var body: some View {
-        // On the first line's baseline: a name that wraps to two lines used
-        // to have the (i) floating in the gap between them, off the end of
-        // the longer line, as though it belonged to neither.
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(notes.first?.name ?? "")
-            Button {
-                isExplaining = true
-            } label: {
-                Image(systemName: "info.circle")
-                    .foregroundStyle(Theme.textDim)
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("What \(notes.first?.name ?? "this setting") does")
-            .popover(isPresented: $isExplaining, arrowEdge: .top) {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(notes) { note in
-                        Text(note.text)
-                            .font(.callout)
-                            .foregroundStyle(Theme.text)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(width: Self.textWidth(for: notes), alignment: .leading)
-                .padding(16)
-                .presentationCompactAdaptation(.popover)
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(notes) { note in
+                Text(note.text)
             }
         }
-    }
-
-    /// The widest line the sentences make when wrapped at `limit`, so the
-    /// bubble is drawn around the text rather than around a fixed width.
-    ///
-    /// A wrapped `Text` reports the whole width it was offered, not the width
-    /// its lines came to, so a bubble sized by layout alone had 16 points of
-    /// padding on the left and however much the last word left over on the
-    /// right. TextKit says where the lines actually end; the font is the one
-    /// `.callout` resolves to, at the current Dynamic Type size, so the
-    /// breaks it finds are the ones SwiftUI draws.
-    private static func textWidth(for notes: [SettingNote], limit: CGFloat = 288) -> CGFloat {
-        let font = UIFont.preferredFont(forTextStyle: .callout)
-        let widest = notes.reduce(CGFloat.zero) { widest, note in
-            let used = (note.text as NSString).boundingRect(
-                with: CGSize(width: limit, height: .greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: [.font: font],
-                context: nil
-            )
-            return max(widest, used.width)
-        }
-        // A point of slack: a line measured a hair narrower than SwiftUI
-        // draws it would otherwise push its last word onto a line of its own.
-        return min(limit, ceil(widest) + 1)
     }
 }
 
 // MARK: - The pages
 
-private struct ServerSettingsPage: View {
+private struct AccountSettingsPage: View {
     @Environment(AppModel.self) private var app
     @Environment(JellyfinClient.self) private var client
 
@@ -953,6 +1050,8 @@ private struct ServerSettingsPage: View {
                 } else {
                     Text("Not connected").foregroundStyle(Theme.textDim)
                 }
+            } header: {
+                Text("Server")
             }
 
             if client.session != nil {
@@ -968,13 +1067,12 @@ private struct ServerSettingsPage: View {
                         }
                     }
                     .disabled(isSigningOut)
-                    .note(Copy.signOut)
+                } footer: {
+                    SettingsFooter(Copy.signOut)
                 }
             }
         }
         .formStyle(.grouped)
-        .screenTitle("Server")
-        .paletteBar()
         .confirmationDialog("Sign out of \(client.session?.server ?? "this server")?",
                             isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) {
@@ -989,28 +1087,158 @@ private struct ServerSettingsPage: View {
     }
 }
 
-private struct AudioSubtitleSettingsPage: View {
+private struct AppearanceSettingsPage: View {
+    @Environment(Preferences.self) private var prefs
+    /// Read again on the way back from the picker; nothing announces a change.
+    @State private var iconTitle = AppIconChoice.current.title
+
+    var body: some View {
+        @Bindable var prefs = prefs
+        Form {
+            Section {
+                Picker(Copy.theme.name ?? "", selection: $prefs.theme) {
+                    ForEach(ThemePref.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+            } footer: {
+                SettingsFooter(Copy.theme)
+            }
+
+            Section {
+                if UIApplication.shared.supportsAlternateIcons {
+                    NavigationLink {
+                        AppIconSettingsView()
+                            .clearsBottomChrome()
+                    } label: {
+                        LabeledContent("App Icon", value: iconTitle)
+                    }
+                }
+                NavigationLink {
+                    TabBarSettingsView()
+                        .clearsBottomChrome()
+                } label: {
+                    LabeledContent(AppModel.usesSidebar ? "Sidebar" : "Tab Bar",
+                                   value: prefs.tabBarOrder.isEmpty ? "Default" : "Custom")
+                }
+            } footer: {
+                Text(AppModel.usesSidebar
+                     ? "The order of the sections in the sidebar."
+                     : "Which sections have a place in the tab bar, and in what order. The rest are listed under More.")
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { iconTitle = AppIconChoice.current.title }
+    }
+}
+
+private struct VideoSettingsPage: View {
+    @Environment(Preferences.self) private var prefs
+
+    var body: some View {
+        @Bindable var prefs = prefs
+        Form {
+            Section {
+                Picker(Copy.defaultQuality.name ?? "", selection: SettingsView.bitrateBinding) {
+                    ForEach(Quality.choices) { Text($0.label).tag($0.maxBitrate) }
+                }
+                Toggle(Copy.adaptiveQuality.name ?? "", isOn: $prefs.adaptiveQuality)
+            } header: {
+                Text("Quality")
+            } footer: {
+                SettingsFooter(Copy.defaultQuality, Copy.adaptiveQuality)
+            }
+
+            Section {
+                // The segments beside the name: a segmented picker on its own
+                // in a form row drops its label, and "Fit | Fill" with nothing
+                // to say what they are of is a puzzle.
+                HStack {
+                    Text(Copy.framing.name ?? "")
+                    Spacer(minLength: 16)
+                    Picker(Copy.framing.name ?? "", selection: $prefs.fillScreen) {
+                        Text("Fit").tag(false)
+                        Text("Fill").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+            } header: {
+                Text("Picture")
+            } footer: {
+                SettingsFooter(Copy.framing, Copy.pictureControls)
+            }
+
+            Section {
+                Toggle(Copy.resume.name ?? "", isOn: $prefs.resumePlayback)
+                Toggle(Copy.autoplayNext.name ?? "", isOn: $prefs.autoplayNext)
+            } header: {
+                Text("Playing")
+            } footer: {
+                SettingsFooter(Copy.resume, Copy.autoplayNext)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct AudioSettingsPage: View {
+    @Environment(Preferences.self) private var prefs
+
+    var body: some View {
+        @Bindable var prefs = prefs
+        Form {
+            Section {
+                Picker("Language", selection: $prefs.audioLanguage) {
+                    Text("File's choice").tag("")
+                    ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
+                }
+            } header: {
+                Text("Language")
+            } footer: {
+                SettingsFooter(Copy.audioLanguage)
+            }
+
+            Section {
+                Toggle(Copy.downmix.name ?? "", isOn: $prefs.stereoDownmix)
+                Picker(Copy.audioDelay.name ?? "", selection: SettingsView.audioDelayBinding) {
+                    ForEach(SettingsView.audioDelayChoices, id: \.self) { milliseconds in
+                        Text(PlayerModel.audioDelayName(milliseconds)).tag(milliseconds)
+                    }
+                }
+            } header: {
+                Text("Output")
+            } footer: {
+                SettingsFooter(Copy.downmix, Copy.audioDelay)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+private struct SubtitlesSettingsPage: View {
     @Environment(Preferences.self) private var prefs
     @Environment(PlayerModel.self) private var player
 
     var body: some View {
         @Bindable var prefs = prefs
         Form {
-            // The languages themselves are on the first page.
-            Section("Audio") {
-                Toggle(Copy.downmix.name ?? "", isOn: $prefs.stereoDownmix)
-                    .note(Copy.downmix)
-            }
-
-            Section("Subtitles") {
+            Section {
+                Picker("Language", selection: $prefs.subtitleLanguage) {
+                    Text("File's choice").tag("")
+                    Text("Never").tag("off")
+                    ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
+                }
                 Toggle(Copy.forcedOnly.name ?? "", isOn: $prefs.forcedSubtitlesOnly)
-                    .note(Copy.forcedOnly, Copy.trackMemory)
+            } header: {
+                Text("Language")
+            } footer: {
+                SettingsFooter(Copy.subtitleLanguage, Copy.forcedOnly, Copy.trackMemory)
             }
 
-            Section("Subtitle appearance") {
+            Section {
                 VStack(alignment: .leading) {
                     HStack {
-                        Text("Size")
+                        Text(Copy.subtitleSize.name ?? "")
                         Spacer()
                         Text("\(Int(prefs.subtitleSize))%")
                             .foregroundStyle(Theme.textDim)
@@ -1019,17 +1247,58 @@ private struct AudioSubtitleSettingsPage: View {
                     Slider(value: $prefs.subtitleSize, in: 60...180, step: 5)
                         .onChange(of: prefs.subtitleSize) { _, _ in player.refreshSubtitleStyling() }
                 }
-                .note(Copy.subtitleSize)
                 Picker(Copy.subtitleBackground.name ?? "", selection: $prefs.subtitleBackground) {
                     ForEach(SubtitleBackground.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 .onChange(of: prefs.subtitleBackground) { _, _ in player.refreshSubtitleStyling() }
-                .note(Copy.subtitleBackground)
+            } header: {
+                Text("Appearance")
+            } footer: {
+                SettingsFooter(Copy.subtitleSize, Copy.subtitleBackground)
             }
         }
         .formStyle(.grouped)
-        .screenTitle("Audio & Subtitles")
-        .paletteBar()
+    }
+}
+
+private struct MusicSettingsPage: View {
+    @Environment(Preferences.self) private var prefs
+
+    var body: some View {
+        @Bindable var prefs = prefs
+        Form {
+            Section {
+                Toggle(Copy.musicAutoplay.name ?? "", isOn: $prefs.musicAutoplay)
+                Toggle(Copy.normalizeVolume.name ?? "", isOn: $prefs.normalizeVolume)
+            } header: {
+                Text("Playing")
+            } footer: {
+                SettingsFooter(Copy.musicAutoplay, Copy.normalizeVolume)
+            }
+
+            Section {
+                Toggle(Copy.losslessOnCellular.name ?? "", isOn: $prefs.losslessOnCellular)
+            } header: {
+                Text("Streaming")
+            } footer: {
+                SettingsFooter(Copy.losslessOnCellular)
+            }
+
+            Section {
+                Toggle(Copy.musicRomanize.name ?? "", isOn: $prefs.musicRomanizeNames)
+                NavigationLink {
+                    StationMixSettingsPage()
+                        .clearsBottomChrome()
+                } label: {
+                    LabeledContent(Copy.stationMix.name ?? "", value: prefs.mixPoints.presetName)
+                }
+            } header: {
+                Text("Stations")
+            } footer: {
+                SettingsFooter(Copy.musicRomanize, Copy.stationMix)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 
@@ -1040,59 +1309,153 @@ private struct LiveTVSettingsPage: View {
     var body: some View {
         @Bindable var prefs = prefs
         Form {
-            Section("Source") {
+            Section {
                 Picker(Copy.liveTVSource.name ?? "", selection: $prefs.liveTVSource) {
                     ForEach(LiveTVSource.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
-                .note(Copy.liveTVSource)
+            } header: {
+                Text("Source")
+            } footer: {
+                SettingsFooter(Copy.liveTVSource)
             }
 
             if prefs.liveTVSource == .custom {
-                Section("Playlist") {
-                    TextField("M3U playlist URL", text: $prefs.iptvPlaylistURL)
-                        .textFieldStyle(.plain)
-                        .note(Copy.iptvPlaylist)
-                    TextField("XMLTV guide URL (optional)", text: $prefs.iptvGuideURL)
-                        .textFieldStyle(.plain)
-                        .note(Copy.iptvGuide)
-                    TextField(Preferences.defaultIPTVUserAgent, text: $prefs.iptvUserAgent)
-                        .textFieldStyle(.plain)
-                        .note(Copy.iptvUserAgent)
-
-                    Picker(Copy.iptvRefresh.name ?? "", selection: $prefs.iptvRefreshMinutes) {
-                        ForEach(SettingsView.iptvRefreshChoices, id: \.minutes) { Text($0.label).tag($0.minutes) }
+                Section {
+                    NavigationLink {
+                        CustomPlaylistSettingsPage()
+                            .clearsBottomChrome()
+                    } label: {
+                        LabeledContent("Custom playlist", value: Self.host(of: prefs.iptvPlaylistURL) ?? "Not set")
                     }
-                    .note(Copy.iptvRefresh)
-
+                } footer: {
                     // What the playlist and guide actually produced, last time
                     // they were read — see the Mac's page for why.
                     if let summary = LiveTVStore.shared.summary {
-                        Text(SettingsView.playlistSummary(summary))
-                            .font(.caption)
-                            .foregroundStyle(Theme.textDim)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Last read: " + SettingsView.playlistSummary(summary) + ".")
+                    } else {
+                        Text("The playlist and guide addresses, how often they are re-read, and a check on the channel artwork.")
                     }
-
-                    ArtworkProbeRow()
                 }
             }
 
             Section {
-                Button("Refresh channel list & guide now") {
+                Button(Copy.refreshNow.name ?? "") {
                     prefs.liveTVRefreshToken += 1
                     app.toast("Refreshing Live TV…", tone: .info)
                 }
-                .note(Copy.refreshNow)
+            } footer: {
+                SettingsFooter(Copy.refreshNow)
             }
         }
         .formStyle(.grouped)
-        .screenTitle("Live TV")
+    }
+
+    /// The server a URL names, for a row with no room for the whole address.
+    private static func host(of url: String) -> String? {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return URL(string: trimmed)?.host ?? trimmed
+    }
+}
+
+private struct CustomPlaylistSettingsPage: View {
+    @Environment(Preferences.self) private var prefs
+
+    var body: some View {
+        @Bindable var prefs = prefs
+        Form {
+            Section {
+                TextField("https://example.com/playlist.m3u", text: $prefs.iptvPlaylistURL)
+                    .textFieldStyle(.plain)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            } header: {
+                Text(Copy.iptvPlaylist.name ?? "")
+            } footer: {
+                SettingsFooter(Copy.iptvPlaylist)
+            }
+
+            Section {
+                TextField("Optional", text: $prefs.iptvGuideURL)
+                    .textFieldStyle(.plain)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            } header: {
+                Text(Copy.iptvGuide.name ?? "")
+            } footer: {
+                SettingsFooter(Copy.iptvGuide)
+            }
+
+            Section {
+                TextField(Preferences.defaultIPTVUserAgent, text: $prefs.iptvUserAgent)
+                    .textFieldStyle(.plain)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Picker(Copy.iptvRefresh.name ?? "", selection: $prefs.iptvRefreshMinutes) {
+                    ForEach(SettingsView.iptvRefreshChoices, id: \.minutes) { Text($0.label).tag($0.minutes) }
+                }
+            } header: {
+                Text("Fetching")
+            } footer: {
+                SettingsFooter(Copy.iptvUserAgent, Copy.iptvRefresh)
+            }
+
+            Section {
+                ArtworkProbeRow()
+            } header: {
+                Text("Channel artwork")
+            } footer: {
+                SettingsFooter(Copy.artworkProbe)
+            }
+        }
+        .formStyle(.grouped)
+        .screenTitle("Custom playlist")
         .paletteBar()
+    }
+}
+
+private struct DownloadsSettingsPage: View {
+    @Environment(Preferences.self) private var prefs
+
+    var body: some View {
+        @Bindable var prefs = prefs
+        Form {
+            Section {
+                Picker("Default quality", selection: $prefs.downloadQuality) {
+                    ForEach(DownloadQualities.all) { Text($0.label).tag($0.label) }
+                }
+            } header: {
+                Text("Quality")
+            } footer: {
+                Text("What a download is asked for. Original keeps the file as it is on the server; the rest are transcoded to fit.")
+            }
+
+            Section {
+                Stepper(value: $prefs.downloadConcurrency, in: 1...Preferences.maxDownloadConcurrency) {
+                    HStack {
+                        Text(Copy.concurrency.name ?? "")
+                        Spacer()
+                        Text("\(prefs.downloadConcurrency)")
+                            .foregroundStyle(Theme.textDim)
+                            .monospacedDigit()
+                    }
+                }
+                Toggle(Copy.wifiOnly.name ?? "", isOn: $prefs.downloadsWiFiOnly)
+            } header: {
+                Text("Transfers")
+            } footer: {
+                SettingsFooter(Copy.concurrency, Copy.wifiOnly)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 
 private struct LibraryCopySettingsPage: View {
     @Environment(Preferences.self) private var prefs
+    @State private var confirmDelete = false
 
     var body: some View {
         @Bindable var prefs = prefs
@@ -1101,7 +1464,8 @@ private struct LibraryCopySettingsPage: View {
             Section {
                 Toggle(Copy.libraryCopy.name ?? "", isOn: $prefs.keepsLibraryCopy)
                     .onChange(of: prefs.keepsLibraryCopy) { _, on in LibraryIndex.shared.setEnabled(on) }
-                    .note(Copy.libraryCopy)
+            } footer: {
+                SettingsFooter(Copy.libraryCopy)
             }
             if prefs.keepsLibraryCopy {
                 Section {
@@ -1110,29 +1474,34 @@ private struct LibraryCopySettingsPage: View {
                             .foregroundStyle(Theme.textDim)
                             .multilineTextAlignment(.trailing)
                     }
-                    .note(Copy.libraryCopyStatus)
                     LabeledContent("Saved") {
                         Text(LibraryCopyText.contents(index))
                             .foregroundStyle(Theme.textDim)
                     }
-                    .note(Copy.libraryCopyContents)
+                } footer: {
+                    SettingsFooter(Copy.libraryCopyStatus)
                 }
                 Section {
                     Button(Copy.syncNow.name ?? "") {
                         Task { await LibraryIndex.shared.sync(force: true) }
                     }
                     .disabled(index.isSyncing)
-                    .note(Copy.syncNow)
                     Button(Copy.deleteCopy.name ?? "", role: .destructive) {
-                        LibraryIndex.shared.wipe()
+                        confirmDelete = true
                     }
-                    .note(Copy.deleteCopy)
+                } footer: {
+                    SettingsFooter(Copy.syncNow, Copy.deleteCopy)
                 }
             }
         }
         .formStyle(.grouped)
-        .screenTitle("Library copy")
-        .paletteBar()
+        .confirmationDialog("Delete the saved copy of your library?",
+                            isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) { LibraryIndex.shared.wipe() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(Copy.deleteCopy.text)
+        }
     }
 }
 
@@ -1153,7 +1522,8 @@ private struct AboutSettingsPage: View {
             Section {
                 LabeledContent("Aquarium", value: "\(Bundle.appVersion) (\(Bundle.appBuild))")
                 LabeledContent("Playback engine", value: "AVFoundation")
-                    .note(Copy.playbackEngine)
+            } footer: {
+                SettingsFooter(Copy.playbackEngine)
             }
             Section {
                 Text(Copy.about.text)
@@ -1163,8 +1533,6 @@ private struct AboutSettingsPage: View {
             }
         }
         .formStyle(.grouped)
-        .screenTitle("About")
-        .paletteBar()
     }
 }
 #endif
@@ -1869,10 +2237,149 @@ enum SettingsCopy {
 extension SettingsView {
     /// Off whenever iCloud can't be used, whatever was chosen before. A
     /// disabled switch still drawn *on* read as a feature that was working.
-    fileprivate var cloudSyncBinding: Binding<Bool> {
+    static var cloudSyncBinding: Binding<Bool> {
         Binding(
             get: { Preferences.shared.syncsAcrossDevices && Preferences.shared.cloudIsAvailable },
             set: { Preferences.shared.syncsAcrossDevices = $0 }
         )
+    }
+}
+
+// MARK: - The map
+
+/// The pages of Settings: the same ones, in the same order, on every platform,
+/// so a setting is on the same page wherever it is looked for and a sentence
+/// written about it once is true everywhere.
+///
+/// A phone and an iPad list them as rows that open pages; a Mac makes tabs of
+/// them (with Appearance and iCloud folded into General, and Downloads and
+/// Library copy sharing Storage); an Apple TV lists them as rows with the
+/// panel describing each. The tile colour and symbol travel with the page.
+enum SettingsPage: String, CaseIterable, Identifiable {
+    case account, appearance, video, audio, subtitles, music, liveTV, downloads, libraryCopy, watch, about
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .account: "Account"
+        case .appearance: "Appearance"
+        case .video: "Video"
+        case .audio: "Audio"
+        case .subtitles: "Subtitles"
+        case .music: "Music"
+        case .liveTV: "Live TV"
+        case .downloads: "Downloads"
+        case .libraryCopy: "Library copy"
+        case .watch: "Apple Watch"
+        case .about: "About"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .account: "person.crop.circle"
+        case .appearance: "circle.lefthalf.filled"
+        case .video: "play.rectangle.fill"
+        case .audio: "speaker.wave.2.fill"
+        case .subtitles: "captions.bubble.fill"
+        case .music: "music.note"
+        case .liveTV: "antenna.radiowaves.left.and.right"
+        case .downloads: "arrow.down.circle.fill"
+        case .libraryCopy: "externaldrive.fill"
+        case .watch: "applewatch"
+        case .about: "info.circle.fill"
+        }
+    }
+
+    /// The colour behind the symbol: one per page, kept apart from each other
+    /// and from the app's accent, so a glance down the list finds the row.
+    var tint: Color {
+        switch self {
+        case .account: Color(hex: 0x3478F6)
+        case .appearance: Color(hex: 0xA550A7)
+        case .video: Color(hex: 0xE5484D)
+        case .audio: Color(hex: 0xF0742A)
+        case .subtitles: Color(hex: 0x2A9D8F)
+        case .music: Color(hex: 0xEC4899)
+        case .liveTV: Color(hex: 0x34A853)
+        case .downloads: Color(hex: 0x5B5BD6)
+        case .libraryCopy: Color(hex: 0x8E8E93)
+        case .watch: Color(hex: 0x3A3A3C)
+        case .about: Color(hex: 0x8E8E93)
+        }
+    }
+
+    /// What the page is about, in a line: the Apple TV's panel while the
+    /// selector rests on the row, and the heading beside an iPad's list.
+    var note: String {
+        switch self {
+        case .account: "Who is signed in and where, how the connection is secured, the other accounts on this device, and signing out."
+        case .appearance: "Light or dark, the icon on the Home Screen, and the order of the tabs."
+        case .video: "The quality a stream opens at, whether it adapts, how a wide picture is framed, and what happens at the end of an episode."
+        case .audio: "The spoken language a video opens with, downmixing surround for a stereo setup, and the delay that keeps sound and picture together."
+        case .subtitles: "Which subtitles a video opens with, whether only the forced track shows, and how large they are drawn and on what."
+        case .music: "Keeping the music going, levelling quiet albums against loud ones, lossless over cellular, and how stations choose."
+        case .liveTV: "Where channels and the guide come from — Jellyfin's own Live TV, or an M3U playlist and XMLTV guide of your own."
+        case .downloads: "The quality a download is asked for, how many run at once, and whether they wait for Wi‑Fi."
+        case .libraryCopy: "Keep the whole library, with its posters, on this device, so it opens straight away and only syncs what changed."
+        case .watch: "Audiobooks and music on the watch, what is on its way there, and what it reports back."
+        case .about: "The version of Aquarium on this device, and how it was made."
+        }
+    }
+}
+
+/// The grey value on a first-page row: the one or two things most worth
+/// knowing about the page without opening it. A page left at its defaults says
+/// as little as it can.
+@MainActor
+enum SettingsSummary {
+    static func account(_ client: JellyfinClient) -> String {
+        guard let session = client.session else { return "Not connected" }
+        return "\(session.userName) · \(client.isOffline ? "Offline" : "Connected")"
+    }
+
+    static func video(_ prefs: Preferences) -> String {
+        var parts = [Quality.shortLabel(for: prefs.defaultBitrate)]
+        if prefs.fillScreen { parts.append("Fill") }
+        return parts.joined(separator: " · ")
+    }
+
+    static func audio(_ prefs: Preferences) -> String {
+        var parts = [language(prefs.audioLanguage, none: "File's choice")]
+        if prefs.stereoDownmix {
+            parts.append("Stereo")
+        } else if prefs.audioDelay != 0 {
+            parts.append(PlayerModel.audioDelayShortName(Int((prefs.audioDelay * 1000).rounded())))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    static func subtitles(_ prefs: Preferences) -> String {
+        var parts = [prefs.subtitleLanguage == "off" ? "Never" : language(prefs.subtitleLanguage, none: "File's choice")]
+        if prefs.forcedSubtitlesOnly { parts.append("Forced only") }
+        return parts.joined(separator: " · ")
+    }
+
+    static func liveTV(_ prefs: Preferences) -> String {
+        prefs.liveTVSource == .custom ? "Custom playlist" : "Jellyfin"
+    }
+
+    static func downloads(_ prefs: Preferences) -> String {
+        var parts = [DownloadQualities.named(prefs.downloadQuality).menuLabel]
+        if prefs.downloadsWiFiOnly { parts.append("Wi‑Fi only") }
+        return parts.joined(separator: " · ")
+    }
+
+    static func libraryCopy(_ prefs: Preferences) -> String {
+        guard prefs.keepsLibraryCopy else { return "Off" }
+        let count = LibraryIndex.shared.itemCount
+        return count > 0 ? "On · \(count.formatted()) items" : "On"
+    }
+
+    /// A language preference's name, or what an empty one means here.
+    static func language(_ code: String, none: String) -> String {
+        guard !code.isEmpty else { return none }
+        return Languages.all.first { $0.code == code }?.name ?? Languages.name(for: code)
     }
 }

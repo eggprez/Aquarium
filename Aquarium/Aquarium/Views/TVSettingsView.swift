@@ -4,9 +4,9 @@
 //  column on the right, and on the left a panel describing whichever one the
 //  selector is on. The sentence explaining a setting is only worth reading
 //  about the setting you are looking at, so that is the only one on screen.
-//  The first page holds what people change; the groups nobody touches twice —
-//  the server's details, audio plumbing, subtitle styling, a custom Live TV
-//  source, About — are a row each that opens a page of their own.
+//  The first page is a table of contents — a row per page of the shared map
+//  (`SettingsPage`), with where the page stands in grey — so it fits on
+//  screen; the controls are a press away, on pages of a handful of rows each.
 //
 //  This replaces a `Form`, and two things about a `Form` on this platform are
 //  why. It draws every row as a slab of its own, which put twenty-odd panels
@@ -34,83 +34,63 @@ struct SettingsView: View {
             title: "Settings", symbol: "gearshape",
             notes: [SettingNote(text: "Select a setting to see what it does.")]
         )) {
-            SettingGroup("Account", symbol: "person.crop.circle") {
-                SettingLink(Self.serverRow, value: serverSummary, isFirst: true) {
+            // Every row a page, so the whole page fits on screen: the
+            // controls are one press away, described one at a time in the
+            // panel, and the first page never scrolls under the tab strip.
+            SettingGroup(nil, page: .account) {
+                SettingLink(Self.row(.account), value: SettingsSummary.account(client), page: .account, isFirst: true) {
                     ServerSettingsPage()
                 }
             }
 
-            SettingGroup("Playback", symbol: "play.rectangle") {
-                SettingChoice(Copy.defaultQuality, selection: Self.bitrateBinding,
-                              options: Quality.choices.map { ($0.maxBitrate, $0.label) })
-                SettingToggle(Copy.adaptiveQuality, isOn: $prefs.adaptiveQuality)
-                SettingToggle(Copy.resume, isOn: $prefs.resumePlayback)
-                SettingToggle(Copy.autoplayNext, isOn: $prefs.autoplayNext)
-                SettingChoice(Copy.framing, selection: $prefs.fillScreen,
-                              options: [(false, "Fit — show the whole frame"), (true, "Fill — crop to the screen")],
-                              also: [Copy.pictureControls])
-                SettingLink(Self.audioRow, value: audioSummary) {
+            SettingGroup("Playing", symbol: "play.rectangle") {
+                SettingLink(Self.row(.video), value: SettingsSummary.video(prefs), page: .video) {
+                    VideoSettingsPage()
+                }
+                SettingLink(Self.row(.audio), value: audioSummary, page: .audio) {
                     AudioSettingsPage()
                 }
-            }
-
-            SettingGroup("Languages", symbol: "globe") {
-                SettingChoice(Copy.audioLanguage, selection: $prefs.audioLanguage,
-                              options: Self.audioLanguageOptions)
-                SettingChoice(Copy.subtitleLanguage, selection: $prefs.subtitleLanguage,
-                              options: Self.subtitleLanguageOptions)
-                SettingLink(Self.subtitleOptionsRow) {
+                SettingLink(Self.row(.subtitles), value: SettingsSummary.subtitles(prefs), page: .subtitles) {
                     SubtitleSettingsPage()
                 }
-            }
-
-            if app.hasAudio {
-                SettingGroup("Music", symbol: "music.note") {
-                    SettingLink(Copy.stationMix, value: prefs.mixPoints.presetName) {
-                        StationMixSettingsPage()
+                if app.hasAudio {
+                    SettingLink(Self.row(.music), page: .music) {
+                        MusicSettingsPage()
                     }
                 }
-            }
-
-            SettingGroup("Live TV", symbol: "antenna.radiowaves.left.and.right") {
-                SettingLink(Self.liveTVRow, value: prefs.liveTVSource == .custom ? "Custom playlist" : "Jellyfin") {
+                SettingLink(Self.row(.liveTV), value: SettingsSummary.liveTV(prefs), page: .liveTV) {
                     LiveTVSettingsPage()
                 }
             }
 
             SettingGroup("General", symbol: "gearshape") {
+                SettingLink(Self.row(.libraryCopy), value: SettingsSummary.libraryCopy(prefs), page: .libraryCopy) {
+                    LibraryCopySettingsPage()
+                }
                 if prefs.cloudIsAvailable {
                     SettingToggle(Copy.cloudSync, isOn: $prefs.syncsAcrossDevices)
                 } else {
                     SettingInfo(Copy.cloudSync.name ?? "", value: "Unavailable", tone: Theme.warn,
                                 notes: [Copy.cloudUnavailable, Copy.cloudSync])
                 }
-                SettingLink(Self.libraryCopyRow, value: prefs.keepsLibraryCopy ? "On" : "Off") {
-                    LibraryCopySettingsPage()
-                }
-                SettingLink(Self.aboutRow, value: Bundle.appVersion) {
+                SettingLink(Self.row(.about), value: Bundle.appVersion, page: .about) {
                     AboutSettingsPage()
                 }
             }
         }
     }
 
-    private var serverSummary: String {
-        guard let session = client.session else { return "Not connected" }
-        return "\(session.userName) · \(client.isOffline ? "Offline" : "Connected")"
-    }
-
-    /// The offsets that are set, if either is: "40 ms earlier", and the
-    /// Match Frame Rate one after it when it has been measured.
-    private var audioSummary: String? {
-        var parts: [String] = []
+    /// The language, then the offsets that are set, if either is: "40 ms
+    /// earlier", and the Match Frame Rate one after it when measured.
+    private var audioSummary: String {
+        var parts = [SettingsSummary.language(prefs.audioLanguage, none: "File's choice")]
         if prefs.audioDelay != 0 {
             parts.append(PlayerModel.audioDelayShortName(Int((prefs.audioDelay * 1000).rounded())))
         }
         if let matched = prefs.matchedAudioDelay {
             parts.append("24 Hz \(PlayerModel.audioDelayShortName(Int((matched * 1000).rounded())))")
         }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        return parts.joined(separator: " · ")
     }
 
     static let audioLanguageOptions: [(String, String)] =
@@ -119,30 +99,19 @@ struct SettingsView: View {
         [("", "Only when the file turns them on"), ("off", "Never — no subtitles")]
             + Languages.all.map { ($0.code, $0.name) }
 
-    private static let serverRow = SettingNote(
-        name: "Server",
-        text: "Who you are signed in as and where, how the connection is secured, and signing out."
-    )
-    private static let audioRow = SettingNote(
-        name: "Audio output",
-        text: "Downmixing surround to stereo, decoding on this Apple TV for a soundbar that runs behind, the audio delay, and the extra delay for Match Frame Rate."
-    )
-    private static let subtitleOptionsRow = SettingNote(
-        name: "Subtitle options",
-        text: "Forced subtitles, and how large subtitles are drawn and what sits behind them."
-    )
-    private static let liveTVRow = SettingNote(
-        name: "Live TV",
-        text: "Where channels and the guide come from — Jellyfin's own Live TV, or an M3U playlist and XMLTV guide of your own."
-    )
-    private static let libraryCopyRow = SettingNote(
-        name: "Library copy",
-        text: "Keep the whole library, with its posters, on this Apple TV, so it opens straight away and only syncs what changed."
-    )
-    private static let aboutRow = SettingNote(
-        name: "About",
-        text: "The version of Aquarium on this Apple TV, and how it was made."
-    )
+    /// A first-page row: the page's name, and what it is about for the panel.
+    static func row(_ page: SettingsPage) -> SettingNote {
+        SettingNote(name: page.title, text: page.note)
+    }
+
+    /// What a page's panel says before any row has focus.
+    static func intro(_ page: SettingsPage) -> SettingDescription {
+        SettingDescription(title: page.title, symbol: page.symbol, tint: page.tint, notes: [SettingNote(text: page.note)])
+    }
+
+    /// The language rows, named for the page they are on.
+    static let audioLanguageRow = SettingNote(name: "Language", text: Copy.audioLanguage.text)
+    static let subtitleLanguageRow = SettingNote(name: "Language", text: Copy.subtitleLanguage.text)
 }
 
 // MARK: - The pages
@@ -156,11 +125,8 @@ private struct ServerSettingsPage: View {
     @State private var chosenAccount: SavedSession?
 
     var body: some View {
-        SettingsColumns(title: "Server", intro: SettingDescription(
-            title: "Server", symbol: "server.rack",
-            notes: [SettingNote(text: "This Apple TV's connection to Jellyfin.")]
-        )) {
-            SettingGroup(nil, symbol: "server.rack") {
+        SettingsColumns(title: "Account", intro: SettingsView.intro(.account)) {
+            SettingGroup(nil, page: .account) {
                 if let session = client.session {
                     SettingInfo("Signed in as", value: session.userName, notes: [Copy.signedInAs], isFirst: true)
                     SettingInfo("Server", value: session.server, notes: [Copy.server])
@@ -196,7 +162,7 @@ private struct ServerSettingsPage: View {
                         app.isAddingAccount = true
                     }
                 }
-                SettingGroup("", symbol: "server.rack") {
+                SettingGroup("", page: .account) {
                     SettingButton(isSigningOut ? "Signing out…" : "Sign out", role: .destructive,
                                   notes: [Copy.signOut]) {
                         confirmSignOut = true
@@ -235,18 +201,43 @@ private struct ServerSettingsPage: View {
     }
 }
 
+private struct VideoSettingsPage: View {
+    @Environment(Preferences.self) private var prefs
+
+    var body: some View {
+        @Bindable var prefs = prefs
+        SettingsColumns(title: "Video", intro: SettingsView.intro(.video)) {
+            SettingGroup(nil, page: .video) {
+                SettingChoice(Copy.defaultQuality, selection: SettingsView.bitrateBinding,
+                              options: Quality.choices.map { ($0.maxBitrate, $0.label) }, isFirst: true)
+                SettingToggle(Copy.adaptiveQuality, isOn: $prefs.adaptiveQuality)
+            }
+            SettingGroup("Picture", page: .video) {
+                SettingChoice(Copy.framing, selection: $prefs.fillScreen,
+                              options: [(false, "Fit — show the whole frame"), (true, "Fill — crop to the screen")],
+                              also: [Copy.pictureControls])
+            }
+            SettingGroup("Playing", page: .video) {
+                SettingToggle(Copy.resume, isOn: $prefs.resumePlayback)
+                SettingToggle(Copy.autoplayNext, isOn: $prefs.autoplayNext)
+            }
+        }
+    }
+}
+
 private struct AudioSettingsPage: View {
     @Environment(Preferences.self) private var prefs
     @Environment(PlayerModel.self) private var player
 
     var body: some View {
         @Bindable var prefs = prefs
-        SettingsColumns(title: "Audio output", intro: SettingDescription(
-            title: "Audio output", symbol: "speaker.wave.2",
-            notes: [SettingNote(text: "How sound reaches your television, soundbar or receiver.")]
-        )) {
-            SettingGroup(nil, symbol: "speaker.wave.2") {
-                SettingToggle(Copy.downmix, isOn: $prefs.stereoDownmix, isFirst: true)
+        SettingsColumns(title: "Audio", intro: SettingsView.intro(.audio)) {
+            SettingGroup(nil, page: .audio) {
+                SettingChoice(SettingsView.audioLanguageRow, selection: $prefs.audioLanguage,
+                              options: SettingsView.audioLanguageOptions, isFirst: true)
+            }
+            SettingGroup("Output", page: .audio) {
+                SettingToggle(Copy.downmix, isOn: $prefs.stereoDownmix)
                 // Apple TV only: it is the one device here that passes a Dolby
                 // bitstream through to something else, and so the only one on
                 // which decoding it here changes anything.
@@ -257,6 +248,8 @@ private struct AudioSettingsPage: View {
                             notes: [Copy.audioDelay, Copy.syncTestStandard])
                 SettingInfo(Copy.matchedAudioDelay.name ?? "", value: prefs.matchedAudioDelay.map(delayName) ?? "Not set",
                             notes: [Copy.matchedAudioDelay, Copy.syncTestMatched])
+            }
+            SettingGroup("Sync tests", page: .audio) {
                 // Each opens the player on a looped test clip at its rate;
                 // the Sync tab sets the matching offset over it.
                 SettingButton(Copy.syncTestStandard.name ?? "", notes: [Copy.syncTestStandard]) {
@@ -292,15 +285,13 @@ private struct SubtitleSettingsPage: View {
 
     var body: some View {
         @Bindable var prefs = prefs
-        SettingsColumns(title: "Subtitle options", intro: SettingDescription(
-            title: "Subtitle options", symbol: "captions.bubble",
-            notes: [SettingNote(text: "Which subtitles appear, and how they look.")]
-        )) {
-            SettingGroup(nil, symbol: "captions.bubble") {
-                SettingToggle(Copy.forcedOnly, isOn: $prefs.forcedSubtitlesOnly,
-                              also: [Copy.trackMemory], isFirst: true)
+        SettingsColumns(title: "Subtitles", intro: SettingsView.intro(.subtitles)) {
+            SettingGroup(nil, page: .subtitles) {
+                SettingChoice(SettingsView.subtitleLanguageRow, selection: $prefs.subtitleLanguage,
+                              options: SettingsView.subtitleLanguageOptions, isFirst: true)
+                SettingToggle(Copy.forcedOnly, isOn: $prefs.forcedSubtitlesOnly, also: [Copy.trackMemory])
             }
-            SettingGroup("Appearance", symbol: "captions.bubble") {
+            SettingGroup("Appearance", page: .subtitles) {
                 // tvOS has no slider a remote can drive; the same range as a
                 // set of steps is what the platform actually offers.
                 SettingChoice(Copy.subtitleSize, selection: $prefs.subtitleSize,
@@ -314,17 +305,34 @@ private struct SubtitleSettingsPage: View {
     }
 }
 
+private struct MusicSettingsPage: View {
+    @Environment(Preferences.self) private var prefs
+
+    var body: some View {
+        @Bindable var prefs = prefs
+        SettingsColumns(title: "Music", intro: SettingsView.intro(.music)) {
+            SettingGroup(nil, page: .music) {
+                SettingToggle(Copy.musicAutoplay, isOn: $prefs.musicAutoplay, isFirst: true)
+                SettingToggle(Copy.normalizeVolume, isOn: $prefs.normalizeVolume)
+            }
+            SettingGroup("Stations", page: .music) {
+                SettingToggle(Copy.musicRomanize, isOn: $prefs.musicRomanizeNames)
+                SettingLink(Copy.stationMix, value: prefs.mixPoints.presetName) {
+                    StationMixSettingsPage()
+                }
+            }
+        }
+    }
+}
+
 private struct LiveTVSettingsPage: View {
     @Environment(AppModel.self) private var app
     @Environment(Preferences.self) private var prefs
 
     var body: some View {
         @Bindable var prefs = prefs
-        SettingsColumns(title: "Live TV", intro: SettingDescription(
-            title: "Live TV", symbol: "antenna.radiowaves.left.and.right",
-            notes: [SettingNote(text: "Where channels and the guide come from.")]
-        )) {
-            SettingGroup(nil, symbol: "antenna.radiowaves.left.and.right") {
+        SettingsColumns(title: "Live TV", intro: SettingsView.intro(.liveTV)) {
+            SettingGroup(nil, page: .liveTV) {
                 SettingChoice(Copy.liveTVSource, selection: $prefs.liveTVSource,
                               options: LiveTVSource.allCases.map { ($0, $0.label) }, isFirst: true)
             }
@@ -339,7 +347,7 @@ private struct LiveTVSettingsPage: View {
                 }
             }
 
-            SettingGroup("", symbol: "antenna.radiowaves.left.and.right") {
+            SettingGroup("", page: .liveTV) {
                 SettingButton(Copy.refreshNow.name ?? "", notes: [Copy.refreshNow]) {
                     prefs.liveTVRefreshToken += 1
                     app.toast("Refreshing Live TV…", tone: .info)
@@ -365,7 +373,7 @@ private struct StationMixSettingsPage: View {
         var presets = MixPoints.presets.map { ($0.name, $0.name) }
         if points.presetName == MixPoints.customName { presets.append((MixPoints.customName, MixPoints.customName)) }
         return SettingsColumns(title: Copy.stationMix.name, intro: SettingDescription(
-            title: Copy.stationMix.name ?? "", symbol: Self.symbol, notes: [Copy.stationMix]
+            title: Copy.stationMix.name ?? "", symbol: Self.symbol, tint: SettingsPage.music.tint, notes: [Copy.stationMix]
         )) {
             SettingGroup(nil, symbol: Self.symbol) {
                 SettingChoice(Copy.mixPreset, selection: preset, options: presets, isFirst: true)
@@ -405,18 +413,18 @@ private struct LibraryCopySettingsPage: View {
         @Bindable var prefs = prefs
         let index = LibraryIndex.shared
         SettingsColumns(title: "Library copy", intro: SettingDescription(
-            title: "Library copy", symbol: "externaldrive",
+            title: "Library copy", symbol: SettingsPage.libraryCopy.symbol, tint: SettingsPage.libraryCopy.tint,
             notes: [Copy.libraryCopy]
         )) {
-            SettingGroup(nil, symbol: "externaldrive") {
+            SettingGroup(nil, page: .libraryCopy) {
                 SettingToggle(Copy.libraryCopy, isOn: $prefs.keepsLibraryCopy, isFirst: true)
             }
             if prefs.keepsLibraryCopy {
-                SettingGroup("", symbol: "externaldrive") {
+                SettingGroup("", page: .libraryCopy) {
                     SettingInfo("Status", value: LibraryCopyText.status(index), notes: [Copy.libraryCopyStatus])
                     SettingInfo("Saved", value: LibraryCopyText.contents(index), notes: [Copy.libraryCopyContents])
                 }
-                SettingGroup("", symbol: "externaldrive") {
+                SettingGroup("", page: .libraryCopy) {
                     SettingButton(Copy.syncNow.name ?? "", notes: [Copy.syncNow]) {
                         Task { await LibraryIndex.shared.sync(force: true) }
                     }
@@ -434,9 +442,9 @@ private struct LibraryCopySettingsPage: View {
 private struct AboutSettingsPage: View {
     var body: some View {
         SettingsColumns(title: "About", intro: SettingDescription(
-            title: "About", symbol: "info.circle", notes: [Copy.about]
+            title: "About", symbol: SettingsPage.about.symbol, tint: SettingsPage.about.tint, notes: [Copy.about]
         )) {
-            SettingGroup(nil, symbol: "info.circle") {
+            SettingGroup(nil, page: .about) {
                 SettingInfo("Aquarium", value: "\(Bundle.appVersion) (\(Bundle.appBuild))",
                             notes: [Copy.about], isFirst: true)
                 SettingInfo("Playback engine", value: "AVFoundation", notes: [Copy.playbackEngine])
@@ -452,14 +460,17 @@ private struct AboutSettingsPage: View {
 struct SettingDescription: Equatable {
     var title: String
     var symbol: String
+    /// The colour of the symbol — the page's, where the row belongs to one.
+    var tint: Color?
     var paragraphs: [String]
     /// Set on a page's first row, whose arrival has to scroll the page all the
     /// way up rather than just far enough to show the row.
     var isFirst = false
 
-    init(title: String, symbol: String, notes: [SettingNote], isFirst: Bool = false) {
+    init(title: String, symbol: String, tint: Color? = nil, notes: [SettingNote], isFirst: Bool = false) {
         self.title = title
         self.symbol = symbol
+        self.tint = tint
         self.paragraphs = notes.map(\.text)
         self.isFirst = isFirst
     }
@@ -482,6 +493,8 @@ extension EnvironmentValues {
     }
     /// The symbol of the group a row sits in, for the panel to draw.
     @Entry var settingSectionSymbol = "gearshape"
+    /// The colour of that symbol: the group's page's, or the accent.
+    @Entry var settingSectionTint: Color? = nil
 }
 
 /// A settings page: the panel on the left, the rows on the right.
@@ -594,7 +607,7 @@ private struct SettingDetailPanel: View {
         VStack(alignment: .leading, spacing: 22) {
             Image(systemName: description.symbol)
                 .font(.system(size: 76, weight: .regular))
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(description.tint ?? Theme.accent)
                 .frame(height: 96, alignment: .bottomLeading)
 
             Text(description.title)
@@ -622,11 +635,20 @@ private struct SettingGroup<Content: View>: View {
     /// the gap without a heading.
     let title: String?
     let symbol: String
+    var tint: Color?
     @ViewBuilder var content: Content
 
     init(_ title: String?, symbol: String, @ViewBuilder content: () -> Content) {
         self.title = title
         self.symbol = symbol
+        self.content = content()
+    }
+
+    /// A group of one page's rows: its symbol and colour in the panel.
+    init(_ title: String?, page: SettingsPage, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.symbol = page.symbol
+        self.tint = page.tint
         self.content = content()
     }
 
@@ -645,6 +667,7 @@ private struct SettingGroup<Content: View>: View {
             content
         }
         .environment(\.settingSectionSymbol, symbol)
+        .environment(\.settingSectionTint, tint)
     }
 }
 
@@ -719,9 +742,13 @@ private struct DescribesSetting: ViewModifier {
     let title: String
     let notes: [SettingNote]
     var isFirst = false
+    /// The page this row opens, whose symbol and colour the panel shows
+    /// instead of the group's.
+    var page: SettingsPage?
 
     @Environment(\.describeSetting) private var describe
-    @Environment(\.settingSectionSymbol) private var symbol
+    @Environment(\.settingSectionSymbol) private var sectionSymbol
+    @Environment(\.settingSectionTint) private var sectionTint
     /// The focus of the button this label is inside. Not a `@FocusState` on
     /// the button: that one is never told when focus leaves for the tab strip,
     /// which left the panel describing a row nobody was on.
@@ -730,14 +757,15 @@ private struct DescribesSetting: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onChange(of: isFocused) { _, focused in
-                describe(SettingDescription(title: title, symbol: symbol, notes: notes, isFirst: isFirst), focused)
+                describe(SettingDescription(title: title, symbol: page?.symbol ?? sectionSymbol,
+                                            tint: page?.tint ?? sectionTint, notes: notes, isFirst: isFirst), focused)
             }
     }
 }
 
 private extension View {
-    func describes(_ title: String, _ notes: [SettingNote], isFirst: Bool = false) -> some View {
-        modifier(DescribesSetting(title: title, notes: notes, isFirst: isFirst))
+    func describes(_ title: String, _ notes: [SettingNote], isFirst: Bool = false, page: SettingsPage? = nil) -> some View {
+        modifier(DescribesSetting(title: title, notes: notes, isFirst: isFirst, page: page))
     }
 }
 
@@ -818,13 +846,17 @@ private struct SettingToggle: View {
 private struct SettingLink<Destination: View>: View {
     let note: SettingNote
     var value: String?
+    /// The page the row opens, when it is one of the map's: its tile in the
+    /// panel while the selector rests here.
+    var page: SettingsPage?
     var isFirst = false
     let destination: () -> Destination
 
-    init(_ note: SettingNote, value: String? = nil, isFirst: Bool = false,
+    init(_ note: SettingNote, value: String? = nil, page: SettingsPage? = nil, isFirst: Bool = false,
          @ViewBuilder destination: @escaping () -> Destination) {
         self.note = note
         self.value = value
+        self.page = page
         self.isFirst = isFirst
         self.destination = destination
     }
@@ -832,7 +864,7 @@ private struct SettingLink<Destination: View>: View {
     var body: some View {
         NavigationLink(destination: destination) {
             SettingRowLabel(title: note.name ?? "", value: value, chevron: true)
-                .describes(note.name ?? "", [note], isFirst: isFirst)
+                .describes(note.name ?? "", [note], isFirst: isFirst, page: page)
         }
         .buttonStyle(SettingRowStyle())
     }
