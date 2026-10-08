@@ -122,6 +122,9 @@ extension JellyfinClient {
         var recursive = true
         /// Songs only: a single letter to start at, for the A–Z index.
         var nameStartsWith: String? = nil
+        /// Only names that sort before this: with `limit` 1, the total is
+        /// where the letter starts in the name order. See `LetterIndex`.
+        var nameLessThan: String? = nil
         var excludeItemIds: [String] = []
     }
 
@@ -153,6 +156,7 @@ extension JellyfinClient {
         if !filters.isEmpty { items.append(.init(name: "Filters", value: filters.joined(separator: ","))) }
         if let term = q.searchTerm, !term.isEmpty { items.append(.init(name: "SearchTerm", value: term)) }
         if let letter = q.nameStartsWith { items.append(.init(name: "NameStartsWith", value: letter)) }
+        if let letter = q.nameLessThan { items.append(.init(name: "NameLessThan", value: letter.lowercased())) }
         return try await get(ItemsResponse.self, "/Items?\(Self.encode(items))")
     }
 
@@ -163,11 +167,12 @@ extension JellyfinClient {
     /// on a track, is twice as long and mostly guest features.
     func albumArtists(
         parentId: String? = nil, startIndex: Int = 0, limit: Int = 200,
-        favorites: Bool = false, searchTerm: String? = nil, sort: MusicSort = .name
+        favorites: Bool = false, searchTerm: String? = nil, sort: MusicSort = .name,
+        nameLessThan: String? = nil
     ) async throws -> ItemsResponse {
         try await artists(
             path: "/Artists/AlbumArtists", parentId: parentId, startIndex: startIndex,
-            limit: limit, favorites: favorites, searchTerm: searchTerm, sort: sort
+            limit: limit, favorites: favorites, searchTerm: searchTerm, sort: sort, nameLessThan: nameLessThan
         )
     }
 
@@ -184,7 +189,7 @@ extension JellyfinClient {
 
     private func artists(
         path: String, parentId: String?, startIndex: Int, limit: Int,
-        favorites: Bool, searchTerm: String?, sort: MusicSort
+        favorites: Bool, searchTerm: String?, sort: MusicSort, nameLessThan: String? = nil
     ) async throws -> ItemsResponse {
         guard let s = prefs.session else { throw APIError.notConfigured }
         var q: [URLQueryItem] = [
@@ -200,6 +205,7 @@ extension JellyfinClient {
         if let parentId { q.append(.init(name: "ParentId", value: parentId)) }
         if favorites { q.append(.init(name: "IsFavorite", value: "true")) }
         if let searchTerm, !searchTerm.isEmpty { q.append(.init(name: "SearchTerm", value: searchTerm)) }
+        if let nameLessThan { q.append(.init(name: "NameLessThan", value: nameLessThan.lowercased())) }
         return try await get(ItemsResponse.self, "\(path)?\(Self.encode(q))")
     }
 

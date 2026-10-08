@@ -9,6 +9,8 @@ import SwiftUI
 /// written to, and the player is pushed by writing to it.
 enum WatchRoute: Hashable {
     case player
+    /// The phone's player, driven from here — see Views/PhoneRemoteViews.swift.
+    case phonePlayer
     case onWatch
     case downloadQueue
     case books, music, playlists, albums, artists, songs, genres, search, settings
@@ -19,6 +21,7 @@ enum WatchRoute: Hashable {
     @ViewBuilder var page: some View {
         switch self {
         case .player: NowPlayingScreen()
+        case .phonePlayer: PhonePlayerScreen()
         case .onWatch: OnWatchView()
         case .downloadQueue: DownloadQueueView()
         case .books: BooksView()
@@ -84,6 +87,8 @@ struct LibraryHome: View {
     @Environment(WatchDownloads.self) private var downloads
     @Environment(WatchPlayer.self) private var player
     @Environment(WatchNavigator.self) private var nav
+    @Environment(WatchLink.self) private var link
+    @Environment(WatchMode.self) private var mode
 
     @State private var inProgress: [BaseItem] = []
     @State private var loaded = false
@@ -92,6 +97,15 @@ struct LibraryHome: View {
 
     var body: some View {
         List {
+            // Watch or iPhone: which source the rest of the page is about.
+            SourceSwitch()
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 4, trailing: 0))
+
+            if mode.source == .phone {
+                phoneRows
+            }
+
             if player.isActive, let item = player.current {
                 Button { nav.showPlayer() } label: { NowPlayingRow(item: item) }
                     .listRowBackground(
@@ -104,40 +118,67 @@ struct LibraryHome: View {
                 NavigationLink(value: WatchRoute.downloadQueue) { DownloadingRow() }
             }
 
-            if !client.isSignedIn {
-                signInNote
-            } else if client.isOffline {
-                Label("Server out of reach — showing what's on the watch", systemImage: "wifi.slash")
-                    .font(.footnote)
-                    .foregroundStyle(WatchTheme.dim)
-                    .listRowBackground(Color.clear)
-            }
-
-            if !continueRows.isEmpty {
-                Section("Continue") {
-                    ForEach(Array(continueRows.prefix(3))) { book in
-                        Button { player.play([book], title: book.title) } label: {
-                            BookRow(item: book)
-                        }
-                    }
-                }
+            if mode.source == .watch {
+                watchRows
             }
 
             Section {
-                NavigationLink(value: WatchRoute.books) { Door("Audiobooks", symbol: "book.fill", tint: Color(hex: 0xF59E0B)) }
-                NavigationLink(value: WatchRoute.music) { Door("Music", symbol: "music.note", tint: Color(hex: 0xEC4899)) }
-                NavigationLink(value: WatchRoute.playlists) { Door("Playlists", symbol: "music.note.list", tint: Color(hex: 0x22C55E)) }
-                NavigationLink(value: WatchRoute.onWatch) {
-                    Door("On Watch", symbol: "applewatch", tint: WatchTheme.accent, detail: onWatchDetail)
-                }
-                if serverAvailable {
-                    NavigationLink(value: WatchRoute.search) { Door("Search", symbol: "magnifyingglass", tint: Color(hex: 0x38BDF8)) }
-                }
                 NavigationLink(value: WatchRoute.settings) { Door("Settings", symbol: "gearshape.fill", tint: .gray) }
             }
         }
         .navigationTitle("Aquarium")
         .task(id: serverAvailable) { await load() }
+    }
+
+    /// iPhone mode: the phone's player and nothing of the library. What
+    /// plays there is started there.
+    @ViewBuilder
+    private var phoneRows: some View {
+        if let state = link.phonePlayback {
+            Button { nav.path.append(WatchRoute.phonePlayer) } label: { PhoneNowPlayingRow(state: state) }
+                .listRowBackground(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(WatchTheme.accent.opacity(0.28))
+                )
+        } else {
+            PhoneIdleRow()
+                .listRowBackground(Color.clear)
+        }
+    }
+
+    /// Watch mode: the server and what is kept here.
+    @ViewBuilder
+    private var watchRows: some View {
+        if !client.isSignedIn {
+            signInNote
+        } else if client.isOffline {
+            Label("Server out of reach — showing what's on the watch", systemImage: "wifi.slash")
+                .font(.footnote)
+                .foregroundStyle(WatchTheme.dim)
+                .listRowBackground(Color.clear)
+        }
+
+        if !continueRows.isEmpty {
+            Section("Continue") {
+                ForEach(Array(continueRows.prefix(3))) { book in
+                    Button { player.play([book], title: book.title) } label: {
+                        BookRow(item: book)
+                    }
+                }
+            }
+        }
+
+        Section {
+            NavigationLink(value: WatchRoute.books) { Door("Audiobooks", symbol: "book.fill", tint: Color(hex: 0xF59E0B)) }
+            NavigationLink(value: WatchRoute.music) { Door("Music", symbol: "music.note", tint: Color(hex: 0xEC4899)) }
+            NavigationLink(value: WatchRoute.playlists) { Door("Playlists", symbol: "music.note.list", tint: Color(hex: 0x22C55E)) }
+            NavigationLink(value: WatchRoute.onWatch) {
+                Door("On Watch", symbol: "applewatch", tint: WatchTheme.accent, detail: onWatchDetail)
+            }
+            if serverAvailable {
+                NavigationLink(value: WatchRoute.search) { Door("Search", symbol: "magnifyingglass", tint: Color(hex: 0x38BDF8)) }
+            }
+        }
     }
 
     private var onWatchDetail: String? {

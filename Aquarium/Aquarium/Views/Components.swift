@@ -1690,6 +1690,7 @@ struct MediaGrid: View {
         LazyVGrid(columns: columns, spacing: Metrics.gridRowSpacing) {
             ForEach(items) { item in
                 tile(item)
+                    .id(item.Id)
                     .onAppear {
                         if onReachEnd != nil, items.suffix(Self.reachAhead).contains(where: { $0.Id == item.Id }) {
                             onReachEnd?()
