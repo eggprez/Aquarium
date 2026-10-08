@@ -277,7 +277,7 @@
 				D296FAB5302815340097E3E7 /* Resources */,
 				FE11A5D00000000000000033 /* Embed Foundation Extensions */,
 				FE11A5D00000000000000233 /* Embed Watch Content */,
-				FE11A5D00000000000000501 /* Make dSYMs for embedded frameworks */,
+				FE11A5D00000000000000501 /* Remove empty framework stubs */,
 			);
 			buildRules = (
 			);
@@ -470,7 +470,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		FE11A5D00000000000000501 /* Make dSYMs for embedded frameworks */ = {
+		FE11A5D00000000000000501 /* Remove empty framework stubs */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -480,14 +480,14 @@
 			);
 			inputPaths = (
 			);
-			name = "Make dSYMs for embedded frameworks";
+			name = "Remove empty framework stubs";
 			outputFileListPaths = (
 			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Archives only. The libraries MPVKit embeds come prebuilt and stripped,\n# with no dSYMs, and App Store Connect warns once per framework when the\n# archive has none to match. dsymutil on the stripped binary makes one with\n# the right UUID: it quiets the warning, though it carries no symbols to\n# read a crash inside mpv or ffmpeg with.\n[ \"$ACTION\" = \"install\" ] || exit 0\nframeworks=\"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\n[ -d \"$frameworks\" ] || exit 0\nfor framework in \"$frameworks\"/*.framework; do\n  name=$(basename \"$framework\" .framework)\n  binary=\"$framework/$name\"\n  [ -f \"$binary\" ] || continue\n  dsym=\"$DWARF_DSYM_FOLDER_PATH/$name.framework.dSYM\"\n  [ -d \"$dsym\" ] && continue\n  xcrun dsymutil \"$binary\" -o \"$dsym\" 2>/dev/null || echo \"warning: no dSYM made for $name\"\ndone\n";
+			shellScript = "# MPVKit's libraries are linked statically into the app, but each of its\n# xcframeworks also carries an empty stub dylib that Xcode embeds and signs:\n# 27 frameworks, 1.6 MB, exporting nothing and loaded by nothing. Drop any\n# embedded framework whose binary exports no symbols and that the app does\n# not load. (This also ends the App Store Connect warnings about those stubs\n# having no dSYM, which an earlier script here papered over with dsymutil.)\nframeworks=\"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\n[ -d \"$frameworks\" ] || exit 0\napp=\"$TARGET_BUILD_DIR/$EXECUTABLE_PATH\"\nfor framework in \"$frameworks\"/*.framework; do\n  [ -d \"$framework\" ] || continue\n  name=$(basename \"$framework\" .framework)\n  binary=\"$framework/$name\"\n  [ -f \"$binary\" ] || continue\n  if nm -gU \"$binary\" 2>/dev/null | grep -qv ' __mh_'; then continue; fi\n  if otool -L \"$app\" 2>/dev/null | grep -q \"/$name.framework/\"; then continue; fi\n  rm -rf \"$framework\"\n  echo \"note: removed empty framework stub $name.framework\"\ndone\nrmdir \"$frameworks\" 2>/dev/null || true\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
