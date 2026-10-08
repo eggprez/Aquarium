@@ -27,6 +27,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 from icon_kit import *  # noqa: F401,F403  geometry, Icon, Group, Layer, the mark
 
@@ -336,6 +337,21 @@ def render(icon_path, rendition, out_png, size):
                    check=True, stdout=subprocess.DEVNULL)
 
 
+PNG8 = None
+
+
+def to_png8(png):
+    """ictool exports 16-bit PNGs; the asset compiler then stores them at
+    twice the size for nothing a screen can show. png8.swift rewrites them
+    as 8-bit, built once per run."""
+    global PNG8
+    if PNG8 is None:
+        here = os.path.dirname(os.path.abspath(__file__))
+        PNG8 = os.path.join(tempfile.mkdtemp(prefix="png8-"), "png8")
+        subprocess.run(["swiftc", "-O", os.path.join(here, "png8.swift"), "-o", PNG8], check=True)
+    subprocess.run([PNG8, png], check=True)
+
+
 def write_previews(icon, icon_path, catalog):
     """The picker's tiles: the icon as the system draws it, light and dark,
     since an app icon in the catalog can't be loaded as an image by name."""
@@ -352,6 +368,7 @@ def write_previews(icon, icon_path, catalog):
     for rendition, suffix, appearance in (("Default", "", None), ("Dark", "-dark", "dark")):
         fn = f"{icon.key}{suffix}.png"
         render(icon_path, rendition, os.path.join(root, fn), 192)
+        to_png8(os.path.join(root, fn))
         entry = {"filename": fn, "idiom": "universal", "scale": "3x"}
         if appearance:
             entry["appearances"] = [{"appearance": "luminosity", "value": appearance}]

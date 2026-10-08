@@ -114,7 +114,8 @@ in `Player/TV/`.
   the way a film does, for televisions that lag more at 24 Hz than at 60. The
   player applies whichever offset the display is in, and the Sync tab during
   a video moves that one. `Tools/SyncTestClip/make-sync-test.swift` renders
-  the clips.
+  the clips, and `EXCLUDED_SOURCE_FILE_NAMES` keeps them out of the iPhone
+  and Mac bundles, where nothing plays them.
 - **Carried over from the AVPlayer model:** per-series track memory, progress
   reporting, skip intro and credits, Up Next with autoplay, the sleep timer,
   Live TV reopening, and the Siri Remote's Now Playing controls.

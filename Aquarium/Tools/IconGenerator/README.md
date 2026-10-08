@@ -72,6 +72,16 @@ the iPhone SDKs only; the picker (`AppIconSettingsView.swift`) shows the
 Adding an icon means: a function here, an entry in `ICONS`, the build setting,
 and a row in `AppIconChoice.shelves`.
 
+Size: those flattened 1024s are what an alternate icon costs — about 2.8 MB
+per icon per device, light + dark + tinted, losslessly compressed — and
+nothing shrinks them (a 26.0 deployment target still emits them; measured).
+So `EXCLUDED_SOURCE_FILE_NAMES` keeps the `.icon` files out of the tvOS and
+macOS builds, which would otherwise rasterise every layer for an icon picker
+they don't have (22 MB on tvOS), and `ASSETCATALOG_COMPILER_OPTIMIZATION =
+space` stores the 1024s with zip rather than lzfse, 9% smaller. The preview
+tiles come out of `ictool` as 16-bit PNGs; `png8.swift` rewrites them as 8-bit
+during `--previews`, which halves their compiled size.
+
 Proofs render through Icon Composer's own renderer:
 `/Applications/Xcode.app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool`
 (`--rendition Default|Dark|ClearLight|ClearDark|TintedLight|TintedDark`). The

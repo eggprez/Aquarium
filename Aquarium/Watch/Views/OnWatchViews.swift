@@ -421,6 +421,10 @@ struct StorageLine: View {
 
 // MARK: - Settings
 
+/// Four short sections and no paragraphs: who is signed in and whether
+/// anything is in reach, what is on the watch, what is waiting to be sent,
+/// and the log. What the iPhone keeps in step is one row with a count; the
+/// choosing happens on the iPhone, and the footer says so.
 struct WatchSettingsView: View {
     @Environment(JellyfinClient.self) private var client
     @Environment(WatchDownloads.self) private var downloads
@@ -430,19 +434,44 @@ struct WatchSettingsView: View {
 
     var body: some View {
         List {
-            Section("Account") {
+            Section {
                 if let account = client.account {
-                    LabeledContent("Signed in as", value: account.userName)
-                    LabeledContent("Server", value: account.server.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: ""))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(account.userName.isEmpty ? "Unnamed user" : account.userName)
+                            .lineLimit(1)
+                        Text(account.server.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: ""))
+                            .font(.caption2)
+                            .foregroundStyle(WatchTheme.dim)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                     LabeledContent("Server", value: client.isOffline ? "Out of reach" : "Connected")
                 } else {
-                    Text("Not signed in. Open Aquarium on your iPhone.").font(.footnote).foregroundStyle(WatchTheme.dim)
+                    Text("Not signed in. Open Aquarium on your iPhone.")
+                        .foregroundStyle(WatchTheme.dim)
                 }
                 LabeledContent("iPhone", value: link.isPhoneReachable ? "In reach" : "Away")
+            } header: {
+                Text("Account")
             }
             .font(.footnote)
 
-            Section("Sync") {
+            Section {
+                StorageLine()
+                NavigationLink("Manage", value: WatchRoute.onWatch)
+                LabeledContent("From iPhone", value: keptSummary)
+                    .font(.footnote)
+                if let note = downloads.mirrorNote {
+                    Text(note).font(.caption2).foregroundStyle(WatchTheme.dim)
+                }
+            } header: {
+                Text("On This Watch")
+            } footer: {
+                Text("Choose what the iPhone keeps here in Aquarium on iPhone, under Settings → Apple Watch. Downloads are AAC at 128 kbps, about \(Format.bytes(JellyfinClient.estimatedBytes(for: hourItem))) an hour.")
+                    .font(.caption2)
+            }
+
+            Section {
                 LabeledContent("Waiting to send", value: "\(sync.pending.count)").font(.footnote)
                 if let at = sync.lastFlushedAt {
                     LabeledContent("Last sent", value: at.formatted(.relative(presentation: .named)) + (sync.lastRoute.map { " via \($0)" } ?? ""))
@@ -460,22 +489,9 @@ struct WatchSettingsView: View {
                 } label: {
                     if syncing { ProgressView() } else { Label("Sync Now", systemImage: "arrow.triangle.2.circlepath") }
                 }
-            }
-
-            Section("From iPhone") {
-                let books = downloads.plan.bookIds.count
-                let lists = downloads.plannedPlaylistIds.count
-                Text(lists == 0 && books == 0
-                     ? "Nothing is sent by itself. Downloads happen only when you ask for them here. To keep the audiobooks you're listening to, or chosen playlists, on the watch automatically, open Aquarium on your iPhone under Settings → Apple Watch. Playlists on the watch follow changes on the server either way."
-                     : "\(books) audiobook\(books == 1 ? "" : "s") and \(lists) playlist\(lists == 1 ? "" : "s") kept in step from the iPhone's settings. Every playlist on the watch follows changes on the server. The iPhone fetches for the watch and hands the files across; over Wi‑Fi the watch can fetch for itself.")
-                    .font(.caption2)
-                    .foregroundStyle(WatchTheme.dim)
-                if let note = downloads.mirrorNote { Text(note).font(.caption2) }
-            }
-
-            Section("Storage") {
-                StorageLine()
-                NavigationLink("Manage", value: WatchRoute.onWatch)
+                .disabled(syncing)
+            } header: {
+                Text("Sync")
             }
 
             Section {
@@ -485,23 +501,25 @@ struct WatchSettingsView: View {
                     if link.logsSending { ProgressView() } else { Label("Send Log to iPhone", systemImage: "doc.text") }
                 }
                 .disabled(link.logsSending)
-                if let at = link.logsSentAt {
-                    Text("Sent \(at.formatted(.relative(presentation: .named))). Find it in Aquarium on your iPhone under Settings → Apple Watch.")
-                        .font(.caption2).foregroundStyle(WatchTheme.dim)
-                }
             } header: {
                 Text("Diagnostics")
             } footer: {
-                Text("What the watch has been doing, for when something goes wrong.")
+                Text(link.logsSentAt.map { "Sent \($0.formatted(.relative(presentation: .named))). Find it on the iPhone under Settings → Apple Watch." }
+                     ?? "What the watch has been doing, for when something goes wrong.")
                     .font(.caption2)
-            }
-
-            Section {
-                Text("Downloads are AAC at 128 kbps. About \(Format.bytes(JellyfinClient.estimatedBytes(for: hourItem))) an hour.")
-                    .font(.caption2).foregroundStyle(WatchTheme.dim)
             }
         }
         .navigationTitle("Settings")
+    }
+
+    /// What the iPhone's settings keep on this watch: "2 books · 3 lists".
+    private var keptSummary: String {
+        let books = downloads.plan.bookIds.count
+        let lists = downloads.plannedPlaylistIds.count
+        var parts: [String] = []
+        if books > 0 { parts.append("\(books) book\(books == 1 ? "" : "s")") }
+        if lists > 0 { parts.append("\(lists) list\(lists == 1 ? "" : "s")") }
+        return parts.isEmpty ? "Nothing" : parts.joined(separator: " · ")
     }
 
     private var hourItem: BaseItem {
