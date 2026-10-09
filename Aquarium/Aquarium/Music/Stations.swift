@@ -145,10 +145,9 @@ enum GenreCatalog {
             MusicNames.genreKey($0.Name ?? "")
         }
         readAt = Date()
-        let spellings = byKey.reduce(into: [String: String]()) { found, entry in
-            if let name = entry.value.compactMap(\.Name).first(where: { MusicNames.isLatin($0) && !$0.isEmpty }) {
-                found[entry.key] = name
-            }
+        var spellings: [String: String] = [:]
+        for (key, pairs) in byKey {
+            if let name = pairs.compactMap(\.Name).first(where: { MusicNames.isLatin($0) && !$0.isEmpty }) { spellings[key] = name }
         }
         latin.withLock { $0 = spellings }
     }
