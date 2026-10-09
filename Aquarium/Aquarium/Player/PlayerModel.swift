@@ -235,6 +235,15 @@ final class PlayerModel {
     }
     private(set) var isStartingNext = false
 
+    /// Titles queued by hand — Play Next and Play Later on a card — played in
+    /// order ahead of whatever the series would have offered. See `queueNext`.
+    private(set) var queue: [BaseItem] = [] {
+        didSet {
+            refreshCues()
+            NowPlaying.shared.refreshCommandAvailability()
+        }
+    }
+
     /// Set when the user dismisses the Up Next card: this episode ends and
     /// stops there. Cleared whenever something new starts playing.
     private(set) var autoplayCancelled = false {
@@ -450,6 +459,25 @@ final class PlayerModel {
     /// lookup that succeeded, so a failed one still gets its retry at the end.
     private var upNextSettled = false
 
+    /// The next title's stream, asked for before this one ends — see
+    /// `prefetchNext`. Taken by `play` when it asks for the same thing.
+    private var prefetched: PrefetchedNext?
+    private var prefetchAttempted = false
+    /// An asset already reading its playlist, for `attachPlainly` to use in
+    /// place of a fresh one when it is for the same URL.
+    private var preparedAsset: AVURLAsset?
+
+    private struct PrefetchedNext {
+        var itemId: String
+        var source: PlaybackSource
+        var asset: AVURLAsset
+        var maxBitrate: Int?
+        var forceTranscode: Bool
+        var audioStreamIndex: Int?
+        var subtitleStreamIndex: Int?
+        var startTicks: Int64
+    }
+
     /// The series being shuffled over downloaded episodes, and what has already
     /// been drawn in this pass.
     private var shuffleSeries: DownloadShuffleState?
@@ -497,7 +525,38 @@ final class PlayerModel {
         configureAudioSession(activate: false)
         observeAudioRoute()
         observeForeground()
+        observePower()
         NowPlaying.shared.attach(to: self)
+    }
+
+    /// The device's thermal state and Low Power Mode — see
+    /// `AdaptiveQuality.notePower`. Both notifications arrive off the main
+    /// thread.
+    private func observePower() {
+        let names = [ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange]
+        for name in names {
+            routeObservers.append(NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.powerStateChanged() }
+            })
+        }
+    }
+
+    private func powerStateChanged() {
+        guard prefs.adaptiveQuality, prefs.powerAwareQuality, isActive, !isLocal, !isExternal else { return }
+        let info = ProcessInfo.processInfo
+        if adaptive.notePower(thermal: info.thermalState, lowPower: info.isLowPowerModeEnabled, currentBitrate: currentBitrate) {
+            maybeAdapt()
+        }
+    }
+
+    /// The rung a stream may open at right now, given the device's state;
+    /// nil when it may open at any.
+    private var powerCapBitrate: Int? {
+        guard prefs.adaptiveQuality, prefs.powerAwareQuality else { return nil }
+        let info = ProcessInfo.processInfo
+        return AdaptiveQuality.powerRung(thermal: info.thermalState, lowPower: info.isLowPowerModeEnabled)
     }
 
     /// The sleep timer's deadline, checked on every return to the foreground.
@@ -1180,6 +1239,14 @@ final class PlayerModel {
            !meta.inherited {
             opts.maxBitrate = prefs.defaultBitrate
         }
+        // What the device can afford right now, over what was asked for — see
+        // `AdaptiveQuality.notePower`. The line the policy climbs back to is
+        // still what was asked, so a phone that cools down gets its picture
+        // back.
+        let requestedBitrate = opts.maxBitrate
+        if !opts.live, let cap = powerCapBitrate, Quality.rungIndex(opts.maxBitrate) < Quality.rungIndex(cap) {
+            opts.maxBitrate = cap
+        }
 
         // Which of the file's tracks to ask for, settled here from the file's
         // own list rather than left to the server's defaults — see
@@ -1194,16 +1261,7 @@ final class PlayerModel {
             opts.subtitleStreamIndex = wanted.subtitle
         }
 
-        let startSeconds: Double = {
-            if let explicit = opts.startSeconds { return explicit.isFinite ? min(max(0, explicit), 30 * 86_400) : 0 }
-            guard opts.resume, prefs.resumePlayback else { return 0 }
-            let ticks = item.userData.positionTicks
-            guard ticks > 0, let total = item.RunTimeTicks, total > 0 else { return 0 }
-            // Something watched to the end resumes from the top, not from its
-            // closing seconds.
-            let f = Double(ticks) / Double(total)
-            return f > 0.92 ? 0 : Double(ticks) / 10_000_000
-        }()
+        let startSeconds = startSeconds(for: item, options: opts)
 
         // A hand-over only makes sense somewhere into a stream: at the top of a
         // file there is nothing on screen worth preserving, and near the end
@@ -1248,6 +1306,7 @@ final class PlayerModel {
         self.upNext = nil
         self.upNextChecked = false
         self.upNextSettled = false
+        self.prefetchAttempted = false
         self.title = Self.displayTitle(item)
         self.subtitle = item.isEpisode ? (item.SeriesName ?? "") : Format.itemSubtitle(item)
         self.artworkURL = Artwork.url(item, type: "Primary", width: 600)
@@ -1280,18 +1339,30 @@ final class PlayerModel {
         // See `handOver`.
         let handoverTarget = startSeconds + Self.handoverLead
         let requestedStart = canHandOver ? handoverTarget : startSeconds
+        let requestedTicks = Int64(requestedStart * 10_000_000)
+        #if !os(tvOS)
+        SharePlayCoordinator.shared.playerStarted(item)
+        #endif
 
         do {
-            let src = try await client.resolvePlayback(
-                itemId: item.Id,
-                maxBitrate: opts.maxBitrate,
-                forceTranscode: opts.forceTranscode || opts.forceFullEncode || opts.maxBitrate != nil,
-                live: opts.live,
-                startTicks: Int64(requestedStart * 10_000_000),
-                fullEncode: opts.forceFullEncode,
-                audioStreamIndex: opts.audioStreamIndex,
-                subtitleStreamIndex: opts.subtitleStreamIndex
-            )
+            // The stream may already be open: autoplay asked for it before
+            // the last episode ended — see `prefetchNext`.
+            let src: PlaybackSource
+            if let ready = takePrefetched(for: item, options: opts, startTicks: requestedTicks, inherited: meta.inherited) {
+                src = ready.source
+                preparedAsset = ready.asset
+            } else {
+                src = try await client.resolvePlayback(
+                    itemId: item.Id,
+                    maxBitrate: opts.maxBitrate,
+                    forceTranscode: opts.forceTranscode || opts.forceFullEncode || opts.maxBitrate != nil,
+                    live: opts.live,
+                    startTicks: requestedTicks,
+                    fullEncode: opts.forceFullEncode,
+                    audioStreamIndex: opts.audioStreamIndex,
+                    subtitleStreamIndex: opts.subtitleStreamIndex
+                )
+            }
             // Overtaken while the server was being asked: something else was
             // started, or this was closed. The session that has just been
             // opened is still ours to release — nobody else knows about it —
@@ -1317,7 +1388,7 @@ final class PlayerModel {
                 await loadExtras(for: item)
                 guard generation == mine else { return }
                 await client.reportPlaybackStart(report(paused: false))
-                adaptive.begin(inherited: meta.inherited, ceiling: opts.maxBitrate)
+                adaptive.begin(inherited: meta.inherited, ceiling: requestedBitrate)
                 return
             }
             guard generation == mine else {
@@ -1364,7 +1435,7 @@ final class PlayerModel {
             await loadExtras(for: item)
             guard generation == mine else { return }
             await client.reportPlaybackStart(report(paused: false))
-            adaptive.begin(inherited: meta.inherited, ceiling: opts.maxBitrate)
+            adaptive.begin(inherited: meta.inherited, ceiling: requestedBitrate)
         } catch {
             guard generation == mine else { return }
             resolvingGeneration = nil
@@ -1810,7 +1881,15 @@ final class PlayerModel {
     private func attachPlainly(
         url: URL, startAt: Double, headers: [String: String], startPaused: Bool
     ) {
-        let asset = AVURLAsset(url: url, options: Self.assetOptions(headers))
+        // An asset `prefetchNext` already has reading its playlist is used as
+        // it is; anything else is built here.
+        let asset: AVURLAsset
+        if let prepared = preparedAsset, prepared.url == url {
+            asset = prepared
+        } else {
+            asset = AVURLAsset(url: url, options: Self.assetOptions(headers))
+        }
+        preparedAsset = nil
         sourceAsset = asset
         audioDelayIsApplied = false
         composedTracks = (nil, nil)
@@ -2887,6 +2966,13 @@ final class PlayerModel {
             upNextChecked = true
             Task { await self.refreshUpNext() }
         }
+        // And, once it is known, its stream — see `prefetchNext`.
+        if !prefetchAttempted, prefetched == nil, !isLocal, !isLive, !isExternal,
+           prefs.autoplayNext, !autoplayCancelled, duration > 0, duration - position < Self.prefetchLead,
+           let next = queue.first ?? upNext {
+            prefetchAttempted = true
+            Task { await self.prefetchNext(next) }
+        }
     }
 
     // MARK: - Transport
@@ -3054,6 +3140,7 @@ final class PlayerModel {
         #if !os(tvOS)
         let closingLocalId = localRecordId
         #endif
+        dropPrefetched()
 
         player.pause()
         player.replaceCurrentItem(with: nil)
@@ -4025,6 +4112,155 @@ final class PlayerModel {
         await finish(userRequested: true, reason: "sleep timer")
     }
 
+    // MARK: - The queue
+
+    /// Put titles at the front of the queue, to play as soon as what is
+    /// playing ends. With nothing playing, the first of them starts now.
+    func queueNext(_ items: [BaseItem]) {
+        let fresh = items.filter { !$0.isFolderLike }
+        guard !fresh.isEmpty else { return }
+        queue.removeAll { queued in fresh.contains { $0.Id == queued.Id } }
+        queue.insert(contentsOf: fresh, at: 0)
+        startQueueIfIdle()
+    }
+
+    /// Put titles at the back of the queue.
+    func queueLater(_ items: [BaseItem]) {
+        let fresh = items.filter { !$0.isFolderLike }
+        guard !fresh.isEmpty else { return }
+        queue.removeAll { queued in fresh.contains { $0.Id == queued.Id } }
+        queue.append(contentsOf: fresh)
+        startQueueIfIdle()
+    }
+
+    func removeFromQueue(_ id: String) {
+        queue.removeAll { $0.Id == id }
+    }
+
+    func clearQueue() {
+        queue = []
+    }
+
+    /// Start a queued title now. Everything queued ahead of it is dropped —
+    /// jumping to the third thing in a list is a decision about the two
+    /// before it as well.
+    func playQueued(_ id: String) async {
+        guard let i = queue.firstIndex(where: { $0.Id == id }) else { return }
+        let next = queue[i]
+        queue.removeFirst(i + 1)
+        await play(item: next)
+    }
+
+    private func startQueueIfIdle() {
+        guard !isActive, !queue.isEmpty else { return }
+        let first = queue.removeFirst()
+        Task { await play(item: first) }
+    }
+
+    // MARK: - The next stream, ahead of time
+
+    /// How close to the end the next title's stream is asked for.
+    private static let prefetchLead: Double = 90
+
+    /// Where `item` opens under `options`: an explicit start, else the
+    /// server's resume point when resuming is on, else the top. Something
+    /// watched to the end resumes from the top, not from its closing seconds.
+    private func startSeconds(for item: BaseItem, options opts: StreamOptions) -> Double {
+        if let explicit = opts.startSeconds { return explicit.isFinite ? min(max(0, explicit), 30 * 86_400) : 0 }
+        guard opts.resume, prefs.resumePlayback else { return 0 }
+        let ticks = item.userData.positionTicks
+        guard ticks > 0, let total = item.RunTimeTicks, total > 0 else { return 0 }
+        let f = Double(ticks) / Double(total)
+        return f > 0.92 ? 0 : Double(ticks) / 10_000_000
+    }
+
+    /// Open the next title's stream while this one is still playing, so that
+    /// autoplay cuts straight to it instead of spending its first seconds on
+    /// PlaybackInfo and, for a transcode, on ffmpeg finding its feet.
+    ///
+    /// The request is the one `play` would make for it with these options
+    /// carried over, down to the track indexes and the start position, so
+    /// that `play` can take the answer as its own — see `takePrefetched`.
+    /// Any difference by then, and the stream is released and asked for
+    /// afresh; nothing opened here is ever played by mistake.
+    private func prefetchNext(_ next: BaseItem) async {
+        guard prefetched == nil, let current = item else { return }
+        let mine = generation
+        var opts = options
+        opts.startSeconds = nil
+        opts.resume = true
+        let meta = StartMeta(
+            inherited: true, quiet: true,
+            carriesSubtitleTranscode: transcodingForSubtitle && opts.forceTranscode
+        )
+        // A download plays from disk and has nothing to open.
+        if downloadToPlay(for: next, options: opts, meta: meta) != nil { return }
+        // The same track choice `play` makes, under the same condition.
+        if let source = next.MediaSources?.first, !source.streams.isEmpty {
+            let wanted = preferredStreams(in: source, seriesId: next.SeriesId)
+            opts.audioStreamIndex = wanted.audio
+            opts.subtitleStreamIndex = wanted.subtitle
+        }
+        let startTicks = Int64(startSeconds(for: next, options: opts) * 10_000_000)
+        let forced = opts.forceTranscode || opts.forceFullEncode || opts.maxBitrate != nil
+        guard let src = try? await client.resolvePlayback(
+            itemId: next.Id,
+            maxBitrate: opts.maxBitrate,
+            forceTranscode: forced,
+            live: false,
+            startTicks: startTicks,
+            fullEncode: opts.forceFullEncode,
+            audioStreamIndex: opts.audioStreamIndex,
+            subtitleStreamIndex: opts.subtitleStreamIndex
+        ) else { return }
+        // Overtaken: something else started, or this was closed. The session
+        // just opened is still ours to give back.
+        guard generation == mine, item?.Id == current.Id, prefetched == nil, isActive else {
+            await release(src)
+            return
+        }
+        let asset = AVURLAsset(url: src.url, options: Self.assetOptions(client.authHeaders(for: src.url)))
+        prefetched = PrefetchedNext(
+            itemId: next.Id, source: src, asset: asset,
+            maxBitrate: opts.maxBitrate, forceTranscode: forced,
+            audioStreamIndex: opts.audioStreamIndex, subtitleStreamIndex: opts.subtitleStreamIndex,
+            startTicks: startTicks
+        )
+        Self.log.info("prefetched next \(next.Id, privacy: .public) transcode=\(src.isTranscode)")
+        // Reading the playlist is what gets the server encoding, and what
+        // leaves the first frame nothing to wait on.
+        _ = try? await asset.load(.isPlayable)
+    }
+
+    /// The prefetched stream, when it is exactly what `play` is about to ask
+    /// for; otherwise it is released, and nil says to ask.
+    private func takePrefetched(
+        for item: BaseItem, options opts: StreamOptions, startTicks: Int64, inherited: Bool
+    ) -> PrefetchedNext? {
+        guard let ready = prefetched else { return nil }
+        prefetched = nil
+        let forced = opts.forceTranscode || opts.forceFullEncode || opts.maxBitrate != nil
+        guard inherited, !opts.live, ready.itemId == item.Id,
+              ready.maxBitrate == opts.maxBitrate, ready.forceTranscode == forced,
+              ready.audioStreamIndex == opts.audioStreamIndex,
+              ready.subtitleStreamIndex == opts.subtitleStreamIndex,
+              ready.startTicks == startTicks
+        else {
+            ready.asset.cancelLoading()
+            Task { await release(ready.source) }
+            return nil
+        }
+        return ready
+    }
+
+    private func dropPrefetched() {
+        preparedAsset = nil
+        guard let ready = prefetched else { return }
+        prefetched = nil
+        ready.asset.cancelLoading()
+        Task { await release(ready.source) }
+    }
+
     // MARK: - Up Next, autoplay and shuffle
 
     func cancelAutoplay() {
@@ -4164,6 +4400,26 @@ final class PlayerModel {
 
     /// Returns true when something next was found and started.
     private func advanceToNext() async -> Bool {
+        // The queue first: what was put there by hand outranks what the
+        // series would offer. A queued title that is downloaded plays from
+        // disk by way of `play` — see `downloadToPlay`.
+        if !queue.isEmpty {
+            #if !os(tvOS)
+            if isLocal, let current = localRecordId { await reportLocalFinished(current) }
+            #endif
+            let next = queue.removeFirst()
+            var opts = options
+            opts.startSeconds = nil
+            opts.resume = true
+            await play(
+                item: next, options: opts,
+                meta: StartMeta(
+                    inherited: true, quiet: true,
+                    carriesSubtitleTranscode: transcodingForSubtitle && opts.forceTranscode
+                )
+            )
+            return true
+        }
         #if !os(tvOS)
         if isLocal, let current = localRecordId {
             if isShuffling, let next = nextShuffled(after: current) {
@@ -4225,11 +4481,12 @@ final class PlayerModel {
 
     private func upNextIsDue() -> Bool {
         guard !autoplayCancelled, prefs.autoplayNext, duration > 0 else { return false }
-        let hasNext = upNext != nil || upNextLocalId != nil
+        let hasNext = upNext != nil || upNextLocalId != nil || !queue.isEmpty
         return hasNext && secondsRemaining <= 25 && secondsRemaining > 0
     }
 
     var upNextTitle: String? {
+        if let queued = queue.first { return Self.displayTitle(queued) }
         if let upNext { return Self.displayTitle(upNext) }
         #if !os(tvOS)
         if let upNextLocalId, let record = DownloadManager.shared.record(for: upNextLocalId) {

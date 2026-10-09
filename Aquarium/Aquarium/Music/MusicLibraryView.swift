@@ -77,6 +77,9 @@ final class PagedItems {
     private var generation = 0
     private let pageSize: Int
     private let fetch: (Int, Int) async throws -> ItemsResponse
+    /// How many names sort before a letter, for the A–Z index. Nil for a
+    /// list with no index.
+    var countBefore: ((String) async throws -> Int)?
 
     init(pageSize: Int = 100, fetch: @escaping (Int, Int) async throws -> ItemsResponse) {
         self.pageSize = pageSize
@@ -84,6 +87,28 @@ final class PagedItems {
     }
 
     var hasMore: Bool { items.count < total }
+
+    /// The item the A–Z index lands on for `letter`: the first at or after
+    /// it, fetching up to there first when it is past what is loaded.
+    func jump(to letter: String) async -> String? {
+        if let hit = LetterIndex.first(in: items, atOrAfter: letter) { return hit.Id }
+        guard hasMore, let countBefore, let before = try? await countBefore(letter) else { return items.last?.Id }
+        await load(through: before)
+        guard !Task.isCancelled else { return nil }
+        return LetterIndex.first(in: items, atOrAfter: letter)?.Id ?? items.last?.Id
+    }
+
+    private func load(through offset: Int) async {
+        guard offset >= items.count, hasMore else { return }
+        let mine = generation
+        isLoading = true
+        defer { if generation == mine { isLoading = false } }
+        let need = min(total, offset + pageSize) - items.count
+        guard need > 0, let page = try? await fetch(items.count, need), generation == mine else { return }
+        let known = Set(items.map(\.Id))
+        items += page.items.filter { !known.contains($0.Id) }
+        total = page.total
+    }
 
     func reload() async {
         generation &+= 1
@@ -139,7 +164,7 @@ struct ArtistsView: View {
     @State private var sort: MusicSort = .name
 
     var body: some View {
-        ScrollView {
+        LetterIndexedScroll(paged: paged, sort: sort) {
             if let paged {
                 if paged.isLoading, paged.items.isEmpty {
                     SkeletonList(count: 12)
@@ -153,6 +178,7 @@ struct ArtistsView: View {
                             MusicListRow(item: artist, subtitle: Self.subtitle(artist)) {
                                 app.push(.music(.artist(artist.Id)))
                             }
+                            .id(artist.Id)
                             .onAppear { if artist.Id == paged.items.last?.Id { Task { await paged.loadMore() } } }
                         }
                         if paged.isLoading { ProgressView().padding() }
@@ -170,6 +196,9 @@ struct ArtistsView: View {
             let sort = sort
             let p = PagedItems(pageSize: 200) { start, limit in
                 try await client.albumArtists(startIndex: start, limit: limit, searchTerm: term.isEmpty ? nil : term, sort: sort)
+            }
+            p.countBefore = { letter in
+                try await client.albumArtists(startIndex: 0, limit: 1, searchTerm: term.isEmpty ? nil : term, sort: .name, nameLessThan: letter).total
             }
             paged = p
             await p.reload()
@@ -194,7 +223,7 @@ struct AlbumsView: View {
     @State private var sort: MusicSort = .name
 
     var body: some View {
-        ScrollView {
+        LetterIndexedScroll(paged: paged, sort: mode == .all ? sort : .recentlyAdded) {
             if let paged {
                 if paged.isLoading, paged.items.isEmpty {
                     AlbumGrid(items: [], pendingCount: 8) { _ in }
@@ -229,6 +258,12 @@ struct AlbumsView: View {
                 q.searchTerm = term.isEmpty ? nil : term
                 return try await client.music(q)
             }
+            p.countBefore = { letter in
+                var q = JellyfinClient.MusicQuery(types: "MusicAlbum", sort: .name, startIndex: 0, limit: 1)
+                q.searchTerm = term.isEmpty ? nil : term
+                q.nameLessThan = letter
+                return try await client.music(q).total
+            }
             paged = p
             await p.reload()
         }
@@ -245,7 +280,7 @@ struct SongsView: View {
     @State private var sort: MusicSort = .name
 
     var body: some View {
-        ScrollView {
+        LetterIndexedScroll(paged: paged, sort: sort) {
             if let paged {
                 if paged.isLoading, paged.items.isEmpty {
                     SkeletonList(count: 14)
@@ -265,6 +300,7 @@ struct SongsView: View {
                             SongRow(song: song, isCurrent: music.current?.Id == song.Id, isPlaying: music.isPlaying) {
                                 music.play(paged.items, startingAt: paged.items.position(of: song) ?? 0, title: "Songs")
                             }
+                            .id(song.Id)
                             .onAppear { if song.Id == paged.items.last?.Id { Task { await paged.loadMore() } } }
                         }
                         if paged.isLoading { ProgressView().padding() }
@@ -285,10 +321,54 @@ struct SongsView: View {
                 q.searchTerm = term.isEmpty ? nil : term
                 return try await client.music(q)
             }
+            p.countBefore = { letter in
+                var q = JellyfinClient.MusicQuery(types: "Audio", sort: .name, startIndex: 0, limit: 1)
+                q.searchTerm = term.isEmpty ? nil : term
+                q.nameLessThan = letter
+                return try await client.music(q).total
+            }
             paged = p
             await p.reload()
         }
     }
+}
+
+/// A scroll view with the A–Z strip down its edge while the list is in
+/// name order and long enough to want one. Nothing but a scroll view on the
+/// platforms without the strip.
+struct LetterIndexedScroll<Content: View>: View {
+    let paged: PagedItems?
+    let sort: MusicSort
+    @ViewBuilder let content: () -> Content
+
+    #if os(iOS)
+    @State private var jumpTask: Task<Void, Never>?
+    #endif
+
+    var body: some View {
+        #if os(iOS)
+        ScrollViewReader { proxy in
+            ScrollView { content() }
+                .letterIndex(shown: shown) { letter in
+                    guard let paged else { return }
+                    jumpTask?.cancel()
+                    jumpTask = Task {
+                        guard let id = await paged.jump(to: letter), !Task.isCancelled else { return }
+                        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .top) }
+                    }
+                }
+        }
+        #else
+        ScrollView { content() }
+        #endif
+    }
+
+    #if os(iOS)
+    private var shown: Bool {
+        guard let paged, sort == .name, paged.error == nil else { return false }
+        return paged.items.count >= LetterIndex.minimumCount
+    }
+    #endif
 }
 
 /// The songs behind a Discover shelf, as a page of their own.

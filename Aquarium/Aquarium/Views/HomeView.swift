@@ -18,6 +18,7 @@ struct HomeView: View {
     @Environment(AppModel.self) private var app
     @Environment(JellyfinClient.self) private var client
     @Environment(PlayerModel.self) private var player
+    @Environment(Preferences.self) private var prefs
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -62,7 +63,32 @@ struct HomeView: View {
     @State private var featured: BaseItem?
     #endif
 
-    private var hero: BaseItem? { heroItems.first ?? resume.first ?? nextUp.first }
+    private var hero: BaseItem? { heroItems.first ?? resume.first ?? shownNextUp.first }
+
+    /// Next Up less the shows taken off it by hand. What every use of the
+    /// list on this page reads — the row, the media bar's fallback, the home
+    /// screen's shortcuts, the Apple TV's top shelf — so that a show removed
+    /// from the row is removed from the rest as well. See `HomeRows.visible`.
+    private var shownNextUp: [BaseItem] {
+        HomeRows.visible(nextUp, nextUp: nextUp) { prefs.nextUpHiddenEpisode(seriesId: $0) }
+    }
+
+    /// Continue Watching and Next Up as one row, with the removed shows taken
+    /// out of it. See `HomeRows.combined`.
+    private var combinedRow: [BaseItem] {
+        HomeRows.visible(HomeRows.combined(resume: resume, nextUp: nextUp), nextUp: nextUp) {
+            prefs.nextUpHiddenEpisode(seriesId: $0)
+        }
+    }
+
+    /// With the two rows combined, the slot the one row is drawn in: whichever
+    /// of Continue Watching and Next Up the account's layout puts first. The
+    /// other slot draws nothing.
+    private var combinedSlot: HomeSection? {
+        guard prefs.combinesNextUp else { return nil }
+        return sections.first { $0 == .resume || $0 == .nextUp }
+    }
+
     private var isBare: Bool {
         resume.isEmpty && nextUp.isEmpty && latest.isEmpty && heroItems.isEmpty
             && !(sections.contains(.libraries) && !app.libraries.isEmpty)
@@ -92,10 +118,10 @@ struct HomeView: View {
         }
 
         take(resume, limit: 2)
-        take(nextUp, limit: 2)
+        take(shownNextUp, limit: 2)
         for entry in latest { take(entry.items, limit: 1) }
 
-        if out.isEmpty, let first = resume.first ?? nextUp.first { return [first] }
+        if out.isEmpty, let first = resume.first ?? shownNextUp.first { return [first] }
         return Array(out.prefix(6))
     }
 
@@ -508,20 +534,40 @@ struct HomeView: View {
                     collectionType: library.CollectionType
                 ))
             }
-        case .resume:
-            MediaShelf(title: "Continue Watching", items: resume, wide: true) { open($0) }
-        case .nextUp:
-            // Portrait, and a picture of the *season* rather than of the
-            // episode. Continue Watching is a row of stills because it points
-            // at a moment you were in the middle of; Next Up points at the next
-            // thing in a show, and a frame from an episode nobody has seen yet
-            // is a picture of nothing in particular. See `Artwork.seasonArt`.
-            MediaShelf(
-                title: "Next Up",
-                items: nextUp,
-                art: .season,
-                menuOpensDetails: true
-            ) { openNextUp($0) }
+        case .resume, .nextUp:
+            if let combinedSlot {
+                // The two rows as one, drawn where the first of them was: a
+                // poster per show, carrying the progress of the episode you
+                // are partway through, beside the films you have started.
+                // Posters rather than stills because a show's card stands for
+                // the show, not for a frame of it — see the Next Up row below
+                // — and a film has only ever had a poster.
+                if section == combinedSlot {
+                    MediaShelf(
+                        title: "Continue Watching",
+                        items: combinedRow,
+                        art: .season,
+                        menuOpensDetails: true,
+                        menuRemovesFromNextUp: true
+                    ) { openNextUp($0) }
+                }
+            } else if section == .resume {
+                MediaShelf(title: "Continue Watching", items: resume, wide: true) { open($0) }
+            } else {
+                // Portrait, and a picture of the *season* rather than of the
+                // episode. Continue Watching is a row of stills because it
+                // points at a moment you were in the middle of; Next Up points
+                // at the next thing in a show, and a frame from an episode
+                // nobody has seen yet is a picture of nothing in particular.
+                // See `Artwork.seasonArt`.
+                MediaShelf(
+                    title: "Next Up",
+                    items: shownNextUp,
+                    art: .season,
+                    menuOpensDetails: true,
+                    menuRemovesFromNextUp: true
+                ) { openNextUp($0) }
+            }
         case .latest:
             // One row per library, which is how Jellyfin draws this slot too —
             // it is a single setting that expands into as many rows as the
@@ -671,11 +717,14 @@ struct HomeView: View {
         #if os(iOS)
         // The home screen icon's press-and-hold menu leads with the same
         // title this page does.
-        if failure == nil { QuickActions.update(resume: resume, nextUp: nextUp) }
+        if failure == nil { QuickActions.update(resume: resume, nextUp: shownNextUp) }
+        // And a fresh Next Up is the moment to notice an episode new to the
+        // server — see Core/NextUpAlerts.swift.
+        if failure == nil { NextUpAlerts.shared.note(nextUp: nextUp) }
         #elseif os(macOS)
         // The Dock icon's menu is the same list: what was left part-watched,
         // then what is next.
-        if failure == nil { app.updateDockMenu(resume: resume, nextUp: nextUp) }
+        if failure == nil { app.updateDockMenu(resume: resume, nextUp: shownNextUp) }
         #endif
 
         // The Apple TV home screen shows the same list, and this is the only
@@ -683,7 +732,7 @@ struct HomeView: View {
         // title: the rest of Home must not wait on artwork for a shelf that is
         // somewhere else entirely.
         #if os(tvOS)
-        let published = nextUp
+        let published = shownNextUp
         Task.detached { await TopShelf.publish(published) }
         #endif
 

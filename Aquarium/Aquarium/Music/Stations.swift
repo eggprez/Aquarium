@@ -20,6 +20,7 @@
 
 import Foundation
 import Observation
+import os
 
 @MainActor
 @Observable
@@ -70,6 +71,8 @@ final class LiveStation {
 
 enum SpecialStation: String, CaseIterable {
     case rediscover, deepCuts
+    /// Surprise Me. Not a tile: the button on the Discover pages starts it.
+    case surprise
 
     static let prefix = "fj-station:"
 
@@ -82,6 +85,7 @@ enum SpecialStation: String, CaseIterable {
         switch self {
         case .rediscover: "Rediscover"
         case .deepCuts: "Deep Cuts"
+        case .surprise: "Surprise Mix"
         }
     }
 
@@ -89,6 +93,7 @@ enum SpecialStation: String, CaseIterable {
         switch self {
         case .rediscover: "Favourites you haven't played lately"
         case .deepCuts: "Songs you haven't heard by artists you love"
+        case .surprise: "A shuffle of what you play, learning as it goes"
         }
     }
 
@@ -107,10 +112,11 @@ enum SpecialStation: String, CaseIterable {
         return seed
     }
 
-    /// Which of these to offer. Both are read from the server's record of
-    /// the account, so both are always worth a try.
+    /// Which of these to offer as tiles. Both are read from the server's
+    /// record of the account, so both are always worth a try. Surprise Me
+    /// has a button of its own.
     @MainActor
-    static func available() -> [SpecialStation] { allCases }
+    static func available() -> [SpecialStation] { [.rediscover, .deepCuts] }
 }
 
 // MARK: - Genres, every spelling of them
@@ -121,17 +127,34 @@ enum SpecialStation: String, CaseIterable {
 enum GenreCatalog {
     private static var byKey: [String: [NameGuidPair]] = [:]
     private static var readAt: Date?
+    /// Key → a Latin spelling the library has for it, for naming a station
+    /// after a tag in another script. Readable from anywhere, since names
+    /// are made wherever a list is.
+    private nonisolated static let latin = OSAllocatedUnfairLock(initialState: [String: String]())
 
     static func genres(forKey key: String) async -> [NameGuidPair] {
-        if readAt == nil || Date().timeIntervalSince(readAt!) > 3600 {
-            if let all = try? await JellyfinClient.shared.musicGenres(limit: 2000).items {
-                byKey = Dictionary(grouping: all.map { NameGuidPair(Id: $0.Id, Name: $0.Name) }) {
-                    MusicNames.genreKey($0.Name ?? "")
-                }
-                readAt = Date()
+        await prime()
+        return byKey[key] ?? []
+    }
+
+    /// Read the server's genres if they haven't been in the last hour.
+    static func prime() async {
+        guard readAt == nil || Date().timeIntervalSince(readAt!) > 3600 else { return }
+        guard let all = try? await JellyfinClient.shared.musicGenres(limit: 2000).items else { return }
+        byKey = Dictionary(grouping: all.map { NameGuidPair(Id: $0.Id, Name: $0.Name) }) {
+            MusicNames.genreKey($0.Name ?? "")
+        }
+        readAt = Date()
+        let spellings = byKey.reduce(into: [String: String]()) { found, entry in
+            if let name = entry.value.compactMap(\.Name).first(where: { MusicNames.isLatin($0) && !$0.isEmpty }) {
+                found[entry.key] = name
             }
         }
-        return byKey[key] ?? []
+        latin.withLock { $0 = spellings }
+    }
+
+    nonisolated static func latinSpelling(forKey key: String) -> String? {
+        latin.withLock { $0[key] }
     }
 }
 
@@ -142,9 +165,16 @@ enum StationBuilder {
     static let genrePrefix = "fj-genre:"
 
     /// A station from `seed`: the server's when there is a server, this
-    /// device's downloads when there isn't or the server has nothing.
-    static func build(from seed: BaseItem, title: String) async -> LiveStation? {
-        let station = await remoteOrLocal(from: seed, title: title)
+    /// device's downloads when there isn't or the server has nothing — or
+    /// the downloads whatever the server could do, when `localOnly`, which
+    /// is what the Downloaded page asks for.
+    static func build(from seed: BaseItem, title: String, localOnly: Bool = false) async -> LiveStation? {
+        let station: LiveStation?
+        #if !os(tvOS)
+        station = localOnly ? local(from: seed, title: title) : await remoteOrLocal(from: seed, title: title)
+        #else
+        station = await remoteOrLocal(from: seed, title: title)
+        #endif
         if let station { TagCoverage.record(station.pool.values) }
         return station
     }
@@ -275,6 +305,32 @@ enum StationBuilder {
             q.artistIds = ids
             q.played = false
             return (await fetch(q), MixProfile(open: true))
+        case .surprise:
+            // A shuffle of what this account plays: what it has starred and
+            // played, more by the same artists, and a few songs from
+            // anywhere, so there is something to be surprised by.
+            let favs: JellyfinClient.MusicQuery = {
+                var q = JellyfinClient.MusicQuery(types: "Audio", sort: .random, limit: 150)
+                q.favorites = true
+                return q
+            }()
+            async let starred = fetch(favs)
+            async let top = try? client.mostPlayedSongs(limit: 100)
+            async let recent = try? client.recentlyPlayedSongs(limit: 60)
+            async let anywhere = fetch(JellyfinClient.MusicQuery(types: "Audio", sort: .random, limit: 50))
+            let known = (await starred) + (await top ?? []) + (await recent ?? [])
+            var artistIds: [String] = []
+            for song in known.shuffled() {
+                guard artistIds.count < 25 else { break }
+                if let id = (song.AlbumArtists?.first ?? song.ArtistItems?.first)?.Id, !artistIds.contains(id) { artistIds.append(id) }
+            }
+            var byArtists: [BaseItem] = []
+            if !artistIds.isEmpty {
+                var q = JellyfinClient.MusicQuery(types: "Audio", sort: .random, limit: 250)
+                q.artistIds = artistIds
+                byArtists = await fetch(q)
+            }
+            return (known + byArtists + (await anywhere), MixProfile(open: true, surprise: true))
         }
     }
 
@@ -331,6 +387,10 @@ enum StationBuilder {
                     .reduce(into: Set<String>()) { $0.formUnion(MusicKeys.artists(of: $1)) }
                 pool = songs.filter { !top.isDisjoint(with: MusicKeys.artists(of: $0)) && ($0.userData.PlayCount ?? 0) == 0 }
                 profile = MixProfile(open: true)
+            case .surprise:
+                // Everything on the device: the shuffle is the point, and
+                // the downloads are already what this listener keeps.
+                profile = MixProfile(open: true, surprise: true)
             }
         } else if seed.isArtist {
             let keys = MusicKeys.artist(id: seed.Id, name: seed.Name)
@@ -443,8 +503,12 @@ struct StationSession: Sendable {
     private(set) var passed = Set<String>()
     /// Thumbs given in this station, by song: 1 up, -1 down.
     private(set) var thumbs: [String: Int] = [:]
+    /// How many reactions this station has had: how far a Surprise Mix has
+    /// come from being a shuffle.
+    private(set) var reactions = 0
 
     mutating func note(_ song: BaseItem, _ reaction: ListenReaction) {
+        reactions += 1
         for k in artists.keys { artists[k]! *= 0.9 }
         for k in genres.keys { genres[k]! *= 0.9 }
         shift(song, by: Self.weight(reaction))

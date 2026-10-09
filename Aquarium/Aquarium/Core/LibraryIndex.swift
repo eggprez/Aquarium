@@ -763,6 +763,15 @@ final class LibraryIndex {
             list = Self.sorted(matches, by: query.sortBy, order: query.sortOrder).map(\.Id)
             queryCache[key] = list
         }
+        if let letter = query.nameLessThan?.lowercased() {
+            // The server's NameLessThan: names that sort before the letter.
+            let before = list.filter { id in
+                guard let item = items[id] else { return false }
+                let name = (item.SortName ?? item.Name ?? "").lowercased()
+                return name.compare(letter, options: [.diacriticInsensitive]) == .orderedAscending
+            }
+            return page(before, startIndex: query.startIndex, limit: query.limit)
+        }
         return page(list, startIndex: query.startIndex, limit: query.limit)
     }
 

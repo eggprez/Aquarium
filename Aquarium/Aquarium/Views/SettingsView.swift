@@ -161,6 +161,7 @@ struct SettingsView: View {
         Form {
             if shows(.general) {
                 appearanceSection
+                homeSection
                 cloudSection
             }
 
@@ -253,6 +254,18 @@ struct SettingsView: View {
             Text("Appearance")
         } footer: {
             MacSettingFooter(Copy.theme)
+        }
+    }
+
+    private var homeSection: some View {
+        @Bindable var prefs = prefs
+        return Section {
+            Toggle(isOn: $prefs.combinesNextUp) { MacSettingLabel(Copy.combineNextUp) }
+                .note(Copy.combineNextUp)
+        } header: {
+            Text("Home")
+        } footer: {
+            MacSettingFooter(Copy.combineNextUp)
         }
     }
 
@@ -358,10 +371,14 @@ struct SettingsView: View {
 
             Toggle(isOn: $prefs.adaptiveQuality) { MacSettingLabel(Copy.adaptiveQuality) }
                 .note(Copy.adaptiveQuality)
+
+            Toggle(isOn: $prefs.powerAwareQuality) { MacSettingLabel(Copy.powerAwareQuality) }
+                .disabled(!prefs.adaptiveQuality)
+                .note(Copy.powerAwareQuality)
         } header: {
             Text("Quality")
         } footer: {
-            MacSettingFooter(Copy.defaultQuality, Copy.adaptiveQuality)
+            MacSettingFooter(Copy.defaultQuality, Copy.adaptiveQuality, Copy.powerAwareQuality)
         }
     }
 
@@ -1088,6 +1105,7 @@ private struct AccountSettingsPage: View {
 }
 
 private struct AppearanceSettingsPage: View {
+    @Environment(AppModel.self) private var app
     @Environment(Preferences.self) private var prefs
     /// Read again on the way back from the picker; nothing announces a change.
     @State private var iconTitle = AppIconChoice.current.title
@@ -1124,6 +1142,25 @@ private struct AppearanceSettingsPage: View {
                      ? "The order of the sections in the sidebar."
                      : "Which sections have a place in the tab bar, and in what order. The rest are listed under More.")
             }
+
+            Section {
+                Toggle(Copy.combineNextUp.name ?? "", isOn: $prefs.combinesNextUp)
+                Toggle(Copy.newEpisodeAlerts.name ?? "", isOn: $prefs.newEpisodeAlerts)
+                    // Turning it on asks to notify; refused, it goes back off.
+                    .onChange(of: prefs.newEpisodeAlerts) { _, on in
+                        guard on else { return }
+                        Task {
+                            if await !NextUpAlerts.shared.enable() {
+                                prefs.newEpisodeAlerts = false
+                                app.toast("Notifications are off for Aquarium — turn them on in Settings", tone: .error)
+                            }
+                        }
+                    }
+            } header: {
+                Text("Home")
+            } footer: {
+                SettingsFooter(Copy.combineNextUp, Copy.newEpisodeAlerts)
+            }
         }
         .formStyle(.grouped)
         .onAppear { iconTitle = AppIconChoice.current.title }
@@ -1141,10 +1178,12 @@ private struct VideoSettingsPage: View {
                     ForEach(Quality.choices) { Text($0.label).tag($0.maxBitrate) }
                 }
                 Toggle(Copy.adaptiveQuality.name ?? "", isOn: $prefs.adaptiveQuality)
+                Toggle(Copy.powerAwareQuality.name ?? "", isOn: $prefs.powerAwareQuality)
+                    .disabled(!prefs.adaptiveQuality)
             } header: {
                 Text("Quality")
             } footer: {
-                SettingsFooter(Copy.defaultQuality, Copy.adaptiveQuality)
+                SettingsFooter(Copy.defaultQuality, Copy.adaptiveQuality, Copy.powerAwareQuality)
             }
 
             Section {
@@ -2077,6 +2116,14 @@ enum SettingsCopy {
         name: "Adapt quality automatically",
         text: "Drops to a smaller stream when playback keeps stalling or the device can't decode fast enough, and climbs back after the connection has been steady for a while. It never goes above the quality you picked, and never touches downloaded files or Live TV."
     )
+    static let powerAwareQuality = SettingNote(
+        name: "Ease off when the device is struggling",
+        text: "Holds the stream to 1080p at 10 Mbps while the device is running hot or in Low Power Mode, and to 720p when it is at its thermal limit — before the picture starts to stutter rather than after. It climbs back the usual way once things settle. Only with adaptive quality on."
+    )
+    static let newEpisodeAlerts = SettingNote(
+        name: "Tell me about new episodes",
+        text: "A notification when an episode new to the server turns up in Next Up — a show you're watching got a new one. Looked for whenever Home loads, and now and then in the background, which needs Background App Refresh on for Aquarium."
+    )
     static let defaultQuality = SettingNote(
         name: "Default quality",
         text: "What a stream opens at before you change it. Direct Play sends the original file when this device can open it, and asks the server to remux or transcode when it can't."
@@ -2084,6 +2131,10 @@ enum SettingsCopy {
     static let resume = SettingNote(
         name: "Resume where I left off",
         text: "Opens something you have already started at the point you stopped, instead of from the beginning."
+    )
+    static let combineNextUp = SettingNote(
+        name: "Combine Next Up with Continue Watching",
+        text: "Draws the two rows on Home as one: a poster for each show you are partway through, carrying the progress of the episode you were in the middle of, beside the films you have started. With more than one episode of a show on the go, the card shows the one just before where Next Up has got to. Hold a poster (right-click on a Mac) to remove a show from the row; it comes back once you watch a later episode."
     )
     static let autoplayNext = SettingNote(
         name: "Play the next episode automatically",

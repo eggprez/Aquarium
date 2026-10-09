@@ -1139,8 +1139,25 @@ struct VideoSurface: UIViewControllerRepresentable {
                                 isOn: option.id == player.selectedSubtitleOption
                             )
                         },
-                        subtitlesOff: player.selectedSubtitleOption == nil
+                        subtitlesOff: player.selectedSubtitleOption == nil,
+                        queue: player.queue.map {
+                            TransportBarExtras.State.Queued(id: $0.Id, title: PlayerModel.displayTitle($0))
+                        },
+                        sharePlayActive: SharePlayCoordinator.shared.isActive,
+                        sharePlayAvailable: player.item != nil && !player.isLocal && !player.isLive
                     )
+                }
+            }
+            extras.onPlayQueued = { id in
+                Task { @MainActor in await player.playQueued(id) }
+            }
+            extras.onClearQueue = { player.clearQueue() }
+            extras.onSharePlay = {
+                let shareplay = SharePlayCoordinator.shared
+                if shareplay.isActive {
+                    shareplay.leave()
+                } else if let item = player.item {
+                    Task { @MainActor in await shareplay.share(item) }
                 }
             }
             extras.onAudio = { id in

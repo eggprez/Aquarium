@@ -57,6 +57,11 @@ final class TransportBarExtras {
     /// Show one of the file's subtitle tracks, by `TrackOption.id`; nil for
     /// none.
     var onSubtitles: (Int?) -> Void = { _ in }
+    /// Start a queued title now, by its id — see `PlayerModel.playQueued`.
+    var onPlayQueued: (String) -> Void = { _ in }
+    var onClearQueue: () -> Void = {}
+    /// Offer the title to the FaceTime call, or leave the session that is on.
+    var onSharePlay: () -> Void = {}
 
     private let quality = UIButton(type: .system)
     private let extras = UIButton(type: .system)
@@ -108,6 +113,17 @@ final class TransportBarExtras {
         var subtitles: [Track] = []
         /// Whether no subtitle is showing.
         var subtitlesOff = true
+        /// Titles queued by hand, in order — see `PlayerModel.queue`.
+        var queue: [Queued] = []
+        /// SharePlay: whether this device is in a session, and whether one
+        /// could be started from here.
+        var sharePlayActive = false
+        var sharePlayAvailable = false
+
+        struct Queued {
+            var id: String
+            var title: String
+        }
 
         struct Track {
             var id: Int
@@ -555,6 +571,30 @@ final class TransportBarExtras {
             ))
         }
         items.append(UIMenu(title: "Sleep", image: UIImage(systemName: "moon"), children: sleep))
+        // What was queued by hand. A row plays its title now; the rows
+        // above it go.
+        if !state.queue.isEmpty {
+            var queued: [UIMenuElement] = state.queue.map { entry in
+                UIAction(title: entry.title) { [weak self] _ in self?.onPlayQueued(entry.id) }
+            }
+            queued.append(UIAction(title: "Clear up next", attributes: .destructive) { [weak self] _ in
+                self?.onClearQueue()
+            })
+            items.append(UIMenu(
+                title: "Up next (\(state.queue.count))",
+                image: UIImage(systemName: "text.line.first.and.arrowtriangle.forward"),
+                children: queued
+            ))
+        }
+        if state.sharePlayActive {
+            items.append(UIAction(title: "Leave SharePlay", image: UIImage(systemName: "shareplay.slash")) { [weak self] _ in
+                self?.onSharePlay()
+            })
+        } else if state.sharePlayAvailable {
+            items.append(UIAction(title: "Watch together with SharePlay", image: UIImage(systemName: "shareplay")) { [weak self] _ in
+                self?.onSharePlay()
+            })
+        }
         items.append(UIAction(
             title: state.fillScreen ? "Fit to screen" : "Fill the screen",
             image: UIImage(systemName: "rectangle.arrowtriangle.2.outward")

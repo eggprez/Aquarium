@@ -1096,7 +1096,7 @@ final class JellyfinClient {
     /// started straight from Home — Continue Watching, Next Up, Latest — and
     /// on season episode lists, which the detail page downloads from as they
     /// are.
-    private static let listFields = itemFields.replacingOccurrences(of: "MediaSources,", with: "")
+    private static let listFields = itemFields.replacingOccurrences(of: "MediaSources,", with: "") + ",SortName"
 
     // MARK: - Browse
 
@@ -1322,6 +1322,10 @@ final class JellyfinClient {
         var unwatched: Bool = false
         var favorites: Bool = false
         var genre: String?
+        /// Only names that sort before this, lowercased: with `limit` 1 the
+        /// answer's total is where a letter starts in the name order. See
+        /// `LetterIndex`.
+        var nameLessThan: String?
     }
 
     func libraryItems(parentId: String, query: LibraryQuery = .init()) async throws -> ItemsResponse {
@@ -1344,6 +1348,7 @@ final class JellyfinClient {
         if query.unwatched { q.append(.init(name: "Filters", value: "IsUnplayed")) }
         if query.favorites { q.append(.init(name: "IsFavorite", value: "true")) }
         if let g = query.genre { q.append(.init(name: "Genres", value: g)) }
+        if let letter = query.nameLessThan { q.append(.init(name: "NameLessThan", value: letter.lowercased())) }
         return try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))")
     }
 

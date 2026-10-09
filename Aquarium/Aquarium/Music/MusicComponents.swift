@@ -714,6 +714,7 @@ struct AlbumGrid: View {
                 }
                 .buttonStyle(PosterButtonStyle())
                 .musicContextMenu(item)
+                .id(item.Id)
                 .onAppear {
                     if item.Id == items.last?.Id { onReachEnd?() }
                 }

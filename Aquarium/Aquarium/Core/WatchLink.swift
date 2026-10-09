@@ -168,6 +168,8 @@ final class WatchLink: NSObject {
         session.delegate = self
         session.activate()
         rejoinFetches()
+        // The watch's remote — see Core/WatchRemote.swift.
+        WatchRemote.shared.start()
     }
 
     /// The system woke the app for the relay session's events.
@@ -271,6 +273,16 @@ final class WatchLink: NSObject {
             }
         } else {
             WCSession.default.transferUserInfo(payload)
+        }
+    }
+
+    /// A message that is only worth anything now — what is playing this
+    /// second. Sent when the watch is in reach, dropped when it isn't: a
+    /// queued copy would arrive stale.
+    func sendLive(_ message: WatchMessage) {
+        guard WCSession.isSupported(), WCSession.default.activationState == .activated, WCSession.default.isReachable else { return }
+        WCSession.default.sendMessage(WatchSync.pack(message), replyHandler: nil) { error in
+            Self.log.notice("live message not delivered: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -455,6 +467,8 @@ final class WatchLink: NSObject {
         case .cancelFetch(let itemId): cancelFetch(itemId)
         case .playlistRemoved(let id): playlistRemovedOnWatch(id)
         case .logs(let chunk): take(chunk)
+        case .remote(let command): WatchRemote.shared.handle(command)
+        case .requestPlayback: WatchRemote.shared.send(force: true)
         default: break
         }
     }
@@ -1352,6 +1366,11 @@ extension WatchLink: WCSessionDelegate {
                 let context = await buildContext()
                 lastContextSentAt = Date()
                 replyHandler(WatchSync.pack(WatchReply(ok: true, context: context)))
+                return
+            }
+            if case .requestPlayback = decoded {
+                let playback = await WatchRemote.shared.state(withArtwork: true)
+                replyHandler(WatchSync.pack(WatchReply(ok: true, playback: playback)))
                 return
             }
             // Listening is answered once it has reached the server, well

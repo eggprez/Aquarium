@@ -240,6 +240,97 @@ enum WatchMessage: Codable, Sendable {
     /// whole file, LZFSE-compressed, cut into pieces small enough for a
     /// message. A file transfer carries it when the phone is away.
     case logs(WatchLogChunk)
+    // The remote: the watch driving the phone's player
+    /// Phone → watch: what the phone is playing now, or nil for nothing.
+    /// Sent whenever it changes while the watch is in reach, and in the
+    /// reply to `requestPlayback`.
+    case phonePlayback(PhonePlaybackState?)
+    /// Watch → phone: send me what you are playing, in the reply.
+    case requestPlayback
+    /// Watch → phone: do this to the player.
+    case remote(RemoteCommand)
+}
+
+// MARK: - The remote
+
+/// What the phone's player is doing, for the watch to show and drive.
+/// `position` is where it was at `at`; a watch drawing it later adds the
+/// time since when `isPlaying`, so the phone needn't send every second.
+struct PhonePlaybackState: Codable, Hashable, Sendable {
+    var itemId: String
+    var title: String
+    var subtitle: String?
+    var isAudiobook = false
+    var isVideo = false
+    var isPlaying = false
+    var position: Double = 0
+    var duration: Double = 0
+    var speed: Double = 1
+    var hasNext = false
+    var hasPrevious = false
+    var upNextCount = 0
+    /// The chapter a book is in, when it has them.
+    var chapter: String?
+    /// The phone's output volume, 0...1, so the watch can show it move.
+    var volume: Double?
+    /// A small JPEG of the cover. Sent with the first state of an item and
+    /// on request, not with every update: a message is a few kilobytes and
+    /// the cover is most of them.
+    var artwork: Data?
+    var at = Date()
+}
+
+extension PhonePlaybackState {
+    private enum CodingKeys: String, CodingKey {
+        case itemId, title, subtitle, isAudiobook, isVideo, isPlaying, position, duration, speed
+        case hasNext, hasPrevious, upNextCount, chapter, volume, artwork, at
+    }
+
+    /// Key by key, for the same reason as `PhoneContext`.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        itemId = try c.decode(String.self, forKey: .itemId)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        subtitle = try c.decodeIfPresent(String.self, forKey: .subtitle)
+        isAudiobook = try c.decodeIfPresent(Bool.self, forKey: .isAudiobook) ?? false
+        isVideo = try c.decodeIfPresent(Bool.self, forKey: .isVideo) ?? false
+        isPlaying = try c.decodeIfPresent(Bool.self, forKey: .isPlaying) ?? false
+        position = try c.decodeIfPresent(Double.self, forKey: .position) ?? 0
+        duration = try c.decodeIfPresent(Double.self, forKey: .duration) ?? 0
+        speed = try c.decodeIfPresent(Double.self, forKey: .speed) ?? 1
+        hasNext = try c.decodeIfPresent(Bool.self, forKey: .hasNext) ?? false
+        hasPrevious = try c.decodeIfPresent(Bool.self, forKey: .hasPrevious) ?? false
+        upNextCount = try c.decodeIfPresent(Int.self, forKey: .upNextCount) ?? 0
+        chapter = try c.decodeIfPresent(String.self, forKey: .chapter)
+        volume = try c.decodeIfPresent(Double.self, forKey: .volume)
+        artwork = try c.decodeIfPresent(Data.self, forKey: .artwork)
+        at = try c.decodeIfPresent(Date.self, forKey: .at) ?? Date()
+    }
+
+    /// Where the player is now, if it has kept going since `at`.
+    func position(now: Date = Date()) -> Double {
+        guard isPlaying else { return position }
+        let elapsed = max(0, now.timeIntervalSince(at)) * speed
+        return duration > 0 ? min(duration, position + elapsed) : position + elapsed
+    }
+
+    /// The same state without the cover, for a comparison that asks whether
+    /// anything worth sending changed.
+    var withoutArtwork: PhonePlaybackState {
+        var copy = self
+        copy.artwork = nil
+        copy.at = Date(timeIntervalSince1970: 0)
+        return copy
+    }
+}
+
+/// What the watch can ask the phone's player to do.
+enum RemoteCommand: Codable, Hashable, Sendable {
+    case play, pause, togglePlayPause
+    case next, previous
+    case seekTo(Double)
+    case seekBy(Double)
+    case setSpeed(Double)
 }
 
 struct WatchLogChunk: Codable, Sendable {
@@ -316,6 +407,9 @@ struct WatchReply: Codable, Sendable {
     /// the watch keeps them too until a later reply names them. Nil from a
     /// phone too old to say, whose `ok` meant it had taken the lot.
     var delivered: [UUID]?
+    /// The answer to `requestPlayback`: nil when nothing is playing, or
+    /// from a phone too old to say.
+    var playback: PhonePlaybackState?
 }
 
 // MARK: - Listening rules, both ends

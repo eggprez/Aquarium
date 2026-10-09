@@ -33,6 +33,9 @@ struct AquariumApp: App {
         // model, one player and one set of navigation paths it could only
         // mirror the first. See `MacCommands`, which drops New Window too.
         NSWindow.allowsAutomaticWindowTabbing = false
+        // A film shared over FaceTime can arrive before any window is up —
+        // see Core/SharePlay.swift.
+        SharePlayCoordinator.shared.start()
     }
     #endif
 
@@ -46,6 +49,20 @@ struct AquariumApp: App {
         // And the watch, which may be sending listening to a phone in a
         // pocket — see Core/WatchLink.swift.
         WatchLink.shared.start()
+        // A film shared over FaceTime can arrive the same way — see
+        // Core/SharePlay.swift.
+        SharePlayCoordinator.shared.start()
+        // The Control Centre buttons' intents run in this process and reach
+        // the players through here — see Shared/WidgetTypes.swift.
+        ControlActions.handler = { action in
+            await MainActor.run {
+                switch action {
+                case .resumeWatching: Task { await AppModel.shared.continueWatching() }
+                case .shuffleMusic: Task { await MusicActions.shuffleAll() }
+                case .resumeAudiobook: Task { await MusicActions.resumeBook() }
+                }
+            }
+        }
     }
     #endif
 
@@ -165,6 +182,21 @@ import UIKit
 /// system hands back when it wakes the app to finish a background download,
 /// and which orientations the app will accept.
 final class AppDelegate: NSObject, UIApplicationDelegate {
+    /// The background look for new episodes has to be registered before
+    /// launching finishes — see Core/NextUpAlerts.swift.
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        MainActor.assumeIsolated { NextUpAlerts.shared.register() }
+        return true
+    }
+
+    /// Going behind: book the next look for new episodes.
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        MainActor.assumeIsolated { NextUpAlerts.shared.schedule() }
+    }
+
     func application(
         _ application: UIApplication,
         handleEventsForBackgroundURLSession identifier: String,

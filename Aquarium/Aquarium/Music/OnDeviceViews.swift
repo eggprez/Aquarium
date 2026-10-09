@@ -173,9 +173,10 @@ struct OfflineListenNowView: View {
     }
 
     private func surpriseMe() {
-        if let station = stations.randomElement() { return play(station) }
-        guard let album = randomAlbums.randomElement() else { return }
-        Task { await MusicMixes.startStation(from: album, title: "Surprise Mix") }
+        Task {
+            let result = await MusicMixes.startSurprise(cover: randomAlbums.randomElement(), localOnly: true)
+            if !result.started { app.toast("Nothing on this device to build a mix from yet", tone: .error) }
+        }
     }
 
     /// `reshuffle` is false when only a play count moved: the random shelf
@@ -263,6 +264,7 @@ struct OnDeviceLibraryView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 LibraryDoors(doors: doors) { app.pushOnDevice($0) }
                     .padding(.top, 12)
+                DownloadedStationsShelf()
                 if !recent.isEmpty {
                     Text("Recently Downloaded")
                         .font(.title3.weight(.bold))
@@ -277,6 +279,98 @@ struct OnDeviceLibraryView: View {
         }
         .task { recent = OfflineMusic.recentlyDownloadedAlbums(limit: 24) }
         .onChange(of: downloads.records.count) { recent = OfflineMusic.recentlyDownloadedAlbums(limit: 24) }
+    }
+}
+
+/// The stations the offline Discover page builds from downloads, and its
+/// Surprise Me, on the Downloaded page too — where they can be reached with
+/// the server in reach, and are built from the downloads all the same. For
+/// a flight, or a plan with a cap on it.
+struct DownloadedStationsShelf: View {
+    @Environment(AppModel.self) private var app
+    @State private var downloads = DownloadManager.shared
+    @State private var index = OfflineMusicIndex.shared
+    @State private var stations: [ListenNowView.Station] = []
+    @State private var albums: [BaseItem] = []
+    @State private var isMixing = false
+
+    var body: some View {
+        if !stations.isEmpty || !albums.isEmpty {
+            VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
+                HStack(alignment: .firstTextBaseline) {
+                    ShelfHeading(title: "Your Stations", subtitle: "Built from your downloads")
+                    Spacer()
+                    Button { surpriseMe() } label: {
+                        if isMixing {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Surprise Me", systemImage: "shuffle")
+                        }
+                    }
+                    .appButtonStyle(prominent: true)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
+                    .disabled(isMixing)
+                    .padding(.trailing, Metrics.gutter)
+                }
+                if !stations.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: Metrics.rowSpacing) {
+                            ForEach(stations) { station in
+                                Button { play(station) } label: {
+                                    MixTile(title: station.title, subtitle: station.subtitle, seed: station.seed)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(PosterButtonStyle())
+                            }
+                        }
+                        .padding(.horizontal, Metrics.gutter)
+                    }
+                }
+            }
+            .padding(.top, 24)
+            .task { load() }
+            .onChange(of: downloads.records.count) { load() }
+            .onChange(of: index.revision) { load() }
+        } else {
+            Color.clear.frame(height: 0)
+                .task { load() }
+                .onChange(of: downloads.records.count) { load() }
+        }
+    }
+
+    private func load() {
+        let all = OfflineMusic.songs
+        guard !all.isEmpty else {
+            stations = []
+            albums = []
+            return
+        }
+        let recent = OfflineMusic.recentlyPlayed(limit: 40)
+        let top = OfflineMusic.mostPlayed(limit: 24)
+        let favorites = Array(OfflineMusic.favorites().prefix(24))
+        stations = OfflineListenNowView.stations(recent: recent, top: top, favorites: favorites, all: all)
+        albums = Array(all.shuffled().localAlbums().prefix(16))
+    }
+
+    private func play(_ station: ListenNowView.Station) {
+        isMixing = true
+        Task {
+            defer { isMixing = false }
+            let result = await MusicMixes.startStation(from: station.seed, title: station.title, localOnly: true)
+            if !result.started { app.toast("Nothing on this device to build that from", tone: .error) }
+        }
+    }
+
+    /// Surprise Me, from downloads only: a shuffle of everything on the
+    /// device that learns from what is finished and skipped.
+    private func surpriseMe() {
+        isMixing = true
+        Task {
+            defer { isMixing = false }
+            let result = await MusicMixes.startSurprise(cover: albums.randomElement(), localOnly: true)
+            if !result.started { app.toast("Nothing downloaded to build a mix from yet", tone: .error) }
+        }
     }
 }
 
@@ -304,11 +398,35 @@ struct OnDeviceListView: View {
     }
 
     var body: some View {
+        #if os(iOS)
+        ScrollViewReader { proxy in
+            list
+                .letterIndex(shown: showsLetterIndex) { letter in
+                    // Local lists are whole and sorted by title: the jump is a lookup.
+                    guard let hit = LetterIndex.first(in: items, atOrAfter: letter, key: { $0.title.lowercased() }) else { return }
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(hit.Id, anchor: .top) }
+                }
+        }
+        #else
+        list
+        #endif
+    }
+
+    #if os(iOS)
+    private var showsLetterIndex: Bool {
+        switch kind {
+        case .artists, .albums, .songs: items.count >= LetterIndex.minimumCount
+        default: false
+        }
+    }
+    #endif
+
+    private var list: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 switch kind {
                 case .artists:
-                    ForEach(items) { artist in MusicListRow(item: artist) { app.pushOnDevice(.artist(artist.Id)) } }
+                    ForEach(items) { artist in MusicListRow(item: artist) { app.pushOnDevice(.artist(artist.Id)) }.id(artist.Id) }
                 case .albums, .recentAlbums:
                     AlbumGrid(items: items) { app.pushOnDevice(.album($0.Id)) }
                 case .songs, .favorites:
@@ -324,6 +442,7 @@ struct OnDeviceListView: View {
                         SongRow(song: song, isCurrent: music.current?.Id == song.Id, isPlaying: music.isPlaying) {
                             music.play(items, startingAt: items.position(of: song) ?? 0, title: title)
                         }
+                        .id(song.Id)
                     }
                 case .genres:
                     ForEach(genres, id: \.name) { genre in

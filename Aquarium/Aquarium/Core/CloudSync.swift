@@ -34,6 +34,7 @@ enum CloudSync {
     static let syncedKeys: Set<String> = [
         "theme",
         "adaptive", "autoplay_next", "stereo_downmix",
+        "home_combine_next_up", "next_up_hidden",
         // No `audio_delay`: it is the lag of one room's soundbar, and two
         // Apple TVs are two rooms. No `default_bitrate` either: the quality a
         // device can stream at is its network's, not the household's. Nor

@@ -11,6 +11,7 @@
 
 import Foundation
 import Observation
+import UIKit
 import WatchConnectivity
 import os
 
@@ -142,6 +143,23 @@ final class WatchLink: NSObject {
     private(set) var lastPhoneContextAt: Date?
     private(set) var lastInventorySentAt: Date?
 
+    // The remote — see Views/PhoneRemoteViews.swift.
+
+    /// What the phone says it is playing, nil for nothing; `phonePlaybackAt`
+    /// is when it last said. Nil too until the phone has answered at all.
+    private(set) var phonePlayback: PhonePlaybackState?
+    private(set) var phonePlaybackAt: Date?
+    /// The cover of `phonePlayback`'s item, from the last state that
+    /// carried one.
+    private(set) var phoneArtwork: (itemId: String, image: UIImage)?
+    /// A command on its way, or an ask for the state: the phone takes a
+    /// moment to answer, and the buttons shouldn't look dead meanwhile.
+    private(set) var remoteBusy = false
+    private(set) var remoteError: String?
+    /// The item whose cover has been asked for once already: an item with
+    /// no cover at all would otherwise be asked for without end.
+    private var artworkAskedFor: String?
+
     private var inventoryTask: Task<Void, Never>?
     private var revision = 0
     /// When the newest context applied was built. The phone's revision
@@ -221,9 +239,91 @@ final class WatchLink: NSObject {
             downloads.notePhoneProgress(itemId: itemId, fraction: fraction)
         case .fetchFailed(let itemId, let reason):
             downloads.phoneFailed(itemId: itemId, reason: reason)
-        case .progress, .fetch, .fetchMany, .cancelFetch, .playlistRemoved, .requestContext, .logs:
+        case .phonePlayback(let state):
+            take(playback: state)
+        case .progress, .fetch, .fetchMany, .cancelFetch, .playlistRemoved, .requestContext, .logs, .requestPlayback, .remote:
             break
         }
+    }
+
+    // MARK: The remote
+
+    private func take(playback state: PhonePlaybackState?) {
+        phonePlaybackAt = Date()
+        remoteError = nil
+        guard let state else {
+            phonePlayback = nil
+            return
+        }
+        if let data = state.artwork, let image = UIImage(data: data) {
+            phoneArtwork = (state.itemId, image)
+        }
+        var kept = state
+        kept.artwork = nil
+        phonePlayback = kept
+        // A new item whose cover didn't come with it: ask for the lot, once.
+        if phoneArtwork?.itemId != state.itemId, state.artwork == nil, artworkAskedFor != state.itemId {
+            artworkAskedFor = state.itemId
+            requestPlayback()
+        }
+    }
+
+    /// Ask the phone what it is playing, now, in the reply.
+    func requestPlayback() {
+        guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return }
+        guard WCSession.default.isReachable else {
+            remoteError = "iPhone out of reach"
+            return
+        }
+        remoteBusy = true
+        WCSession.default.sendMessage(WatchSync.pack(WatchMessage.requestPlayback), replyHandler: { reply in
+            let answer = WatchSync.unpack(WatchReply.self, from: reply)
+            Task { @MainActor in
+                self.remoteBusy = false
+                guard let answer else { return }
+                self.take(playback: answer.playback)
+            }
+        }, errorHandler: { error in
+            WatchLog.error("link", "playback request failed: \(error.localizedDescription)")
+            Task { @MainActor in
+                self.remoteBusy = false
+                self.remoteError = "The iPhone didn't answer"
+            }
+        })
+    }
+
+    /// Tell the phone's player to do something. Only ever a live message: a
+    /// pause that arrived an hour late would be a surprise.
+    func remote(_ command: RemoteCommand) {
+        guard WCSession.isSupported(), WCSession.default.activationState == .activated, WCSession.default.isReachable else {
+            remoteError = "iPhone out of reach"
+            return
+        }
+        remoteBusy = true
+        remoteError = nil
+        // What the phone will do, drawn now rather than when it says so.
+        if var guess = phonePlayback {
+            switch command {
+            case .play: guess.isPlaying = true
+            case .pause: guess.isPlaying = false
+            case .togglePlayPause: guess.isPlaying.toggle()
+            case .seekTo(let seconds): guess.position = seconds
+            case .seekBy(let delta): guess.position = max(0, guess.position(now: Date()) + delta)
+            case .setSpeed(let speed): guess.speed = speed
+            case .next, .previous: break
+            }
+            guess.at = Date()
+            phonePlayback = guess
+        }
+        WCSession.default.sendMessage(WatchSync.pack(WatchMessage.remote(command)), replyHandler: { _ in
+            Task { @MainActor in self.remoteBusy = false }
+        }, errorHandler: { error in
+            WatchLog.error("link", "remote command failed: \(error.localizedDescription)")
+            Task { @MainActor in
+                self.remoteBusy = false
+                self.remoteError = "The iPhone didn't answer"
+            }
+        })
     }
 
     /// The watch's log, as a file transfer: it goes in the background, in
@@ -501,6 +601,8 @@ extension WatchLink: WCSessionDelegate {
         Task { @MainActor in
             isPhoneReachable = reachable
             if reachable {
+                remoteError = nil
+                if WatchMode.shared.source == .phone { requestPlayback() }
                 requestContext()
                 WatchDownloads.shared.pump()
                 await WatchSyncQueue.shared.flush()

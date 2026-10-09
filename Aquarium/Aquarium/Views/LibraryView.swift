@@ -109,6 +109,11 @@ struct LibraryView: View {
     /// and left others unreachable; instead the pages come in a fixed order,
     /// visited in a shuffled sequence and each shuffled within itself.
     @State private var shuffleSeed: UInt64 = 0
+    #if os(iOS)
+    /// The letter index's jump under way: a drag along the strip lands on
+    /// several letters, and only the last one's is wanted.
+    @State private var jumpTask: Task<Void, Never>?
+    #endif
 
     private static let pageSize = 60
 
@@ -311,6 +316,17 @@ struct LibraryView: View {
     }
 
     private var grid: some View {
+        #if os(iOS)
+        ScrollViewReader { proxy in
+            gridScroll
+                .letterIndex(shown: showsLetterIndex) { letter in jump(to: letter, proxy: proxy) }
+        }
+        #else
+        gridScroll
+        #endif
+    }
+
+    private var gridScroll: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 #if os(tvOS)
@@ -357,6 +373,53 @@ struct LibraryView: View {
             .padding(.top, 8)
         }
     }
+
+    #if os(iOS)
+    /// The strip is only honest on the name order, and only worth having on
+    /// a list too long to flick through.
+    private var showsLetterIndex: Bool {
+        sort == .name && !reversed && error == nil && items.count >= LetterIndex.minimumCount
+    }
+
+    private func jump(to letter: String, proxy: ScrollViewProxy) {
+        jumpTask?.cancel()
+        jumpTask = Task {
+            guard let id = await target(for: letter), !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .top) }
+        }
+    }
+
+    /// The item the strip should land on: the first at or after the letter.
+    /// Past what is loaded, the server says how many names come before the
+    /// letter, and the pages up to there are fetched in one go.
+    private func target(for letter: String) async -> String? {
+        if let hit = LetterIndex.first(in: items, atOrAfter: letter) { return hit.Id }
+        guard items.count < total, !isLoading else { return items.last?.Id }
+        var q = query(startIndex: 0, limit: 1)
+        q.nameLessThan = letter
+        guard let before = try? await fetch(q).total, !Task.isCancelled else { return nil }
+        await load(through: before)
+        guard !Task.isCancelled else { return nil }
+        return LetterIndex.first(in: items, atOrAfter: letter)?.Id ?? items.last?.Id
+    }
+
+    /// Everything from the end of what is loaded through the page that holds
+    /// `offset`, as one request, so the grid stays one unbroken list.
+    private func load(through offset: Int) async {
+        guard offset >= items.count, !isPaging else { return }
+        let mine = generation
+        isPaging = true
+        defer { isPaging = false }
+        let need = min(total, offset + Self.pageSize) - items.count
+        guard need > 0, let response = try? await fetch(query(startIndex: items.count, limit: need)), mine == generation else { return }
+        let known = Set(items.map(\.Id))
+        items += response.items.filter { !known.contains($0.Id) }
+        total = response.total
+        // Rounded down: the next page `loadMore` asks for overlaps the tail
+        // of this one rather than skipping past it, and repeats are dropped.
+        pagesLoaded = max(pagesLoaded, items.count / Self.pageSize)
+    }
+    #endif
 
     /// The grid's selection is the page's on the Mac, so the toolbar can act
     /// on it; elsewhere the grid has none.

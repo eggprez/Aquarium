@@ -171,15 +171,9 @@ struct ListenNowView: View {
     private func surpriseMe() async {
         isMixing = true
         defer { isMixing = false }
-        if let station = stations.randomElement() {
-            await play(station)
-            return
-        }
-        guard let album = randomAlbums.randomElement() else {
-            return app.toast("Nothing in the library to build a mix from yet", tone: .error)
-        }
-        let result = await MusicMixes.startStation(from: album, title: "Surprise Mix")
-        guard result.started else { return app.toast("The server couldn't build a mix", tone: .error) }
+        let result = await MusicMixes.startSurprise()
+        if result.isLocal, result.started { app.toast("The server didn't answer — mixed from your downloads", tone: .info) }
+        guard result.started else { return app.toast("Nothing in the library to build a mix from yet", tone: .error) }
     }
 
     private func reload() async {
@@ -219,6 +213,9 @@ struct ListenNowView: View {
         do { randomAlbums = try await randomTask.items } catch { failure = failure ?? error }
 
         let sortNames = await Self.artistSortNames(songs: topSongs + recentSongs)
+        // So a genre tagged in another script is named by the library's
+        // Latin spelling of it — see `MusicNames.genreName`.
+        await GenreCatalog.prime()
         stations = Self.stations(
             recent: recentSongs, top: topSongs, favoriteArtists: favoriteArtists, random: randomAlbums, sortNames: sortNames
         )

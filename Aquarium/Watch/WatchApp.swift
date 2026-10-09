@@ -21,6 +21,7 @@ struct AquariumWatchApp: App {
     @State private var link = WatchLink.shared
     @State private var sync = WatchSyncQueue.shared
     @State private var navigator = WatchNavigator()
+    @State private var mode = WatchMode.shared
 
     init() {
         WatchLog.launched()
@@ -36,6 +37,7 @@ struct AquariumWatchApp: App {
                 .environment(link)
                 .environment(sync)
                 .environment(navigator)
+                .environment(mode)
                 .tint(WatchTheme.accent)
                 .onOpenURL { WatchActions.handle($0) }
         }
@@ -44,6 +46,7 @@ struct AquariumWatchApp: App {
             case .active:
                 WatchLog.foregrounded()
                 link.requestContext()
+                if mode.source == .phone { link.requestPlayback() }
                 Task {
                     await client.checkOnline()
                     downloads.pump()

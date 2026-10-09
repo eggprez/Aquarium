@@ -89,9 +89,11 @@ extension View {
     ///
     /// `allowsOpen` is off where the thing being held *is* the page's own way
     /// in — a poster whose tap already opens the title page doesn't need a
-    /// menu entry saying so.
-    func itemContextMenu(_ item: BaseItem, allowsOpen: Bool = false) -> some View {
-        contextMenu { ItemMenu(item: item, allowsOpen: allowsOpen) }
+    /// menu entry saying so. `removesFromNextUp` is on for the rows that are
+    /// Next Up: the entry only means something where the show is being shown
+    /// *because* it is next up.
+    func itemContextMenu(_ item: BaseItem, allowsOpen: Bool = false, removesFromNextUp: Bool = false) -> some View {
+        contextMenu { ItemMenu(item: item, allowsOpen: allowsOpen, removesFromNextUp: removesFromNextUp) }
     }
 }
 
@@ -104,10 +106,12 @@ extension View {
 struct ItemMenu: View {
     let item: BaseItem
     var allowsOpen: Bool = false
+    var removesFromNextUp: Bool = false
 
     @Environment(AppModel.self) private var app
     @Environment(JellyfinClient.self) private var client
     @Environment(PlayerModel.self) private var player
+    @Environment(Preferences.self) private var prefs
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
     #endif
@@ -162,6 +166,13 @@ struct ItemMenu: View {
                     Label("Play from Beginning", systemImage: "gobackward")
                 }
             }
+            #if !os(tvOS)
+            // The queue — see `PlayerModel.queueNext`. Not a channel: live
+            // has no end for the next thing to follow.
+            if !isChannel, !item.isAudio {
+                queueActions([item])
+            }
+            #endif
         } else if item.isSeries || item.isSeason {
             // A show has no media of its own; what it means by "play" is the
             // episode you are up to, which only the server can name. Resolved
@@ -174,8 +185,53 @@ struct ItemMenu: View {
                 Label("Play Next Episode", systemImage: "play.fill")
             }
             .macShortcut(.return, modifiers: .command)
+            #if !os(tvOS)
+            // A season's episodes, in order, as one entry each — resolved
+            // when the button is pressed, like Play Next Episode above.
+            if item.isSeason {
+                Button {
+                    Task { await queueSeason(next: true) }
+                } label: {
+                    Label("Play Season Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                }
+                Button {
+                    Task { await queueSeason(next: false) }
+                } label: {
+                    Label("Play Season Later", systemImage: "text.line.last.and.arrowtriangle.forward")
+                }
+            }
+            #endif
         }
     }
+
+    #if !os(tvOS)
+    @ViewBuilder
+    private func queueActions(_ items: [BaseItem]) -> some View {
+        Button {
+            player.queueNext(items)
+            app.toast("Playing next", tone: .ok)
+        } label: {
+            Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+        }
+        Button {
+            player.queueLater(items)
+            app.toast("Added to Up Next", tone: .ok)
+        } label: {
+            Label("Play Later", systemImage: "text.line.last.and.arrowtriangle.forward")
+        }
+    }
+
+    private func queueSeason(next: Bool) async {
+        guard let seriesId = item.SeriesId ?? item.ParentId else { return }
+        let episodes = (try? await client.episodes(seriesId: seriesId, seasonId: item.Id)) ?? []
+        guard !episodes.isEmpty else {
+            app.toast("Nothing to queue here yet", tone: .error)
+            return
+        }
+        if next { player.queueNext(episodes) } else { player.queueLater(episodes) }
+        app.toast(next ? "Playing the season next" : "Added the season to Up Next", tone: .ok)
+    }
+    #endif
 
     /// Where the next episode comes from, in the order the answer gets less
     /// specific: what the server has queued for the show, else the first
@@ -299,6 +355,20 @@ struct ItemMenu: View {
             Label(watchedLabel, systemImage: item.userData.played ? "arrow.uturn.backward.circle" : "checkmark.circle")
         }
         .macShortcut("u", modifiers: [.command, .shift])
+
+        // Taking a show off Next Up without touching what the server thinks
+        // of it. Jellyfin has no such switch — the only way it offers is to
+        // mark episodes watched, which is a different thing — so this is the
+        // app's own list, and the show comes back on its own once a later
+        // episode has been watched. See `Preferences.nextUpHidden`.
+        if removesFromNextUp, item.isEpisode, let seriesId = item.SeriesId, !seriesId.isEmpty {
+            Button {
+                prefs.hideFromNextUp(seriesId: seriesId, episodeId: item.Id)
+                app.toast("Removed \(item.SeriesName ?? item.title) from Next Up", tone: .ok)
+            } label: {
+                Label("Remove from Next Up", systemImage: "eye.slash")
+            }
+        }
     }
 
     /// A show or a season is marked whole, and saying so is the difference
