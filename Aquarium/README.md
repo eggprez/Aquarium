@@ -65,6 +65,17 @@ Everything the Linux build does, with the exceptions listed further down.
   actually is (`1080p · HEVC · EAC3 · 5.1 · 8.4 GiB`).
 - **Skip intro / skip credits** from Jellyfin's media segments, and the **Up
   Next** card over the closing stretch of an episode with autoplay behind it.
+  The next episode's stream is asked for ninety seconds before the end — the
+  server is already encoding it by the time the card appears — so autoplay
+  cuts straight across rather than opening on a spinner (iPhone, iPad, Mac).
+- **A queue of your own** (iPhone, iPad, Mac) — Play Next and Play Later on
+  any film or episode, or a whole season, from its press-and-hold menu. What
+  is queued plays ahead of whatever the series would have offered; the Up
+  Next entry in the player's menu lists it, plays any row now, or clears it.
+- **Ease off when the device is struggling** — with adaptive quality on, a
+  phone that has run hot or is in Low Power Mode is held to 1080p at 10 Mbps,
+  and to 720p at its thermal limit, before the frame drops start rather than
+  after; it climbs back the usual way once it cools.
 - **Shuffle** over a downloaded series, drawing without repeats until the pool
   is spent.
 - **Sleep timer** — 15/30/60/90 minutes, or "stop after this episode".
@@ -181,6 +192,32 @@ now, and keeps the Now Playing and Siri Remote parts of this list):
   nothing to set up; and the app icon's press-and-hold menu leads with
   whatever Continue Watching would. Something playing on the phone can be
   picked up on the iPad or the Mac through Handoff, at the same point.
+- **The Home Screen, the Lock Screen and StandBy** (iPhone, iPad). A Now
+  Playing widget with the cover and a progress bar that keeps moving between
+  the app's own updates, in small and medium and as a Lock Screen row — the
+  medium one is what StandBy shows on a bedside table. The app writes a small
+  snapshot into the app group whenever what is playing changes; the widget
+  never talks to the server (`Shared/WidgetTypes.swift`).
+- **Control Centre** (iOS 18). Three buttons to add beside the flashlight:
+  Continue Watching, Shuffle Music and Resume Audiobook. The two music ones
+  start playback without bringing the app forward. The same three are App
+  Shortcuts, so any of them can be the Action button on an iPhone 15 Pro or
+  later (Settings → Action Button → Shortcut).
+- **SharePlay** (iPhone, iPad, Mac). "Watch Together with SharePlay" in the
+  player's menu offers the title to the FaceTime call in progress; everyone
+  on the call opens their own stream from their own server and
+  `AVPlayerPlaybackCoordinator` keeps the transports in step — a pause is a
+  pause for everyone, and the next thing anyone plays becomes what the call
+  is watching. Everyone needs an account that can see the title. Not Apple
+  TV, whose player has no coordinator to join. Needs Group Activities on the
+  App ID (`com.apple.developer.group-session`).
+- **New episode notifications** (iPhone, iPad). Settings → Appearance → Home
+  → "Tell me about new episodes": a notification when an episode *added to
+  the server* since the last look turns up in Next Up — Next Up moving on
+  because you finished something is not news. Looked for whenever Home
+  loads and, with Background App Refresh on, every few hours in the
+  background through `BGAppRefreshTask`; a tap opens the episode, Play plays
+  it (`Core/NextUpAlerts.swift`).
 - Picture in Picture, and AirPlay to another device.
 - The lock screen, Control Centre and Now Playing transport, plus media keys on
   a Mac keyboard and the Siri Remote on Apple TV — the counterpart to MPRIS.

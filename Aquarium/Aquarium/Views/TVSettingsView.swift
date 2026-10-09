@@ -67,6 +67,7 @@ struct SettingsView: View {
                 SettingLink(Self.row(.libraryCopy), value: SettingsSummary.libraryCopy(prefs), page: .libraryCopy) {
                     LibraryCopySettingsPage()
                 }
+                SettingToggle(Copy.combineNextUp, isOn: $prefs.combinesNextUp)
                 if prefs.cloudIsAvailable {
                     SettingToggle(Copy.cloudSync, isOn: $prefs.syncsAcrossDevices)
                 } else {

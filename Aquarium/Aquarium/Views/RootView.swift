@@ -32,6 +32,18 @@ struct RootView: View {
     /// detail toolbar, means there is always a button that can bring it back.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
 
+    #if os(iOS)
+    /// The floating sidebar toggle's circle, and where it sits from the
+    /// detail column's leading edge.
+    private static let sidebarToggleSize: CGFloat = 36
+    private static let sidebarToggleLeading: CGFloat = 12
+    /// How much further in than its gutter a page's own top bar has to start
+    /// to clear that button, with a little air after it.
+    private static var sidebarToggleClearance: CGFloat {
+        max(0, sidebarToggleLeading + sidebarToggleSize + 8 - Metrics.gutter)
+    }
+    #endif
+
     var body: some View {
         Group {
             if client.isSignedIn {
@@ -423,6 +435,11 @@ struct RootView: View {
             // how the sidebar ended up with no way back. This sits outside
             // that NavigationStack entirely, so it is there no matter what
             // page is showing or what that page does with its own toolbar.
+            //
+            // The pages underneath draw their own bars in that same corner —
+            // the wordmark on Home, the back button on a title — so while the
+            // button is there, every `AppTopBar` is told to start to the right
+            // of it. See `sidebarToggleInset`.
             .overlay(alignment: .topLeading) {
                 if sidebarVisibility == .detailOnly {
                     Button {
@@ -430,14 +447,18 @@ struct RootView: View {
                     } label: {
                         Image(systemName: "sidebar.leading")
                             .font(.body.weight(.semibold))
-                            .padding(10)
+                            .frame(width: Self.sidebarToggleSize, height: Self.sidebarToggleSize)
                             .background(.thinMaterial, in: Circle())
                     }
                     .accessibilityLabel("Show sidebar")
                     .padding(.top, 8)
-                    .padding(.leading, 12)
+                    .padding(.leading, Self.sidebarToggleLeading)
                 }
             }
+            .environment(
+                \.sidebarToggleInset,
+                sidebarVisibility == .detailOnly ? Self.sidebarToggleClearance : 0
+            )
             #endif
         }
         #if os(macOS)

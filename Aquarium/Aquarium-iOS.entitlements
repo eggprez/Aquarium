@@ -15,5 +15,16 @@
 	     App ID. Music/CarPlayScene.swift is the scene it unlocks. -->
 	<key>com.apple.developer.carplay-audio</key>
 	<true/>
+	<!-- The folder the Now Playing widget reads — see Shared/WidgetTypes.swift
+	     and LiveActivities/LiveActivities.entitlements. The same group the
+	     watch app and the Apple TV already use. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.scottai.FellyJin</string>
+	</array>
+	<!-- SharePlay — see Core/SharePlay.swift. Needs Group Activities enabled
+	     on the App ID. -->
+	<key>com.apple.developer.group-session</key>
+	<true/>
 </dict>
 </plist>

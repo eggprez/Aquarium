@@ -47,6 +47,12 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<!-- The look for new episodes — see Core/NextUpAlerts.swift. -->
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>scottai.FellyJin.nextup-refresh</string>
 	</array>
 </dict>
 </plist>

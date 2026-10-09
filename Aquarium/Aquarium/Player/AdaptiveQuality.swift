@@ -67,6 +67,9 @@ final class AdaptiveQuality {
     /// Best rung the policy may climb back to — the one the user actually asked
     /// for, lowered permanently when a climb turns out to be beyond the line.
     private var ceiling = 0
+    /// The rung the device itself can afford right now, as an index into the
+    /// ladder — see `notePower`. Nil when it can afford any of them.
+    private var powerCap: Int?
     private var streamStartedAt = Date.distantPast
     private var lastSwitchAt = Date.distantPast
     /// While this is in the future, the rung playing was chosen by hand and the
@@ -113,6 +116,44 @@ final class AdaptiveQuality {
         lastUpshiftAt = nil
         manualUntil = .distantPast
     }
+
+    // MARK: - The device
+
+    /// The rungs a device in this state is held to. Decoding and drawing a
+    /// 4K stream is what heats a phone up, and the thermal manager answers by
+    /// throttling the clocks — which is when frames start being dropped. The
+    /// policy already catches that, a minute late and after the slideshow.
+    /// Easing off at the warning instead keeps the picture smooth and the
+    /// phone cooler, and the usual climb brings it back once things settle.
+    ///
+    /// Low Power Mode is the person asking for the battery to last; a 1080p
+    /// stream at a third of the bits is a fair reading of that.
+    static func powerRung(thermal: ProcessInfo.ThermalState, lowPower: Bool) -> Int? {
+        var cap: Int?
+        if lowPower { cap = 10_000_000 }
+        switch thermal {
+        case .serious: cap = min(cap ?? .max, 10_000_000)
+        case .critical: cap = min(cap ?? .max, 5_000_000)
+        default: break
+        }
+        return cap
+    }
+
+    /// The device's state changed. True when the stream playing is now above
+    /// what it can afford and `decide` has a step down ready — a change the
+    /// caller is expected to act on at once rather than at the next tick.
+    func notePower(thermal: ProcessInfo.ThermalState, lowPower: Bool, currentBitrate: Int?) -> Bool {
+        let cap = Self.powerRung(thermal: thermal, lowPower: lowPower).flatMap(rungIndex)
+        powerCap = cap
+        guard let cap, rungIndex(currentBitrate) < cap else { return false }
+        powerReason = lowPower && thermal != .serious && thermal != .critical ? .lowPower : .heat
+        wantPowerDrop = true
+        return true
+    }
+
+    private enum PowerReason { case heat, lowPower }
+    private var powerReason: PowerReason = .heat
+    private var wantPowerDrop = false
 
     /// The stream is finally playing. The opening hold — fetching the playlist,
     /// waiting for a transcode to reach the position it was seeked to — can run
@@ -286,6 +327,26 @@ final class AdaptiveQuality {
     func decide(currentBitrate: Int?) -> Decision? {
         let index = rungIndex(currentBitrate)
 
+        // The device's own limit comes first and waits for nothing — not the
+        // startup grace, not a rung picked by hand. A phone at its thermal
+        // limit is going to drop frames whatever anyone chose.
+        if wantPowerDrop {
+            wantPowerDrop = false
+            if let cap = powerCap, index < cap {
+                lastSwitchAt = Date()
+                lastUpshiftAt = nil
+                let label = Quality.choices[cap].label
+                return Decision(
+                    bitrate: Quality.choices[cap].maxBitrate,
+                    message: powerReason == .heat
+                        ? "This device is running hot — easing to \(label)"
+                        : "Low Power Mode — easing to \(label)",
+                    isDrop: true,
+                    reason: powerReason == .heat ? "Device running hot" : "Low Power Mode"
+                )
+            }
+        }
+
         if wantDown {
             wantDown = false
             guard !settling else { return nil }
@@ -325,7 +386,7 @@ final class AdaptiveQuality {
         if wantUp {
             wantUp = false
             let next = index - 1
-            guard next >= ceiling, next >= 0, !settling else { return nil }
+            guard next >= ceiling, next >= (powerCap ?? 0), next >= 0, !settling else { return nil }
             lastUpshiftAt = Date()
             lastSwitchAt = Date()
             return Decision(

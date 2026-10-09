@@ -17,6 +17,9 @@
 		FE11A5D00000000000000123 /* ListeningLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000103 /* ListeningLiveActivity.swift */; };
 		FE11A5D00000000000000124 /* DownloadsLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000104 /* DownloadsLiveActivity.swift */; };
 		FE11A5D00000000000000125 /* LiveActivities.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000101 /* LiveActivities.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		FE11A5D00000000000000126 /* WidgetTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000107 /* WidgetTypes.swift */; };
+		FE11A5D00000000000000127 /* WidgetTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000107 /* WidgetTypes.swift */; };
+		FE11A5D00000000000000128 /* NowPlayingWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000108 /* NowPlayingWidget.swift */; };
 		FE11A5D00000000000000220 /* WatchSyncTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000206 /* WatchSyncTypes.swift */; };
 		FE11A5D00000000000000221 /* WatchSyncTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000206 /* WatchSyncTypes.swift */; };
 		FE11A5D00000000000000222 /* WatchWidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000207 /* WatchWidgetSnapshot.swift */; };
@@ -110,6 +113,9 @@
 		FE11A5D00000000000000104 /* DownloadsLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsLiveActivity.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000105 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		FE11A5D00000000000000106 /* LiveActivityTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityTypes.swift; sourceTree = "<group>"; };
+		FE11A5D00000000000000107 /* WidgetTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetTypes.swift; sourceTree = "<group>"; };
+		FE11A5D00000000000000108 /* NowPlayingWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingWidget.swift; sourceTree = "<group>"; };
+		FE11A5D00000000000000109 /* LiveActivities.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LiveActivities.entitlements; sourceTree = "<group>"; };
 		FE11A5D00000000000000201 /* AquariumWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AquariumWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FE11A5D00000000000000206 /* WatchSyncTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchSyncTypes.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000207 /* WatchWidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchWidgetSnapshot.swift; sourceTree = "<group>"; };
@@ -240,6 +246,7 @@
 				FE11A5D00000000000000106 /* LiveActivityTypes.swift */,
 				FE11A5D00000000000000206 /* WatchSyncTypes.swift */,
 				FE11A5D00000000000000207 /* WatchWidgetSnapshot.swift */,
+				FE11A5D00000000000000107 /* WidgetTypes.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -250,7 +257,9 @@
 				FE11A5D00000000000000102 /* LiveActivitiesBundle.swift */,
 				FE11A5D00000000000000103 /* ListeningLiveActivity.swift */,
 				FE11A5D00000000000000104 /* DownloadsLiveActivity.swift */,
+				FE11A5D00000000000000108 /* NowPlayingWidget.swift */,
 				FE11A5D00000000000000105 /* Info.plist */,
+				FE11A5D00000000000000109 /* LiveActivities.entitlements */,
 			);
 			path = LiveActivities;
 			sourceTree = "<group>";
@@ -498,6 +507,7 @@
 			files = (
 				FE11A5D00000000000000020 /* TopShelfSnapshot.swift in Sources */,
 				FE11A5D00000000000000120 /* LiveActivityTypes.swift in Sources */,
+				FE11A5D00000000000000126 /* WidgetTypes.swift in Sources */,
 				FE11A5D00000000000000220 /* WatchSyncTypes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -518,7 +528,9 @@
 				FE11A5D00000000000000122 /* LiveActivitiesBundle.swift in Sources */,
 				FE11A5D00000000000000123 /* ListeningLiveActivity.swift in Sources */,
 				FE11A5D00000000000000124 /* DownloadsLiveActivity.swift in Sources */,
+				FE11A5D00000000000000128 /* NowPlayingWidget.swift in Sources */,
 				FE11A5D00000000000000121 /* LiveActivityTypes.swift in Sources */,
+				FE11A5D00000000000000127 /* WidgetTypes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -888,6 +900,7 @@
 		FE11A5D00000000000000142 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = LiveActivities/LiveActivities.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 70;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
@@ -917,6 +930,7 @@
 		FE11A5D00000000000000143 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = LiveActivities/LiveActivities.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 70;
 				DEVELOPMENT_TEAM = 6S26L64S3C;

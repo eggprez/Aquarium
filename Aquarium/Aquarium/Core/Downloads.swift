@@ -135,6 +135,45 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
 
     var isEpisode: Bool { type == "Episode" || (series != nil && type != "Movie") }
 
+    /// Take the server's description of the item: its name, where it sits in
+    /// its show or on its album, who made it, and where its pictures are.
+    /// Nothing about the file on this device or what has been done with it —
+    /// the quality, the bytes, the position — moves. Written when the record
+    /// is made and again whenever the server is asked about it later, so a
+    /// title fixed or a cover replaced on the server reaches the copy here.
+    /// Returns whether anything was different.
+    @MainActor
+    @discardableResult
+    mutating func describe(_ item: BaseItem) -> Bool {
+        let before = self
+        title = DownloadManager.displayTitle(item)
+        name = item.title
+        series = item.SeriesName
+        seriesId = item.SeriesId
+        season = item.ParentIndexNumber
+        seasonId = item.SeasonId
+        episode = item.IndexNumber
+        year = item.ProductionYear
+        // Three levels, stored separately, because the downloads screens
+        // draw all three: the episode's own thumbnail on its row, the
+        // season's poster on its heading, the show's on its tile. Which one a
+        // view falls back to when the server has none is the view's decision,
+        // not this one's.
+        imageURL = (item.isAudio
+            ? MusicArt.url(item, width: 600)
+            : item.isEpisode
+                ? Artwork.ownPrimary(item, width: 500)
+                : Artwork.url(item, type: "Primary", width: 500))?.absoluteString
+        seasonImageURL = item.isEpisode ? Artwork.seasonPoster(item, width: 500)?.absoluteString : nil
+        seriesImageURL = item.isEpisode ? Artwork.seriesPoster(item, width: 500)?.absoluteString : nil
+        album = item.Album
+        albumId = item.AlbumId
+        artist = item.isAudio ? (item.AlbumArtist ?? item.artistLine) : nil
+        track = item.isAudio ? item.IndexNumber : nil
+        disc = item.isAudio ? item.ParentIndexNumber : nil
+        return self != before
+    }
+
     /// Decoded key by key, every one of them optional.
     ///
     /// Swift's own `init(from:)` would be shorter and is a trap here: it does
@@ -1589,12 +1628,6 @@ final class DownloadManager: NSObject {
                 title: Self.displayTitle(item),
                 name: item.title,
                 type: item.kind,
-                series: item.SeriesName,
-                seriesId: item.SeriesId,
-                season: item.ParentIndexNumber,
-                seasonId: item.SeasonId,
-                episode: item.IndexNumber,
-                year: item.ProductionYear,
                 runTimeTicks: item.RunTimeTicks ?? 0,
                 quality: quality.label,
                 fileName: built.fileName,
@@ -1604,25 +1637,13 @@ final class DownloadManager: NSObject {
                 // Seed watch state from the server so an already-watched episode
                 // shows its tick and resume point immediately.
                 positionTicks: item.userData.positionTicks,
-                played: item.userData.played,
-                // Three levels, stored separately, because the downloads
-                // screens draw all three: the episode's own thumbnail on its
-                // row, the season's poster on its heading, the show's on its
-                // tile. Which one a view falls back to when the server has none
-                // is the view's decision, not this one's.
-                imageURL: (item.isAudio
-                    ? MusicArt.url(item, width: 600)
-                    : item.isEpisode
-                        ? Artwork.ownPrimary(item, width: 500)
-                        : Artwork.url(item, type: "Primary", width: 500))?.absoluteString,
-                seasonImageURL: item.isEpisode ? Artwork.seasonPoster(item, width: 500)?.absoluteString : nil,
-                seriesImageURL: item.isEpisode ? Artwork.seriesPoster(item, width: 500)?.absoluteString : nil,
-                album: item.Album,
-                albumId: item.AlbumId,
-                artist: item.isAudio ? (item.AlbumArtist ?? item.artistLine) : nil,
-                track: item.isAudio ? item.IndexNumber : nil,
-                disc: item.isAudio ? item.ParentIndexNumber : nil
+                played: item.userData.played
             )
+            // The name, the album, the artwork addresses — everything the
+            // server may later say differently. In one place so the refresh
+            // that keeps them current (`adopt`) writes exactly what a fresh
+            // download would.
+            record.describe(item)
         } else {
             // Nothing to build a URL from. The slot stays claimed while the
             // item is fetched back, because releasing it here sends the pump
@@ -2197,6 +2218,87 @@ final class DownloadManager: NSObject {
         for i in queue.indices where queue[i].retryAt != nil { queue[i].retryAt = nil }
         persistQueue()
         pump()
+        Task { await refreshDescriptions() }
+    }
+
+    // MARK: - Keeping up with the server
+
+    /// Ask the server about these downloads and take whatever it says about
+    /// them — see `DownloadRecord.describe`. A download the server no longer
+    /// has is simply not in the answer and is left exactly as it was: the
+    /// file is still here and still plays, and its last known name is better
+    /// than none. Returns the items the server did answer with, for whoever
+    /// else wants them; throws when the server could not be asked at all.
+    func describe(ids: [String]) async throws -> [BaseItem] {
+        guard !ids.isEmpty else { return [] }
+        let items = try await JellyfinClient.shared.itemsByIds(
+            ids, fields: JellyfinClient.musicFields, countsForOffline: false
+        )
+        adopt(items)
+        return items
+    }
+
+    /// Fresh descriptions for whichever of these items are downloaded here.
+    /// A record whose picture now has a different tag has its saved copy
+    /// replaced; one whose name or album moved is rewritten. Records still
+    /// transferring are left alone — their description was written seconds
+    /// ago from the same item.
+    func adopt(_ items: [BaseItem]) {
+        for item in items {
+            guard var rec = record(for: item.Id), rec.status == .complete else { continue }
+            let was = rec
+            guard rec.describe(item) else { continue }
+            save(rec)
+            let pictures: [(DownloadArtwork.Kind, String?, String?)] = [
+                (.primary, was.imageURL, rec.imageURL),
+                (.season, was.seasonImageURL, rec.seasonImageURL),
+                (.series, was.seriesImageURL, rec.seriesImageURL),
+            ]
+            // Only a picture the server now names differently is fetched
+            // again. One it no longer names at all keeps the copy that is
+            // here: a response that happened to come without image tags
+            // would otherwise strip every cover on the device.
+            let changed = pictures.compactMap { kind, before, after -> DownloadArtwork.Kind? in
+                guard after != nil, DownloadArtwork.key(before) != DownloadArtwork.key(after) else { return nil }
+                return kind
+            }
+            guard !changed.isEmpty else { continue }
+            let replaced = rec
+            Task.detached(priority: .utility) { await DownloadArtwork.replace(replaced, kinds: changed) }
+        }
+    }
+
+    /// How long a description is trusted before the server is asked again.
+    private static let describeEvery: TimeInterval = 6 * 3600
+
+    /// When every film and episode here was last described. Kept across
+    /// launches, as `OfflineMusicIndex.lastRefresh` is.
+    private var lastDescribed: Date? {
+        get { UserDefaults.standard.object(forKey: "downloads_described") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "downloads_described") }
+    }
+
+    @ObservationIgnored private var describing: Task<Void, Never>?
+
+    /// Bring the films and episodes up to date with the server, a few times a
+    /// day at most. Songs and books are not asked about here: the
+    /// `OfflineMusicIndex` already asks the server about every one of them for
+    /// its own facts, and routes that answer through `describe` so the one
+    /// request serves both.
+    func refreshDescriptions(force: Bool = false) async {
+        let client = JellyfinClient.shared
+        guard client.isSignedIn, !client.isOffline else { return }
+        if let running = describing { return await running.value }
+        let task = Task { [self] in
+            let due = force || lastDescribed.map { Date().timeIntervalSince($0) > Self.describeEvery } ?? true
+            guard due else { return }
+            let ids = records.filter { !$0.isAudio && $0.status == .complete }.map(\.itemId)
+            guard (try? await describe(ids: ids)) != nil else { return }
+            lastDescribed = Date()
+        }
+        describing = task
+        await task.value
+        describing = nil
     }
 
     static func displayTitle(_ item: BaseItem) -> String {
@@ -2665,6 +2767,32 @@ enum DownloadArtwork {
     /// Whether each picture is on disk, by "itemId/kind", as far as it has
     /// been asked.
     private static let presence = OSAllocatedUnfairLock(initialState: [String: Bool]())
+
+    /// What names the picture in one of the server's addresses: the item and
+    /// the image tag, with the host left out. Two addresses with the same key
+    /// are the same picture even when the server is reached by a different
+    /// name than it was at download time, which is not a reason to fetch
+    /// every cover again. A season poster carries no tag (see
+    /// `Artwork.seasonPoster`), so a change to one goes unnoticed here.
+    static func key(_ remote: String?) -> String? {
+        guard let remote, let parts = URLComponents(string: remote) else { return nil }
+        let tag = parts.queryItems?.first { $0.name == "tag" }?.value ?? ""
+        return "\(parts.path)#\(tag)"
+    }
+
+    /// The server has a different picture now: drop the copy here and the
+    /// memory of there having been none, and fetch what it has.
+    static func replace(_ record: DownloadRecord, kinds: [Kind]) async {
+        for kind in kinds {
+            let local = file(itemId: record.itemId, kind: kind)
+            try? FileManager.default.removeItem(at: local)
+            try? FileManager.default.removeItem(at: absentMarker(itemId: record.itemId, kind: kind))
+            presence.withLock { $0["\(record.itemId)/\(kind.rawValue)"] = nil }
+            // Already decoded at the old address — which is this same file.
+            await ImageLoader.shared.forget(local)
+        }
+        await cache(record)
+    }
 
     /// The item's folder is gone.
     static func forget(itemId: String) {

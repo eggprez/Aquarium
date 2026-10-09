@@ -26,11 +26,10 @@
 	<array>
 		<string>arm64</string>
 	</array>
-	<!-- A WidgetKit extension with no widgets in it: Live Activities are drawn
-	     by one, and this is the only reason the target exists. It has no
-	     entitlements file because it needs none — everything it draws arrives
-	     in the activity's own state, so it reads no shared container, no
-	     keychain and no network. -->
+	<!-- A WidgetKit extension: the Live Activities, the Now Playing widget
+	     and the Control Centre buttons. Its only entitlement is the app group
+	     the widget's snapshot is written into — it reads no keychain and no
+	     network. -->
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>

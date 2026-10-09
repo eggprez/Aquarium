@@ -44,6 +44,7 @@ final class NowPlaying {
         let videoHasNext = model?.upNext != nil
         #else
         let videoHasNext = model?.upNext != nil || model?.upNextLocalId != nil || model?.isShuffling == true
+            || model?.queue.isEmpty == false
         #endif
         centre.nextTrackCommand.isEnabled = onStage || videoHasNext
         centre.skipForwardCommand.isEnabled = !onStage || music.current?.isAudiobook == true

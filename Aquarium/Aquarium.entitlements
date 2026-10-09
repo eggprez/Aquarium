@@ -15,6 +15,10 @@
 	     quietly, so a build signed without it behaves as before. -->
 	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
 	<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+	<!-- SharePlay — see Core/SharePlay.swift. Needs Group Activities enabled
+	     on the App ID. -->
+	<key>com.apple.developer.group-session</key>
+	<true/>
 	<!-- No CarPlay key here: macOS refuses an upload that carries
 	     com.apple.developer.carplay-audio. iPhone/iPad sign with
 	     Aquarium-iOS.entitlements, which has it. -->

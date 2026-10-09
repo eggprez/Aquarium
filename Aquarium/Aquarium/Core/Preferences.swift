@@ -68,6 +68,14 @@ enum Quality {
         choices.first { $0.maxBitrate == bitrate }?.short ?? "Custom"
     }
 
+    /// Where a bitrate sits on the ladder: 0 is direct play, and a higher
+    /// index is a smaller stream. A bitrate that isn't a rung is read as the
+    /// rung `snapped` would make of it.
+    static func rungIndex(_ bitrate: Int?) -> Int {
+        let rung = snapped(bitrate)
+        return choices.firstIndex { $0.maxBitrate == rung } ?? 0
+    }
+
     /// A stored bitrate moved onto the current ladder.
     ///
     /// The rungs are not the ones earlier builds wrote, and a saved default of
@@ -390,9 +398,63 @@ final class Preferences {
         didSet { write(adaptiveQuality, forKey: "adaptive") }
     }
 
+    /// Ease the stream off when the device itself is the limit: a phone that
+    /// has run hot, or one in Low Power Mode. See `AdaptiveQuality.notePower`.
+    var powerAwareQuality: Bool {
+        didSet { write(powerAwareQuality, forKey: "power_aware_quality") }
+    }
+
+    /// A notification when an episode new to the server lands in Next Up —
+    /// see `NextUpAlerts`. Per device, because permission to notify is.
+    var newEpisodeAlerts: Bool {
+        didSet { defaults.set(newEpisodeAlerts, forKey: "new_episode_alerts") }
+    }
+
     /// Start the next episode when one finishes.
     var autoplayNext: Bool {
         didSet { write(autoplayNext, forKey: "autoplay_next") }
+    }
+
+    /// Draw Home's Continue Watching and Next Up as one row: a poster per
+    /// show, carrying the progress of the episode you are partway through.
+    /// See `HomeRows.combined`.
+    var combinesNextUp: Bool {
+        didSet { write(combinesNextUp, forKey: "home_combine_next_up") }
+    }
+
+    /// Shows taken out of Next Up by hand — see `ItemMenu`'s "Remove from
+    /// Next Up". Jellyfin has no way to hide a show from Next Up without
+    /// marking something watched, so the list is this app's, and it travels
+    /// with the account's other preferences.
+    ///
+    /// Keyed by account and series (see `nextUpHiddenKey`), the value being
+    /// the episode the row was showing when the show was removed. A show
+    /// stays hidden while that is still the episode Next Up has for it, and
+    /// comes back by itself once something later has been watched — the
+    /// same moment the row would have changed anyway. Nothing to forget, no
+    /// list to manage.
+    var nextUpHidden: [String: String] {
+        didSet { write(nextUpHidden, forKey: "next_up_hidden") }
+    }
+
+    private func nextUpHiddenKey(seriesId: String) -> String? {
+        guard let session else { return nil }
+        return session.accountKey + "|" + seriesId
+    }
+
+    /// Hide a show from Next Up while `episodeId` is the episode its card
+    /// stands for.
+    func hideFromNextUp(seriesId: String, episodeId: String) {
+        guard let key = nextUpHiddenKey(seriesId: seriesId) else { return }
+        nextUpHidden[key] = episodeId
+    }
+
+    /// The episode this account removed the show at, if it ever did. The
+    /// caller compares it with what the row would show now — see
+    /// `HomeRows.visible`.
+    func nextUpHiddenEpisode(seriesId: String) -> String? {
+        guard let key = nextUpHiddenKey(seriesId: seriesId) else { return nil }
+        return nextUpHidden[key]
     }
 
     /// Default quality for a new stream. `nil` is direct play. This device's
@@ -730,7 +792,11 @@ final class Preferences {
         accounts = savedAccounts
         theme = ThemePref(rawValue: d.string(forKey: "theme") ?? "") ?? .auto
         adaptiveQuality = d.object(forKey: "adaptive") == nil ? true : d.bool(forKey: "adaptive")
+        powerAwareQuality = d.object(forKey: "power_aware_quality") == nil ? true : d.bool(forKey: "power_aware_quality")
+        newEpisodeAlerts = d.bool(forKey: "new_episode_alerts")
         autoplayNext = d.object(forKey: "autoplay_next") == nil ? true : d.bool(forKey: "autoplay_next")
+        combinesNextUp = d.bool(forKey: "home_combine_next_up")
+        nextUpHidden = (d.dictionary(forKey: "next_up_hidden") as? [String: String]) ?? [:]
         defaultBitrate = Quality.snapped(d.object(forKey: "default_bitrate") as? Int)
         stereoDownmix = d.bool(forKey: "stereo_downmix")
         decodeAudioLocally = d.bool(forKey: "decode_audio_locally")
@@ -814,7 +880,10 @@ final class Preferences {
         guard CloudSync.isAvailable else { return }
         CloudSync.set(theme.rawValue, forKey: "theme")
         CloudSync.set(adaptiveQuality, forKey: "adaptive")
+        CloudSync.set(powerAwareQuality, forKey: "power_aware_quality")
         CloudSync.set(autoplayNext, forKey: "autoplay_next")
+        CloudSync.set(combinesNextUp, forKey: "home_combine_next_up")
+        CloudSync.set(nextUpHidden, forKey: "next_up_hidden")
         CloudSync.set(stereoDownmix, forKey: "stereo_downmix")
         CloudSync.set(resumePlayback, forKey: "resume_playback")
         CloudSync.set(audioLanguage, forKey: "audio_lang")
@@ -887,7 +956,10 @@ final class Preferences {
         if let v = CloudSync.object(forKey: "theme") as? String,
            let t = ThemePref(rawValue: v), t != theme { theme = t }
         if let v = CloudSync.object(forKey: "adaptive") as? Bool, v != adaptiveQuality { adaptiveQuality = v }
+        if let v = CloudSync.object(forKey: "power_aware_quality") as? Bool, v != powerAwareQuality { powerAwareQuality = v }
         if let v = CloudSync.object(forKey: "autoplay_next") as? Bool, v != autoplayNext { autoplayNext = v }
+        if let v = CloudSync.object(forKey: "home_combine_next_up") as? Bool, v != combinesNextUp { combinesNextUp = v }
+        if let v = CloudSync.object(forKey: "next_up_hidden") as? [String: String], v != nextUpHidden { nextUpHidden = v }
         if let v = CloudSync.object(forKey: "stereo_downmix") as? Bool, v != stereoDownmix { stereoDownmix = v }
         if let v = CloudSync.object(forKey: "resume_playback") as? Bool, v != resumePlayback { resumePlayback = v }
         if let v = CloudSync.object(forKey: "audio_lang") as? String, v != audioLanguage { audioLanguage = v }

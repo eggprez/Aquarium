@@ -657,6 +657,9 @@ struct MediaShelf: View {
     /// where it leads somewhere else — Next Up opens the season the episode
     /// sits in, so the episode's own page is worth an entry.
     var menuOpensDetails: Bool = false
+    /// Whether the press-and-hold menu offers "Remove from Next Up". On for
+    /// the rows that are Next Up, or carry it — see `ItemMenu`.
+    var menuRemovesFromNextUp: Bool = false
     var onSelect: (BaseItem) -> Void
     var seeAll: (() -> Void)?
 
@@ -751,7 +754,7 @@ struct MediaShelf: View {
         }
         .buttonStyle(PosterButtonStyle())
         .posterZoomSource("\(title)/\(item.Id)", in: zoomNamespace)
-        .itemContextMenu(item, allowsOpen: menuOpensDetails)
+        .itemContextMenu(item, allowsOpen: menuOpensDetails, removesFromNextUp: menuRemovesFromNextUp)
         #if os(macOS)
         .help(item.title)
         #endif
@@ -2342,8 +2345,13 @@ struct AppTopBar<Content: View>: View {
     var height: CGFloat = Metrics.topBar
     @ViewBuilder var content: Content
 
+    /// Room for the floating sidebar toggle on an iPad whose sidebar is
+    /// collapsed — see `sidebarToggleInset`. Zero everywhere else.
+    @Environment(\.sidebarToggleInset) private var toggleInset
+
     var body: some View {
         content
+            .padding(.leading, toggleInset)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Metrics.gutter)
             .padding(.bottom, 9)
@@ -2362,6 +2370,23 @@ struct AppTopBar<Content: View>: View {
                     .fill(Theme.border)
                     .frame(height: 0.5)
             }
+    }
+}
+
+/// How far the leading end of a self-drawn top bar has to move over to clear
+/// the floating "show sidebar" button `RootView` lays over the detail column
+/// of an iPad whose sidebar is collapsed. That button sits outside the
+/// navigation stack, in the corner `AppTopBar` puts the wordmark or the back
+/// button in, and without this the two land on top of each other. Zero when
+/// the sidebar is showing, and on anything that has no sidebar.
+private struct SidebarToggleInsetKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    var sidebarToggleInset: CGFloat {
+        get { self[SidebarToggleInsetKey.self] }
+        set { self[SidebarToggleInsetKey.self] = newValue }
     }
 }
 

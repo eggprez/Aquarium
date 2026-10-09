@@ -595,6 +595,12 @@ actor ImageLoader {
     }
 
     /// Dropped when the app is put under memory pressure.
+    /// The picture at this address has changed on disk. Nothing is fetched;
+    /// the next request simply reads the file again.
+    func forget(_ url: URL) {
+        cache.removeObject(forKey: url as NSURL)
+    }
+
     func purge() {
         cache.removeAllObjects()
         widestInMemory = [:]

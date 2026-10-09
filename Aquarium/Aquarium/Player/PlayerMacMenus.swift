@@ -245,6 +245,27 @@ struct PlayerMenuItems: View {
             }
         }
 
+        // What was queued by hand — see `PlayerModel.queueNext`. A row plays
+        // its title now; the rows above it go.
+        Menu("Up Next") {
+            if player.queue.isEmpty {
+                Text("Nothing Queued")
+            } else {
+                ForEach(player.queue, id: \.Id) { queued in
+                    Button(PlayerModel.displayTitle(queued)) { Task { await player.playQueued(queued.Id) } }
+                }
+                Divider()
+                Button("Clear Up Next") { player.clearQueue() }
+            }
+        }
+
+        // The same film on everyone's screen — see Core/SharePlay.swift.
+        if SharePlayCoordinator.shared.isActive {
+            Button("Leave SharePlay") { SharePlayCoordinator.shared.leave() }
+        } else if let item = player.item, !player.isLocal, !player.isLive {
+            Button("Watch Together with SharePlay") { Task { await SharePlayCoordinator.shared.share(item) } }
+        }
+
         Menu("Sleep") {
             if let left = player.sleepMinutesRemaining {
                 Button("Cancel Sleep Timer (\(left) min left)") { player.cancelSleepTimer() }
@@ -471,6 +492,27 @@ final class PlayerActionMenu: NSObject, NSMenuDelegate {
             delay.addItem(why)
         }
         menu.addItem(submenu("Audio Delay", delay))
+
+        let upNext = NSMenu(title: "Up Next")
+        if player.queue.isEmpty {
+            let none = item("Nothing Queued") {}
+            none.isEnabled = false
+            upNext.addItem(none)
+        } else {
+            for queued in player.queue {
+                upNext.addItem(item(PlayerModel.displayTitle(queued)) { Task { await player.playQueued(queued.Id) } })
+            }
+            upNext.addItem(.separator())
+            upNext.addItem(item("Clear Up Next") { player.clearQueue() })
+        }
+        menu.addItem(submenu("Up Next", upNext))
+
+        let shareplay = SharePlayCoordinator.shared
+        if shareplay.isActive {
+            menu.addItem(item("Leave SharePlay") { shareplay.leave() })
+        } else if let current = player.item, !player.isLocal, !player.isLive {
+            menu.addItem(item("Watch Together with SharePlay") { Task { await shareplay.share(current) } })
+        }
 
         let sleep = NSMenu(title: "Sleep")
         if let left = player.sleepMinutesRemaining {

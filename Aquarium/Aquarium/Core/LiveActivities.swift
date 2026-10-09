@@ -20,6 +20,7 @@ import ActivityKit
 import Foundation
 import Observation
 import UIKit
+import WidgetKit
 import os
 
 @MainActor
@@ -56,6 +57,7 @@ final class LiveActivityCenter {
 
         watchListening()
         watchDownloads()
+        watchNowPlaying()
 
         // A start refused because the app was behind is asked for again here.
         NotificationCenter.default.addObserver(
@@ -274,6 +276,144 @@ final class LiveActivityCenter {
             )
         }
         return nil
+    }
+
+    // MARK: - The Now Playing widget
+
+    private var nowPlayingSent: NowPlayingSnapshot?
+    /// The artwork written beside the snapshot, by the URL it came from.
+    private var nowPlayingArtworkFor: URL?
+    private var nowPlayingArtworkTask: Task<Void, Never>?
+    /// While something plays, a look a minute at where the playhead really
+    /// is, so a seek the card didn't hear about is caught.
+    private var nowPlayingTicker: Task<Void, Never>?
+    private static let nowPlayingDrift: Double = 3
+
+    /// What the Home Screen card shows — see Shared/WidgetTypes.swift. Only
+    /// the things that name a change are read under observation; the
+    /// playhead is read in a turn of its own, so a tick isn't a redraw.
+    private func watchNowPlaying() {
+        withObservationTracking {
+            let music = MusicPlayer.shared
+            let player = PlayerModel.shared
+            _ = music.isActive
+            _ = music.current?.Id
+            _ = music.isPlaying
+            _ = music.duration
+            _ = player.isActive
+            _ = player.item?.Id
+            _ = player.title
+            _ = player.isPaused
+            _ = player.duration
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.publishNowPlaying()
+                self?.watchNowPlaying()
+            }
+        }
+    }
+
+    private func nowPlayingSnapshot() -> (snapshot: NowPlayingSnapshot, artwork: URL?)? {
+        let music = MusicPlayer.shared
+        if music.isActive, let item = music.current {
+            let snapshot = NowPlayingSnapshot(
+                itemId: item.Id,
+                title: (item.isAudiobook ? item.Album : nil) ?? item.title,
+                subtitle: item.artistLine,
+                isVideo: false, isPlaying: music.isPlaying,
+                position: music.position, duration: music.duration, rate: music.speed,
+                hasArtwork: false
+            )
+            return (snapshot, music.artworkURL)
+        }
+        let player = PlayerModel.shared
+        if player.isActive, !player.isLive, !player.isExternal {
+            let snapshot = NowPlayingSnapshot(
+                itemId: player.item?.Id ?? "",
+                title: player.title, subtitle: player.subtitle,
+                isVideo: true, isPlaying: !player.isPaused,
+                position: player.position, duration: player.duration, rate: player.speed,
+                hasArtwork: false
+            )
+            return (snapshot, player.artworkURL)
+        }
+        return nil
+    }
+
+    private func publishNowPlaying() {
+        guard let current = nowPlayingSnapshot() else {
+            nowPlayingTicker?.cancel()
+            nowPlayingTicker = nil
+            // Playback stopped. The card keeps what was last playing, paused,
+            // so a glance at StandBy still says where you were.
+            guard var last = nowPlayingSent, last.isPlaying else { return }
+            last.position = last.position(at: Date())
+            last.isPlaying = false
+            last.updatedAt = Date()
+            nowPlayingSent = last
+            NowPlayingSnapshot.write(last)
+            WidgetCenter.shared.reloadTimelines(ofKind: NowPlayingSnapshot.widgetKind)
+            return
+        }
+        var snapshot = current.snapshot
+        loadNowPlayingArtwork(current.artwork)
+        snapshot.hasArtwork = current.artwork != nil && nowPlayingArtworkFor == current.artwork
+
+        if let sent = nowPlayingSent,
+           sent.itemId == snapshot.itemId, sent.title == snapshot.title, sent.isPlaying == snapshot.isPlaying,
+           sent.hasArtwork == snapshot.hasArtwork, abs(sent.duration - snapshot.duration) < 1,
+           abs(sent.position(at: snapshot.updatedAt) - snapshot.position) < Self.nowPlayingDrift {
+            return
+        }
+        nowPlayingSent = snapshot
+        NowPlayingSnapshot.write(snapshot)
+        WidgetCenter.shared.reloadTimelines(ofKind: NowPlayingSnapshot.widgetKind)
+
+        if snapshot.isPlaying, nowPlayingTicker == nil {
+            nowPlayingTicker = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(60))
+                    guard let self, !Task.isCancelled else { return }
+                    self.publishNowPlaying()
+                }
+            }
+        } else if !snapshot.isPlaying {
+            nowPlayingTicker?.cancel()
+            nowPlayingTicker = nil
+        }
+    }
+
+    /// The cover, saved small beside the snapshot. The card is drawn by
+    /// another process with no way to the server, so the picture has to be
+    /// on disk before the card can show it; once it is, the card is
+    /// redrawn with it.
+    private func loadNowPlayingArtwork(_ url: URL?) {
+        guard url != nowPlayingArtworkFor else { return }
+        nowPlayingArtworkTask?.cancel()
+        guard let url else {
+            nowPlayingArtworkFor = nil
+            NowPlayingSnapshot.writeArtwork(nil)
+            return
+        }
+        nowPlayingArtworkTask = Task { [weak self] in
+            guard let image = await ImageLoader.shared.load(url), !Task.isCancelled else { return }
+            let jpeg = await Task.detached(priority: .utility) { Self.thumbnail(image, side: 400) }.value
+            guard let self, !Task.isCancelled else { return }
+            NowPlayingSnapshot.writeArtwork(jpeg)
+            self.nowPlayingArtworkFor = jpeg == nil ? nil : url
+            self.publishNowPlaying()
+        }
+    }
+
+    nonisolated private static func thumbnail(_ image: UIImage, side: CGFloat) -> Data? {
+        let scale = min(1, side / max(image.size.width, image.size.height))
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let drawn = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        return drawn.jpegData(compressionQuality: 0.8)
     }
 
     // MARK: - Downloads
