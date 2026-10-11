@@ -59,10 +59,16 @@ export function noartIcon(name: IconName, px = 28): HTMLElement {
 export function art(
   src: string | null | undefined,
   fallback: string | (() => Node),
-  opts: { lazy?: boolean; hash?: string | null } = {}
+  opts: {
+    lazy?: boolean;
+    hash?: string | null;
+    /** A second picture to try when the first 404s — a series poster behind
+     *  a season that has none of its own. */
+    fallbackSrc?: string | null;
+  } = {}
 ): Node {
   const placeholder = (): Node => (typeof fallback === "function" ? fallback() : noart(fallback));
-  if (!src) return placeholder();
+  if (!src) return opts.fallbackSrc ? art(opts.fallbackSrc, fallback, { ...opts, fallbackSrc: null }) : placeholder();
   // The artwork's own colours, decoded from the ~30 byte hash the server sends
   // with the item, painted underneath the real image. An <img> renders nothing
   // until it has decoded, so its own background is what shows through the gap.
@@ -81,7 +87,14 @@ export function art(
   // A cached image can already be complete before the listener is attached.
   if (img.complete && img.naturalWidth > 0) img.classList.add("loaded");
   else img.addEventListener("load", () => img.classList.add("loaded"), { once: true });
-  img.addEventListener("error", () => img.replaceWith(placeholder()), { once: true });
+  img.addEventListener(
+    "error",
+    () => {
+      const next = opts.fallbackSrc;
+      img.replaceWith(next ? art(next, fallback, { ...opts, fallbackSrc: null, hash: null }) : placeholder());
+    },
+    { once: true }
+  );
   return img;
 }
 
@@ -900,20 +913,50 @@ export function itemCard(
      * the grid, not leave a card the query would no longer return.
      */
     onChanged?: (item: any, card: HTMLElement) => void;
+    /**
+     * What the card is a picture *of*, where the item alone doesn't settle it.
+     * "season": a portrait card carrying the season's poster, for an episode
+     * standing in for a show you are partway through — what Next Up shows, as
+     * in the Apple app. A show's seasons are the one thing its artwork is made
+     * to tell apart; a still from an episode nobody has seen yet is a picture
+     * of nothing in particular. The card opens the show (which lands on that
+     * season) rather than the episode's own page.
+     */
+    art?: "automatic" | "season";
   } = {}
 ): HTMLElement {
-  const wide = opts.wide ?? (item.Type === "Episode");
+  const seasonArt = opts.art === "season" && item.Type === "Episode";
+  const wide = seasonArt ? false : opts.wide ?? (item.Type === "Episode");
   let img = api.imageUrl(item, "Primary", wide ? 500 : 320);
-  if (wide && !img && item.SeriesId) {
+  let fallbackSrc: string | null = null;
+  if (seasonArt) {
+    // The season's poster, then the series', then whatever the item has.
+    const series = api.seriesPosterUrl(item, 320);
+    const season = api.seasonPosterUrl(item, 320);
+    fallbackSrc = series ?? img;
+    img = season ?? fallbackSrc;
+  } else if (wide && !img && item.SeriesId) {
     img = api.imageUrl({ Id: item.SeriesId, ImageTags: {} }, "Primary", 320);
   }
+  // Where a click goes: the item itself, or — for a Next Up card — its show.
+  const target = seasonArt && item.SeriesId ? item.SeriesId : item.Id;
 
   let title = item.Name ?? "";
   let sub = item.ProductionYear ? String(item.ProductionYear) : "";
+  // A second line under the first, for cards that have two things to say.
+  let sub2 = "";
   if (item.Type === "Episode") {
     title = item.SeriesName ?? item.Name;
     const s = item.ParentIndexNumber, e = item.IndexNumber;
-    sub = s != null && e != null ? `S${s}:E${e} · ${item.Name}` : item.Name;
+    if (seasonArt) {
+      // Spelled out, on its own line, with the episode's name under it — the
+      // Apple card's two lines. "S2:E4 · Name" is a filename convention.
+      sub = e == null ? "" : s == null ? `Episode ${e}` : s === 0 ? `Specials: Episode ${e}` : `Season ${s}: Episode ${e}`;
+      sub2 = item.Name ?? "";
+      if (!sub) { sub = sub2; sub2 = ""; }
+    } else {
+      sub = s != null && e != null ? `S${s}:E${e} · ${item.Name}` : item.Name;
+    }
   } else if (item.Type === "Series" && item.UserData?.UnplayedItemCount) {
     sub = `${item.UserData.UnplayedItemCount} unplayed`;
   }
@@ -938,7 +981,9 @@ export function itemCard(
       : "";
 
   const poster = el("div", { class: "card-poster" }, [
-    art(img, title, { hash: api.imageHash(item, "Primary") }),
+    // No BlurHash for a season poster: the hash the item carries is its
+    // still's, and the blur of a different picture is worse than none.
+    art(img, title, { hash: seasonArt ? null : api.imageHash(item, "Primary"), fallbackSrc }),
     // A scrim under the bottom furniture: the strip and the time pill have to
     // stay legible over a poster that happens to be white down there.
     pct != null && pct > 1 ? el("div", { class: "card-scrim" }) : null,
@@ -974,9 +1019,9 @@ export function itemCard(
       "aria-label": sub ? `${title} — ${sub}` : title,
       // Read by prefetch.ts to warm the detail page while the card sits under
       // focus or the pointer, before Enter or a click ever asks for it.
-      "data-item-id": item.Id,
+      "data-item-id": target,
       onClick: () => {
-        location.hash = `#/item/${item.Id}`;
+        location.hash = `#/item/${target}`;
       },
       onKeydown: (ev: KeyboardEvent) => {
         // Space scrolls the page by default; a card that looks like a button
@@ -984,10 +1029,15 @@ export function itemCard(
         if (ev.key !== "Enter" && ev.key !== " ") return;
         if (ev.target !== ev.currentTarget) return; // the overlay button's own key
         ev.preventDefault();
-        location.hash = `#/item/${item.Id}`;
+        location.hash = `#/item/${target}`;
       },
     },
-    [poster, el("div", { class: "card-title" }, [title]), el("div", { class: "card-sub" }, [sub])]
+    [
+      poster,
+      el("div", { class: "card-title" }, [title]),
+      el("div", { class: "card-sub" }, [sub]),
+      sub2 ? el("div", { class: "card-sub" }, [sub2]) : null,
+    ]
   );
   if (item.Type !== "TvChannel") {
     attachContextMenu(card, item.Name ?? null, () =>
@@ -1041,7 +1091,10 @@ export function scrollRow(row: HTMLElement): HTMLElement {
   return wrap;
 }
 
-export function cardRow(items: any[], opts: { wide?: boolean } = {}): HTMLElement {
+export function cardRow(
+  items: any[],
+  opts: { wide?: boolean; art?: "automatic" | "season" } = {}
+): HTMLElement {
   return scrollRow(el("div", { class: "card-row" }, items.map((i) => itemCard(i, opts))));
 }
 

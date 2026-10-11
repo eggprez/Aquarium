@@ -23,7 +23,8 @@ import {
   restoreDownloadQueue,
   resumeAutoplay,
   setLiveSetting,
-  showEpisodeMenu,
+  getEpisodeQueue,
+  playQueuedEpisode,
   cancelSleepTimer,
   setSleepTimer,
   sleepDeadline,
@@ -45,6 +46,7 @@ import {
   rememberSearch,
   clearRecentSearches,
   icon,
+  art,
 } from "./ui";
 import { registerAdaptiveQuality } from "./adaptive";
 import { wireSmoothScroll } from "./scroll";
@@ -635,10 +637,15 @@ const PB_ICONS = {
   pause:
     '<svg viewBox="0 0 24 24"><rect x="7" y="5.5" width="3.4" height="13" rx="1" fill="currentColor"/><rect x="13.6" y="5.5" width="3.4" height="13" rx="1" fill="currentColor"/></svg>',
   stop: '<svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor"/></svg>',
+  // A speech bubble with lines of text — what the Apple app uses
+  // (captions.bubble). It used to be a plain box with lines, which next to
+  // the quality icon's rows of sliders read as the same shape twice.
   subtitles:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M6.5 12h4M13 12h4.5M6.5 15.5h2.5M11.5 15.5h6"/></svg>',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8a2.5 2.5 0 0 1-2.5 2.5h-6.3L7 20.4V17h-.5A2.5 2.5 0 0 1 4 14.5z"/><path d="M7.5 9h4.5M14.5 9h2M7.5 12.5h2M12 12.5h4.5"/></svg>',
+  // A waveform, not a speaker: the speaker already means volume, two buttons
+  // to its right, and the two were being confused for each other.
   audio:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4z" fill="currentColor" stroke="none"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11" stroke-linecap="round"/></svg>',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3.5 10.5v3M7 7.5v9M10.5 4.5v15M14 8v8M17.5 6v12M21 10v4"/></svg>',
   // Three states so the icon alone says whether sound is coming out.
   volHigh:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4z" fill="currentColor" stroke="none"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11" stroke-linecap="round"/></svg>',
@@ -648,10 +655,13 @@ const PB_ICONS = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4z" fill="currentColor" stroke="none"/><path d="m15.5 10 5 4m0-4-5 4" stroke-linecap="round"/></svg>',
   tune:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4v5m0 6v5M5.5 4v9m0 4v3M18.5 4v3m0 4v9"/><circle cx="12" cy="12" r="2"/><circle cx="5.5" cy="15" r="2"/><circle cx="18.5" cy="9" r="2"/></svg>',
+  // The "HD" badge every TV and streaming app uses for stream quality. The
+  // old rows-of-sliders glyph was one of three slider icons in the same bar.
   quality:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h9M17 17h3"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="15" cy="17" r="2"/></svg>',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M6.5 9v6M6.5 12h3.4M9.9 9v6" stroke-linecap="round"/><path d="M13.3 9v6h2.2a3 3 0 0 0 0-6z"/></svg>',
+  // Up next: a list with a play mark, the standard "play queue" glyph.
   episodes:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4.5" width="13" height="9" rx="2"/><path d="M20 8v9a2 2 0 0 1-2 2H6"/><path d="m8 7.5 4 2.5-4 2.5z" fill="currentColor" stroke="none"/></svg>',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16M4 12h9M4 17.5h7"/><path d="M15.5 13.2a.7.7 0 0 1 1.05-.6l5 3.05a.7.7 0 0 1 0 1.2l-5 3.05a.7.7 0 0 1-1.05-.6z" fill="currentColor" stroke="none"/></svg>',
   fullscreen:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></svg>',
   // The browser convention: the frame, with the picture pulled out into the
@@ -1041,6 +1051,118 @@ function togglePicturePanel(): void {
 
 /** The two ways to say "stop on your own": at the end of this episode, or after
  *  a stretch of time. */
+/**
+ * The Up Next panel: the playing episode's season as a strip of tiles, the
+ * one that's on highlighted and the strip scrolled so it sits at the left
+ * with what follows it in view. It used to be mpv's own OSD menu (uosc),
+ * drawn at subtitle scale inside the picture — a few lines of 10px text that
+ * nobody could read from a couch.
+ *
+ * A strip rather than a list because the bar is the only surface there is:
+ * the video covers every pixel above it, so a panel that grew upward would
+ * disappear behind the picture. Each tile is a frame from the episode with
+ * its number and name beside it, which is what the series page shows, at
+ * the size the bar allows.
+ */
+function toggleEpisodePanel(): void {
+  toggleBarPanel("episodes", "Up next", (panel) => {
+    panel.classList.add("pb-queue");
+    const note = el("span", { class: "pb-panel-note" }, ["Loading episodes…"]);
+    panel.append(note);
+    void getEpisodeQueue()
+      .then((queue) => {
+        if (!panel.isConnected) return;
+        note.remove();
+        if (!queue) {
+          panel.append(el("span", { class: "pb-panel-note" }, ["Not playing an episode"]));
+          return;
+        }
+        if (!queue.episodes.length) {
+          panel.append(
+            el("span", { class: "pb-panel-note" }, [
+              api.isOffline() ? "Offline — the queue needs the server" : "No other episodes in this season",
+            ])
+          );
+          return;
+        }
+        const { current, episodes } = queue;
+        const label = panel.querySelector(".pb-panel-label");
+        if (label) label.textContent = `${current.SeriesName ?? "Up next"} · ${current.SeasonName ?? ""}`.replace(/ · $/, "");
+        const strip = el("div", { class: "pb-queue-strip", role: "list" });
+        let currentTile: HTMLElement | null = null;
+        const at = episodes.findIndex((ep: any) => ep.Id === current.Id);
+        episodes.forEach((ep: any, i: number) => {
+          const playing = ep.Id === current.Id;
+          const played = !!ep.UserData?.Played;
+          const num = ep.IndexNumber != null ? `${ep.IndexNumber}. ` : "";
+          const minutes = ep.RunTimeTicks ? Math.round(ep.RunTimeTicks / 600_000_000) : 0;
+          const status = playing
+            ? "Playing"
+            : i === at + 1
+              ? "Up next"
+              : played
+                ? "Watched"
+                : minutes
+                  ? `${minutes} min`
+                  : "";
+          const tile = el("button", {
+            class: `pb-queue-tile${playing ? " playing" : ""}${played ? " watched" : ""}`,
+            role: "listitem",
+            title: `${num}${ep.Name ?? ""}`,
+            "aria-current": playing ? "true" : null,
+            onClick: () => {
+              if (playing) {
+                closeBarPanel();
+                return;
+              }
+              closeBarPanel();
+              playQueuedEpisode(ep.Id)
+                .then((ok) => { if (!ok) toast("Couldn't start that episode", "error"); })
+                .catch((e) => toast(String(e), "error"));
+            },
+          }, [
+            el("div", { class: "pb-queue-thumb" }, [
+              art(api.imageUrl(ep, "Primary", 240), () => icon("play", 18), {
+                lazy: false,
+                hash: api.imageHash(ep, "Primary"),
+              }),
+              playing ? el("span", { class: "pb-queue-now" }, [icon("play", 14)]) : null,
+            ]),
+            el("div", { class: "pb-queue-text" }, [
+              el("span", { class: "pb-queue-name" }, [`${num}${ep.Name ?? ""}`]),
+              el("span", { class: `pb-queue-status${playing || i === at + 1 ? " live" : ""}` }, [
+                status,
+                played && !playing ? icon("check", 12) : null,
+              ]),
+            ]),
+          ]);
+          if (playing) currentTile = tile;
+          strip.append(tile);
+        });
+        panel.append(strip);
+        // Vertical wheel scrolls the strip sideways: there is no vertical
+        // direction to scroll in, and nobody tilts a wheel.
+        strip.addEventListener("wheel", (ev: WheelEvent) => {
+          if (Math.abs(ev.deltaY) <= Math.abs(ev.deltaX)) return;
+          ev.preventDefault();
+          strip.scrollLeft += ev.deltaY;
+        }, { passive: false });
+        // Open on the playing episode, with what follows it to the right. A
+        // jump, not a glide: the strip's smooth scrolling is for the wheel.
+        if (currentTile) {
+          const t = currentTile as HTMLElement;
+          strip.style.scrollBehavior = "auto";
+          strip.scrollLeft = Math.max(0, t.offsetLeft - strip.offsetLeft - 4);
+          strip.style.scrollBehavior = "";
+        }
+      })
+      .catch((e) => {
+        if (!panel.isConnected) return;
+        note.textContent = `Couldn't load the season: ${e?.message ?? e}`;
+      });
+  });
+}
+
 function toggleSleepPanel(): void {
   toggleBarPanel("sleep", "Sleep", (panel) => {
     const rebuild = (): void => {
@@ -1333,17 +1455,56 @@ function syncUpNext(st: any): void {
   const label = document.getElementById("pb-upnext-when");
   const title = document.getElementById("pb-upnext-title");
   const item = upNextItem;
-  // Local downloads and server items describe themselves differently.
-  const name = item.Name ?? item.title ?? item.name ?? "next episode";
-  const s = item.ParentIndexNumber ?? item.season;
-  const e = item.IndexNumber ?? item.episode;
-  const code = s != null && e != null ? `Season ${s}, Episode ${e} · ` : "";
-  if (title) title.textContent = `${code}${name}`;
+  if (title) title.textContent = upNextTitle(item);
   if (label) {
     label.textContent = upNextStarting
       ? "Starting…"
       : `Up next · in ${Math.max(0, Math.ceil(left))}s`;
   }
+  // The frame from the next episode, fetched once per item rather than on
+  // every tick. A download that was started from the Downloads view has no
+  // server image to show; the thumbnail box simply stays out of the layout.
+  const thumb = document.getElementById("pb-upnext-thumb");
+  if (thumb && thumb.dataset.for !== upNextKey(item)) {
+    thumb.dataset.for = upNextKey(item);
+    clear(thumb);
+    const src = item.Id ? api.imageUrl(item, "Primary", 240) : null;
+    thumb.classList.toggle("on", !!src);
+    if (src) thumb.append(art(src, () => icon("play", 16), { lazy: false, hash: api.imageHash(item, "Primary") }));
+  }
+}
+
+/** Something that changes when the next episode does, for the thumbnail. */
+function upNextKey(item: any): string {
+  return String(item?.Id ?? item?.item_id ?? item?.path ?? "");
+}
+
+/**
+ * The card's one line about what's coming, spelled the way the Apple app
+ * spells it: "Series · Season 2: Episode 4 · Name". Local downloads and
+ * server items describe themselves differently (see playerTitleLines).
+ */
+function upNextTitle(item: any): string {
+  const series = item.SeriesName ?? item.series;
+  const name = item.Name ?? item.title ?? item.name ?? "Next episode";
+  const s = item.ParentIndexNumber ?? item.season;
+  const e = item.IndexNumber ?? item.episode;
+  const label =
+    e == null ? null : s == null ? `Episode ${e}` : s === 0 ? `Specials: Episode ${e}` : `Season ${s}: Episode ${e}`;
+  if (!series) return name;
+  return [series, label, name].filter(Boolean).join(" · ");
+}
+
+/** "Not now": this episode plays out and playback stops there. */
+function dismissUpNext(): void {
+  cancelAutoplay();
+  $("player-bar").classList.remove("upnext");
+  document.getElementById("pb-upnext")?.classList.remove("on");
+}
+
+/** Whether the card is on screen — the keys that answer it only count then. */
+function upNextShowing(): boolean {
+  return !!document.getElementById("pb-upnext")?.classList.contains("on");
 }
 
 async function startUpNext(): Promise<void> {
@@ -1400,22 +1561,30 @@ function buildPlayerBar(): void {
   // Up Next takes over the title slot rather than being inserted into the bar:
   // the bar's layout is identical whether it's showing or not, so the scrubber
   // doesn't jump sideways at the exact moment you might be reaching for it.
-  const upnext = el("div", { class: "pb-upnext", id: "pb-upnext" }, [
+  //
+  // The same card the Apple app shows: a quiet "Up next · in 12s" over the
+  // episode's full name, with "Play now" and "Not now" as two labelled
+  // buttons (Return answers it on a Mac; Enter does here). The TV app adds a
+  // frame from the episode, and there's room for one in the bar, so it's here
+  // too.
+  const upnext = el("div", { class: "pb-upnext", id: "pb-upnext", role: "status" }, [
+    el("div", { class: "pb-upnext-thumb", id: "pb-upnext-thumb" }),
     el("div", { class: "pb-upnext-text" }, [
       el("span", { class: "pb-upnext-when", id: "pb-upnext-when" }, ["Up next"]),
       el("span", { class: "pb-upnext-title", id: "pb-upnext-title" }, [""]),
     ]),
-    el("button", { class: "btn small primary", onClick: () => void startUpNext() }, ["Play"]),
-    el("button", {
-      class: "btn small icon",
-      title: "Not now — stop after this episode",
-      "aria-label": "Not now",
-      onClick: () => {
-        cancelAutoplay();
-        $("player-bar").classList.remove("upnext");
-        document.getElementById("pb-upnext")?.classList.remove("on");
-      },
-    }, [icon("close", 15)]),
+    el("div", { class: "pb-upnext-actions" }, [
+      el("button", {
+        class: "btn small primary",
+        title: "Play the next episode now (Enter)",
+        onClick: () => void startUpNext(),
+      }, ["Play now"]),
+      el("button", {
+        class: "btn small",
+        title: "Stop after this episode",
+        onClick: dismissUpNext,
+      }, ["Not now"]),
+    ]),
   ]);
 
   const title = el("div", { class: "pb-title" }, [
@@ -1514,7 +1683,7 @@ function buildPlayerBar(): void {
       pbButton("pb-picture", PB_ICONS.picture, "Picture and zoom", () => togglePicturePanel()),
       pbButton("pb-sleep", PB_ICONS.sleep, "Sleep timer", () => toggleSleepPanel()),
       pbButton("pb-quality", PB_ICONS.quality, "Stream quality", () => toggleQualityPicker()),
-      pbButton("pb-episodes", PB_ICONS.episodes, "Episode queue", () => showEpisodeMenu()),
+      pbButton("pb-episodes", PB_ICONS.episodes, "Up next (this season's episodes)", () => toggleEpisodePanel()),
       pbButton("pb-pip", PB_ICONS.pip, "Picture in picture (p)", () => setVideoPip(!videoPip)),
       pbButton("pb-fullscreen", PB_ICONS.fullscreen, "Fullscreen (f, Esc exits)", () =>
         setVideoFullscreen(!videoFullscreen)
@@ -1537,6 +1706,17 @@ function buildPlayerBar(): void {
   // value here is still the previous position.
   bar.addEventListener("mousemove", (e) => {
     if (fsBarShown && fsPointerMoved(e)) fsBarHovered = true;
+  });
+  // A clicked button keeps keyboard focus, and the first key after it — Space
+  // to pause, an arrow to seek, which this player takes on the document —
+  // makes WebKit treat the page as keyboard-driven and draw the focus ring on
+  // it. So every mute, every seek left a purple ring on whatever was pressed
+  // last. The ring is for focus that arrived by keyboard, and `detail` is 0
+  // only for those activations; a pointer click lets go of the button.
+  bar.addEventListener("click", (e: MouseEvent) => {
+    if (e.detail === 0) return;
+    const btn = (e.target as Element | null)?.closest("button");
+    if (btn && bar.contains(btn)) btn.blur();
   });
   bar.addEventListener("mouseleave", () => {
     fsBarHovered = false;
@@ -1851,6 +2031,7 @@ const SHORTCUTS: { group: string; rows: [string[], string][] }[] = [
     group: "Playback",
     rows: [
       [["Space"], "Play / pause"],
+      [["Enter"], "Play the next episode (while Up next is showing)"],
       [["←", "→"], "Seek 10 seconds"],
       [["↑", "↓"], "Volume"],
       [["m"], "Mute"],
@@ -2264,6 +2445,13 @@ async function boot(): Promise<void> {
       case " ":
         ev.preventDefault();
         playerCtl.pauseToggle();
+        break;
+      // The Up Next card is a question; Enter is yes. Only while it's up, and
+      // not when a focused button has its own idea of what Enter means.
+      case "Enter":
+        if (!upNextShowing() || (t && t.tagName === "BUTTON")) break;
+        ev.preventDefault();
+        void startUpNext();
         break;
       case "ArrowLeft":
         ev.preventDefault();

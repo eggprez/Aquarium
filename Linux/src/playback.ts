@@ -1518,15 +1518,17 @@ export async function showQualityMenu(): Promise<void> {
   });
 }
 
-export async function showEpisodeMenu(): Promise<void> {
+/**
+ * The season the playing episode belongs to, for the player's Up Next panel:
+ * the server item behind what's playing (a download has one too) and every
+ * episode of its season, fetched once and kept across quality switches and
+ * hops within the series (see `nowPlaying.queue`). Null when what's playing
+ * isn't an episode of anything.
+ */
+export async function getEpisodeQueue(): Promise<{ current: any; episodes: any[] } | null> {
   const np = nowPlaying;
   const cur = np?.serverItem;
-  if (!np || !cur || cur.Type !== "Episode" || !cur.SeriesId) {
-    return openUoscMenu({
-      title: "Episode queue",
-      items: [{ title: "Not playing an episode", value: "ignore", muted: true }],
-    });
-  }
+  if (!np || !cur || cur.Type !== "Episode" || !cur.SeriesId) return null;
   if (!np.queue) {
     try {
       np.queue = await api.getEpisodes(cur.SeriesId, cur.SeasonId);
@@ -1534,10 +1536,36 @@ export async function showEpisodeMenu(): Promise<void> {
       np.queue = [];
     }
   }
+  return { current: cur, episodes: np.queue ?? [] };
+}
+
+/** Start an episode picked from the Up Next panel. A continuation of what's
+ *  playing, so fullscreen and the chosen bitrate carry over. */
+export async function playQueuedEpisode(id: string): Promise<boolean> {
+  const np = nowPlaying;
+  const ep = np?.queue?.find((e: any) => e.Id === id);
+  if (!np || !ep) return false;
+  await playItem(
+    ep,
+    { resume: true, maxBitrate: np.isLocal ? undefined : np.opts.maxBitrate },
+    { inherited: !np.isLocal, continuation: true }
+  );
+  return true;
+}
+
+export async function showEpisodeMenu(): Promise<void> {
+  const queue = await getEpisodeQueue();
+  if (!queue) {
+    return openUoscMenu({
+      title: "Up next",
+      items: [{ title: "Not playing an episode", value: "ignore", muted: true }],
+    });
+  }
+  const cur = queue.current;
   const pad = (n: any) => String(n ?? 0).padStart(2, "0");
   await openUoscMenu({
     title: `${cur.SeriesName ?? "Episodes"} — ${cur.SeasonName ?? "Season"}`,
-    items: (np.queue ?? []).map((ep: any) => ({
+    items: queue.episodes.map((ep: any) => ({
       title: `${ep.IndexNumber != null ? ep.IndexNumber + ". " : ""}${ep.Name}`,
       hint: `S${pad(ep.ParentIndexNumber)}E${pad(ep.IndexNumber)}${ep.UserData?.Played ? " ✓" : ""}`,
       active: ep.Id === cur.Id,
@@ -1572,18 +1600,9 @@ async function handlePlayerMessage(args: any[]): Promise<void> {
       );
       break;
     }
-    case "aquarium-episode": {
-      const np = nowPlaying;
-      const ep = np?.queue?.find((e: any) => e.Id === arg);
-      if (ep) {
-        await playItem(
-          ep,
-          { resume: true, maxBitrate: np!.isLocal ? undefined : np!.opts.maxBitrate },
-          { inherited: !np!.isLocal, continuation: true }
-        );
-      }
+    case "aquarium-episode":
+      await playQueuedEpisode(arg);
       break;
-    }
     case "aquarium-fullscreen":
       document.dispatchEvent(new CustomEvent("aquarium-fullscreen-toggle"));
       break;

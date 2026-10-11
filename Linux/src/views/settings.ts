@@ -322,6 +322,11 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
         ]),
         themeSelect,
       ]),
+      row(
+        "Continue Watching",
+        "The row of part-watched episodes and films on Home. Hide it to keep just Next Up, which lists the next episode of each show you're following.",
+        toggle(cfg, "hide_continue_watching", ["Shown", "Hidden — Next Up only"])
+      ),
     ])
   );
 

@@ -28,8 +28,16 @@ interface HomeData {
   latest: Map<string, any[]>;
 }
 
+/** Whether the Continue Watching row is turned off in Settings. */
+function continueWatchingHidden(): boolean {
+  return api.getConfig()?.hide_continue_watching === true;
+}
+
 function homeSignature(d: HomeData): string {
   return [
+    // A setting that changes what the page shows has to count as a change,
+    // or toggling it would do nothing until the server data moved too.
+    continueWatchingHidden() ? "nocw" : "cw",
     itemSignature(d.resume),
     itemSignature(d.nextUp),
     itemSignature(d.favorites),
@@ -278,11 +286,17 @@ function paintHome(page: HTMLElement, data: HomeData): void {
   const hero = heroRotator(picks, fromNextUp ? "Next up" : "Continue watching");
   page.append(hero ?? el("h1", { class: "page-title" }, ["Home"]));
 
-  if (resume.length) {
+  // Continue Watching is a row of stills, because it points at a moment you
+  // were in the middle of. It can be switched off in Settings for anyone who
+  // only wants the one row.
+  if (resume.length && !continueWatchingHidden()) {
     page.append(section("Continue Watching", cardRow(resume, { wide: true })));
   }
+  // Next Up is portrait, and a picture of the *season* rather than of the
+  // episode — see the `art` option on itemCard, and the same row in the Apple
+  // app's HomeView.
   if (nextUp.length) {
-    page.append(section("Next Up", cardRow(nextUp, { wide: true })));
+    page.append(section("Next Up", cardRow(nextUp, { art: "season" })));
   }
   // Starred items, newest first — the row is the shortcut, the Favorites page
   // is the whole list.
