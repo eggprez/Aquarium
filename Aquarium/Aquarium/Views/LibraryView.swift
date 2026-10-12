@@ -101,6 +101,9 @@ struct LibraryView: View {
     /// Pages asked for so far. This, not the item count, is what ends paging:
     /// a page that adds nothing new would never move the count to the total.
     @State private var pagesLoaded = 0
+    /// Bumped each time `reload` replaces the list, for the grid — see
+    /// `MediaGrid.revision`.
+    @State private var listRevision = 0
     /// Bumped by every reload, so an answer to an older one — a late page, or a
     /// reload that was cancelled — can tell it has been overtaken.
     @State private var generation = 0
@@ -355,7 +358,8 @@ struct LibraryView: View {
                         pendingCount: isPaging ? pendingTileCount : 0,
                         onSelect: { app.push(.item($0.Id)) },
                         onReachEnd: { Task { await loadMore() } },
-                        selection: gridSelection
+                        selection: gridSelection,
+                        revision: listRevision
                     )
                     #if os(macOS)
                     // The window's subtitle already says how many there are.
@@ -709,11 +713,18 @@ struct LibraryView: View {
                 // The shuffled page sequence needs the page count up front.
                 knownTotal = try await fetch(query(startIndex: 0, limit: 1)).total
             }
-            let response = try await fetchPage(0, total: knownTotal)
+            // A reload with the list already deep — something was marked
+            // watched from the grid, or the library copy finished its first
+            // sync underneath you — asks for as much as was loaded, in one
+            // request, so you stay where you were in it. Only in a fixed
+            // order: a reshuffle starts over by definition.
+            let keep = sort == .random ? 1 : max(1, pagesLoaded)
+            let response = try await fetchPage(0, total: knownTotal, pages: keep)
             guard mine == generation, !Task.isCancelled else { return }
             items = response.items
             total = response.total
-            pagesLoaded = 1
+            pagesLoaded = keep
+            listRevision &+= 1
         } catch is CancellationError {
             // Overtaken by a newer reload, or the page went away.
         } catch {
@@ -737,13 +748,14 @@ struct LibraryView: View {
         items += response.items.filter { !known.contains($0.Id) }
     }
 
-    /// One page of the list. For "Random" it is a page of the name order, the
-    /// pages taken in an order shuffled by `shuffleSeed` and each page shuffled
-    /// too — stable for as long as the seed is, so paging neither repeats nor
-    /// skips anything.
-    private func fetchPage(_ page: Int, total: Int?) async throws -> (items: [BaseItem], total: Int) {
+    /// One page of the list — or `pages` of them from there, in one request,
+    /// for a reload that keeps its place. For "Random" it is a page of the
+    /// name order, the pages taken in an order shuffled by `shuffleSeed` and
+    /// each page shuffled too — stable for as long as the seed is, so paging
+    /// neither repeats nor skips anything; it is always one page.
+    private func fetchPage(_ page: Int, total: Int?, pages: Int = 1) async throws -> (items: [BaseItem], total: Int) {
         guard sort == .random, let total else {
-            let response = try await fetch(query(startIndex: page * Self.pageSize))
+            let response = try await fetch(query(startIndex: page * Self.pageSize, limit: pages * Self.pageSize))
             return (response.items, response.total)
         }
         let pageCount = max(1, (total + Self.pageSize - 1) / Self.pageSize)

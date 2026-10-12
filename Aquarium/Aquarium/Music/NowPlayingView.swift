@@ -121,6 +121,7 @@ struct NowPlayingView: View {
 
     @State private var showQueue = false
     @State private var showLyrics = false
+    @State private var showLeanings = false
     @State private var scrubbing: Double?
 
     /// What sits where the cover normally is.
@@ -180,6 +181,14 @@ struct NowPlayingView: View {
         .interactiveDismissDisabled(showQueue)
         .preferredColorScheme(.dark)
         .modifier(SongInfoHost(overNowPlaying: true))
+        .sheet(isPresented: $showLeanings) {
+            if let station = music.station {
+                StationLeaningsSheet(station: station)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+                    .preferredColorScheme(.dark)
+            }
+        }
     }
 
     /// Where the queue card's top edge sits: just under the top bar, so where
@@ -503,6 +512,14 @@ struct NowPlayingView: View {
                 .disabled(song.isAudiobook)
                 .opacity(song.isAudiobook ? 0.3 : 1)
             }
+            // A station only: what it has come to lean toward, by points —
+            // the artists and genres its skips and thumbs have put ahead.
+            if music.station != nil, song.isSong {
+                Spacer()
+                toggle("chart.bar.xaxis", isOn: showLeanings, label: "What's leading in the mix") {
+                    showLeanings = true
+                }
+            }
             Spacer()
             AirPlayButton()
                 .frame(width: 44, height: 40)
@@ -554,6 +571,108 @@ struct NowPlayingView: View {
         } catch {
             app.toast("Couldn't update favorites", tone: .error)
         }
+    }
+}
+
+// MARK: - What's leading
+
+/// The station's standings: the genres and artists that are ahead on
+/// points right now, and the ones falling behind, read off
+/// `StationSession`. Every finished song, skip and thumb moves them, and
+/// the last few move them most, so this is the mix's mood at this moment
+/// rather than a record of taste.
+private struct StationLeaningsSheet: View {
+    let station: LiveStation
+
+    private var session: StationSession { station.session }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if session.reactions == 0 {
+                    Section {
+                        Text("Nothing is ahead yet. Let a few songs play out, skip the ones that don't fit, or give a thumb, and the mix starts to lean.")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    standings("Genres", session.genreLeanings.map { Leaning(name: MusicNames.genreName($0.name), points: $0.points) })
+                    standings("Artists", session.artistLeanings.map { Leaning(name: MusicNames.artistName($0.name), points: $0.points) })
+                }
+            }
+            .navigationTitle("What's leading")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 1) {
+                        Text("What's leading").font(.headline)
+                        Text(station.title).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Text("After \(session.reactions) reaction\(session.reactions == 1 ? "" : "s") in this station. The newest count most, and it all resets when the station ends.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 10)
+            }
+        }
+    }
+
+    private struct Leaning: Identifiable {
+        let name: String
+        let points: Double
+        var id: String { name }
+    }
+
+    /// Ahead first, then whatever has slipped below zero — a skipped artist,
+    /// a genre thumbed down — so the card says what the mix is steering away
+    /// from as well as toward.
+    @ViewBuilder
+    private func standings(_ title: String, _ all: [Leaning]) -> some View {
+        let scale = all.map { abs($0.points) }.max() ?? 1
+        let ahead = all.filter { $0.points > 0.05 }.prefix(8)
+        let behind = all.filter { $0.points < -0.05 }.suffix(5).reversed()
+        if !ahead.isEmpty {
+            Section(title) {
+                ForEach(Array(ahead)) { row($0, scale: scale) }
+            }
+        }
+        if !behind.isEmpty {
+            Section("\(title) losing ground") {
+                ForEach(Array(behind)) { row($0, scale: scale) }
+            }
+        }
+    }
+
+    private func row(_ leaning: Leaning, scale: Double) -> some View {
+        let fraction = max(0.04, min(1, abs(leaning.points) / max(scale, 0.01)))
+        let positive = leaning.points > 0
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(leaning.name)
+                    .lineLimit(1)
+                Spacer()
+                Text(Self.points(leaning.points))
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(positive ? Theme.link : .secondary)
+            }
+            GeometryReader { geo in
+                Capsule()
+                    .fill(positive ? Theme.link : Color.secondary.opacity(0.5))
+                    .frame(width: geo.size.width * fraction)
+            }
+            .frame(height: 5)
+            .background(Capsule().fill(.white.opacity(0.08)))
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+    }
+
+    private static func points(_ value: Double) -> String {
+        let sign = value < 0 ? "−" : "+"
+        return sign + String(format: "%.1f", abs(value))
     }
 }
 

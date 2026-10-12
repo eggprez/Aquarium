@@ -6,11 +6,12 @@
 //
 //  - click the centre to pause or play, and to bring up the bar;
 //  - click the left or right edge to go back or forward ten seconds;
-//  - swipe left or right to scrub, with a thumbnail of where you'll land,
-//    then click to jump there or press Menu to go back. Paused, a short
-//    swipe starts it; playing, only a long, flat one does, so a swipe meant
-//    for something else doesn't. After a jump, Menu returns to where the
-//    playhead was, for as long as the bar is up;
+//  - paused, swipe left or right to scrub, with a thumbnail of where
+//    you'll land, then click to jump there or press Menu to go back. Only
+//    paused: playing, a swipe moves nothing, so a thumb resting on the
+//    remote or a swipe meant for the panel can't throw the film somewhere
+//    else — the edge clicks are how to move while it plays. After a jump,
+//    Menu returns to where the playhead was, for as long as the bar is up;
 //  - each click left or right shows how far it has gone, run together;
 //  - swipe down for the panel (Info, Audio, Subtitles, Quality, Speed, Sync);
 //    Menu, or a swipe up from its tabs, puts it away again;
@@ -260,14 +261,11 @@ struct PlayerScreen: View {
             }
             showControls()
             if scrub == nil {
-                // Paused, a short swipe that is mostly sideways. Playing, a
-                // long one that is plainly sideways: a finger resting on the
-                // remote, or a swipe down that drifts, shouldn't move the film.
+                // Paused only, and a short swipe that is mostly sideways.
+                // Playing, nothing: the film was too easy to throw with a
+                // swipe meant for something else, and the edge clicks skip.
                 let x = abs(translation.x), y = abs(translation.y)
-                let starts = player.isPaused
-                    ? x > 24 && x > y
-                    : x > Self.playingScrubDistance && x > y * 2.5
-                guard starts, canScrub else { return }
+                guard player.isPaused, x > 24 && x > y, canScrub else { return }
                 scrub = player.position
                 scrubAnchor = player.position
                 scrubOrigin = player.position
@@ -325,9 +323,10 @@ struct PlayerScreen: View {
 
     private var canScrub: Bool { !player.isLive && player.duration > 0 && !player.isOpening }
 
-    /// A full swipe across the touch surface moves a quarter of the item,
-    /// never less than ninety seconds.
-    private var secondsPerPoint: Double { max(player.duration / 4, 90) / 1000 }
+    /// A full swipe across the touch surface moves an eighth of the item,
+    /// never less than a minute. It was a quarter, which overshot: a
+    /// two-hour film moved half an hour for one swipe.
+    private var secondsPerPoint: Double { max(player.duration / 8, 60) / 1000 }
 
     private func clamp(_ seconds: Double) -> Double {
         min(max(0, seconds), max(0, player.duration - 1))
@@ -340,9 +339,6 @@ struct PlayerScreen: View {
         showControls()
     }
 
-    /// How far a swipe must go, in the remote's points (about a thousand
-    /// across), to start a scrub while playing.
-    private static let playingScrubDistance: CGFloat = 170
 
     /// Add a click to the run on screen: clicks the same way add up, a click
     /// the other way starts again, and the count goes a moment after the

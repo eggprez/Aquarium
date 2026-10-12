@@ -67,7 +67,7 @@ struct SettingsView: View {
                 SettingLink(Self.row(.libraryCopy), value: SettingsSummary.libraryCopy(prefs), page: .libraryCopy) {
                     LibraryCopySettingsPage()
                 }
-                SettingToggle(Copy.combineNextUp, isOn: $prefs.combinesNextUp)
+                SettingToggle(Copy.hideContinueWatching, isOn: $prefs.hidesContinueWatching)
                 SettingToggle(Copy.clearAbandoned, isOn: $prefs.clearsAbandonedEpisodes)
                 if prefs.cloudIsAvailable {
                     SettingToggle(Copy.cloudSync, isOn: $prefs.syncsAcrossDevices)
@@ -82,17 +82,11 @@ struct SettingsView: View {
         }
     }
 
-    /// The offsets that are set — "24 fps 40 ms earlier" — or "In step"
-    /// when none is, and "Stereo" after them when downmixing.
-    private var audioSummary: String {
-        var parts = PlayerModel.DelayRate.presets.compactMap { rate -> String? in
-            let delay = prefs.audioDelay(forRate: rate.fps)
-            guard delay != 0 else { return nil }
-            return "\(rate.name) \(PlayerModel.audioDelayShortName(Int((delay * 1000).rounded())))"
-        }
-        if parts.isEmpty { parts.append("In step") }
-        if prefs.stereoDownmix { parts.append("Stereo") }
-        return parts.joined(separator: " · ")
+    /// "Stereo" when downmixing, and nothing otherwise. The delays are not
+    /// summarised here: one per frame rate ran the row off the page, and
+    /// the Audio page lists them a row each.
+    private var audioSummary: String? {
+        prefs.stereoDownmix ? "Stereo" : nil
     }
 
     static let audioLanguageOptions: [(String, String)] =
@@ -237,6 +231,10 @@ private struct AudioSettingsPage: View {
     @Environment(Preferences.self) private var prefs
     @Environment(PlayerModel.self) private var player
 
+    /// The rate whose test is about to play, while the flashing-images
+    /// warning is up over it.
+    @State private var pendingTest: PlayerModel.DelayRate?
+
     var body: some View {
         @Bindable var prefs = prefs
         SettingsColumns(title: "Audio", intro: SettingsView.intro(.audio)) {
@@ -249,7 +247,7 @@ private struct AudioSettingsPage: View {
                     let note = Copy.audioDelay(rate)
                     SettingButton(note.name ?? "", value: delayName(prefs.audioDelay(forRate: rate.fps)),
                                   notes: [note], isFirst: rate == PlayerModel.DelayRate.presets.first) {
-                        Task { await player.playSyncTest(rate) }
+                        pendingTest = rate
                     }
                 }
             }
@@ -259,6 +257,20 @@ private struct AudioSettingsPage: View {
             SettingGroup("Output", page: .audio) {
                 SettingToggle(Copy.downmix, isOn: $prefs.stereoDownmix)
             }
+        }
+        // The clip flashes the whole screen once a second, which is the
+        // kind of picture a photosensitive viewer needs to be told about
+        // before it starts — every time, since whoever is holding the
+        // remote may not be whoever read it last.
+        .alert("Flashing images", isPresented: Binding(
+            get: { pendingTest != nil }, set: { if !$0 { pendingTest = nil } }
+        ), presenting: pendingTest) { rate in
+            Button("Play the test") {
+                Task { await player.playSyncTest(rate) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("The sync test fills the screen with a bright flash about once a second for as long as it plays. If you or anyone watching is sensitive to flashing light, don't play it.")
         }
     }
 
