@@ -117,16 +117,37 @@ in `Player/TV/`.
   switch the display for it; the player does, through `AVDisplayManager`,
   before the file opens. A 23.976 fps film is shown at 24 Hz instead of
   juddering at 60 when *Match Content → Match Frame Rate* is on.
-- **Audio delay, exact, per display mode.** mpv's `audio-delay` moves the
-  sound earlier or later on every stream. *Settings → Audio output* has two
-  sync tests, each a looping clip — a ruler, a sweeping line and a beep at 0 —
-  with the Sync tab over it setting the delay by ear: one at 60 fps for the
-  mode the Home screen runs in, one at 23.976 fps that switches the display
-  the way a film does, for televisions that lag more at 24 Hz than at 60. The
-  player applies whichever offset the display is in, and the Sync tab during
-  a video moves that one. `Tools/SyncTestClip/make-sync-test.swift` renders
-  the clips, and `EXCLUDED_SOURCE_FILE_NAMES` keeps them out of the iPhone
-  and Mac bundles, where nothing plays them.
+- **Audio delay, exact, per frame rate.** mpv's `audio-delay` moves the
+  sound earlier or later on every stream. *Settings → Audio* keeps a delay
+  for each frame rate: five presets — 24, 25, 30, 50 and 60 fps — each a
+  row that plays a looping test clip at its rate (a ruler, a sweeping line
+  and a beep at 0) with the Sync tab over it setting that delay by ear. The
+  player reads the frame rate of whatever is playing, rounds it (23.976 is
+  24, 29.97 is 30) and applies the delay kept for it; the Sync tab during a
+  video moves that one, and a rate with no preset — 48, 120 — gets an entry
+  of its own the first time, listed under *Other frame rates*.
+  `Tools/SyncTestClip/make-sync-test.swift` renders the clips, and
+  `EXCLUDED_SOURCE_FILE_NAMES` keeps them out of the iPhone and Mac bundles,
+  where nothing plays them.
+- **Measured by an iPhone, not by ear.** *Settings → Audio → Measure Apple
+  TV sync* on the iPhone films a sync clip playing on the television and
+  says what to set the Sync tab to. The clip inverts the whole picture for
+  its beat frame; the phone runs its camera at its fastest rate (240
+  fps on anything recent) with the shutter locked open for the whole frame,
+  so how bright a half-lit frame is says how far into it the flash began,
+  and reads the flash row by row across the sensor's rolling shutter to
+  place it to well under a frame. A Goertzel filter at the beep's 1 kHz
+  finds the tone's start in the microphone. Both are stamped on the one
+  capture clock, so the gap is the room's lag, less the sound's travel time
+  from a distance the page asks for and the microphone's own latency. The
+  Apple TV draws a QR code over the clip (`SyncCodeOverlay`) with the rate
+  on test and the delay in force, which the phone reads from the same
+  picture — nothing passes between the apps, no Bonjour, no server. The
+  detectors (`Player/SyncMeasure/SyncDetector.swift`) know nothing of
+  AVFoundation; `Tools/SyncMeasure/main.swift` compiles them into a Mac
+  command that runs them on a recording or on a simulated rolling-shutter
+  camera, where they land within 0.3 ms at 240 and 120 fps and within a
+  frame at 60.
 - **Carried over from the AVPlayer model:** per-series track memory, progress
   reporting, skip intro and credits, Up Next with autoplay, the sleep timer,
   Live TV reopening, and the Siri Remote's Now Playing controls.

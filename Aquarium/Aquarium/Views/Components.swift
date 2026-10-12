@@ -2011,7 +2011,14 @@ struct OfflineState: View {
     var onDownloads: (() -> Void)?
     @State private var checking = false
 
+    #if os(tvOS)
+    // Nothing is downloaded to a television, so there is nothing to offer
+    // in the meantime: the app asks again on its own and comes back when the
+    // server answers.
+    private static let message = "You're signed in, but your Jellyfin server can't be reached right now. Aquarium keeps checking, and everything comes back as soon as the server answers."
+    #else
     private static let message = "You're signed in, but your Jellyfin server can't be reached right now. Downloaded media is still available, and playback will sync once you're back online."
+    #endif
 
     var body: some View {
         #if os(macOS)

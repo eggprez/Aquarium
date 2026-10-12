@@ -520,27 +520,6 @@ final class TransportBarExtras {
     private func extrasItems() -> [UIMenuElement] {
         let state = state()
 
-        // The repairs, when the stream offers any: ahead of the settings
-        // under them, because this is the entry somebody opens the menu
-        // *looking* for when something is wrong.
-        var sync: [UIMenuElement] = []
-        if state.canResync {
-            sync.append(UIAction(
-                title: "Resync audio",
-                image: UIImage(systemName: "arrow.triangle.2.circlepath")
-            ) { [weak self] _ in
-                self?.onResync()
-            })
-        }
-        if state.canReencodeForSync {
-            sync.append(UIAction(
-                title: "Re-encode this stream",
-                image: UIImage(systemName: "server.rack")
-            ) { [weak self] _ in
-                self?.onReencodeForSync()
-            })
-        }
-
         var sleep: [UIAction] = []
         if let left = state.sleepMinutesRemaining {
             sleep.append(UIAction(title: "Cancel sleep timer (\(left) min left)") { [weak self] _ in
@@ -565,11 +544,9 @@ final class TransportBarExtras {
         if let audio = audioMenu(state) { items.append(audio) }
         if let subtitles = subtitlesMenu(state) { items.append(subtitles) }
         items.append(languagesMenu(state))
-        if !sync.isEmpty {
-            items.append(UIMenu(
-                title: "Audio sync", image: UIImage(systemName: "waveform"), children: sync
-            ))
-        }
+        // No audio sync entry: the sound is put back in step on its own
+        // when Picture in Picture ends, which is where it was found to
+        // drift, and the Apple TV is where the offset is measured and set.
         items.append(UIMenu(title: "Sleep", image: UIImage(systemName: "moon"), children: sleep))
         // What was queued by hand. A row plays its title now; the rows
         // above it go.

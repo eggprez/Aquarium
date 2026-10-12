@@ -729,12 +729,19 @@
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=appletvsimulator*]" = "*.icon";
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphoneos*]" = "SyncTest-*.mov";
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*]" = "SyncTest-*.mov";
-				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = "AppIcon-*.icon SyncTest-*.mov";
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = (
+					"AppIcon-*.icon",
+					"SyncTest-*.mov",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
+				"INFOPLIST_KEY_NSCameraUsageDescription[sdk=iphoneos*]" = "Aquarium films the Apple TV's audio sync clip to time its flash against its beep, only while you measure.";
+				"INFOPLIST_KEY_NSCameraUsageDescription[sdk=iphonesimulator*]" = "Aquarium films the Apple TV's audio sync clip to time its flash against its beep, only while you measure.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Aquarium connects to your Jellyfin server, which is usually on your own network.";
+				"INFOPLIST_KEY_NSMicrophoneUsageDescription[sdk=iphoneos*]" = "Aquarium listens for the Apple TV's sync clip beep to time it against the flash, only while you measure.";
+				"INFOPLIST_KEY_NSMicrophoneUsageDescription[sdk=iphonesimulator*]" = "Aquarium listens for the Apple TV's sync clip beep to time it against the flash, only while you measure.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
@@ -794,12 +801,19 @@
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=appletvsimulator*]" = "*.icon";
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphoneos*]" = "SyncTest-*.mov";
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*]" = "SyncTest-*.mov";
-				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = "AppIcon-*.icon SyncTest-*.mov";
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = (
+					"AppIcon-*.icon",
+					"SyncTest-*.mov",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
+				"INFOPLIST_KEY_NSCameraUsageDescription[sdk=iphoneos*]" = "Aquarium films the Apple TV's audio sync clip to time its flash against its beep, only while you measure.";
+				"INFOPLIST_KEY_NSCameraUsageDescription[sdk=iphonesimulator*]" = "Aquarium films the Apple TV's audio sync clip to time its flash against its beep, only while you measure.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Aquarium connects to your Jellyfin server, which is usually on your own network.";
+				"INFOPLIST_KEY_NSMicrophoneUsageDescription[sdk=iphoneos*]" = "Aquarium listens for the Apple TV's sync clip beep to time it against the flash, only while you measure.";
+				"INFOPLIST_KEY_NSMicrophoneUsageDescription[sdk=iphonesimulator*]" = "Aquarium listens for the Apple TV's sync clip beep to time it against the flash, only while you measure.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;

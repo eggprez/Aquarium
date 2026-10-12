@@ -1545,6 +1545,32 @@ final class JellyfinClient {
         }
     }
 
+    /// Forget where an item was left: its saved position goes to zero, so it
+    /// drops out of Continue Watching everywhere, while its played state,
+    /// play count and last-played date are left as they were. Nothing here
+    /// counts as a play, so a show's Next Up is not moved by it — which is
+    /// why the stale episodes Home tidies (see `HomeRows.abandoned`) are
+    /// cleared rather than marked played.
+    ///
+    /// Servers from 10.9 take the position straight into the item's user
+    /// data. An older one has no such call and answers 404, and is instead
+    /// told the item was stopped at the very start, which it records the
+    /// same way — below its minimum resume point, the position is dropped
+    /// and nothing is marked played.
+    func clearProgress(_ itemId: String) async throws {
+        guard let s = prefs.session else { throw APIError.notConfigured }
+        let id = Self.pathId(itemId)
+        do {
+            try await request(
+                "/Users/\(s.userId)/Items/\(id)/UserData", method: "POST",
+                body: ["PlaybackPositionTicks": 0]
+            )
+        } catch APIError.server(let status, _) where status == 404 {
+            try await request("/Users/\(s.userId)/PlayingItems/\(id)?positionTicks=0", method: "DELETE")
+        }
+        LibraryIndex.shared.patchUserData(itemId) { $0.PlaybackPositionTicks = 0 }
+    }
+
     func setFavorite(_ itemId: String, favorite: Bool) async throws {
         guard let s = prefs.session else { throw APIError.notConfigured }
         try await request("/Users/\(s.userId)/FavoriteItems/\(Self.pathId(itemId))", method: favorite ? "POST" : "DELETE")

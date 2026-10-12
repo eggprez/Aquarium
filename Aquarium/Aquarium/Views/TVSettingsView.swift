@@ -68,6 +68,7 @@ struct SettingsView: View {
                     LibraryCopySettingsPage()
                 }
                 SettingToggle(Copy.combineNextUp, isOn: $prefs.combinesNextUp)
+                SettingToggle(Copy.clearAbandoned, isOn: $prefs.clearsAbandonedEpisodes)
                 if prefs.cloudIsAvailable {
                     SettingToggle(Copy.cloudSync, isOn: $prefs.syncsAcrossDevices)
                 } else {
@@ -81,16 +82,16 @@ struct SettingsView: View {
         }
     }
 
-    /// The language, then the offsets that are set, if either is: "40 ms
-    /// earlier", and the Match Frame Rate one after it when measured.
+    /// The offsets that are set — "24 fps 40 ms earlier" — or "In step"
+    /// when none is, and "Stereo" after them when downmixing.
     private var audioSummary: String {
-        var parts = [SettingsSummary.language(prefs.audioLanguage, none: "File's choice")]
-        if prefs.audioDelay != 0 {
-            parts.append(PlayerModel.audioDelayShortName(Int((prefs.audioDelay * 1000).rounded())))
+        var parts = PlayerModel.DelayRate.presets.compactMap { rate -> String? in
+            let delay = prefs.audioDelay(forRate: rate.fps)
+            guard delay != 0 else { return nil }
+            return "\(rate.name) \(PlayerModel.audioDelayShortName(Int((delay * 1000).rounded())))"
         }
-        if let matched = prefs.matchedAudioDelay {
-            parts.append("24 Hz \(PlayerModel.audioDelayShortName(Int((matched * 1000).rounded())))")
-        }
+        if parts.isEmpty { parts.append("In step") }
+        if prefs.stereoDownmix { parts.append("Stereo") }
         return parts.joined(separator: " · ")
     }
 
@@ -110,8 +111,10 @@ struct SettingsView: View {
         SettingDescription(title: page.title, symbol: page.symbol, tint: page.tint, notes: [SettingNote(text: page.note)])
     }
 
-    /// The language rows, named for the page they are on.
-    static let audioLanguageRow = SettingNote(name: "Language", text: Copy.audioLanguage.text)
+    /// The language rows, named for the page they are on: the subtitle one
+    /// is on Subtitles, the audio one on Video beside the rest of what a
+    /// video opens with.
+    static let audioLanguageRow = SettingNote(name: "Audio language", text: Copy.audioLanguage.text)
     static let subtitleLanguageRow = SettingNote(name: "Language", text: Copy.subtitleLanguage.text)
 }
 
@@ -222,6 +225,10 @@ private struct VideoSettingsPage: View {
                 SettingToggle(Copy.resume, isOn: $prefs.resumePlayback)
                 SettingToggle(Copy.autoplayNext, isOn: $prefs.autoplayNext)
             }
+            SettingGroup("Language", page: .video) {
+                SettingChoice(SettingsView.audioLanguageRow, selection: $prefs.audioLanguage,
+                              options: SettingsView.audioLanguageOptions)
+            }
         }
     }
 }
@@ -233,32 +240,24 @@ private struct AudioSettingsPage: View {
     var body: some View {
         @Bindable var prefs = prefs
         SettingsColumns(title: "Audio", intro: SettingsView.intro(.audio)) {
-            SettingGroup(nil, page: .audio) {
-                SettingChoice(SettingsView.audioLanguageRow, selection: $prefs.audioLanguage,
-                              options: SettingsView.audioLanguageOptions, isFirst: true)
+            SettingGroup("Audio delay", page: .audio) {
+                // One row a frame rate: it shows what is set, and pressing
+                // it opens the player on the looped test clip at that rate,
+                // where the Sync tab sets this offset over it. The player
+                // picks among them by the frame rate of whatever is playing.
+                ForEach(PlayerModel.DelayRate.presets) { rate in
+                    let note = Copy.audioDelay(rate)
+                    SettingButton(note.name ?? "", value: delayName(prefs.audioDelay(forRate: rate.fps)),
+                                  notes: [note], isFirst: rate == PlayerModel.DelayRate.presets.first) {
+                        Task { await player.playSyncTest(rate) }
+                    }
+                }
             }
+            // A rate with no clip — 48, 120 — still gets a delay of its own
+            // from the Sync tab over a video at it, and the player uses it;
+            // it just isn't listed here.
             SettingGroup("Output", page: .audio) {
                 SettingToggle(Copy.downmix, isOn: $prefs.stereoDownmix)
-                // Apple TV only: it is the one device here that passes a Dolby
-                // bitstream through to something else, and so the only one on
-                // which decoding it here changes anything.
-                SettingToggle(Copy.soundbar, isOn: $prefs.decodeAudioLocally)
-                // The two offsets, read-only here: each is set in the
-                // player, over the clip that measures it — the Sync tab.
-                SettingInfo(Copy.audioDelay.name ?? "", value: delayName(prefs.audioDelay),
-                            notes: [Copy.audioDelay, Copy.syncTestStandard])
-                SettingInfo(Copy.matchedAudioDelay.name ?? "", value: prefs.matchedAudioDelay.map(delayName) ?? "Not set",
-                            notes: [Copy.matchedAudioDelay, Copy.syncTestMatched])
-            }
-            SettingGroup("Sync tests", page: .audio) {
-                // Each opens the player on a looped test clip at its rate;
-                // the Sync tab sets the matching offset over it.
-                SettingButton(Copy.syncTestStandard.name ?? "", notes: [Copy.syncTestStandard]) {
-                    Task { await player.playSyncTest(.standard) }
-                }
-                SettingButton(Copy.syncTestMatched.name ?? "", notes: [Copy.syncTestMatched]) {
-                    Task { await player.playSyncTest(.matched) }
-                }
             }
         }
     }
@@ -797,23 +796,32 @@ private struct SettingInfo: View {
     }
 }
 
+/// A row that does something when pressed. With a `value`, it is also a
+/// fact — the audio delay rows show what is set and open the test that
+/// sets it.
 private struct SettingButton: View {
     let title: String
+    var value: String?
     var role: ButtonRole?
     let notes: [SettingNote]
+    var isFirst = false
     let action: () -> Void
 
-    init(_ title: String, role: ButtonRole? = nil, notes: [SettingNote], action: @escaping () -> Void) {
+    init(_ title: String, value: String? = nil, role: ButtonRole? = nil, notes: [SettingNote],
+         isFirst: Bool = false, action: @escaping () -> Void) {
         self.title = title
+        self.value = value
         self.role = role
         self.notes = notes
+        self.isFirst = isFirst
         self.action = action
     }
 
     var body: some View {
         Button(action: action) {
-            SettingRowLabel(title: title, titleColour: role == .destructive ? Theme.danger : Theme.accent)
-                .describes(title, notes)
+            SettingRowLabel(title: title, value: value,
+                            titleColour: role == .destructive ? Theme.danger : Theme.accent)
+                .describes(title, notes, isFirst: isFirst)
         }
         .buttonStyle(SettingRowStyle())
     }
