@@ -19,8 +19,9 @@
 //    then out.
 //
 //  While the bar is up with nothing else open, `RemoteInput` holds focus and
-//  reads the remote itself — see there for why. A panel or the error card
-//  takes focus from it, and SwiftUI's focus engine drives those as usual.
+//  reads the remote itself — see there for why. Menu is the exception: it
+//  arrives as SwiftUI's exit command, below. A panel or the error card takes
+//  focus from it, and SwiftUI's focus engine drives those as usual.
 
 #if os(tvOS)
 
@@ -69,6 +70,12 @@ struct PlayerScreen: View {
             // this one's first frame replaces it.
             if player.pictureIsStale {
                 Color.black.ignoresSafeArea()
+            }
+
+            // The code the iPhone app reads during a sync clip: which rate
+            // this is and the delay in force. See `SyncCodeOverlay`.
+            if player.isSyncTest, player.errorMessage == nil {
+                SyncCodeOverlay()
             }
 
             RemoteInput(isEnabled: remoteInCharge, panelOpen: panel != nil, onEvent: handle)
@@ -123,6 +130,12 @@ struct PlayerScreen: View {
         .animation(.easeOut(duration: 0.3), value: panel)
         .animation(.spring(duration: 0.25), value: skipTotal)
         .onPlayPauseCommand { player.togglePlayPause() }
+        // Menu comes this way rather than through `RemoteInput`: the full-screen
+        // cover the player sits in closes on a Menu press unless a handler on
+        // the SwiftUI side claims it, and swallowing the press in UIKit was
+        // found not to stop that. With the panel open its own handler, nearer
+        // the focused button, gets there first.
+        .onExitCommand { handle(.menu) }
         .onChange(of: player.trickplay, initial: true) { _, info in trickplay.reset(info) }
         .task(id: player.currentChannel?.Id) { await schedule.load(for: player.currentChannel) }
         .task(id: InfoArtwork.url(for: player)) { await artwork.load(InfoArtwork.url(for: player)) }

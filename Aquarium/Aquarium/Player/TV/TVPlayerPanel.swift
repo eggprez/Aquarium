@@ -423,9 +423,9 @@ private struct SpeedTab: View {
 /// The sound against the picture, moved while the picture plays above: five
 /// milliseconds a step, fifty for a room that is a long way out, either way,
 /// on everything. mpv moves it the moment it is pressed. Which of the two
-/// offsets it moves follows the display: the standard one, or the Match
-/// Frame Rate one while the television has been switched for this video —
-/// see `PlayerModel.usesMatchedDelay`.
+/// offsets it moves follows the frame rate of what is playing: the 24 fps
+/// delay under a film, the 60 fps one under a show — see
+/// `PlayerModel.delayRate`.
 ///
 /// Signed the way a receiver's lip-sync control is: minus holds the sound
 /// back, plus brings it forward. That is the opposite of the stored value
@@ -461,24 +461,16 @@ private struct SyncTab: View {
         .padding(.vertical, 10)
     }
 
-    /// Which way the sound is moved, and which of the two offsets this is:
-    /// the one for the display as the Home screen has it, or the one for
-    /// the mode the television was switched to for this video.
+    /// Which way the sound is moved, which of the two offsets this is, and
+    /// the frame rate that chose it when it is known — kept short enough
+    /// for the label, which is one line.
     private func caption(_ current: Int) -> String {
-        let direction = current == 0 ? "Sound and picture together"
-            : current < 0 ? "Sound earlier" : "Sound later"
-        let mode: String
-        if player.usesMatchedDelay, let rate = DisplayMatch.requested {
-            mode = "Match Frame Rate · \(PlayerModel.frameRateName(rate.rounded(), unit: "Hz"))"
-        } else if player.syncTest == .matched {
-            // The clip asked for 24 Hz and wasn't given it: Match Frame
-            // Rate is off on the Apple TV, so there is no matched mode to
-            // set an offset for, and this test is setting the other one.
-            mode = "Match Frame Rate is off · standard frame rate"
-        } else {
-            mode = "Standard frame rate"
+        let direction = current == 0 ? "Together" : current < 0 ? "Sound earlier" : "Sound later"
+        var parts = [direction, "\(player.delayRate.name) delay"]
+        if let rate = player.videoFrameRate {
+            parts.append(PlayerModel.frameRateName(rate))
         }
-        return "\(direction) · \(mode)"
+        return parts.joined(separator: " · ")
     }
 
     /// `delta` as the tab signs it: negative holds the sound back.

@@ -1,7 +1,7 @@
 //  Home on a Mac: the media bar as a carousel a pointer and a keyboard can
 //  drive, and the button style its Play wears.
 //
-//  The phone pages with a swipe and the television crossfades on a timer; a
+//  The phone pages with a swipe and the television with the selector; a
 //  Mac has both a pointer and arrow keys and no swipe at all, so this one is
 //  driven the way the TV app's is — chevrons at the edges under the pointer,
 //  ←/→ when the bar has the keyboard, dots you can click — and the timer stops

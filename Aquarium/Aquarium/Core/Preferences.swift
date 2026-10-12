@@ -422,6 +422,14 @@ final class Preferences {
         didSet { write(combinesNextUp, forKey: "home_combine_next_up") }
     }
 
+    /// Have the server forget the position of episodes left partway through
+    /// that Next Up has since moved well past — see `HomeRows.abandoned` —
+    /// each time Home loads. Off by default: it writes to the account's watch
+    /// state, so it is asked for.
+    var clearsAbandonedEpisodes: Bool {
+        didSet { write(clearsAbandonedEpisodes, forKey: "home_clear_abandoned") }
+    }
+
     /// Shows taken out of Next Up by hand — see `ItemMenu`'s "Remove from
     /// Next Up". Jellyfin has no way to hide a show from Next Up without
     /// marking something watched, so the list is this app's, and it travels
@@ -520,32 +528,50 @@ final class Preferences {
     /// the rarer case, and the cost of getting it wrong is one menu entry
     /// rather than an offset silently reappearing next time. Only ever applied
     /// where it can be: see `PlayerModel.canDelayAudio`.
+    ///
+    /// On an Apple TV this is the 60 fps delay — shows, sport and Live TV —
+    /// and the one for a video whose rate isn't known; every other rate has
+    /// its own, in `audioDelaysByRate`.
     var audioDelay: Double {
         // Not shared between devices, for the reason above: it is the lag of
         // the room's own soundbar, and two Apple TVs are two rooms.
         didSet { defaults.set(audioDelay, forKey: "audio_delay") }
     }
 
-    /// The offset used instead of `audioDelay`, in seconds, while the Apple
-    /// TV has switched the television out of its usual 60 Hz for a video —
-    /// Match Content → Match Frame Rate, on a film.
+    /// The Apple TV's offsets for every other frame rate, in seconds and
+    /// positive for later, keyed by the rate rounded to a whole number:
+    /// "24" for a 23.976 or 24 fps film, "30" for 29.97, "48", "120". Read
+    /// and written through `audioDelay(forRate:)`, which folds the 60 fps
+    /// one into `audioDelay`.
     ///
-    /// Its own value because a television does different work at 24 Hz than
-    /// at 60: frame-rate conversion, a different motion mode, a different
-    /// game or low-latency setting. The picture comes out later by an amount
-    /// that is nothing to do with the soundbar, and tvOS reports only that
-    /// matching is switched on, never what it costs. So it is measured the
-    /// same way as the other: the Match Frame Rate sync test switches the
-    /// display and the Sync tab sets this over it. Nil until that has been
-    /// done, and `audioDelay` stands in. Not shared between devices: another
-    /// room is another television.
-    var matchedAudioDelay: Double? {
-        didSet {
-            if let matchedAudioDelay {
-                defaults.set(matchedAudioDelay, forKey: "matched_audio_delay")
-            } else {
-                defaults.removeObject(forKey: "matched_audio_delay")
-            }
+    /// A delay a rate because a television does different work on each:
+    /// with Match Frame Rate on it switches modes for a film and runs a
+    /// different motion mode there, and either way its frame-rate
+    /// conversion is a different job at 24 than at 60. The picture comes
+    /// out later by an amount that is nothing to do with the soundbar, so
+    /// each is measured on its own — the preset rates over the sync clips
+    /// in Settings → Audio, any other rate over a video at it, from the
+    /// Sync tab — and kept. Not shared between devices: another room is
+    /// another television.
+    var audioDelaysByRate: [String: Double] {
+        didSet { defaults.set(audioDelaysByRate, forKey: "audio_delays_by_rate") }
+    }
+
+    /// The offset for a video at `fps` frames a second, rounded. Nothing
+    /// measured yet is in step.
+    func audioDelay(forRate fps: Int) -> Double {
+        fps == 60 ? audioDelay : audioDelaysByRate[String(fps)] ?? 0
+    }
+
+    /// Set the offset for a rate. In step is forgotten rather than kept as
+    /// zero, so a rate only stays in the list while it has a delay.
+    func setAudioDelay(_ seconds: Double, forRate fps: Int) {
+        if fps == 60 {
+            audioDelay = seconds
+        } else if abs(seconds) < 0.0005 {
+            audioDelaysByRate.removeValue(forKey: String(fps))
+        } else {
+            audioDelaysByRate[String(fps)] = seconds
         }
     }
 
@@ -796,6 +822,7 @@ final class Preferences {
         newEpisodeAlerts = d.bool(forKey: "new_episode_alerts")
         autoplayNext = d.object(forKey: "autoplay_next") == nil ? true : d.bool(forKey: "autoplay_next")
         combinesNextUp = d.bool(forKey: "home_combine_next_up")
+        clearsAbandonedEpisodes = d.bool(forKey: "home_clear_abandoned")
         nextUpHidden = (d.dictionary(forKey: "next_up_hidden") as? [String: String]) ?? [:]
         defaultBitrate = Quality.snapped(d.object(forKey: "default_bitrate") as? Int)
         stereoDownmix = d.bool(forKey: "stereo_downmix")
@@ -804,7 +831,18 @@ final class Preferences {
         resumePlayback = d.object(forKey: "resume_playback") == nil ? true : d.bool(forKey: "resume_playback")
         volume = d.object(forKey: "volume") == nil ? 1.0 : d.double(forKey: "volume")
         audioDelay = d.double(forKey: "audio_delay")
-        matchedAudioDelay = d.object(forKey: "matched_audio_delay") as? Double
+        var byRate = (d.dictionary(forKey: "audio_delays_by_rate") as? [String: Double]) ?? [:]
+        // The 24 fps delay was the "matched" delay before the player chose
+        // by frame rate rather than by display mode: the same measurement,
+        // so it carries over.
+        if byRate["24"] == nil,
+           let old = d.object(forKey: "audio_delay_24") as? Double ?? d.object(forKey: "matched_audio_delay") as? Double,
+           old != 0 {
+            byRate["24"] = old
+        }
+        audioDelaysByRate = byRate
+        d.removeObject(forKey: "audio_delay_24")
+        d.removeObject(forKey: "matched_audio_delay")
         // The offset this replaced was added to the other rather than used
         // instead of it, so it doesn't carry over.
         d.removeObject(forKey: "frame_rate_match_delay")
@@ -883,6 +921,7 @@ final class Preferences {
         CloudSync.set(powerAwareQuality, forKey: "power_aware_quality")
         CloudSync.set(autoplayNext, forKey: "autoplay_next")
         CloudSync.set(combinesNextUp, forKey: "home_combine_next_up")
+        CloudSync.set(clearsAbandonedEpisodes, forKey: "home_clear_abandoned")
         CloudSync.set(nextUpHidden, forKey: "next_up_hidden")
         CloudSync.set(stereoDownmix, forKey: "stereo_downmix")
         CloudSync.set(resumePlayback, forKey: "resume_playback")
@@ -959,6 +998,7 @@ final class Preferences {
         if let v = CloudSync.object(forKey: "power_aware_quality") as? Bool, v != powerAwareQuality { powerAwareQuality = v }
         if let v = CloudSync.object(forKey: "autoplay_next") as? Bool, v != autoplayNext { autoplayNext = v }
         if let v = CloudSync.object(forKey: "home_combine_next_up") as? Bool, v != combinesNextUp { combinesNextUp = v }
+        if let v = CloudSync.object(forKey: "home_clear_abandoned") as? Bool, v != clearsAbandonedEpisodes { clearsAbandonedEpisodes = v }
         if let v = CloudSync.object(forKey: "next_up_hidden") as? [String: String], v != nextUpHidden { nextUpHidden = v }
         if let v = CloudSync.object(forKey: "stereo_downmix") as? Bool, v != stereoDownmix { stereoDownmix = v }
         if let v = CloudSync.object(forKey: "resume_playback") as? Bool, v != resumePlayback { resumePlayback = v }

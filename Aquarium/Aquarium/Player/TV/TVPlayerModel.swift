@@ -62,10 +62,10 @@ final class PlayerModel {
     /// A channel from an M3U playlist rather than Jellyfin: no session on the
     /// other end, so nothing is reported for it.
     private(set) var isExternal = false
-    /// Which of the clips from Settings → Audio output is playing, if one
-    /// is. Each says to swipe down for the Sync tab, and so opens the panel
-    /// there.
-    private(set) var syncTest: SyncTest?
+    /// Which of the clips from Settings → Audio is playing, if one is, by
+    /// the rate it sets the delay for. Each says to swipe down for the Sync
+    /// tab, and so opens the panel there.
+    private(set) var syncTest: DelayRate?
     var isSyncTest: Bool { syncTest != nil }
     private(set) var errorMessage: String?
 
@@ -166,6 +166,9 @@ final class PlayerModel {
     private var displayRequested = false
     /// Waiting on the last seek's first frame — see `watchSeek`.
     private var seekWatch: Task<Void, Never>?
+    /// When the idle timer was last written during playback — see
+    /// `keepScreenAwake`.
+    private var lastAwakeAssert: CFTimeInterval = 0
 
     private var client: JellyfinClient { .shared }
     private var prefs: Preferences { .shared }
@@ -291,8 +294,8 @@ final class PlayerModel {
                 }
             }
             engine.setVideoSync(displayRate: DisplayMatch.matchedRate)
-            // After the display request: which offset applies depends on
-            // what was asked for — see `usesMatchedDelay`.
+            // Which offset applies follows the file's frame rate — see
+            // `delayRate`.
             engine.audioDelay = audioDelay
             // A Jellyfin HLS playlist covers the whole item from zero whatever
             // start the server was given, so a transcode is seeked the same
@@ -368,15 +371,13 @@ final class PlayerModel {
         if let previous { Task { await release(previous) } }
     }
 
-    /// One of the two sync tests from Settings → Audio output: a clip in the
-    /// app — a line sweeping a millisecond ruler, a beep as it crosses 0 —
-    /// looped, and opened the way a video is: the display asked for the
-    /// clip's rate first. The 60 fps clip leaves the display as it is and
-    /// the Sync tab over it sets `Preferences.audioDelay`; the 23.976 fps
-    /// one switches it, as a film does when Match Frame Rate is on, and the
-    /// tab sets `Preferences.matchedAudioDelay` instead — see
-    /// `usesMatchedDelay`. Made by `Tools/SyncTestClip/make-sync-test.swift`.
-    func playSyncTest(_ test: SyncTest) async {
+    /// One of the sync tests from Settings → Audio: a clip in the app — a
+    /// line sweeping a millisecond ruler, a beep as it crosses 0 — looped,
+    /// and opened the way a video is: the display asked for the clip's rate
+    /// first. The clip's rate picks the delay the Sync tab over it sets, as
+    /// a video's does — see `delayRate`. Only the preset rates have a clip;
+    /// made by `Tools/SyncTestClip/make-sync-test.swift`.
+    func playSyncTest(_ test: DelayRate) async {
         guard let url = Bundle.main.url(forResource: test.resource, withExtension: "mov") else {
             Self.log.error("\(test.resource, privacy: .public).mov is missing from the bundle")
             return
@@ -401,7 +402,7 @@ final class PlayerModel {
         isLive = false
         autoplayCancelled = true
         upNextSettled = true
-        title = "Audio Sync Test · \(test.name)"
+        title = "Audio Sync · \(test.name) delay"
         subtitle = "The beep should land on the flash"
         artworkURL = nil
         currentBitrate = nil
@@ -416,7 +417,13 @@ final class PlayerModel {
         awaitingLoad = true
         engine.stop()
         displayRequested = true
-        await DisplayMatch.request(rate: test.rate, codec: "h264", size: CGSize(width: 1920, height: 1080))
+        await DisplayMatch.request(rate: test.clipRate, codec: "h264", size: CGSize(width: 1920, height: 1080))
+        guard generation == mine else { return }
+        // A film waits on the server before it loads, and by then the
+        // player has come up around the video view; a clip in the bundle
+        // would load into a view not yet on screen, and mpv's first open
+        // against a surface with no size drew nothing until the next.
+        await awaitSurface()
         guard generation == mine else { return }
         engine.setVideoSync(displayRate: DisplayMatch.matchedRate)
         engine.audioDelay = audioDelay
@@ -425,15 +432,43 @@ final class PlayerModel {
         if let previous { Task { await release(previous) } }
     }
 
+    /// Waits for the video view to be on screen with a size, which is what
+    /// mpv's output needs when a file first opens; gives up after a second
+    /// and a half rather than never load.
+    private func awaitSurface() async {
+        let deadline = ContinuousClock.now + .milliseconds(1500)
+        while (videoView.window == nil || videoView.bounds.width < 2 || videoView.bounds.height < 2),
+              ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(16))
+        }
+    }
+
     /// Keeps the screensaver off while something is playing, and lets it
     /// back on once it's paused or put away. AVPlayer did this by itself;
     /// mpv draws into a layer tvOS knows nothing about, so the idle timer ran
     /// on through a film and the screensaver came up over it.
-    private func holdScreenAwake() {
+    ///
+    /// `reassert` writes the flag even when it already reads as set. tvOS
+    /// has been seen to let the screensaver through over a video that
+    /// followed a display-mode switch — the sync test's, or a film's — with
+    /// the flag still reading true, so it is written again on the first
+    /// frame, after every mode switch, on coming to the front, and every
+    /// few seconds of playback from `keepScreenAwake`.
+    private func holdScreenAwake(reassert: Bool = false) {
         let playing = isActive && !isPaused
-        if UIApplication.shared.isIdleTimerDisabled != playing {
-            UIApplication.shared.isIdleTimerDisabled = playing
+        let application = UIApplication.shared
+        if application.isIdleTimerDisabled != playing || (reassert && playing) {
+            application.isIdleTimerDisabled = playing
         }
+    }
+
+    /// Called on every position tick: writes the flag again every ten
+    /// seconds of playback. Cheap, and it outlasts whatever reset it.
+    private func keepScreenAwake() {
+        let now = CACurrentMediaTime()
+        guard now - lastAwakeAssert >= 10 else { return }
+        lastAwakeAssert = now
+        holdScreenAwake(reassert: true)
     }
 
     /// Everything that belongs to one stream, cleared before the next opens.
@@ -515,6 +550,7 @@ final class PlayerModel {
         guard isActive, !awaitingLoad else { return }
         switch event {
         case .position(let seconds):
+            keepScreenAwake()
             position = seconds
             refreshCues()
             maybeReport()
@@ -548,6 +584,10 @@ final class PlayerModel {
             videoSize = size
         case .frameRate(let rate):
             frameRate = rate > 0 ? rate : nil
+            // The offset follows the rate: a stream the server couldn't say
+            // the rate of opened on the 60 fps delay, and moves to the 24
+            // fps one now if that is what mpv found.
+            engine?.audioDelay = audioDelay
             // A stream the server couldn't say the rate of — a playlist
             // channel, an unprobed file — is matched once mpv has read it.
             // It is already playing, so the switch lands over the picture.
@@ -576,10 +616,13 @@ final class PlayerModel {
             if isOpening {
                 isOpening = false
                 let latency = AVAudioSession.sharedInstance().outputLatency
-                Self.log.info("first frame: \(self.title, privacy: .public); output latency \(Int((latency * 1000).rounded())) ms, offset \(self.audioDelayMilliseconds) ms, \(self.usesMatchedDelay ? "matched" : "standard", privacy: .public)")
+                Self.log.info("first frame: \(self.title, privacy: .public); output latency \(Int((latency * 1000).rounded())) ms, offset \(self.audioDelayMilliseconds) ms, \(self.delayRate.name, privacy: .public) delay")
                 NowPlaying.shared.update(from: self)
             }
             isBuffering = false
+            // The idle timer is asserted again on the first frame of every
+            // open — see `holdScreenAwake`.
+            holdScreenAwake(reassert: true)
         case .endFile(let reason, let error):
             endFile(reason, error: error)
         }
@@ -873,37 +916,73 @@ final class PlayerModel {
     /// The furthest the offset goes either way, in milliseconds.
     static let audioDelayReach = 1000
 
-    /// Whether the sound is being timed for a television the Apple TV has
-    /// switched out of 60 Hz for this video: Match Content → Match Frame
-    /// Rate is on, and the file is a rate the Home screen isn't — 23.976,
-    /// 24, 25, 29.97, 50. 59.94 and 60 leave the display where it is. A
-    /// television does different work in that mode and delays the picture
-    /// by a different amount, so the offset in play is a different one: see
-    /// `Preferences.matchedAudioDelay`.
-    var usesMatchedDelay: Bool {
-        guard let rate = DisplayMatch.requested else { return false }
-        return abs(rate - 60) > 1
+    /// A frame rate the app keeps a delay for: any rate, rounded to a whole
+    /// number, so 23.976 and 24 are one and 29.97 and 30 another. Five are
+    /// presets with a sync clip in Settings; any other — 48, 120, something
+    /// odd from a camera — is learned the first time the Sync tab is used
+    /// over a video at it, and remembered under that rate.
+    struct DelayRate: Hashable, Comparable, Identifiable {
+        let fps: Int
+
+        /// The rounded rate; nothing known is 60, the mode the Home screen
+        /// runs in and what Live TV and most shows are.
+        init(frameRate: Double?) {
+            fps = frameRate.map { $0 > 0 ? Int($0.rounded()) : 60 } ?? 60
+        }
+
+        init(fps: Int) { self.fps = fps }
+
+        /// The rates with a clip of their own, in the order Settings lists
+        /// them.
+        static let presets = [24, 25, 30, 50, 60].map(DelayRate.init(fps:))
+
+        var id: Int { fps }
+        var name: String { "\(fps) fps" }
+        var isPreset: Bool { Self.presets.contains(self) }
+        var resource: String { "SyncTest-\(fps)" }
+
+        /// The rate the clip is rendered at: the NTSC rate for 24 and 30,
+        /// which is what the files at those rates are.
+        var clipRate: Double {
+            switch fps {
+            case 24: 24000.0 / 1001
+            case 30: 30000.0 / 1001
+            default: Double(fps)
+            }
+        }
+
+        static func < (a: DelayRate, b: DelayRate) -> Bool { a.fps < b.fps }
     }
 
-    /// The offset in play, in seconds, positive for later: the one for the
-    /// mode the display is in. The matched one stands in for nothing — until
-    /// it has been measured, a film gets the standard offset.
-    var audioDelay: Double {
-        usesMatchedDelay ? (prefs.matchedAudioDelay ?? prefs.audioDelay) : prefs.audioDelay
+    /// The frame rate of what is playing, as far as it is known: the
+    /// server's reading of the file, the sync clip's own rate, or what mpv
+    /// found in a stream the server couldn't describe.
+    var videoFrameRate: Double? {
+        if let video = source?.mediaSource.streams.first(where: { $0.type == "Video" }),
+           let rate = video.RealFrameRate ?? video.AverageFrameRate, rate > 0 {
+            return rate
+        }
+        if let syncTest { return syncTest.clipRate }
+        return frameRate
     }
+
+    /// The offset in play follows the picture's frame rate — see
+    /// `Preferences.audioDelaysByRate`.
+    var delayRate: DelayRate { DelayRate(frameRate: videoFrameRate) }
+
+    /// The offset in play, in seconds, positive for later: the one measured
+    /// for the frame rate of what is playing.
+    var audioDelay: Double { prefs.audioDelay(forRate: delayRate.fps) }
 
     var audioDelayMilliseconds: Int { Int((audioDelay * 1000).rounded()) }
 
-    /// Set the offset in play — whichever of the two the display's mode
-    /// calls for, so a nudge during a film lands on the film's and one
-    /// during a 60 fps show on the other's. mpv moves the sound at once.
+    /// Set the offset in play, under the frame rate of what is playing, so
+    /// a nudge during a film lands on the 24 fps delay and one during a 60
+    /// fps show on that one. A rate not seen before gets an entry of its
+    /// own. mpv moves the sound at once.
     func setAudioDelay(milliseconds: Int) {
         let clamped = min(max(milliseconds, -Self.audioDelayReach), Self.audioDelayReach)
-        if usesMatchedDelay {
-            prefs.matchedAudioDelay = Double(clamped) / 1000
-        } else {
-            prefs.audioDelay = Double(clamped) / 1000
-        }
+        prefs.setAudioDelay(Double(clamped) / 1000, forRate: delayRate.fps)
         engine?.audioDelay = audioDelay
     }
 
@@ -1476,6 +1555,7 @@ final class PlayerModel {
             MainActor.assumeIsolated {
                 Self.log.info("display mode switch ended; restarting audio output")
                 self?.recoverAudio()
+                self?.holdScreenAwake(reassert: true)
             }
         })
         observers.append(centre.addObserver(
@@ -1516,6 +1596,7 @@ final class PlayerModel {
                 self.engine?.set("vid", "auto")
                 self.recoverAudio()
                 self.checkSleepDeadline()
+                self.holdScreenAwake(reassert: true)
             }
         })
     }
@@ -1533,20 +1614,6 @@ final class PlayerModel {
     #endif
 
     // MARK: - Helpers
-
-    /// The two sync tests in Settings → Audio output, one for each mode the
-    /// television can be in — see `Preferences.matchedAudioDelay`.
-    enum SyncTest: String, CaseIterable {
-        /// 60 fps: the display stays as the Home screen has it.
-        case standard
-        /// 23.976 fps, the rate films are: with Match Frame Rate on, the
-        /// display switches for it the way it does for a film.
-        case matched
-
-        var rate: Double { self == .standard ? 60 : 24000.0 / 1001 }
-        var resource: String { self == .standard ? "SyncTest-60" : "SyncTest-24" }
-        var name: String { self == .standard ? "Standard Frame Rate" : "Match Frame Rate" }
-    }
 
     static func displayTitle(_ item: BaseItem) -> String {
         if item.isEpisode, let series = item.SeriesName {

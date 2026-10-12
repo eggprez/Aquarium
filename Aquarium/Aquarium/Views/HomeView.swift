@@ -191,6 +191,30 @@ struct HomeView: View {
         _heroDrawnAt = State(initialValue: memo.heroDrawnAt)
     }
 
+    /// Have the server forget the in-progress episodes Next Up has moved
+    /// well past — see `HomeRows.abandoned` — and take the ones it forgot off
+    /// the page. Each is its own request and its own failure: one the server
+    /// would not clear stays where it is until the next load tries again.
+    private func clearAbandonedEpisodes() async {
+        let stale = HomeRows.abandoned(resume: resume, nextUp: nextUp)
+        guard !stale.isEmpty else { return }
+        var cleared = Set<String>()
+        for item in stale {
+            do {
+                try await client.clearProgress(item.Id)
+                cleared.insert(item.Id)
+            } catch {
+                continue
+            }
+        }
+        guard !cleared.isEmpty else { return }
+        resume.removeAll { cleared.contains($0.Id) }
+        rememberPage()
+        app.toast(cleared.count == 1
+                  ? "Cleared an abandoned episode from Continue Watching"
+                  : "Cleared \(cleared.count) abandoned episodes from Continue Watching")
+    }
+
     private func rememberPage() {
         HomeMemo.save(HomeMemo(
             account: client.session?.accountKey,
@@ -713,6 +737,13 @@ struct HomeView: View {
         sections = await sectionsTask
         do { resume = try await resumeTask } catch { failure = error }
         do { nextUp = try await nextUpTask } catch { failure = failure ?? error }
+
+        // Both lists fresh is the moment to tidy the episodes Next Up has left
+        // behind. Not awaited: it is a write per episode, and the page is not
+        // kept waiting on housekeeping.
+        if failure == nil, prefs.clearsAbandonedEpisodes {
+            Task { await clearAbandonedEpisodes() }
+        }
 
         #if os(iOS)
         // The home screen icon's press-and-hold menu leads with the same
@@ -1528,57 +1559,109 @@ struct HeroHeader: View {
 /// the one that happened to be first in Continue Watching, moving on by itself
 /// if you don't.
 ///
-/// The same idea as the phone's carousel below, built differently because tvOS
-/// has no paging `TabView` and no swipe to drive one. One page is drawn at a
-/// time and crossfades to the next; the rest are fetched into the image cache up
-/// front so a change of page is a fade rather than a blur resolving again.
+/// The same idea as the phone's carousel below, built the way a television
+/// does everything: as a row the selector moves along. Each title is a page
+/// the width of the screen, and the pages sit in a horizontal scroll view that
+/// snaps to one at a time. Swiping right from a page's Details lands on the
+/// next page's Play, and the bar slides over to it; swiping left from Play
+/// brings the one before back. There is no gesture of its own to invent — the
+/// paging *is* focus moving, which is the one input a Siri Remote always has —
+/// and the dots in the corner say where you are.
 ///
 /// It stops rotating while the selector is inside it. A bar that changed title
 /// under a focused Play button would start something other than what the button
 /// said when you pressed it — and moving focus off it is exactly the moment
 /// rotating becomes harmless again.
+///
+/// The whole row is one focus section. That is what makes it the stop on the
+/// way up from the shelves: without it the selector moved by overlap alone, and
+/// a card on the right of the screen pressed up past two buttons on the left
+/// and landed in the refresh control, or the tab strip. A section the width of
+/// the screen is a target every card is under, so the way up from anywhere on
+/// the page is Play or Details, then Refresh, then the tabs.
 struct HeroCarousel: View {
     let items: [BaseItem]
     /// Passed straight through to whichever page is on screen.
     var topBleed: CGFloat = 0
 
-    @State private var index = 0
-    @State private var isFocused = false
+    /// Which page the scroll view is resting on, by the item's id. Set by the
+    /// ticker and by focus arriving on another page, and read back from the
+    /// scroll view as it settles.
+    @State private var position: String?
+    /// The page whose buttons hold the selector, if any.
+    @State private var focusedPage: String?
     /// Held in state so it belongs to the view's lifetime rather than being a
     /// fresh countdown on every redraw.
     @State private var ticker = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var current: BaseItem? {
-        items.indices.contains(index) ? items[index] : items.first
+    private var index: Int {
+        items.firstIndex { $0.Id == position } ?? 0
     }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            if let current {
-                HeroHeader(item: current, onFocusChange: { isFocused = $0 }, topBleed: topBleed)
-                    .id(current.Id)
-                    .transition(.opacity)
+            ScrollView(.horizontal) {
+                // Eager rather than lazy, for the same reason the shelves are
+                // (see `HomeView.scroll`): the selector can only move to a
+                // button that exists, and the next page's Play has to be there
+                // before anyone swipes towards it. Six backdrops is what this
+                // costs, and `prefetch` was loading them all anyway.
+                HStack(spacing: 0) {
+                    ForEach(items) { item in
+                        HeroHeader(
+                            item: item,
+                            onFocusChange: { inside in
+                                if inside {
+                                    focusedPage = item.Id
+                                } else if focusedPage == item.Id {
+                                    focusedPage = nil
+                                }
+                            },
+                            topBleed: topBleed
+                        )
+                        .containerRelativeFrame(.horizontal)
+                        .id(item.Id)
+                    }
+                }
+                .scrollTargetLayout()
             }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $position)
+            .scrollIndicators(.hidden)
+            .focusSection()
+
             if items.count > 1 { pageDots }
         }
         .frame(height: HeroHeader.height + topBleed)
+        .onAppear {
+            if position == nil { position = items.first?.Id }
+        }
+        // Focus landing on another page is the swipe that pages the bar. The
+        // focus engine scrolls just far enough to show the button it moved to;
+        // this finishes the move so the page sits square, not a third of the
+        // way across.
+        .onChange(of: focusedPage) { _, page in
+            guard let page, page != position else { return }
+            withAnimation(.easeInOut(duration: 0.45)) { position = page }
+        }
         .onReceive(ticker) { _ in
-            guard !reduceMotion, !isFocused, items.count > 1 else { return }
-            withAnimation(.easeInOut(duration: 0.6)) {
-                index = (index + 1) % items.count
-            }
+            guard !reduceMotion, focusedPage == nil, items.count > 1 else { return }
+            let next = items[(index + 1) % items.count].Id
+            withAnimation(.easeInOut(duration: 0.6)) { position = next }
         }
         // A fresh draw is a fresh bar: it starts at the first of the new set
         // rather than at wherever the old one had got to — which would also be
-        // out of range whenever the new draw is the shorter of the two.
-        .onChange(of: items.map(\.Id)) { _, _ in index = 0 }
+        // a page that no longer exists whenever the new draw is the shorter of
+        // the two.
+        .onChange(of: items.map(\.Id)) { _, _ in position = items.first?.Id }
         .task(id: items.map(\.Id)) { await prefetch() }
     }
 
-    /// Everything but the page on screen, pulled into the image cache. Without
-    /// it the first turn of the bar shows a blur resolving, because `RemoteImage`
-    /// only skips its placeholder when the artwork is already cached.
+    /// Everything but the first page, pulled into the image cache. The pages
+    /// are all built, but `RemoteImage` only skips its placeholder when the
+    /// artwork is already cached, and the first slide of the bar should be a
+    /// picture arriving rather than a blur resolving.
     private func prefetch() async {
         for item in items.dropFirst() {
             guard let url = Artwork.url(item, type: "Backdrop", width: HeroHeader.backdropWidth)

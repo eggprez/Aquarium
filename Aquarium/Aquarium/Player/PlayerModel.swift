@@ -915,7 +915,18 @@ final class PlayerModel {
 
     /// The offset that is *set*, in seconds. Positive means the sound plays
     /// later. Lives in Preferences and outlives the stream — see there.
-    var audioDelay: Double { prefs.audioDelay }
+    ///
+    /// Always zero on an iPhone or iPad: there is nothing between the device
+    /// and its own speaker or headphones to lag, the controls were taken out
+    /// of the player and Settings, and a value left over from when they were
+    /// there must not keep building compositions nobody asked for.
+    var audioDelay: Double {
+        #if os(iOS)
+        0
+        #else
+        prefs.audioDelay
+        #endif
+    }
 
     /// The same, as the menu spells it.
     var audioDelayMilliseconds: Int { Int((audioDelay * 1000).rounded()) }

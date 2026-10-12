@@ -177,10 +177,10 @@ struct SettingsView: View {
                 qualitySection
                 pictureSection
                 playingSection
+                audioLanguageSection
             }
 
             if shows(.audio) {
-                audioLanguageSection
                 audioOutputSection
             }
 
@@ -262,10 +262,12 @@ struct SettingsView: View {
         return Section {
             Toggle(isOn: $prefs.combinesNextUp) { MacSettingLabel(Copy.combineNextUp) }
                 .note(Copy.combineNextUp)
+            Toggle(isOn: $prefs.clearsAbandonedEpisodes) { MacSettingLabel(Copy.clearAbandoned) }
+                .note(Copy.clearAbandoned)
         } header: {
             Text("Home")
         } footer: {
-            MacSettingFooter(Copy.combineNextUp)
+            MacSettingFooter(Copy.combineNextUp, Copy.clearAbandoned)
         }
     }
 
@@ -415,8 +417,8 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Audio
-
+    /// On the Video tab with the rest of what a video opens with; the Audio
+    /// tab is the delay and the downmix.
     private var audioLanguageSection: some View {
         @Bindable var prefs = prefs
         return Section {
@@ -424,7 +426,7 @@ struct SettingsView: View {
                 Text("Whatever the file lists first").tag("")
                 ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
             } label: {
-                MacSettingLabel(Copy.audioLanguage, title: "Language")
+                MacSettingLabel(Copy.audioLanguage)
             }
             .note(Copy.audioLanguage)
         } header: {
@@ -433,6 +435,8 @@ struct SettingsView: View {
             MacSettingFooter(Copy.audioLanguage)
         }
     }
+
+    // MARK: - Audio
 
     private var audioOutputSection: some View {
         @Bindable var prefs = prefs
@@ -1145,6 +1149,7 @@ private struct AppearanceSettingsPage: View {
 
             Section {
                 Toggle(Copy.combineNextUp.name ?? "", isOn: $prefs.combinesNextUp)
+                Toggle(Copy.clearAbandoned.name ?? "", isOn: $prefs.clearsAbandonedEpisodes)
                 Toggle(Copy.newEpisodeAlerts.name ?? "", isOn: $prefs.newEpisodeAlerts)
                     // Turning it on asks to notify; refused, it goes back off.
                     .onChange(of: prefs.newEpisodeAlerts) { _, on in
@@ -1159,7 +1164,7 @@ private struct AppearanceSettingsPage: View {
             } header: {
                 Text("Home")
             } footer: {
-                SettingsFooter(Copy.combineNextUp, Copy.newEpisodeAlerts)
+                SettingsFooter(Copy.combineNextUp, Copy.clearAbandoned, Copy.newEpisodeAlerts)
             }
         }
         .formStyle(.grouped)
@@ -1215,6 +1220,17 @@ private struct VideoSettingsPage: View {
             } footer: {
                 SettingsFooter(Copy.resume, Copy.autoplayNext)
             }
+
+            Section {
+                Picker(Copy.audioLanguage.name ?? "", selection: $prefs.audioLanguage) {
+                    Text("File's choice").tag("")
+                    ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
+                }
+            } header: {
+                Text("Language")
+            } footer: {
+                SettingsFooter(Copy.audioLanguage)
+            }
         }
         .formStyle(.grouped)
     }
@@ -1227,28 +1243,29 @@ private struct AudioSettingsPage: View {
         @Bindable var prefs = prefs
         Form {
             Section {
-                Picker("Language", selection: $prefs.audioLanguage) {
-                    Text("File's choice").tag("")
-                    ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
-                }
-            } header: {
-                Text("Language")
-            } footer: {
-                SettingsFooter(Copy.audioLanguage)
-            }
-
-            Section {
                 Toggle(Copy.downmix.name ?? "", isOn: $prefs.stereoDownmix)
-                Picker(Copy.audioDelay.name ?? "", selection: SettingsView.audioDelayBinding) {
-                    ForEach(SettingsView.audioDelayChoices, id: \.self) { milliseconds in
-                        Text(PlayerModel.audioDelayName(milliseconds)).tag(milliseconds)
-                    }
-                }
+                // No audio delay here: a phone has nothing between it and
+                // its own speaker to lag. The Apple TV is where the delay
+                // is measured and set; the row below is how.
             } header: {
                 Text("Output")
             } footer: {
-                SettingsFooter(Copy.downmix, Copy.audioDelay)
+                SettingsFooter(Copy.downmix)
             }
+            #if os(iOS)
+            Section {
+                NavigationLink {
+                    SyncMeasureView()
+                        .clearsBottomChrome()
+                } label: {
+                    Text(Copy.measureSync.name ?? "")
+                }
+            } header: {
+                Text("Apple TV")
+            } footer: {
+                SettingsFooter(Copy.measureSync)
+            }
+            #endif
         }
         .formStyle(.grouped)
     }
@@ -2134,7 +2151,11 @@ enum SettingsCopy {
     )
     static let combineNextUp = SettingNote(
         name: "Combine Next Up with Continue Watching",
-        text: "Draws the two rows on Home as one: a poster for each show you are partway through, carrying the progress of the episode you were in the middle of, beside the films you have started. With more than one episode of a show on the go, the card shows the one just before where Next Up has got to. Hold a poster (right-click on a Mac) to remove a show from the row; it comes back once you watch a later episode."
+        text: "Draws the two rows on Home as one: a poster for each show you are partway through, carrying the progress of the episode you were in the middle of, beside the films you have started. With more than one episode of a show on the go, the card shows the one just before where Next Up has got to, or one you touched in the last month; an episode abandoned seasons ago gives way to Next Up's. Hold a poster (right-click on a Mac) to remove a show from the row; it comes back once you watch a later episode."
+    )
+    static let clearAbandoned = SettingNote(
+        name: "Clear abandoned episodes",
+        text: "Each time Home loads, an episode you left partway through that Next Up has since moved well past — more than one episode behind, and untouched for a month — has its saved position cleared on the server, so it leaves Continue Watching here and in every other Jellyfin app. The episode stays unwatched; nothing is marked played and Next Up does not move."
     )
     static let autoplayNext = SettingNote(
         name: "Play the next episode automatically",
@@ -2144,28 +2165,33 @@ enum SettingsCopy {
         name: "Downmix surround to stereo",
         text: "Asks the server for two channels instead of six. Worth turning on if you listen on headphones or a laptop and find dialogue in 5.1 material too quiet — the centre channel it lives on gets mixed in properly rather than dropped."
     )
-    static let soundbar = SettingNote(
-        name: "Decode audio on this Apple TV",
-        text: "For a soundbar or receiver whose sound runs behind the picture. Dolby tracks are normally handed to it undecoded and it takes its own time over them; with this on, the server sends AAC instead, the Apple TV decodes it, and plain multichannel PCM goes down the HDMI cable. Surround is kept, Atmos is not. Takes effect on the next thing you play."
-    )
     static let audioDelay = SettingNote(
         name: "Audio delay",
-        text: "How far the sound is moved against the picture — the lag a television or soundbar adds, which is the same for everything watched through it. " + audioDelayPlayerHint + "Whatever is settled on is saved here and applied to everything you play. The sound can be moved earlier on any stream; moving it later needs a file the server can send untouched."
+        text: "How far the sound is moved against the picture — the lag a television or soundbar adds, which is the same for everything watched through it. Whatever is settled on is saved here and applied to everything you play. The sound can be moved earlier on any stream; moving it later needs a file the server can send untouched."
     )
-    static let matchedAudioDelay = SettingNote(
-        name: "Audio delay at 24 Hz",
-        text: "The offset used instead when Match Content → Match Frame Rate switches your television out of 60 Hz for a video — a film, mostly. Many televisions show the picture later at 24 Hz than at 60, and tvOS can tell the app that matching is on but not how much later, so this is measured on its own with the Match Frame Rate sync test. Until it has been, films get the standard delay. The player's Sync tab moves this one while a video the display switched for is playing."
+    static let measureSync = SettingNote(
+        name: "Measure Apple TV sync",
+        text: "Times the Apple TV's sync clip with this device's camera and microphone and says what to set its Sync tab to. On the Apple TV, open Settings → Audio and press a frame rate; point this camera at the television with the sound up and the whole screen in the picture, and twenty seconds later the number is here. The rate and the delay already in force are read off the code in the corner of the clip, so nothing is typed in and the two devices never need to find each other."
     )
-    static let syncTestStandard = SettingNote(
-        name: "Sync test · standard frame rate",
-        text: "Plays a short looping clip at 60 fps, which leaves the television in the mode the Home screen runs in — what shows and most Live TV play in. A line sweeps across a ruler and a beep plays as it crosses 0. Swipe down for the Sync tab: if the beep comes before the flash, press −; after it, press +. What is settled on becomes the audio delay."
-    )
-    static let syncTestMatched = SettingNote(
-        name: "Sync test · Match Frame Rate",
-        text: "The same clip at 23.976 fps, the rate films are, so with Match Content → Match Frame Rate on the television switches to the mode your films play in and the test measures that mode's lag. What is settled on becomes the audio delay at 24 Hz, and is used for every video the display switches for. With Match Frame Rate off there is no switch, and the test sets the standard delay instead."
-    )
+    #if os(tvOS)
+    /// The row for one of the preset rates, each with a sync clip of its own.
+    static func audioDelay(_ rate: PlayerModel.DelayRate) -> SettingNote {
+        let what: String = switch rate.fps {
+        case 24: "films, and most shows made for streaming, at 23.976 or 24 fps"
+        case 25: "British and European television at 25 fps"
+        case 30: "American television and video at 29.97 or 30 fps"
+        case 50: "European sport and Live TV at 50 fps"
+        default: "sport, Live TV and games at 59.94 or 60 fps, the mode the Home screen runs in — also what a video whose rate isn't known gets"
+        }
+        let clip = rate.fps == 24 ? "23.976" : rate.fps == 30 ? "29.97" : "\(rate.fps)"
+        return SettingNote(
+            name: "\(rate.name) delay",
+            text: "The offset for \(what). A television does different work at each frame rate, and with Match Frame Rate on in the Apple TV's own Settings it switches modes for one, so each is measured on its own. Press to play a looping \(clip) fps clip: a line sweeps a ruler and a beep plays as it crosses 0. Swipe down for the Sync tab — if the beep comes before the flash, press −; after it, press +. What is settled on is saved here, and the player uses it whenever the video playing is this rate. The Sync tab over a video at any other rate saves a delay for that rate. Or let an iPhone do the judging: Settings → Audio → Measure Apple TV sync in the iPhone app times the beep against the flash through its camera and says what to set here."
+        )
+    }
+    #endif
     static let audioLanguage = SettingNote(
-        name: "Audio",
+        name: "Audio language",
         text: "Preferred spoken language. When a file has more than one soundtrack, every video opens with the first track in this language — asked of the server before the stream starts, so it holds on a transcode as well as a file played untouched."
     )
     static let subtitleLanguage = SettingNote(
@@ -2257,16 +2283,6 @@ enum SettingsCopy {
         name: "Delete the copy",
         text: "Removes the saved details and artwork from this device. With the setting still on, the next sync downloads everything again."
     )
-    /// The player's own audio-sync controls exist only on Apple TV; elsewhere
-    /// the footer pointed at a panel that isn't there.
-    private static var audioDelayPlayerHint: String {
-        #if os(tvOS)
-        "Set from inside the player: the Sync tab puts the controls over whatever is playing, so the sound can be nudged while watching a line of dialogue, or over the sync test's clip. Used while the television is in its usual 60 Hz mode; a video the display is switched for gets the delay at 24 Hz instead. "
-        #else
-        ""
-        #endif
-    }
-
     static let cloudUnavailable = SettingNote(
         text: "Not signed in to iCloud on this device, or this build isn't set up for it."
     )
@@ -2367,8 +2383,8 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .account: "Who is signed in and where, how the connection is secured, the other accounts on this device, and signing out."
         case .appearance: "Light or dark, the icon on the Home Screen, and the order of the tabs."
-        case .video: "The quality a stream opens at, whether it adapts, how a wide picture is framed, and what happens at the end of an episode."
-        case .audio: "The spoken language a video opens with, downmixing surround for a stereo setup, and the delay that keeps sound and picture together."
+        case .video: "The quality a stream opens at, whether it adapts, how a wide picture is framed, what happens at the end of an episode, and the spoken language a video opens with."
+        case .audio: "The delay that keeps sound and picture together, and downmixing surround for a stereo setup."
         case .subtitles: "Which subtitles a video opens with, whether only the forced track shows, and how large they are drawn and on what."
         case .music: "Keeping the music going, levelling quiet albums against loud ones, lossless over cellular, and how stations choose."
         case .liveTV: "Where channels and the guide come from — Jellyfin's own Live TV, or an M3U playlist and XMLTV guide of your own."
@@ -2397,12 +2413,8 @@ enum SettingsSummary {
     }
 
     static func audio(_ prefs: Preferences) -> String {
-        var parts = [language(prefs.audioLanguage, none: "File's choice")]
-        if prefs.stereoDownmix {
-            parts.append("Stereo")
-        } else if prefs.audioDelay != 0 {
-            parts.append(PlayerModel.audioDelayShortName(Int((prefs.audioDelay * 1000).rounded())))
-        }
+        var parts = [prefs.audioDelay == 0 ? "In step" : PlayerModel.audioDelayShortName(Int((prefs.audioDelay * 1000).rounded()))]
+        if prefs.stereoDownmix { parts.append("Stereo") }
         return parts.joined(separator: " · ")
     }
 
