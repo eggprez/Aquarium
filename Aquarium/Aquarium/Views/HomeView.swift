@@ -63,7 +63,12 @@ struct HomeView: View {
     @State private var featured: BaseItem?
     #endif
 
-    private var hero: BaseItem? { heroItems.first ?? resume.first ?? shownNextUp.first }
+    /// What there is to carry on with, as Home shows it: nothing, with the
+    /// Continue Watching row turned off — the bar and the fallbacks below
+    /// then lead with Next Up, as the page does.
+    private var shownResume: [BaseItem] { prefs.hidesContinueWatching ? [] : resume }
+
+    private var hero: BaseItem? { heroItems.first ?? shownResume.first ?? shownNextUp.first }
 
     /// Next Up less the shows taken off it by hand. What every use of the
     /// list on this page reads — the row, the media bar's fallback, the home
@@ -71,22 +76,6 @@ struct HomeView: View {
     /// from the row is removed from the rest as well. See `HomeRows.visible`.
     private var shownNextUp: [BaseItem] {
         HomeRows.visible(nextUp, nextUp: nextUp) { prefs.nextUpHiddenEpisode(seriesId: $0) }
-    }
-
-    /// Continue Watching and Next Up as one row, with the removed shows taken
-    /// out of it. See `HomeRows.combined`.
-    private var combinedRow: [BaseItem] {
-        HomeRows.visible(HomeRows.combined(resume: resume, nextUp: nextUp), nextUp: nextUp) {
-            prefs.nextUpHiddenEpisode(seriesId: $0)
-        }
-    }
-
-    /// With the two rows combined, the slot the one row is drawn in: whichever
-    /// of Continue Watching and Next Up the account's layout puts first. The
-    /// other slot draws nothing.
-    private var combinedSlot: HomeSection? {
-        guard prefs.combinesNextUp else { return nil }
-        return sections.first { $0 == .resume || $0 == .nextUp }
     }
 
     private var isBare: Bool {
@@ -117,11 +106,11 @@ struct HomeView: View {
             }
         }
 
-        take(resume, limit: 2)
+        take(shownResume, limit: 2)
         take(shownNextUp, limit: 2)
         for entry in latest { take(entry.items, limit: 1) }
 
-        if out.isEmpty, let first = resume.first ?? shownNextUp.first { return [first] }
+        if out.isEmpty, let first = shownResume.first ?? shownNextUp.first { return [first] }
         return Array(out.prefix(6))
     }
 
@@ -558,40 +547,26 @@ struct HomeView: View {
                     collectionType: library.CollectionType
                 ))
             }
-        case .resume, .nextUp:
-            if let combinedSlot {
-                // The two rows as one, drawn where the first of them was: a
-                // poster per show, carrying the progress of the episode you
-                // are partway through, beside the films you have started.
-                // Posters rather than stills because a show's card stands for
-                // the show, not for a frame of it — see the Next Up row below
-                // — and a film has only ever had a poster.
-                if section == combinedSlot {
-                    MediaShelf(
-                        title: "Continue Watching",
-                        items: combinedRow,
-                        art: .season,
-                        menuOpensDetails: true,
-                        menuRemovesFromNextUp: true
-                    ) { openNextUp($0) }
-                }
-            } else if section == .resume {
+        case .resume:
+            // Turned off in Settings, the slot draws nothing — Next Up keeps
+            // its own place below.
+            if !prefs.hidesContinueWatching {
                 MediaShelf(title: "Continue Watching", items: resume, wide: true) { open($0) }
-            } else {
-                // Portrait, and a picture of the *season* rather than of the
-                // episode. Continue Watching is a row of stills because it
-                // points at a moment you were in the middle of; Next Up points
-                // at the next thing in a show, and a frame from an episode
-                // nobody has seen yet is a picture of nothing in particular.
-                // See `Artwork.seasonArt`.
-                MediaShelf(
-                    title: "Next Up",
-                    items: shownNextUp,
-                    art: .season,
-                    menuOpensDetails: true,
-                    menuRemovesFromNextUp: true
-                ) { openNextUp($0) }
             }
+        case .nextUp:
+            // Portrait, and a picture of the *season* rather than of the
+            // episode. Continue Watching is a row of stills because it
+            // points at a moment you were in the middle of; Next Up points
+            // at the next thing in a show, and a frame from an episode
+            // nobody has seen yet is a picture of nothing in particular.
+            // See `Artwork.seasonArt`.
+            MediaShelf(
+                title: "Next Up",
+                items: shownNextUp,
+                art: .season,
+                menuOpensDetails: true,
+                menuRemovesFromNextUp: true
+            ) { openNextUp($0) }
         case .latest:
             // One row per library, which is how Jellyfin draws this slot too —
             // it is a single setting that expands into as many rows as the

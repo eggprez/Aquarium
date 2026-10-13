@@ -9,5 +9,17 @@
 	<array>
 		<string>group.scottai.FellyJin</string>
 	</array>
+	<!-- The same value the app carries in Aquarium-tvOS.entitlements. With
+	     it on the app alone, the app runs as the current Apple TV user and
+	     writes the shelf into that user's copy of the group container, while
+	     the extension runs as the default user and reads the default user's
+	     copy — which is empty, so the shelf stays the static image. Both
+	     sides carrying it puts them in the same container. Needs User
+	     Management ticked on the extension's own App ID
+	     (scottai.FellyJin.TopShelf), as it is on the app's. -->
+	<key>com.apple.developer.user-management</key>
+	<array>
+		<string>runs-as-current-user-with-user-independent-keychain</string>
+	</array>
 </dict>
 </plist>

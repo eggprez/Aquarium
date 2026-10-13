@@ -260,14 +260,14 @@ struct SettingsView: View {
     private var homeSection: some View {
         @Bindable var prefs = prefs
         return Section {
-            Toggle(isOn: $prefs.combinesNextUp) { MacSettingLabel(Copy.combineNextUp) }
-                .note(Copy.combineNextUp)
+            Toggle(isOn: $prefs.hidesContinueWatching) { MacSettingLabel(Copy.hideContinueWatching) }
+                .note(Copy.hideContinueWatching)
             Toggle(isOn: $prefs.clearsAbandonedEpisodes) { MacSettingLabel(Copy.clearAbandoned) }
                 .note(Copy.clearAbandoned)
         } header: {
             Text("Home")
         } footer: {
-            MacSettingFooter(Copy.combineNextUp, Copy.clearAbandoned)
+            MacSettingFooter(Copy.hideContinueWatching, Copy.clearAbandoned)
         }
     }
 
@@ -1148,7 +1148,7 @@ private struct AppearanceSettingsPage: View {
             }
 
             Section {
-                Toggle(Copy.combineNextUp.name ?? "", isOn: $prefs.combinesNextUp)
+                Toggle(Copy.hideContinueWatching.name ?? "", isOn: $prefs.hidesContinueWatching)
                 Toggle(Copy.clearAbandoned.name ?? "", isOn: $prefs.clearsAbandonedEpisodes)
                 Toggle(Copy.newEpisodeAlerts.name ?? "", isOn: $prefs.newEpisodeAlerts)
                     // Turning it on asks to notify; refused, it goes back off.
@@ -1164,7 +1164,7 @@ private struct AppearanceSettingsPage: View {
             } header: {
                 Text("Home")
             } footer: {
-                SettingsFooter(Copy.combineNextUp, Copy.clearAbandoned, Copy.newEpisodeAlerts)
+                SettingsFooter(Copy.hideContinueWatching, Copy.clearAbandoned, Copy.newEpisodeAlerts)
             }
         }
         .formStyle(.grouped)
@@ -2149,9 +2149,9 @@ enum SettingsCopy {
         name: "Resume where I left off",
         text: "Opens something you have already started at the point you stopped, instead of from the beginning."
     )
-    static let combineNextUp = SettingNote(
-        name: "Combine Next Up with Continue Watching",
-        text: "Draws the two rows on Home as one: a poster for each show you are partway through, carrying the progress of the episode you were in the middle of, beside the films you have started. With more than one episode of a show on the go, the card shows the one just before where Next Up has got to, or one you touched in the last month; an episode abandoned seasons ago gives way to Next Up's. Hold a poster (right-click on a Mac) to remove a show from the row; it comes back once you watch a later episode."
+    static let hideContinueWatching = SettingNote(
+        name: "Hide Continue Watching",
+        text: "Leaves the row of part-watched episodes and films off Home, keeping Next Up, which lists the next episode of each show you're following. Nothing is forgotten: a title you stopped partway through still resumes from where you left it, and still shows in Jellyfin's other apps."
     )
     static let clearAbandoned = SettingNote(
         name: "Clear abandoned episodes",

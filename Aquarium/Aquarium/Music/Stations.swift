@@ -505,6 +505,41 @@ struct StationSession: Sendable {
     /// How many reactions this station has had: how far a Surprise Mix has
     /// come from being a shuffle.
     private(set) var reactions = 0
+    /// How each artist is spelled, by the keys `MusicKeys.artists` gives it
+    /// — an id, a lowercased name — so `artistLeanings` can say who.
+    private(set) var artistNames: [String: String] = [:]
+
+    /// One name and what it has earned, for the player's "what's leading"
+    /// card.
+    struct Leaning: Identifiable, Equatable, Sendable {
+        let name: String
+        let points: Double
+        var id: String { name }
+    }
+
+    /// The artists this station has come to lean toward or away from,
+    /// most points first. An artist is reached by more than one key — its
+    /// id and its name move together — so each is listed once, under the
+    /// best spelling kept for it.
+    var artistLeanings: [Leaning] {
+        var points: [String: Double] = [:]
+        var spelled: [String: String] = [:]
+        for (key, value) in artists {
+            guard let name = artistNames[key] ?? (key.hasPrefix("name:") ? String(key.dropFirst(5)) : nil),
+                  !name.isEmpty else { continue }
+            let k = name.lowercased()
+            if spelled[k] == nil || spelled[k] == k { spelled[k] = name }
+            if abs(value) > abs(points[k] ?? 0) { points[k] = value }
+        }
+        return points.map { Leaning(name: spelled[$0.key] ?? $0.key, points: $0.value) }
+            .sorted { $0.points == $1.points ? $0.name < $1.name : $0.points > $1.points }
+    }
+
+    /// The genres, the same way, by their keys: the caller names them.
+    var genreLeanings: [Leaning] {
+        genres.map { Leaning(name: $0.key, points: $0.value) }
+            .sorted { $0.points == $1.points ? $0.name < $1.name : $0.points > $1.points }
+    }
 
     mutating func note(_ song: BaseItem, _ reaction: ListenReaction) {
         reactions += 1
@@ -555,6 +590,13 @@ struct StationSession: Sendable {
     private mutating func shift(_ song: BaseItem, by w: (artist: Double, genre: Double)) {
         for key in MusicKeys.artists(of: song) { artists[key, default: 0] += w.artist }
         for key in MusicKeys.genres(of: song) { genres[key, default: 0] += w.genre }
+        for pair in (song.ArtistItems ?? []) + (song.AlbumArtists ?? []) {
+            guard let name = pair.Name, !name.isEmpty else { continue }
+            for key in MusicKeys.artist(id: pair.Id, name: name) { artistNames[key] = name }
+        }
+        for name in (song.Artists ?? []) + [song.AlbumArtist].compactMap({ $0 }) where !name.isEmpty {
+            artistNames["name:\(name.lowercased())"] = name
+        }
     }
 
     /// Stations once learned from every song for weeks and kept every thumb

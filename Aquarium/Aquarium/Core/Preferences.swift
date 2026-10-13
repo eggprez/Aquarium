@@ -415,11 +415,11 @@ final class Preferences {
         didSet { write(autoplayNext, forKey: "autoplay_next") }
     }
 
-    /// Draw Home's Continue Watching and Next Up as one row: a poster per
-    /// show, carrying the progress of the episode you are partway through.
-    /// See `HomeRows.combined`.
-    var combinesNextUp: Bool {
-        didSet { write(combinesNextUp, forKey: "home_combine_next_up") }
+    /// Leave Home's Continue Watching row out, keeping Next Up: the next
+    /// episode of each show, without a row of stills from the ones you are
+    /// partway through.
+    var hidesContinueWatching: Bool {
+        didSet { write(hidesContinueWatching, forKey: "home_hide_continue_watching") }
     }
 
     /// Have the server forget the position of episodes left partway through
@@ -821,7 +821,7 @@ final class Preferences {
         powerAwareQuality = d.object(forKey: "power_aware_quality") == nil ? true : d.bool(forKey: "power_aware_quality")
         newEpisodeAlerts = d.bool(forKey: "new_episode_alerts")
         autoplayNext = d.object(forKey: "autoplay_next") == nil ? true : d.bool(forKey: "autoplay_next")
-        combinesNextUp = d.bool(forKey: "home_combine_next_up")
+        hidesContinueWatching = d.bool(forKey: "home_hide_continue_watching")
         clearsAbandonedEpisodes = d.bool(forKey: "home_clear_abandoned")
         nextUpHidden = (d.dictionary(forKey: "next_up_hidden") as? [String: String]) ?? [:]
         defaultBitrate = Quality.snapped(d.object(forKey: "default_bitrate") as? Int)
@@ -920,7 +920,7 @@ final class Preferences {
         CloudSync.set(adaptiveQuality, forKey: "adaptive")
         CloudSync.set(powerAwareQuality, forKey: "power_aware_quality")
         CloudSync.set(autoplayNext, forKey: "autoplay_next")
-        CloudSync.set(combinesNextUp, forKey: "home_combine_next_up")
+        CloudSync.set(hidesContinueWatching, forKey: "home_hide_continue_watching")
         CloudSync.set(clearsAbandonedEpisodes, forKey: "home_clear_abandoned")
         CloudSync.set(nextUpHidden, forKey: "next_up_hidden")
         CloudSync.set(stereoDownmix, forKey: "stereo_downmix")
@@ -997,7 +997,7 @@ final class Preferences {
         if let v = CloudSync.object(forKey: "adaptive") as? Bool, v != adaptiveQuality { adaptiveQuality = v }
         if let v = CloudSync.object(forKey: "power_aware_quality") as? Bool, v != powerAwareQuality { powerAwareQuality = v }
         if let v = CloudSync.object(forKey: "autoplay_next") as? Bool, v != autoplayNext { autoplayNext = v }
-        if let v = CloudSync.object(forKey: "home_combine_next_up") as? Bool, v != combinesNextUp { combinesNextUp = v }
+        if let v = CloudSync.object(forKey: "home_hide_continue_watching") as? Bool, v != hidesContinueWatching { hidesContinueWatching = v }
         if let v = CloudSync.object(forKey: "home_clear_abandoned") as? Bool, v != clearsAbandonedEpisodes { clearsAbandonedEpisodes = v }
         if let v = CloudSync.object(forKey: "next_up_hidden") as? [String: String], v != nextUpHidden { nextUpHidden = v }
         if let v = CloudSync.object(forKey: "stereo_downmix") as? Bool, v != stereoDownmix { stereoDownmix = v }

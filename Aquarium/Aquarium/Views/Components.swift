@@ -1658,6 +1658,9 @@ struct MediaGrid: View {
     /// The selected item ids, for a caller that wants them. Nil leaves the
     /// grid to keep its own. Nothing anywhere but the Mac.
     var selection: Binding<Set<String>>? = nil
+    /// Bumped by the caller each time it replaces the list whole — a reload
+    /// — even one that came back with the same items. See `reachEndAgain`.
+    var revision = 0
 
     @Environment(AppModel.self) private var app
     @Environment(\.posterZoomNamespace) private var zoomNamespace
@@ -1685,9 +1688,27 @@ struct MediaGrid: View {
     /// any of the grids, and the page is usually there before the end is.
     private static let reachAhead = 12
 
+    /// The second way the end is reached. The list replaced under a grid
+    /// that was already at its end — a reload after something was marked
+    /// watched, or after the library copy finished its first sync — left the
+    /// last tiles on screen with their one `onAppear` long spent, and if the
+    /// page that was on its way was dropped by the reload, an Apple TV sat
+    /// at "60 of 400" until the grid was scrolled away and back. So the end
+    /// is also reached whenever the list is replaced or changes while any of
+    /// its last tiles is in view. A page that merely grew doesn't qualify:
+    /// the tiles in view are no longer its last ones.
+    private func reachEndAgain() {
+        guard onReachEnd != nil, items.suffix(Self.reachAhead).contains(where: { visible.contains($0.Id) }) else { return }
+        onReachEnd?()
+    }
+
     private var columns: [GridItem] { PosterGrid.columns(wide: wide, compact: isCompact) }
 
     private var cardWidth: CGFloat? { PosterGrid.cardWidth(wide: wide, compact: isCompact) }
+
+    /// The tiles on screen, or near enough that the grid has built them.
+    /// For the second way the end is reached — see `body`.
+    @State private var visible = Set<String>()
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: Metrics.gridRowSpacing) {
@@ -1695,10 +1716,12 @@ struct MediaGrid: View {
                 tile(item)
                     .id(item.Id)
                     .onAppear {
+                        visible.insert(item.Id)
                         if onReachEnd != nil, items.suffix(Self.reachAhead).contains(where: { $0.Id == item.Id }) {
                             onReachEnd?()
                         }
                     }
+                    .onDisappear { visible.remove(item.Id) }
             }
             if pendingCount > 0 {
                 ForEach(0..<pendingCount, id: \.self) { _ in
@@ -1708,6 +1731,8 @@ struct MediaGrid: View {
         }
         .padding(.horizontal, Metrics.gutter)
         .animation(.easeOut(duration: 0.2), value: pendingCount > 0)
+        .onChange(of: items.map(\.Id)) { _, _ in reachEndAgain() }
+        .onChange(of: revision) { _, _ in reachEndAgain() }
         #if os(macOS)
         .background(WidthReader(width: $gridWidth))
         .focusable()
