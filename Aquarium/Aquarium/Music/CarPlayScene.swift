@@ -704,13 +704,21 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                 let albums = offline
                     ? OfflineMusic.songs(byArtist: artist).localAlbums()
                     : (try? await JellyfinClient.shared.music(q).items) ?? []
-                let shuffle = CPListItem(text: "Shuffle All", detailText: nil, image: self?.symbolTile("shuffle"))
+                // Surprise Me here is the artist's station — their songs and
+                // the artists near them, re-dealt as songs are skipped —
+                // what the phone's "Start Station" on an artist does. Only
+                // when no station can be built (nothing of theirs on this
+                // device, say) does it fall back to a shuffle of their songs.
+                let shuffle = CPListItem(text: "Surprise Me", detailText: "A mix around \(artist.title)", image: self?.symbolTile("shuffle"))
                 shuffle.handler = { _, finished in
                     Task { @MainActor in
-                        let songs = offline
-                            ? OfflineMusic.songs(byArtist: artist)
-                            : (try? await JellyfinClient.shared.allSongs(artistId: artist.Id)) ?? []
-                        if !songs.isEmpty { MusicPlayer.shared.play(songs, shuffle: true, title: artist.title) }
+                        let started = await MusicMixes.startStation(from: artist, title: "\(artist.title) Station", localOnly: offline).started
+                        if !started {
+                            let songs = offline
+                                ? OfflineMusic.songs(byArtist: artist)
+                                : (try? await JellyfinClient.shared.allSongs(artistId: artist.Id)) ?? []
+                            if !songs.isEmpty { MusicPlayer.shared.play(songs, shuffle: true, title: artist.title) }
+                        }
                         self?.showNowPlaying()
                         finished()
                     }
