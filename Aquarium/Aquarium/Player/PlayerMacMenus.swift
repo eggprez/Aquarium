@@ -80,8 +80,23 @@ final class PlayerMacState {
 
     // MARK: Window
 
+    /// The player's window, never another: with no player window to hand this
+    /// used to fall back to the key window, and Full Screen on the menu put the
+    /// main window into full screen instead. Nothing while Picture in Picture
+    /// has the window put away, either — toggling it brought the window back
+    /// as an empty black screen with the picture still floating elsewhere.
     func toggleFullScreen() {
-        (window ?? NSApp.keyWindow)?.toggleFullScreen(nil)
+        guard let window, !isHiddenForPictureInPicture else { return }
+        window.toggleFullScreen(nil)
+    }
+
+    /// The player's window is put away while Picture in Picture shows the
+    /// picture — ordered out, not closed and not minimised (see
+    /// `playerViewDidStartPicture`). Bringing it forward then shows nothing
+    /// but black; the floating picture's own button is the way back.
+    var isHiddenForPictureInPicture: Bool {
+        guard let window else { return false }
+        return !window.isVisible && !window.isMiniaturized
     }
 
     // MARK: Keys

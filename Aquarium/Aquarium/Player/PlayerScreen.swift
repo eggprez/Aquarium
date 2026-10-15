@@ -364,6 +364,9 @@ struct PlayerScreen: View {
         // the way it does on a phone.
         .zIndex(2)
         .playerOverlayScheme()
+        // With one of its buttons focused, Space presses it rather than the
+        // Playback menu's Play / Pause — see `playerKeysYielded`.
+        .focusedValue(\.playerKeysYielded, true)
         #elseif !os(tvOS)
         // AVKit's own transport chrome (the top icon row, the bottom
         // scrubber/transport bar) lives in a native view AVKit manages

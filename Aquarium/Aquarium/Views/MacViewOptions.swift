@@ -24,14 +24,16 @@ final class MacViewOptions {
 
     /// What a grid multiplies its minimum column width by. Persisted so a
     /// size picked once is the size the app opens at.
+    ///
+    /// The clamped value is the one saved. Assigning to a property from its
+    /// own `didSet` doesn't run the observer again, so returning after the
+    /// clamp — as this once did — left a step past either end unsaved: 0.6
+    /// on screen, and whatever came before it at the next launch.
     var thumbnailSize: Double {
         didSet {
             let clamped = min(max(thumbnailSize, Self.range.lowerBound), Self.range.upperBound)
-            if clamped != thumbnailSize {
-                thumbnailSize = clamped
-                return
-            }
-            UserDefaults.standard.set(thumbnailSize, forKey: Self.key)
+            if clamped != thumbnailSize { thumbnailSize = clamped }
+            UserDefaults.standard.set(clamped, forKey: Self.key)
         }
     }
 

@@ -1667,6 +1667,12 @@ struct AccountsSection: View {
             }
             HStack(spacing: 0) {
                 Button {
+                    // The sign-in sheet is the main window's (see
+                    // `RootView`), so that window comes forward to show it —
+                    // opened again if it was closed. Left where it was, the
+                    // sheet opened behind Settings, or not at all until the
+                    // main window next appeared.
+                    MacMainWindow.show()
                     app.isAddingAccount = true
                 } label: {
                     Image(systemName: "plus")

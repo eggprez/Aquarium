@@ -188,11 +188,13 @@ struct RootView: View {
             Text(app.blockingMessage ?? "")
         }
         // What an error toast becomes on a Mac — see `AppModel.toast` and
-        // `presentAlert`. On the main window, whichever page is in front.
+        // `presentAlert`. On the main window, whichever page is in front —
+        // unless a title window is the one being worked in, which shows its
+        // own (see `takesAlerts`).
         .alert(
             app.pendingAlert?.title ?? "",
             isPresented: Binding(
-                get: { app.pendingAlert != nil },
+                get: { app.pendingAlert != nil && takesAlerts },
                 set: { if !$0 { app.pendingAlert = nil } }
             ),
             presenting: app.pendingAlert
@@ -287,6 +289,17 @@ struct RootView: View {
                 path.wrappedValue = new
             }
         )
+    }
+
+    /// Whether `pendingAlert` is this window's to show. On a Mac, only while
+    /// no title or library window is the one being worked in — that window
+    /// shows it instead; see `RouteWindow` and `AppModel.isWorkingWindow`.
+    private var takesAlerts: Bool {
+        #if os(macOS)
+        app.isWorkingWindow(nil)
+        #else
+        true
+        #endif
     }
 
     private var addingAccountBinding: Binding<Bool> {

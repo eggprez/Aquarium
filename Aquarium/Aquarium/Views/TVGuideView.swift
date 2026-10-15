@@ -524,7 +524,21 @@ struct TVGuideView: View {
                     now: nowTick
                 )
                 .frame(height: rulerHeight)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                // From zero: the viewport's width, whatever the ruler's own.
+                //
+                // The ruler is the whole schedule laid out — six hours is
+                // 2,160 points — and a frame with only a maximum takes its
+                // child's width when the child is the wider of the two. So
+                // this strip came out as wide as the schedule rather than the
+                // window; the clip below clipped nothing; the width reported
+                // for "the end has scrolled into view" was the schedule's; and
+                // the header, wider than the guide under it, was centred over
+                // it, which slid the ruler left by half the overflow — the 90
+                // minutes it ran ahead of the programmes beneath it. With a
+                // minimum of zero the strip takes the width it is offered, the
+                // ruler starts at the channel column's edge as the rows do,
+                // and the offset is all that moves it.
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .clipped()
                 .background {
                     GeometryReader { g in

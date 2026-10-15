@@ -1,5 +1,6 @@
 //  The detail page's Mac-only pieces that don't need the page's own state:
-//  Return opening a focused tile, and the disk-space question as an alert.
+//  Return opening a focused tile, the page's width, and the disk-space
+//  question as an alert.
 
 import SwiftUI
 
@@ -36,6 +37,26 @@ extension View {
 
 #if os(macOS)
 extension View {
+    /// The page takes the width the window gives it and asks for none of its
+    /// own.
+    ///
+    /// A vertical scroll view passes its content's width straight out — it
+    /// only scrolls the other way — and this page's content has widths far
+    /// beyond any window. Each shelf (Seasons, Cast & Crew, More Like This)
+    /// is a horizontal scroll view, whose ideal width is its whole row laid
+    /// end to end: fifteen seasons is some 2,800 points. The overview's ideal
+    /// is its whole text on one line. Reported out of the page, those sized
+    /// the window: pushing a title grew it to 3,094 points, wider than the
+    /// display, and by a different amount each time, depending on how much of
+    /// a lazy row had been built when it was measured.
+    ///
+    /// Flexible from zero, with no ideal: the window's width is the window's,
+    /// and the page lays out in it — which it always could, once the window
+    /// was dragged back.
+    func macWindowSizedPage() -> some View {
+        frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)
+    }
+
     /// "That won't fit, and here is what would" — as an alert, with the rungs
     /// that fit as its buttons. The first of them is the default, so Return
     /// takes the best fit and Escape takes nothing; the phone's sheet of

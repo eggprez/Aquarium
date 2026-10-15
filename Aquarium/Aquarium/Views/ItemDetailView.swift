@@ -355,6 +355,21 @@ struct ItemDetailView: View {
                     }
                     #endif
                 }
+                #if os(macOS)
+                // The page follows the selection as ↑ and ↓ move it. The list
+                // doesn't scroll itself (see `MacEpisodeList`), so on its own
+                // the selection walked off the bottom of the window. Only a
+                // row added to a selection there already: a first click or an
+                // arrival is a row already on screen, or one the arrival above
+                // has placed.
+                .onChange(of: episodeSelection) { old, new in
+                    guard !old.isEmpty, let added = new.subtracting(old).first,
+                          new.subtracting(old).count == 1 else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(MacEpisodeList.anchor(for: added))
+                    }
+                }
+                #endif
         }
         #endif
     }
@@ -422,6 +437,10 @@ struct ItemDetailView: View {
             }
         }
         .coordinateSpace(name: Self.scrollSpace)
+        #if os(macOS)
+        // Without this, opening a title grew the window — see the modifier.
+        .macWindowSizedPage()
+        #endif
         // Keyed on the item: on tvOS the detail root can go straight from one
         // item to another, and SwiftUI keeps this view rather than making a
         // new one, so an unkeyed task would leave the first item showing.
