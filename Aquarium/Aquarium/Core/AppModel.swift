@@ -650,7 +650,10 @@ final class AppModel {
             return
         }
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom == .phone {
+        // The tab bar, wherever it is showing: a phone, an iPad in Slide Over,
+        // a foldable closed. The idiom was asked before, and an iPad in a
+        // narrow split was reconciled as if it had a sidebar.
+        if !sidebarShown {
             // Downloads is a tab of its own offline and, on most setups, a
             // row in More online. Someone on it when the server comes back
             // stays on it — `show` reopens it where it now lives.
@@ -805,17 +808,50 @@ final class AppModel {
     }
 
     /// Whether this device's shell is the sidebar rather than the tab bar —
-    /// the idiom, not the size class, for the reason `RootView.adaptiveShell`
-    /// gives.
+    /// what `RootView.adaptiveShell` last laid out, which is the idiom until
+    /// it says otherwise, for the reason given there.
     static var usesSidebar: Bool {
         #if os(iOS)
-        UIDevice.current.userInterfaceIdiom != .phone
+        shared.sidebarShown
         #elseif os(macOS)
         true
         #else
         false
         #endif
     }
+
+    #if os(iOS)
+    /// Someone in the tent pose pressed Browse: the ordinary shell instead of
+    /// the lean-back screen, until the pose changes — see `TentIdleView` and
+    /// `RootView`.
+    var tentBrowsing = false
+
+    /// What `RootView.adaptiveShell` last laid out. The idiom until it says
+    /// otherwise, which is what an iPad at full width gets anyway.
+    private(set) var sidebarShown = UIDevice.current.userInterfaceIdiom != .phone
+
+    /// The shell has swapped between the sidebar and the tab bar — a foldable
+    /// opened or closed. The selection goes where the new shell has it, the
+    /// way `reconcileSelection` does for the offline shell: a section the bar
+    /// has no tab for opens inside More, and More, which a sidebar has no row
+    /// for, becomes whatever it had open.
+    func shellChanged(toSidebar sidebar: Bool) {
+        guard sidebar != sidebarShown else { return }
+        sidebarShown = sidebar
+        if sidebar {
+            guard selection == .more else { return }
+            if case .section(let section)? = routeStacks[AppSection.more.id]?.first, sections.contains(section) {
+                selection = section
+            } else {
+                selection = .home
+            }
+            paths[AppSection.more.id] = nil
+            routeStacks[AppSection.more.id] = nil
+        } else if !tabSections.contains(selection) {
+            show(selection)
+        }
+    }
+    #endif
 
     /// A phone's tab bar, in order.
     ///

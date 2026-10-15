@@ -1126,6 +1126,18 @@ private struct AppearanceSettingsPage: View {
                 SettingsFooter(Copy.theme)
             }
 
+            // Only a foldable has poses to choose between. The row stays while
+            // an override is set, so one can always be cleared.
+            if FoldState.shared.isFoldable || prefs.layoutOverride != .automatic {
+                Section {
+                    Picker(Copy.layout.name ?? "", selection: $prefs.layoutOverride) {
+                        ForEach(LayoutOverride.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                } footer: {
+                    SettingsFooter(Copy.layout)
+                }
+            }
+
             Section {
                 if UIApplication.shared.supportsAlternateIcons {
                     NavigationLink {
@@ -2118,6 +2130,10 @@ enum SettingsCopy {
     static let theme = SettingNote(
         name: "Theme",
         text: "Match system follows the device's light/dark setting. The player is always dark, wherever this is set."
+    )
+    static let layout = SettingNote(
+        name: "Layout",
+        text: "Automatic follows the hinge: the front screen is a phone, the inside an iPad, stood up like a tent a player, and half-folded on a table a picture above the fold with the controls below. Inside and Half-folded only take effect on the inside screen."
     )
     static let adaptiveQuality = SettingNote(
         name: "Adapt quality automatically",

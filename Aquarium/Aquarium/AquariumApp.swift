@@ -85,6 +85,8 @@ struct AquariumApp: App {
                 .environment(prefs)
                 .environment(player)
                 .environment(music)
+                // Which way a foldable is being held — see DevicePose.
+                .providesDevicePose()
                 // tvOS has no light mode here — see Theme — so it must not be
                 // told to switch to one.
                 #if !os(tvOS)

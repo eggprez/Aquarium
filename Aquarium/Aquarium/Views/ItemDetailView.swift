@@ -25,6 +25,9 @@ struct ItemDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(JellyfinClient.self) private var client
     @Environment(PlayerModel.self) private var player
+    #if os(iOS)
+    @Environment(\.devicePose) private var pose
+    #endif
 
     @State private var item: BaseItem?
     @State private var seasons: [BaseItem] = []
@@ -360,8 +363,9 @@ struct ItemDetailView: View {
     }
     #endif
 
-    @ViewBuilder
-    private func scrollCore() -> some View {
+    /// The page as one scroll, which is what it is everywhere but a foldable
+    /// half-folded.
+    private var plainScroll: some View {
         ScrollView {
             #if os(iOS)
             scrollProbe
@@ -401,6 +405,41 @@ struct ItemDetailView: View {
                 detailStack(item)
                     .padding(.bottom, 40)
             }
+        }
+    }
+
+    #if os(iOS)
+    /// Half-folded on a table: the artwork and the summary stand up on the
+    /// top half, and the list — the seasons, the episodes, the cast — lies
+    /// flat on the bottom, each scrolling on its own. See `DevicePose`.
+    private func foldSplit(_ item: BaseItem) -> some View {
+        FoldSplit(split: true, crease: Theme.background) {
+            ScrollView {
+                scrollProbe
+                LazyVStack(alignment: .leading, spacing: 26) { headerSections(item) }
+                    .padding(.bottom, 24)
+            }
+        } lower: {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 26) { bodySections(item) }
+                    .padding(.vertical, 24)
+            }
+        }
+    }
+    #endif
+
+    @ViewBuilder
+    private func scrollCore() -> some View {
+        Group {
+            #if os(iOS)
+            if pose == .halfFolded, let item {
+                foldSplit(item)
+            } else {
+                plainScroll
+            }
+            #else
+            plainScroll
+            #endif
         }
         .coordinateSpace(name: Self.scrollSpace)
         // Keyed on the item: on tvOS the detail root can go straight from one
@@ -467,9 +506,22 @@ struct ItemDetailView: View {
 
     @ViewBuilder
     private func sections(_ item: BaseItem) -> some View {
+        headerSections(item)
+        bodySections(item)
+    }
+
+    /// The artwork and what the title is: the top of the page, and the top
+    /// half of a half-folded one.
+    @ViewBuilder
+    private func headerSections(_ item: BaseItem) -> some View {
         HeroHeader(item: item, style: .detail)
             .id(Self.topAnchor)
         details(item)
+    }
+
+    /// The lists under it.
+    @ViewBuilder
+    private func bodySections(_ item: BaseItem) -> some View {
         // A show is its seasons, and a season is its episodes. The two lists
         // never appear on the same page: mixing them is what made "which season
         // am I looking at" a question.

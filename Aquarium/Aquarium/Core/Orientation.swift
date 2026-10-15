@@ -40,9 +40,30 @@ final class OrientationLock {
     /// What UIKit is told when it asks the delegate. A phone is portrait unless
     /// something on screen has asked otherwise; anything larger was never
     /// locked.
+    ///
+    /// A foldable is asked about its hinge rather than its pose, and the
+    /// difference matters: the tent — part-open, stood on its edges — is
+    /// recognised by the front screen being landscape, and the front screen
+    /// can only be landscape if landscape was allowed first. So any part-open
+    /// hinge frees the phone to turn, and the pose follows the turn. Fully
+    /// open is the inside screen, which ignores this mask anyway.
     var mask: UIInterfaceOrientationMask {
         guard UIDevice.current.userInterfaceIdiom == .phone else { return .all }
-        return wanting > 0 ? .allButUpsideDown : .portrait
+        switch FoldState.shared.effectiveHinge {
+        case .fullyOpen: return .all
+        case .partiallyOpen: return .allButUpsideDown
+        case .closed, nil: return wanting > 0 ? .allButUpsideDown : .portrait
+        }
+    }
+
+    /// The hinge has moved between closed, part-open and open. The last
+    /// answer may now be stale — a change of display is a change of what the
+    /// mask means — so it is forgotten and UIKit is asked again, deferred like
+    /// every other request here: a fold is a burst of hinge and trait changes
+    /// and one geometry update at the end of it is what is wanted.
+    func hingeChanged() {
+        lastRequested = nil
+        scheduleApply()
     }
 
     func allowLandscape() {

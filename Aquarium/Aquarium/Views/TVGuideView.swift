@@ -132,6 +132,9 @@ struct TVGuideView: View {
     #endif
 
     @Environment(\.scenePhase) private var scenePhase
+    #if os(iOS)
+    @Environment(\.devicePose) private var pose
+    #endif
 
     /// How many hours of schedule the guide holds. How many of them are *on
     /// screen* is a different question, and is settled by
@@ -329,6 +332,9 @@ struct TVGuideView: View {
         // wider than it is tall, so it is the one page a phone may be turned
         // sideways for. See `OrientationLock`.
         .allowsLandscape()
+        // A foldable opening is a change of screen, and the grid's widths were
+        // measured against the old one: start the guide again on the new.
+        .id(pose.usesInnerDisplay)
         #endif
         #if os(macOS)
         .onDisappear { lastShown = Date() }
