@@ -219,7 +219,10 @@ enum Metrics {
     /// Width of the guide's pinned channel column.
     static var guideChannelColumnWidth: CGFloat {
         #if os(tvOS)
-        return 280
+        // 280 left a name about 150 points beside its 104-point logo, which
+        // cut most of a line-up to a word and an ellipsis. The guide's hours
+        // have the rest of a 1920-point screen to give.
+        return 340
         #elseif os(macOS)
         return 172
         #else
