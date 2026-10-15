@@ -200,7 +200,12 @@ struct MacSidebarFooter<Status: View>: View {
         // rather than as a widget set on it.
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         .contentShape(Rectangle())
-        .onTapGesture { openWindow(id: PlayerWindow.id) }
+        .onTapGesture {
+            // Not while Picture in Picture has the window put away: it came
+            // back as a black window beside the floating picture.
+            guard !PlayerMacState.shared.isHiddenForPictureInPicture else { return }
+            openWindow(id: PlayerWindow.id)
+        }
         .help("Show the Player")
     }
 

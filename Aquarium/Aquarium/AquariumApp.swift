@@ -183,6 +183,13 @@ struct AquariumApp: App {
         .defaultSize(width: 1280, height: 720)
         .defaultPosition(.center)
         .windowResizability(.contentMinSize)
+        // Not in the Window menu. The window opens itself when something
+        // plays and closes when it stops (see `PlayerWindow`), so Window ▸
+        // Player with nothing playing opened a black window that shut again
+        // at once, and during Picture in Picture brought back the window the
+        // floating picture had put away. While something plays it is listed
+        // with the other open windows, under the title of what is playing.
+        .commandsRemoved()
         #endif
     }
 }
