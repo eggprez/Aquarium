@@ -569,35 +569,54 @@ struct LibraryView: View {
             .help("Show as posters or as a list")
         }
         if layout == .grid {
+            // The ends are buttons of our own rather than the slider's value
+            // labels. AppKit makes those into step buttons too, but SwiftUI
+            // named both of them after the first — "Photo" — so VoiceOver
+            // couldn't tell them apart. These say what they do and follow
+            // View ▸ Bigger and Smaller, which they are.
+            //
+            // Three toolbar items rather than one holding the three controls
+            // in a row. As one item the toolbar gave every control in it the
+            // first one's name — the label on the second button was never
+            // read, and both ends were "Smaller" — and a toolbar item's name
+            // comes from a `Label`'s title, not from an accessibility label.
+            // So each control is an item of its own, and each button's name
+            // is the title of its label.
             ToolbarItem(placement: .primaryAction) {
-                // The ends are buttons of our own rather than the slider's
-                // value labels. AppKit makes those into step buttons too, but
-                // SwiftUI named both of them after the first — "Photo", and
-                // then "Smaller" twice — so VoiceOver couldn't tell them
-                // apart. These say what they do and follow View ▸ Bigger and
-                // Smaller, which they are.
-                HStack(spacing: 4) {
-                    Button { MacViewOptions.shared.smaller() } label: {
+                Button { MacViewOptions.shared.smaller() } label: {
+                    Label {
+                        Text("Smaller")
+                    } icon: {
                         Image(systemName: "photo").imageScale(.small)
                     }
-                    .disabled(!MacViewOptions.shared.canShrink)
-                    .help("Smaller (⌘-)")
-                    .accessibilityLabel("Smaller")
-                    Slider(value: thumbnailSize, in: MacViewOptions.range) {
-                        Text("Thumbnail Size")
-                    }
-                    .labelsHidden()
-                    .help("Thumbnail Size")
-                    Button { MacViewOptions.shared.bigger() } label: {
-                        Image(systemName: "photo").imageScale(.large)
-                    }
-                    .disabled(!MacViewOptions.shared.canGrow)
-                    .help("Bigger (⌘=)")
-                    .accessibilityLabel("Bigger")
+                    .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
-                .frame(width: 150)
+                .disabled(!MacViewOptions.shared.canShrink)
+                .help("Smaller (⌘-)")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Slider(value: thumbnailSize, in: MacViewOptions.range) {
+                    Text("Thumbnail Size")
+                }
+                .labelsHidden()
+                .frame(width: 100)
+                .help("Thumbnail Size")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button { MacViewOptions.shared.bigger() } label: {
+                    Label {
+                        Text("Bigger")
+                    } icon: {
+                        Image(systemName: "photo").imageScale(.large)
+                    }
+                    .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .disabled(!MacViewOptions.shared.canGrow)
+                .help("Bigger (⌘=)")
             }
         }
         ToolbarItem(placement: .primaryAction) {

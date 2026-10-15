@@ -333,6 +333,21 @@ struct ItemDetailView: View {
                     }
                     #endif
                 }
+                #if os(macOS)
+                // The page follows the selection as ↑ and ↓ move it. The list
+                // doesn't scroll itself (see `MacEpisodeList`), so on its own
+                // the selection walked off the bottom of the window. Only a
+                // row added to a selection there already: a first click or an
+                // arrival is a row already on screen, or one the arrival above
+                // has placed.
+                .onChange(of: episodeSelection) { old, new in
+                    guard !old.isEmpty, let added = new.subtracting(old).first,
+                          new.subtracting(old).count == 1 else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(MacEpisodeList.anchor(for: added))
+                    }
+                }
+                #endif
         }
         #endif
     }

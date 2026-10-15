@@ -15,7 +15,12 @@ struct MacSidebarRows: View {
     /// When the selection last moved to another row — set by the list's
     /// selection binding (see `RootView.sidebarSelection`), which runs as the
     /// row is pressed. See `reselected`.
-    static var selectionChangedAt = Date.distantPast
+    static var selectionChangedAt = Date.distantPast {
+        didSet { selectionAwaitsTap = true }
+    }
+    /// The selection has moved, and the tap that ends the click which moved
+    /// it hasn't arrived yet. See `reselected`.
+    private static var selectionAwaitsTap = false
 
     var body: some View {
         ForEach(MacSidebarGroup.grouped(app.sections)) { group in
@@ -31,6 +36,9 @@ struct MacSidebarRows: View {
         ForEach(sections) { section in
             Label(section.title, systemImage: section.symbol)
                 .badge(badge(for: section))
+                // The whole name, for a library whose name the sidebar's
+                // width cuts short.
+                .help(section.title)
                 .tag(section)
                 .contextMenu { menu(for: section) }
                 .simultaneousGesture(TapGesture().onEnded { reselected(section) })
@@ -40,12 +48,21 @@ struct MacSidebarRows: View {
     /// A click on the row already selected: back to the top of that section,
     /// as Music and Finder do. The list's selection binding isn't told about a
     /// click that doesn't change it, so the row hears it itself. The list
-    /// selects on the way down and the tap ends on the way up, so a click that
-    /// has only just moved the selection here is told apart by how recently
-    /// it moved — that one keeps the section's pages where they were left.
+    /// selects on the way down and the tap ends on the way up, so the tap
+    /// that ends the click which moved the selection here is not a second
+    /// click — that one keeps the section's pages where they were left.
+    ///
+    /// Told apart by the selection having moved since the last tap, rather
+    /// than by how recently it moved: a click held for longer than the 0.4
+    /// seconds that used to be allowed — an unhurried press is about that —
+    /// arrived as a re-click and threw away the pages it had come back for.
+    /// The time is still a bound, so a selection moved with the arrow keys,
+    /// which no tap ends, doesn't swallow a real re-click made long after.
     private func reselected(_ section: AppSection) {
-        guard app.shownSelection == section,
-              Date().timeIntervalSince(Self.selectionChangedAt) > 0.4 else { return }
+        let endsTheSelectingClick = Self.selectionAwaitsTap
+            && Date().timeIntervalSince(Self.selectionChangedAt) < 10
+        Self.selectionAwaitsTap = false
+        guard app.shownSelection == section, !endsTheSelectingClick else { return }
         app.showAtTop(section)
     }
 
