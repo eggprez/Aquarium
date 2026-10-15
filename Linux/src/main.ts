@@ -38,6 +38,7 @@ import {
 import {
   el,
   clear,
+  asButton,
   closeMenus,
   toast,
   errorState,
@@ -141,10 +142,18 @@ function fsSetBar(shown: boolean): void {
   $("player-bar").classList.toggle("revealed", shown);
   invoke("player_set_viewport", { full: true, bar: shown }).catch(() => {});
   // Subtitles sit at the very bottom of the frame, which is exactly the strip
-  // the bar takes over; lift them clear of it for as long as it's up.
+  // the bar takes over; lift them clear of it for as long as it's up. Never
+  // lower than where Settings put them, and back to that, not the bottom edge.
+  const pos = userSubPos();
   invoke("player_mpv_command", {
-    cmd: ["set_property", "sub-pos", shown ? 93 : 100],
+    cmd: ["set_property", "sub-pos", shown ? Math.min(pos, 93) : pos],
   }).catch(() => {});
+}
+
+/** Settings' subtitle position (`sub_pos`; 100 is the bottom edge). */
+function userSubPos(): number {
+  const v = Number(api.getConfig()?.sub_pos ?? 100);
+  return isFinite(v) ? v : 100;
 }
 
 /** Pointer activity: reveal the controls and (re)start the clock that hides
@@ -203,7 +212,7 @@ async function setVideoFullscreen(full: boolean): Promise<void> {
   // Leaving fullscreen mid-reveal would otherwise strand the subtitles at the
   // lifted position fsSetBar puts them in.
   if (fsBarShown) {
-    invoke("player_mpv_command", { cmd: ["set_property", "sub-pos", 100] }).catch(() => {});
+    invoke("player_mpv_command", { cmd: ["set_property", "sub-pos", userSubPos()] }).catch(() => {});
   }
   fsBarShown = false;
   // Entering or leaving fullscreen is a fresh start for the hover latch: the
@@ -1908,6 +1917,11 @@ function wireSearch(): void {
     panel.toggleAttribute("hidden", true);
   };
 
+  const clearRecent = (): void => {
+    clearRecentSearches();
+    hidePanel();
+  };
+
   const showPanel = (): void => {
     const terms = recentSearches();
     if (!terms.length || input.value.trim()) {
@@ -1920,10 +1934,8 @@ function wireSearch(): void {
         el("span", {}, ["Recent searches"]),
         el("span", {
           class: "sr-clear",
-          onClick: () => {
-            clearRecentSearches();
-            hidePanel();
-          },
+          onClick: clearRecent,
+          ...asButton(clearRecent),
         }, ["Clear"]),
       ])
     );
@@ -2091,8 +2103,31 @@ function toggleShortcuts(): void {
 /**
  * The window's close button kills every download mid-file. Rust holds the close
  * and asks here first; either answer is final for that attempt.
+ *
+ * The prompt is HTML, and embedded video is a native surface drawn over the
+ * page (fullscreen or not), so it would sit invisibly underneath — and the
+ * window could then neither close nor be asked again. The picture is moved
+ * into picture-in-picture for as long as the question is up (which also
+ * leaves fullscreen), and brought back if the answer is to stay. A second
+ * close while it's up is the same question, not another dialog on top.
  */
-function askBeforeQuit(count: number): void {
+let quitPromptOpen = false;
+
+async function askBeforeQuit(count: number): Promise<void> {
+  if (quitPromptOpen) return;
+  quitPromptOpen = true;
+  let movedToPip = false;
+  if (playerActive && playerEmbedded && !videoPip) {
+    await setVideoPip(true);
+    movedToPip = videoPip;
+    // PiP refused (it says why in a toast): stop the picture rather than ask
+    // a question nobody can see. The user was closing the app anyway.
+    if (!movedToPip) await playerCtl.stop().catch(() => {});
+  }
+  const stay = (): void => {
+    quitPromptOpen = false;
+    if (movedToPip && videoPip) void setVideoPip(false);
+  };
   openDialog({
     title: `${count} download${count === 1 ? " is" : "s are"} still running`,
     body: [
@@ -2103,9 +2138,17 @@ function askBeforeQuit(count: number): void {
       ]),
     ],
     actions: [
-      { label: "Keep downloading", primary: true },
-      { label: "Quit anyway", danger: true, run: () => invoke("quit_confirm", { quit: true }) },
+      { label: "Keep downloading", primary: true, run: stay },
+      {
+        label: "Quit anyway",
+        danger: true,
+        run: () => {
+          quitPromptOpen = false;
+          void invoke("quit_confirm", { quit: true });
+        },
+      },
     ],
+    onDismiss: stay,
   });
 }
 
@@ -2224,7 +2267,7 @@ async function boot(): Promise<void> {
 
   // Rust held a window close because transfers are in flight.
   await listen("quit-requested", (ev) => {
-    askBeforeQuit((ev.payload as any)?.downloads ?? 0);
+    void askBeforeQuit((ev.payload as any)?.downloads ?? 0);
   });
 
   // Offline/online transitions from the API layer.

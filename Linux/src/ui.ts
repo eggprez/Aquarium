@@ -31,6 +31,26 @@ export function clear(node: HTMLElement): void {
   node.textContent = "";
 }
 
+/**
+ * Attributes for `el` that make a clickable element that isn't a <button> (a
+ * card that contains buttons, a link with no href) work from the keyboard:
+ * announced as a button, reachable by Tab and so by the arrow keys, and run by
+ * Enter or Space — what `itemCard` does for its cards. Without them, Tab and
+ * spatial navigation skip the element, or land on it and can do nothing.
+ */
+export function asButton(run: () => void): Record<string, any> {
+  return {
+    role: "button",
+    tabindex: "0",
+    onKeydown: (ev: KeyboardEvent) => {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      if (ev.target !== ev.currentTarget) return; // a button inside it
+      ev.preventDefault();
+      run();
+    },
+  };
+}
+
 export function spinner(): HTMLElement {
   return el("div", { class: "spinner" });
 }
@@ -347,7 +367,9 @@ export interface DialogAction {
  *
  * Note this can't be used while the video is embedded — the X11 child window
  * covers every pixel of HTML above the player bar. It's for shell-level
- * questions (quitting, the shortcut sheet), which is where dialogs belong.
+ * questions (quitting, the shortcut sheet), which is where dialogs belong; one
+ * that can arrive mid-film has to get the picture out of the way first, the
+ * way `askBeforeQuit` in main.ts moves it into picture-in-picture.
  */
 export function openDialog(opts: {
   title: string;
@@ -827,8 +849,9 @@ export function itemActions(
 
   if (playable) {
     if (resumeTicks > 0) {
+      const left = api.remainingText(item.RunTimeTicks, resumeTicks);
       out.push({
-        label: `Resume (${api.ticksToText(item.RunTimeTicks - resumeTicks)} left)`,
+        label: left ? `Resume (${left} left)` : "Resume",
         icon: "play",
         run: () => playItem(item, { resume: true }),
       });
@@ -977,7 +1000,7 @@ export function itemCard(
   // whether you start something now — a bare progress bar only says "some".
   const left =
     pct != null && pct > 1 && pct < 98
-      ? api.ticksToText(item.RunTimeTicks - item.UserData.PlaybackPositionTicks)
+      ? api.remainingText(item.RunTimeTicks, item.UserData?.PlaybackPositionTicks)
       : "";
 
   const poster = el("div", { class: "card-poster" }, [
@@ -1102,7 +1125,7 @@ export function section(title: string, content: HTMLElement, seeAll?: () => void
   return el("div", { class: "section" }, [
     el("div", { class: "section-head" }, [
       el("h2", {}, [title]),
-      seeAll ? el("a", { class: "see-all", onClick: seeAll }, ["See all"]) : null,
+      seeAll ? el("a", { class: "see-all", onClick: seeAll, ...asButton(seeAll) }, ["See all"]) : null,
     ]),
     content,
   ]);

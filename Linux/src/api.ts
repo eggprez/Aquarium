@@ -500,6 +500,10 @@ export async function getEpisodes(seriesId: string, seasonId: string): Promise<a
 export interface TrickplayInfo {
   /** Item the tiles belong to — not always the item being played. */
   itemId: string;
+  /** The version (media source) the tiles were made from, when the server
+   *  said; the tile request names it so a multi-version item's sheets come
+   *  from the version that is playing. */
+  mediaSourceId?: string;
   /** Pixel size of a single thumbnail. */
   width: number;
   height: number;
@@ -523,8 +527,16 @@ export interface TrickplayInfo {
 export async function getTrickplay(itemId: string): Promise<TrickplayInfo | null> {
   const s = session;
   if (!s) return null;
-  const item = await api(`/Items/${itemId}?userId=${s.userId}&Fields=Trickplay`).catch(() => null);
-  const byWidth = item?.Trickplay?.[item?.MediaSources?.[0]?.Id] ?? Object.values(item?.Trickplay ?? {})[0];
+  // `Trickplay` is keyed by media source, and an item with several versions
+  // has tiles for each. MediaSources has to be asked for as well, or there is
+  // no way to tell which entry is the version being played — playback takes
+  // the first source the server offers, so that is the one to match.
+  const item = await api(`/Items/${itemId}?userId=${s.userId}&Fields=Trickplay,MediaSources`).catch(() => null);
+  const playedSource: string | undefined = item?.MediaSources?.[0]?.Id;
+  const sources: [string, any][] = Object.entries(item?.Trickplay ?? {});
+  const entry = sources.find(([id]) => id === playedSource) ?? sources[0];
+  const sourceId: string | undefined = entry?.[0];
+  const byWidth: any = entry?.[1];
   if (!byWidth || typeof byWidth !== "object") return null;
   // Several resolutions may exist; the widest still fits in a scrubber bubble.
   const widths = Object.keys(byWidth as object)
@@ -535,6 +547,7 @@ export async function getTrickplay(itemId: string): Promise<TrickplayInfo | null
   if (!info?.Width || !info?.Interval) return null;
   return {
     itemId,
+    mediaSourceId: sourceId,
     width: info.Width,
     height: info.Height ?? Math.round(info.Width * 0.5625),
     tileWidth: info.TileWidth ?? 1,
@@ -550,8 +563,12 @@ export async function getTrickplay(itemId: string): Promise<TrickplayInfo | null
  * across the IPC boundary rather than being fetched by the webview.
  */
 export async function trickplayTile(info: TrickplayInfo, tileIndex: number): Promise<string> {
+  const version =
+    info.mediaSourceId && info.mediaSourceId !== info.itemId
+      ? `?mediaSourceId=${encodeURIComponent(info.mediaSourceId)}`
+      : "";
   return invoke<string>("jf_image", {
-    path: `/Videos/${info.itemId}/Trickplay/${info.width}/${tileIndex}.jpg`,
+    path: `/Videos/${info.itemId}/Trickplay/${info.width}/${tileIndex}.jpg${version}`,
   });
 }
 
@@ -1085,6 +1102,17 @@ export function ticksToText(ticks?: number): string {
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+/**
+ * Time still to watch ("24m"), or "" when it can't be said: plenty of items
+ * (home videos, some live recordings) carry no RunTimeTicks, and the plain
+ * subtraction then made "Resume ( left)" out of NaN.
+ */
+export function remainingText(runTimeTicks?: number, positionTicks?: number): string {
+  if (!runTimeTicks || !isFinite(runTimeTicks)) return "";
+  const left = runTimeTicks - (positionTicks ?? 0);
+  return left > 0 ? ticksToText(left) : "";
 }
 
 export function secondsToClock(sec: number): string {
