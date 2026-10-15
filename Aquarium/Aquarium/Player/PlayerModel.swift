@@ -304,6 +304,11 @@ final class PlayerModel {
     private var source: PlaybackSource?
     private var options = StreamOptions()
     private var localRecordId: String?
+    #if !os(tvOS)
+    /// The download playing now, as the server hears about it — see
+    /// `OfflineProgress.Session`. Ended by `endLocalSession`.
+    @ObservationIgnored private var localSession: OfflineProgress.Session?
+    #endif
     /// Where the current stream has to be taken to once its asset is ready to
     /// be seeked; nil once that's done, or when it started from the top.
     private var pendingSeek: Double?
@@ -1304,12 +1309,19 @@ final class PlayerModel {
             transcodingForSubtitle = meta.carriesSubtitleTranscode && opts.forceTranscode
         }
 
+        // What the stream on screen is owed should this start fail, read while
+        // `item` still names it — see the `catch` below.
+        let outgoingReport = source != nil && !isLocal && !isExternal ? report(paused: true) : nil
+
         self.item = item
         self.options = opts
         self.isLocal = false
         self.isExternal = false
         self.externalChannel = nil
         if !meta.reopening { resetLiveRecovery() }
+        #if !os(tvOS)
+        endLocalSession()
+        #endif
         self.localRecordId = nil
         self.isLive = opts.live
         self.autoplayCancelled = false
@@ -1399,7 +1411,7 @@ final class PlayerModel {
                 await loadExtras(for: item)
                 guard generation == mine else { return }
                 await client.reportPlaybackStart(report(paused: false))
-                adaptive.begin(inherited: meta.inherited, ceiling: requestedBitrate)
+                adaptive.begin(inherited: meta.inherited, ceiling: requestedBitrate, powerCap: powerCapBitrate)
                 return
             }
             guard generation == mine else {
@@ -1446,7 +1458,7 @@ final class PlayerModel {
             await loadExtras(for: item)
             guard generation == mine else { return }
             await client.reportPlaybackStart(report(paused: false))
-            adaptive.begin(inherited: meta.inherited, ceiling: requestedBitrate)
+            adaptive.begin(inherited: meta.inherited, ceiling: requestedBitrate, powerCap: powerCapBitrate)
         } catch {
             guard generation == mine else { return }
             resolvingGeneration = nil
@@ -1454,6 +1466,21 @@ final class PlayerModel {
             // for. It is not what the card is about, and must not go on
             // reporting as it.
             if canHandOver { quiesceOutgoingStream() }
+            // Otherwise the stream left in `source` is the one this start was
+            // replacing, very often another item's. Kept, the stopped report
+            // closing the card sends paired this item's id with that stream's
+            // session, its encode and tuner stayed open behind the card, and
+            // the lock screen went on naming it. It is ended now, under its
+            // own ids. A hand-over's is this item's own and stays, as before.
+            if !canHandOver, let stale = source {
+                source = nil
+                isTranscoding = false
+                Task {
+                    if let outgoingReport { await client.reportPlaybackStopped(outgoingReport) }
+                    await release(stale)
+                }
+            }
+            NowPlaying.shared.clear()
             pendingTrackChoice = nil
             // The player stays up, with the card saying what went wrong.
             //
@@ -1485,6 +1512,36 @@ final class PlayerModel {
             await client.closeLiveStream(id: id)
         }
     }
+
+    /// End the Jellyfin stream on screen when what replaces it isn't one — a
+    /// download, or a channel from a playlist.
+    ///
+    /// `play` settles its predecessor's encode and tuner once its own stream
+    /// is in, and `finish` settles all three when the player closes. These
+    /// two starts did neither: the server's Now Playing never ended, and the
+    /// transcode or the tuner behind the stream stayed open until the server
+    /// timed it out. Called before `item` and `source` are cleared, since the
+    /// stopped report is built from them. A prepared next episode goes too.
+    private func releaseOutgoingServerStream() {
+        dropPrefetched()
+        guard let outgoing = source else { return }
+        let closing = report(paused: true)
+        source = nil
+        Task {
+            await client.reportPlaybackStopped(closing)
+            await release(outgoing)
+        }
+    }
+
+    #if !os(tvOS)
+    /// Close the sitting with the download on screen, if there is one — see
+    /// `OfflineProgress.Session`. Its record holds where it got to.
+    private func endLocalSession() {
+        guard let session = localSession else { return }
+        localSession = nil
+        Task { await OfflineProgress.end(session) }
+    }
+    #endif
 
     /// Silence the item in the player while its replacement is being asked
     /// for: paused, and with its observers gone, so it neither reports
@@ -1543,6 +1600,21 @@ final class PlayerModel {
             return
         }
         MusicPlayer.shared.yield()
+        // As in `play`: whatever was on screen goes quiet, and anything still
+        // in flight for it — a channel's PlaybackInfo can take half a minute
+        // to answer, a playlist channel's address as long to resolve — loses
+        // to this. Without a fresh number it went on to attach itself over
+        // the download. See `generation`.
+        quiesceOutgoingStream()
+        generation &+= 1
+        resolvingGeneration = nil
+        externalResolve?.cancel()
+        externalResolve = nil
+        externalChannel = nil
+        resetLiveRecovery()
+        releaseOutgoingServerStream()
+        endLocalSession()
+        localSession = OfflineProgress.Session(itemId: record.itemId)
         if !keepShuffle { shuffleSeries = nil }
         errorMessage = nil
         noVideoTrack = false
@@ -1598,6 +1670,10 @@ final class PlayerModel {
         // As in `play`: the address may take a while to resolve, and the old
         // item's end or failure must not fire on this channel's behalf.
         quiesceOutgoingStream()
+        releaseOutgoingServerStream()
+        #if !os(tvOS)
+        endLocalSession()
+        #endif
         shuffleSeries = nil
         errorMessage = nil
         noVideoTrack = false
@@ -3026,6 +3102,16 @@ final class PlayerModel {
     func seek(to seconds: Double) {
         let target = max(0, duration > 0 ? min(seconds, duration - 0.5) : seconds)
         adaptive.noteSeek()
+        // Before the item is ready the seek can't be made at all — an HLS
+        // asset drops one issued before its playlist is in, see `attach` — so
+        // it becomes the position the hold is waiting to jump to instead.
+        // Made here, it was lost along with the start position it replaced,
+        // and the stream played from the top.
+        if isOpening, pendingSeek != nil {
+            pendingSeek = target
+            position = target
+            return
+        }
         // Somewhere of the user's own choosing replaces the position the stream
         // was opening at, and ends the hold that was waiting on it.
         pendingSeek = nil
@@ -3146,10 +3232,14 @@ final class PlayerModel {
 
         // Everything the two closing calls need, read while it is still true.
         let finalPosition = position
-        let closingReport = isExternal ? nil : report(paused: true, position: finalPosition)
+        // A download's sitting closes through its own session instead — see
+        // `OfflineProgress.Session`.
+        let closingReport = isExternal || isLocal ? nil : report(paused: true, position: finalPosition)
         let closingSource = source
         #if !os(tvOS)
         let closingLocalId = localRecordId
+        let closingLocalSession = localSession
+        localSession = nil
         #endif
         dropPrefetched()
 
@@ -3216,7 +3306,11 @@ final class PlayerModel {
         #if !os(tvOS)
         if let closingLocalId {
             DownloadManager.shared.noteProgress(itemId: closingLocalId, positionSeconds: finalPosition)
-            Task { await OfflineProgress.sync() }
+            if let closingLocalSession {
+                Task { await OfflineProgress.end(closingLocalSession) }
+            } else {
+                Task { await OfflineProgress.sync() }
+            }
         }
         #endif
         //
@@ -3268,13 +3362,17 @@ final class PlayerModel {
         if isActive { PlaybackHandoff.shared.update(position: position) }
         // A download keeps the same beat a stream does: where it has got to
         // is written to its record and, while there is a server to tell, sent
-        // on. Left for the player closing, a connection that went away
-        // mid-film took the whole sitting's progress with it.
+        // on, as progress under the sitting's own session. Left for the player
+        // closing, a connection that went away mid-film took the whole
+        // sitting's progress with it.
         if isActive, let localRecordId {
             guard Date().timeIntervalSince(lastReportAt) >= Self.reportInterval else { return }
             lastReportAt = Date()
             DownloadManager.shared.noteProgress(itemId: localRecordId, positionSeconds: position)
-            Task { await OfflineProgress.push(localRecordId) }
+            if let localSession {
+                let paused = isPaused
+                Task { await OfflineProgress.push(localSession, paused: paused) }
+            }
             return
         }
         #endif
@@ -3289,7 +3387,7 @@ final class PlayerModel {
         #if !os(tvOS)
         if let localRecordId {
             DownloadManager.shared.noteProgress(itemId: localRecordId, positionSeconds: position)
-            await OfflineProgress.push(localRecordId)
+            if let localSession { await OfflineProgress.push(localSession, paused: isPaused) }
             return
         }
         #endif
@@ -3677,8 +3775,18 @@ final class PlayerModel {
         guard let seriesId = item?.SeriesId else { return }
         let audio = selectedAudioTrack.flatMap { audioTracks.indices.contains($0) ? audioTracks[$0].language : nil }
         let sub: String? = {
-            guard let index = selectedSubtitleTrack, subtitleTracks.indices.contains(index) else { return "off" }
-            return subtitleTracks[index].language ?? "und"
+            if let index = selectedSubtitleTrack, subtitleTracks.indices.contains(index) {
+                return subtitleTracks[index].language ?? "und"
+            }
+            // A subtitle the server painted into the picture is no track
+            // here. Read as none, it was never remembered, and an audio change
+            // after it wrote it down as "off" — so the next episode opened
+            // without the subtitles that were on screen.
+            if let burned = burnedInSubtitle,
+               let option = subtitleOptions.first(where: { $0.serverIndex == burned }) {
+                return option.language ?? "und"
+            }
+            return "off"
         }()
         prefs.setTrackChoice(.init(audio: audio, sub: sub), seriesId: seriesId)
     }
@@ -3929,9 +4037,12 @@ final class PlayerModel {
         } else if let match = subtitleOptions.first(where: { $0.serverIndex == subtitle }),
                   let av = match.avIndex {
             selectSubtitleTrack(av)
+        } else {
+            // Anything else is a subtitle that came back burnt into the
+            // picture, which is on screen already and is not a track to
+            // select — but is still the choice to remember for the series.
+            rememberTrackChoice()
         }
-        // Anything else is a subtitle that came back burnt into the picture,
-        // which is on screen already and is not a track to select.
         return true
     }
 
@@ -4471,7 +4582,11 @@ final class PlayerModel {
     #if !os(tvOS)
     private func reportLocalFinished(_ itemId: String) async {
         DownloadManager.shared.noteProgress(itemId: itemId, positionSeconds: duration, played: true)
-        Task { await OfflineProgress.sync() }
+        if localSession?.itemId == itemId {
+            endLocalSession()
+        } else {
+            Task { await OfflineProgress.sync() }
+        }
     }
     #endif
 

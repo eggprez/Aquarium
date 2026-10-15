@@ -96,8 +96,17 @@ final class AdaptiveQuality {
     /// from the last rather than being chosen; only our own switches earn the
     /// cooldown, because a user who just picked a quality shouldn't wait 45
     /// seconds for the policy to start watching it.
-    func begin(inherited: Bool, ceiling requested: Int?) {
+    ///
+    /// `powerCap` is the rung the device can afford as the stream opens — see
+    /// `powerRung`. It used to be learnt only from the notification that the
+    /// device's state had *changed*, so a phone already in Low Power Mode when
+    /// playback began had no cap here at all: every five minutes the policy
+    /// climbed towards the ceiling, the start capped the climb straight back
+    /// to the rung that was playing, and the same stream was torn down and
+    /// reopened for nothing.
+    func begin(inherited: Bool, ceiling requested: Int?, powerCap capBitrate: Int?) {
         let index = rungIndex(requested)
+        powerCap = capBitrate.map(rungIndex)
         resetStream()
         streamStartedAt = Date()
         lastSwitchAt = inherited ? streamStartedAt : .distantPast

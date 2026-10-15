@@ -76,6 +76,16 @@ enum Quality {
         return choices.firstIndex { $0.maxBitrate == rung } ?? 0
     }
 
+    /// What the error card's "Try a smaller stream" asks for: the 720p rung,
+    /// or the rung below whatever was already playing at or under it. It
+    /// used to ask for a flat 4 Mbps, which is no rung: the quality pill read
+    /// "Custom" and the size cap resolved to 480p.
+    static func smallerStream(than bitrate: Int?) -> Int? {
+        let floor = choices.firstIndex { $0.maxBitrate == 5_000_000 } ?? choices.count - 1
+        let index = max(floor, rungIndex(bitrate) + 1)
+        return choices[min(index, choices.count - 1)].maxBitrate
+    }
+
     /// A stored bitrate moved onto the current ladder.
     ///
     /// The rungs are not the ones earlier builds wrote, and a saved default of
