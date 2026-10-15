@@ -123,7 +123,9 @@ struct FavoritesView: View {
                                     .background(kind == entry.value ? Theme.accentSoft : Theme.raised, in: Capsule())
                                     .foregroundStyle(kind == entry.value ? Theme.accent : Theme.textBody)
                             }
-                            .buttonStyle(.plain)
+                            // `.plain` elsewhere; on a television it showed no
+                            // sign of which pill the selector was on.
+                            .chipButtonStyle()
                         }
                     }
                     .padding(.horizontal, Metrics.gutter)

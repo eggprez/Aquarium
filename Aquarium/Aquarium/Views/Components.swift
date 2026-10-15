@@ -1949,6 +1949,20 @@ struct WrappingRow: Layout {
 // skeletons above — so the layout settles once, when the request goes out,
 // rather than jumping when it lands.
 
+/// The empty, error and offline states' glyph and text column, given the
+/// phone's. A television's are its own: the phone's 420-point column under a
+/// 34-point glyph was a narrow strip in the middle of a 1920-point screen,
+/// read from across a room.
+private enum StateSize {
+    #if os(tvOS)
+    static func glyph(_ phone: CGFloat) -> CGFloat { 72 }
+    static func textWidth(_ phone: CGFloat) -> CGFloat { 960 }
+    #else
+    static func glyph(_ phone: CGFloat) -> CGFloat { phone }
+    static func textWidth(_ phone: CGFloat) -> CGFloat { phone }
+    #endif
+}
+
 struct EmptyState: View {
     var symbol: String = "tray"
     var title: String
@@ -1974,14 +1988,14 @@ struct EmptyState: View {
         #else
         VStack(spacing: 10) {
             Image(systemName: symbol)
-                .font(.system(size: 34))
+                .font(.system(size: StateSize.glyph(34)))
                 .foregroundStyle(Theme.textDim)
             Text(title).font(.headline).foregroundStyle(Theme.text)
             Text(message)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textDim)
-                .frame(maxWidth: 420)
+                .frame(maxWidth: StateSize.textWidth(420))
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .appButtonStyle()
@@ -2015,14 +2029,14 @@ struct ErrorState: View {
         #else
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 32))
+                .font(.system(size: StateSize.glyph(32)))
                 .foregroundStyle(Theme.warn)
             Text(title).font(.headline).foregroundStyle(Theme.text)
             Text(error)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textDim)
-                .frame(maxWidth: 460)
+                .frame(maxWidth: StateSize.textWidth(460))
             if let retry {
                 Button("Try again", action: retry)
                     .appButtonStyle(prominent: true)
@@ -2069,14 +2083,14 @@ struct OfflineState: View {
         #else
         VStack(spacing: 14) {
             Image(systemName: "wifi.slash")
-                .font(.system(size: 34))
+                .font(.system(size: StateSize.glyph(34)))
                 .foregroundStyle(Theme.warn)
             Text("Server offline").font(.title2.weight(.semibold))
             Text(Self.message)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textDim)
-                .frame(maxWidth: 460)
+                .frame(maxWidth: StateSize.textWidth(460))
             HStack(spacing: 12) {
                 if let onDownloads {
                     Button("Go to Downloads", action: onDownloads)
