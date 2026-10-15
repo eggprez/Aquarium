@@ -1073,8 +1073,8 @@ struct RowPressStyle: ButtonStyle {
 /// nothing at all until the selector reached them.
 ///
 /// Both states are drawn here instead, so a button reads the same whether or not
-/// it has focus, and the focus itself is the ring, the lift and the shadow the
-/// rest of the app already uses.
+/// it has focus, and the focus itself is a white fill with the ring, the lift
+/// and the shadow the rest of the app already uses.
 struct TVButtonStyle: ButtonStyle {
     enum Kind { case prominent, secondary }
     var kind: Kind = .secondary
@@ -1113,18 +1113,22 @@ struct TVButtonStyle: ButtonStyle {
         }
     }
 
+    /// Focus turns either kind white. The prominent one used to go from one
+    /// purple to a lighter one, which over a purple-lit backdrop left a focused
+    /// Play with nothing but its thin ring to say so, beside a Details that
+    /// went white.
     private func fill(_ isFocused: Bool) -> Color {
         switch kind {
-        case .prominent: isFocused ? Theme.accent : Theme.accentStrong
+        case .prominent: isFocused ? .white : Theme.accentStrong
         case .secondary: isFocused ? .white : Theme.raised
         }
     }
 
-    /// White on the accent either way; on the secondary style the label has to
-    /// flip with the fill, since focus turns that one white.
+    /// The label flips with the fill: white on the accent, and on white the
+    /// accent for the prominent style and near-black for the secondary.
     private func labelColour(_ isFocused: Bool) -> Color {
         switch kind {
-        case .prominent: .white
+        case .prominent: isFocused ? Theme.accentStrong : .white
         // Focus turns this one's fill white, so the label has to go dark with
         // it — a highlight colour pitched for the raised fill would be the same
         // trap the system style falls into.
