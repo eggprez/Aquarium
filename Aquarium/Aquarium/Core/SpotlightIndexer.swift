@@ -11,6 +11,7 @@
 //  Not on tvOS, which has no Core Spotlight.
 
 #if os(iOS) || os(macOS)
+import AppIntents
 import CoreSpotlight
 import Foundation
 import UniformTypeIdentifiers
@@ -94,6 +95,14 @@ final class SpotlightIndexer {
         attributes.contentDescription = lines.joined(separator: " · ")
         let searchable = CSSearchableItem(uniqueIdentifier: item.Id, domainIdentifier: domain, attributeSet: attributes)
         searchable.expirationDate = .distantFuture
+        // The same title as the App Intents entity Siri plays, so the
+        // system's semantic search and its suggestions ("play the thing I
+        // was looking at") see one catalogue rather than two. Shows and
+        // films ahead of episodes: an episode is a result for a search
+        // that named it, not for one that named its show.
+        if #available(iOS 18.0, macOS 15.0, *) {
+            searchable.associateAppEntity(MediaItemEntity(item), priority: item.kind == "Episode" ? 0 : 1)
+        }
         return searchable
     }
 }

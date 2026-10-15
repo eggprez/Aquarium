@@ -39,12 +39,15 @@ struct ListeningActivityAttributes: ActivityAttributes {
         /// A film rather than something in the music player. Tapping the
         /// activity opens Now Playing, which a film doesn't have.
         var isVideo = false
+        /// "Skip intro" or "Skip credits" while the playhead is in one the
+        /// server has marked; nil when there is nothing to skip.
+        var skipLabel: String?
     }
 
 }
 
 extension ListeningActivityAttributes.ContentState {
-    private enum CodingKeys: String, CodingKey { case title, subtitle, isPlaying, sleepDeadline, isVideo }
+    private enum CodingKeys: String, CodingKey { case title, subtitle, isPlaying, sleepDeadline, isVideo, skipLabel }
 
     /// Key by key: an activity already running when the app updates can have
     /// the system hand its extension a state encoded by the build before
@@ -57,6 +60,7 @@ extension ListeningActivityAttributes.ContentState {
         isPlaying = try c.decode(Bool.self, forKey: .isPlaying)
         sleepDeadline = try c.decode(Date.self, forKey: .sleepDeadline)
         isVideo = try c.decodeIfPresent(Bool.self, forKey: .isVideo) ?? false
+        skipLabel = try c.decodeIfPresent(String.self, forKey: .skipLabel)
     }
 }
 
@@ -89,6 +93,14 @@ struct DownloadsActivityAttributes: ActivityAttributes {
         var currentEnd: Date?
         /// What the queue will start after the arriving one.
         var nextTitle: String?
+        /// The batch in bytes: what has arrived, and what the whole of it
+        /// is expected to come to. Nil when there is nothing to size it by.
+        /// Optional so a state written by an older build still decodes.
+        var receivedBytes: Int64?
+        var totalBytes: Int64?
+        /// Whether `totalBytes` leans on an estimate anywhere — a stream
+        /// still arriving, an item not started yet. Shown as "~".
+        var totalIsEstimate: Bool?
 
         /// Not landed yet, the arriving one included.
         var remaining: Int { max(0, total - done - failed) }
@@ -102,6 +114,8 @@ enum LiveActivityAction: Sendable {
     case extendSleepTimer(minutes: Int)
     case cancelSleepTimer
     case setDownloadsPaused(Bool)
+    case togglePlayPause
+    case skipSegment
 }
 
 enum LiveActivityActions {
@@ -135,6 +149,26 @@ struct CancelSleepTimerIntent: LiveActivityIntent {
 
     func perform() async throws -> some IntentResult {
         await LiveActivityActions.send(.cancelSleepTimer)
+        return .result()
+    }
+}
+
+struct TogglePlayPauseActivityIntent: LiveActivityIntent {
+    static let title: LocalizedStringResource = "Play or Pause"
+    static let isDiscoverable = false
+
+    func perform() async throws -> some IntentResult {
+        await LiveActivityActions.send(.togglePlayPause)
+        return .result()
+    }
+}
+
+struct SkipSegmentActivityIntent: LiveActivityIntent {
+    static let title: LocalizedStringResource = "Skip Intro or Credits"
+    static let isDiscoverable = false
+
+    func perform() async throws -> some IntentResult {
+        await LiveActivityActions.send(.skipSegment)
         return .result()
     }
 }

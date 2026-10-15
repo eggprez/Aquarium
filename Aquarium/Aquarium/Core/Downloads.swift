@@ -50,9 +50,21 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
     /// AVFoundation picks the location for a downloaded stream and it must be
     /// addressed relatively — the absolute path changes between launches.
     var hlsPath: String?
+    /// Where a stream download is being written while it runs, relative to
+    /// the app's home directory as `hlsPath` is. AVFoundation says so as the
+    /// transfer starts (iOS 18 and macOS 14 on); `hlsPath` is only written
+    /// when it ends. Kept so the bytes on disk can be measured while the
+    /// transfer is still going — the only count of them that survives the
+    /// app being suspended or relaunched. See `measureStreamsSoon`.
+    var partialPath: String?
     /// How far an HLS download has got, as a share of its duration. Segments
     /// arrive as time rather than as a share of a size nobody knows.
     var loadedFraction: Double?
+    /// A stream's expected size, projected from the bytes on disk and the
+    /// share of the running time they cover, and smoothed so it settles
+    /// rather than swinging with every segment. See
+    /// `DownloadManager.updateProjection`.
+    var projectedBytes: Int64?
     /// Kept so a failed transfer can be replayed without the item it came from.
     var sourceURL: String = ""
     var estimatedBytes: Int64?
@@ -204,7 +216,9 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
         fileName = try c.decodeIfPresent(String.self, forKey: .fileName) ?? ""
         transport = try c.decodeIfPresent(JellyfinClient.DownloadTransport.self, forKey: .transport) ?? .file
         hlsPath = try c.decodeIfPresent(String.self, forKey: .hlsPath)
+        partialPath = try c.decodeIfPresent(String.self, forKey: .partialPath)
         loadedFraction = try c.decodeIfPresent(Double.self, forKey: .loadedFraction)
+        projectedBytes = try c.decodeIfPresent(Int64.self, forKey: .projectedBytes)
         sourceURL = try c.decodeIfPresent(String.self, forKey: .sourceURL) ?? ""
         estimatedBytes = try c.decodeIfPresent(Int64.self, forKey: .estimatedBytes)
         receivedBytes = try c.decodeIfPresent(Int64.self, forKey: .receivedBytes) ?? 0
@@ -325,6 +339,10 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
     /// moments, before there is anything to project from.
     var progressTotal: (bytes: Int64, estimated: Bool)? {
         if totalBytes > 0 { return (totalBytes, false) }
+        // The smoothed projection, once there is one. Never less than what
+        // has arrived: a total below the bytes received is a contradiction
+        // on screen, whatever the arithmetic says.
+        if let projectedBytes, projectedBytes > 0 { return (max(projectedBytes, receivedBytes), true) }
         if let loadedFraction, loadedFraction >= Self.projectableFraction, receivedBytes > 0 {
             let projected = Int64((Double(receivedBytes) / loadedFraction).rounded())
             return (max(projected, receivedBytes), true)
@@ -455,6 +473,7 @@ final class DownloadManager: NSObject {
         var received: Int64
         var total: Int64
         var fraction: Double?
+        var projected: Int64? = nil
     }
 
     /// A record with its transfer's latest counts laid over it.
@@ -464,6 +483,7 @@ final class DownloadManager: NSObject {
         out.receivedBytes = progress.received
         out.totalBytes = progress.total
         out.loadedFraction = progress.fraction
+        out.projectedBytes = progress.projected
         return out
     }
 
@@ -524,6 +544,18 @@ final class DownloadManager: NSObject {
     /// one that has genuinely stopped.
     @ObservationIgnored
     private var lastSeenBytes: [String: Int64] = [:]
+
+    /// The size on disk of each running stream's package, as last measured.
+    /// When there is one it is the byte count, and the task's own counter is
+    /// not consulted — see `measureStreamsSoon`.
+    @ObservationIgnored
+    private var measuredStreamBytes: [String: Int64] = [:]
+    @ObservationIgnored
+    private var streamMeasurer: Task<Void, Never>?
+    /// How often a running stream's package is measured. A feature-length
+    /// package is a few thousand segment files; walking them is a few tens of
+    /// milliseconds, off the main actor.
+    private static let streamMeasureInterval: TimeInterval = 3
 
     /// How long a transfer may go without a byte before it is called stalled,
     /// and how often that is checked.
@@ -700,6 +732,15 @@ final class DownloadManager: NSObject {
         NotificationCenter.default.addObserver(forName: backgrounded, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { DownloadManager.shared.flushPersisted() }
         }
+        #if os(iOS)
+        // On the way out, while the app still counts as in front — see
+        // `handOffBeforeBackground`.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { DownloadManager.shared.handOffBeforeBackground() }
+        }
+        #endif
         // Everything downloaded before artwork was kept locally, filled in the
         // next time there is a network to fill it from. One pass, cheapest
         // priority, and each picture is skipped the moment it is found on disk.
@@ -820,6 +861,20 @@ final class DownloadManager: NSObject {
     /// itself is moved by the system between launches.
     nonisolated static func hlsURL(forRelativePath path: String) -> URL {
         URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(path)
+    }
+
+    /// The inverse: a location AVFoundation handed over, as the path relative
+    /// to the home directory that `hlsURL` expects. AVFoundation hands over a
+    /// URL relative to home, and `relativePath` is that; an absolute URL —
+    /// which nothing promises it won't send — is cut down to the same form,
+    /// so the two callbacks that report a package always agree on its name.
+    nonisolated static func homeRelativePath(_ location: URL) -> String {
+        if location.baseURL != nil { return location.relativePath }
+        let full = location.path
+        for home in [NSHomeDirectory(), URL(fileURLWithPath: NSHomeDirectory()).resolvingSymlinksInPath().path] {
+            if full.hasPrefix(home + "/") { return String(full.dropFirst(home.count + 1)) }
+        }
+        return location.relativePath
     }
 
     /// Every record on disk, read as the manager is first touched — which is
@@ -1147,6 +1202,54 @@ final class DownloadManager: NSObject {
     /// a record to its name, and must not read as "nothing left" in between.
     var inFlightCount: Int { queue.count + active.count }
 
+    /// What is waiting or arriving, in bytes: what has arrived of it, and
+    /// what all of it is expected to come to.
+    ///
+    /// An arriving item counts what is on disk against its own total — the
+    /// server's length for a file, the projection for a stream (see
+    /// `DownloadRecord.progressTotal`). A waiting one counts what an earlier
+    /// attempt left, against the size worked out from the item it was queued
+    /// with. `unsized` is how many had nothing to size them by, so a caller
+    /// can tell a total it may quote from one that is missing pieces.
+    struct InFlightBytes: Equatable, Sendable {
+        var received: Int64 = 0
+        var total: Int64 = 0
+        var estimated = false
+        var unsized = 0
+    }
+
+    var inFlightBytes: InFlightBytes {
+        var out = InFlightBytes()
+        var seen = Set<String>()
+        func add(_ itemId: String, quality: String?) {
+            guard seen.insert(itemId).inserted else { return }
+            if let stored = record(for: itemId) {
+                let rec = live(stored)
+                out.received += rec.receivedBytes
+                if let total = rec.progressTotal {
+                    out.total += max(total.bytes, rec.receivedBytes)
+                    out.estimated = out.estimated || total.estimated
+                    return
+                }
+            }
+            let quality = quality ?? record(for: itemId)?.quality
+            if let item = pendingItems[itemId], let quality,
+               let estimate = JellyfinClient.estimateDownloadSize(item: item, quality: DownloadQualities.named(quality)),
+               estimate > 0 {
+                out.total += estimate
+                out.estimated = true
+            } else if let estimate = record(for: itemId)?.estimatedBytes, estimate > 0 {
+                out.total += estimate
+                out.estimated = true
+            } else {
+                out.unsized += 1
+            }
+        }
+        for id in active { add(id, quality: nil) }
+        for entry in queue { add(entry.itemId, quality: entry.quality) }
+        return out
+    }
+
     /// How many songs — or audiobooks — are waiting or arriving.
     func audioBacklog(books: Bool) -> Int {
         let wanted = books ? "AudioBook" : "Audio"
@@ -1379,6 +1482,62 @@ final class DownloadManager: NSObject {
         }
     }
 
+    // MARK: - Handing the batch to the system
+
+    /// The most the hand-off below starts at once. A season, comfortably;
+    /// not a music library, which the system would take as many hundreds of
+    /// simultaneous transfers.
+    private static let handOffLimit = 16
+
+    /// The app is about to leave the front. Start what is still waiting now,
+    /// so the system carries the batch through without the app.
+    ///
+    /// The queue normally starts the next item when one lands. Behind, that
+    /// means the system has to wake the app to do it, and a transfer started
+    /// from the background is one the system treats as discretionary: it may
+    /// be put off for hours, and a stream started that way is demoted
+    /// outright (see AVAssetDownloadTask.h). So a batch left running used to
+    /// finish the item that was arriving and then sit. Started here, while
+    /// the app still counts as in front, the rest go to the system as
+    /// ordinary transfers, and it runs them whether or not the app is woken.
+    ///
+    /// What still holds: a pause, Wi-Fi only, retries waiting out a delay, and
+    /// one transcode at a time — the server's encoder is the reason for that
+    /// rule, and the app being behind doesn't change it. What gives way is
+    /// the Parallel downloads limit, for this batch: the extras run alongside
+    /// until they land, and the pump starts nothing new until the count is
+    /// back under it. Nothing running is set aside on the way back in.
+    ///
+    /// Asked on every resignation, which includes pulling down Control
+    /// Centre. Starting the rest of a batch early then is harmless — it is
+    /// what was asked for — and telling the two apart isn't possible here.
+    func handOffBeforeBackground() {
+        guard !isPaused, !queue.isEmpty, !JellyfinClient.shared.isOffline, JellyfinClient.shared.isSignedIn
+        else { return }
+        let now = Date()
+        var started: [String] = []
+        while started.count < Self.handOffLimit,
+              let i = queue.firstIndex(where: { $0.isDue(at: now) && !waitsForTranscode($0) }) {
+            let next = queue.remove(at: i)
+            start(next)
+            started.append(next.itemId)
+        }
+        guard !started.isEmpty else { return }
+        persistQueue()
+        Self.log.notice("Handed \(started.count) queued download(s) to the system on the way out")
+        #if canImport(UIKit)
+        // An item with nothing saved about it is looked up before it can
+        // start (`resolveThenStart`); a little time behind to finish that.
+        // Twenty seconds is well inside what the system grants, so the
+        // timer is what ends it, as in LiveActivities.
+        let hold = UIApplication.shared.beginBackgroundTask(withName: "DownloadHandOff")
+        Task {
+            try? await Task.sleep(for: .seconds(20))
+            if hold != .invalid { UIApplication.shared.endBackgroundTask(hold) }
+        }
+        #endif
+    }
+
     // MARK: - Parallel downloads
 
     /// Follows the Parallel downloads setting, from the Downloads page or
@@ -1510,10 +1669,11 @@ final class DownloadManager: NSObject {
         // Read before cancelling: cancelling rewrites the record, and the path
         // of a downloaded stream is the only way back to bytes that live
         // outside this item's own folder.
-        let streamPath = record(for: itemId)?.hlsPath
+        let existing = record(for: itemId)
+        let streamPaths = Set([existing?.hlsPath, existing?.partialPath].compactMap { $0 })
         cancel(itemId)
-        if let streamPath {
-            try? FileManager.default.removeItem(at: Self.hlsURL(forRelativePath: streamPath))
+        for path in streamPaths {
+            try? FileManager.default.removeItem(at: Self.hlsURL(forRelativePath: path))
         }
         try? FileManager.default.removeItem(at: Self.folder(for: itemId))
         DownloadArtwork.forget(itemId: itemId)
@@ -1707,6 +1867,10 @@ final class DownloadManager: NSObject {
     /// pointing at it.
     private func startStream(_ record: DownloadRecord, url: URL, resuming: Bool) {
         let asset: AVURLAsset
+        // A new attempt measures its own package; the last one's figure
+        // would otherwise stand until the first walk of the new one.
+        measuredStreamBytes[record.itemId] = nil
+        projectionFraction[record.itemId] = nil
         if resuming, let partial = Self.partialPackage(of: record) {
             asset = AVURLAsset(url: partial)
             // The task about to start counts only what *it* pulls, from zero,
@@ -1719,6 +1883,17 @@ final class DownloadManager: NSObject {
             Self.log.notice("Resuming stream \(record.itemId, privacy: .public) from its package")
         } else {
             streamByteBase[record.itemId] = nil
+            // Starting over: a package an earlier attempt was writing is not
+            // this one's, and neither is the size projected from it.
+            if record.partialPath != nil || record.projectedBytes != nil {
+                var fresh = record
+                if let old = fresh.partialPath, old != fresh.hlsPath {
+                    try? FileManager.default.removeItem(at: Self.hlsURL(forRelativePath: old))
+                }
+                fresh.partialPath = nil
+                fresh.projectedBytes = nil
+                save(fresh)
+            }
             // Records saved before downloads carried a session of their own
             // get one here; see `JellyfinClient.withPlaySession`.
             asset = AVURLAsset(url: JellyfinClient.shared.authorized(JellyfinClient.withPlaySession(url)))
@@ -1734,9 +1909,13 @@ final class DownloadManager: NSObject {
     /// Where a stream download's package is, if there is one on disk to
     /// resume from.
     private static func partialPackage(of record: DownloadRecord) -> URL? {
-        guard let path = record.hlsPath else { return nil }
-        let url = hlsURL(forRelativePath: path)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        // `hlsPath` when an attempt ended and said where; `partialPath` when
+        // the app was gone before it could — a force-quit mid-transfer.
+        for path in [record.hlsPath, record.partialPath].compactMap({ $0 }) {
+            let url = hlsURL(forRelativePath: path)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        return nil
     }
 
     /// Throw away what a stream download had fetched so far, so the next
@@ -1744,11 +1923,16 @@ final class DownloadManager: NSObject {
     /// a token that has changed, a transcode it has forgotten — resuming would
     /// fail the same way every time.
     private func discardPartialPackage(_ itemId: String) {
-        guard var rec = record(for: itemId), let path = rec.hlsPath else { return }
-        try? FileManager.default.removeItem(at: Self.hlsURL(forRelativePath: path))
+        guard var rec = record(for: itemId), rec.hlsPath != nil || rec.partialPath != nil else { return }
+        for path in Set([rec.hlsPath, rec.partialPath].compactMap({ $0 })) {
+            try? FileManager.default.removeItem(at: Self.hlsURL(forRelativePath: path))
+        }
         rec.hlsPath = nil
+        rec.partialPath = nil
         rec.loadedFraction = nil
+        rec.projectedBytes = nil
         rec.receivedBytes = 0
+        measuredStreamBytes[itemId] = nil
         save(rec)
     }
 
@@ -1835,6 +2019,12 @@ final class DownloadManager: NSObject {
         // deleted or changed in the meantime.
         guard let current = record(for: itemId), current.hlsPath == path else { return }
         rec = current
+        if let partial = rec.partialPath, partial != path {
+            try? FileManager.default.removeItem(at: Self.hlsURL(forRelativePath: partial))
+        }
+        rec.partialPath = nil
+        rec.projectedBytes = nil
+        measuredStreamBytes[itemId] = nil
         rec.receivedBytes = size
         rec.totalBytes = size
         rec.loadedFraction = 1
@@ -1941,6 +2131,9 @@ final class DownloadManager: NSObject {
             active.insert(itemId)
         }
         pump()
+        // The streams that carried on while the app was gone have grown on
+        // disk; count them now rather than at their next callback.
+        measureStreamsSoon()
 
         // Anything still claiming to be running is either a transfer the last
         // run genuinely lost, or one that finished without the app there to be
@@ -1998,7 +2191,8 @@ final class DownloadManager: NSObject {
     /// when its state does, or when the counts are due on disk.
     private func publish(_ rec: inout DownloadRecord, received: Int64, at now: Date) {
         liveProgress[rec.itemId] = LiveProgress(
-            received: rec.receivedBytes, total: rec.totalBytes, fraction: rec.loadedFraction
+            received: rec.receivedBytes, total: rec.totalBytes, fraction: rec.loadedFraction,
+            projected: rec.projectedBytes
         )
         var stateChanged = false
         if rec.status != .downloading {
@@ -2111,11 +2305,113 @@ final class DownloadManager: NSObject {
         let now = Date()
         activityAt[itemId] = now
         guard var rec = record(for: itemId), rec.status != .complete else { return }
+        // The live counts, not the record's: those are written to disk every
+        // ten seconds and may be that far behind.
+        rec = live(rec)
         rec.loadedFraction = fraction
-        // Fraction and bytes are written together, from the same callback, so
-        // the two never describe different moments of the transfer.
-        if received > 0 { rec.receivedBytes = (streamByteBase[itemId] ?? 0) + received }
+        if let measured = measuredStreamBytes[itemId] {
+            // The package on disk is the count. The task's own counter is
+            // only good for the task that is running now, in this process: it
+            // starts again from zero on a resume, is not carried across a
+            // relaunch, and has been seen to stop moving after the app comes
+            // back from the background — which, with the fraction still
+            // climbing, is what made the projected total shrink.
+            rec.receivedBytes = measured
+        } else if received > 0 {
+            // No measurement yet (the first seconds, or a system older than
+            // iOS 18 that never says where the package is). The counter, but
+            // never backwards.
+            rec.receivedBytes = max(rec.receivedBytes, (streamByteBase[itemId] ?? 0) + received)
+        }
+        updateProjection(&rec)
         publish(&rec, received: received, at: now)
+        measureStreamsSoon()
+    }
+
+    /// Move the smoothed projection towards what the bytes and the fraction
+    /// now imply.
+    ///
+    /// Raw, `received / fraction` swings with the picture: a dark opening
+    /// encodes small and projects a small film, an action scene the opposite.
+    /// So the projection starts from the bitrate estimate and moves towards
+    /// each new reading by how much more of the film the reading covers —
+    /// most of the way over each tenth or so of the running time, and all of
+    /// it near the end, when a reading says almost everything. Measured by
+    /// the film rather than by the clock, so it settles the same whether
+    /// readings come twice a second or once every few. Never below what has
+    /// arrived.
+    private func updateProjection(_ rec: inout DownloadRecord) {
+        guard rec.transport != .file, rec.totalBytes == 0, rec.receivedBytes > 0,
+              let fraction = rec.loadedFraction, fraction >= DownloadRecord.projectableFraction else { return }
+        let f = min(1, fraction)
+        let raw = Double(rec.receivedBytes) / f
+        // A projection carried over a relaunch has no reading behind it in
+        // this process; it is taken as up to date rather than jumped from.
+        let last = projectionFraction[rec.itemId] ?? (rec.projectedBytes == nil ? 0 : f)
+        projectionFraction[rec.itemId] = f
+        let previous = Double(rec.projectedBytes ?? rec.estimatedBytes ?? Int64(raw))
+        let weight = max(1 - exp(-max(0, f - last) / Self.projectionSpan), pow(f, 6))
+        let next = previous + (raw - previous) * weight
+        rec.projectedBytes = max(rec.receivedBytes, Int64(next.rounded()))
+    }
+
+    /// The share of the running time over which the projection mostly
+    /// catches up with a new reading. See `updateProjection`.
+    private static let projectionSpan = 0.12
+    /// The fraction each stream's projection was last moved at.
+    @ObservationIgnored private var projectionFraction: [String: Double] = [:]
+
+    // MARK: - Measuring running streams on disk
+
+    /// Measure every running stream's package every few seconds, for as long
+    /// as any is running. Harmless to call often: one measurer at a time.
+    func measureStreamsSoon() {
+        guard streamMeasurer == nil else { return }
+        streamMeasurer = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let targets: [(itemId: String, path: String)] = self.records.compactMap { rec in
+                    guard rec.status == .downloading, rec.transport != .file,
+                          let path = rec.partialPath ?? rec.hlsPath else { return nil }
+                    return (rec.itemId, path)
+                }
+                if targets.isEmpty { break }
+                for target in targets {
+                    let url = Self.hlsURL(forRelativePath: target.path)
+                    let bytes = await Task.detached(priority: .utility) { Self.sizeOnDisk(of: url) }.value
+                    self.applyMeasured(itemId: target.itemId, path: target.path, bytes: bytes)
+                }
+                try? await Task.sleep(for: .seconds(Self.streamMeasureInterval))
+            }
+            self?.streamMeasurer = nil
+        }
+    }
+
+    private func applyMeasured(itemId: String, path: String, bytes: Int64) {
+        // Read again: the walk suspended, and the download may have finished,
+        // failed or started over under another package meanwhile.
+        guard var rec = record(for: itemId), rec.status == .downloading,
+              (rec.partialPath ?? rec.hlsPath) == path, bytes > 0 else { return }
+        let before = measuredStreamBytes[itemId]
+        measuredStreamBytes[itemId] = bytes
+        let now = Date()
+        // Bytes landing on disk is the transfer alive, whether or not this
+        // process heard a callback about it — see `sweepStalledTransfers`.
+        if let before, bytes > before { activityAt[itemId] = now }
+        rec = live(rec)
+        guard rec.receivedBytes != bytes else { return }
+        rec.receivedBytes = bytes
+        updateProjection(&rec)
+        publish(&rec, received: bytes, at: now)
+    }
+
+    /// The app came forward. Whatever the transfers did while it was away is
+    /// on disk; measure it now rather than at the next callback, so the page
+    /// opens on the true count instead of the one from before it left.
+    func appBecameActive() {
+        streamMeasurer?.cancel()
+        streamMeasurer = nil
+        measureStreamsSoon()
     }
 
     private func forgetProgressThrottle(_ itemId: String) {
@@ -2123,6 +2419,8 @@ final class DownloadManager: NSObject {
         lastPersistAt[itemId] = nil
         activityAt[itemId] = nil
         streamByteBase[itemId] = nil
+        measuredStreamBytes[itemId] = nil
+        projectionFraction[itemId] = nil
     }
 
     /// Watch for transfers that have stopped moving.
@@ -2620,7 +2918,8 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 // A resumed stream that fetched nothing at all before it
                 // failed, on a network that is up, is a package the server
                 // won't honour any more; the next go starts clean.
-                if isStream, received == 0, rec.hlsPath != nil, self.pathIsSatisfied, !failure.isConnectivity {
+                if isStream, received == 0, (self.measuredStreamBytes[itemId] ?? 0) == 0,
+                   rec.hlsPath != nil || rec.partialPath != nil, self.pathIsSatisfied, !failure.isConnectivity {
                     self.discardPartialPackage(itemId)
                 }
                 self.scheduleAutomaticRetry(
@@ -2897,7 +3196,7 @@ extension DownloadManager: AVAssetDownloadDelegate {
     ) {
         let id = DownloadTaskKey(session, assetDownloadTask)
         let described = assetDownloadTask.taskDescription
-        let path = location.relativePath
+        let path = Self.homeRelativePath(location)
         // Written on the spot rather than from a task hopped onto the main
         // actor. This session delivers on the main queue, so the hop is
         // needless — and it was harmful: the completion callback that follows
@@ -2930,6 +3229,33 @@ extension DownloadManager: AVAssetDownloadDelegate {
             }
             rec.hlsPath = path
             self.save(rec)
+        }
+    }
+
+    /// Where a stream is about to be written, as its transfer starts — iOS 18
+    /// and macOS 14 on. Kept as `partialPath`, apart from `hlsPath`, which
+    /// stays what it has always been: where an attempt *ended*. This is only
+    /// so the bytes can be measured while it runs, and so a force-quit
+    /// mid-transfer still leaves a package to resume from.
+    @available(iOS 18.0, macOS 14.0, *)
+    nonisolated func urlSession(
+        _ session: URLSession,
+        assetDownloadTask: AVAssetDownloadTask,
+        willDownloadTo location: URL
+    ) {
+        let id = DownloadTaskKey(session, assetDownloadTask)
+        let described = assetDownloadTask.taskDescription
+        let path = Self.homeRelativePath(location)
+        // On the spot, for the same reason as `didFinishDownloadingTo`: this
+        // session delivers on the main queue.
+        MainActor.assumeIsolated {
+            guard let itemId = self.itemId(forTask: id, description: described, url: nil),
+                  var rec = self.record(for: itemId), rec.status != .complete else { return }
+            if rec.partialPath != path {
+                rec.partialPath = path
+                self.save(rec)
+            }
+            self.measureStreamsSoon()
         }
     }
 

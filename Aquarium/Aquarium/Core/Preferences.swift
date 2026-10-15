@@ -404,12 +404,6 @@ final class Preferences {
         didSet { write(powerAwareQuality, forKey: "power_aware_quality") }
     }
 
-    /// A notification when an episode new to the server lands in Next Up —
-    /// see `NextUpAlerts`. Per device, because permission to notify is.
-    var newEpisodeAlerts: Bool {
-        didSet { defaults.set(newEpisodeAlerts, forKey: "new_episode_alerts") }
-    }
-
     /// Start the next episode when one finishes.
     var autoplayNext: Bool {
         didSet { write(autoplayNext, forKey: "autoplay_next") }
@@ -819,7 +813,6 @@ final class Preferences {
         theme = ThemePref(rawValue: d.string(forKey: "theme") ?? "") ?? .auto
         adaptiveQuality = d.object(forKey: "adaptive") == nil ? true : d.bool(forKey: "adaptive")
         powerAwareQuality = d.object(forKey: "power_aware_quality") == nil ? true : d.bool(forKey: "power_aware_quality")
-        newEpisodeAlerts = d.bool(forKey: "new_episode_alerts")
         autoplayNext = d.object(forKey: "autoplay_next") == nil ? true : d.bool(forKey: "autoplay_next")
         hidesContinueWatching = d.bool(forKey: "home_hide_continue_watching")
         clearsAbandonedEpisodes = d.bool(forKey: "home_clear_abandoned")

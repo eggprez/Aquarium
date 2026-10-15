@@ -15,6 +15,10 @@
 	     App ID. Music/CarPlayScene.swift is the scene it unlocks. -->
 	<key>com.apple.developer.carplay-audio</key>
 	<true/>
+	<!-- CarPlay: video while parked (iOS 26.4), granted on top of audio.
+	     It unlocks the Video tab in Music/CarPlayScene.swift. -->
+	<key>com.apple.developer.carplay-video</key>
+	<true/>
 	<!-- The folder the Now Playing widget reads — see Shared/WidgetTypes.swift
 	     and LiveActivities/LiveActivities.entitlements. The same group the
 	     watch app and the Apple TV already use. -->

@@ -55,7 +55,7 @@ struct DownloadsLiveActivity: Widget {
                             }
                             QueueLine(state: state)
                             HStack(spacing: 12) {
-                                OverallBar(fraction: state.fraction, remaining: state.remaining)
+                                OverallBar(state: state, isStale: context.isStale)
                                 PauseButton(paused: state.phase == .paused)
                             }
                         }
@@ -120,8 +120,19 @@ extension DownloadsActivityAttributes.ContentState {
         case .paused:
             return "\(remaining.formatted()) item\(remaining == 1 ? "" : "s") waiting"
         case .finished:
-            return failed > 0 ? "\(failed.formatted()) didn't finish — open Downloads to retry" : nil
+            if failed > 0 { return "\(failed.formatted()) didn't finish — open Downloads to retry" }
+            return bytesLine
         }
+    }
+
+    /// "1.2 GB of ~4.8 GB" while the batch runs or waits; how much landed
+    /// once it is over. Nil when the app couldn't size the batch.
+    var bytesLine: String? {
+        guard let received = receivedBytes, let total = totalBytes, total > 0 else { return nil }
+        let arrived = received.formatted(.byteCount(style: .file))
+        if phase == .finished { return arrived }
+        let whole = (totalIsEstimate == true ? "~" : "") + total.formatted(.byteCount(style: .file))
+        return "\(arrived) of \(whole)"
     }
 }
 
@@ -157,7 +168,7 @@ private struct DownloadsLockScreen: View {
                 QueueLine(state: state)
                     .padding(.leading, 42)
                 HStack(spacing: 12) {
-                    OverallBar(fraction: state.fraction, remaining: state.remaining)
+                    OverallBar(state: state, isStale: isStale)
                     PauseButton(paused: state.phase == .paused)
                 }
             }
@@ -230,7 +241,8 @@ private struct DownloadsSmall: View {
     private var small: String? {
         switch state.phase {
         case .running where !isStale, .paused:
-            state.total > 1 ? "\(state.done.formatted()) of \(state.total.formatted())" : nil
+            // The bytes when there are any to quote; the count otherwise.
+            state.bytesLine ?? (state.total > 1 ? "\(state.done.formatted()) of \(state.total.formatted())" : nil)
         case .running:
             nil
         case .finished:
@@ -292,20 +304,31 @@ private struct QueueLine: View {
     }
 }
 
-/// The whole batch, labelled so it isn't mistaken for the item bar above it.
+/// The whole batch, labelled so it isn't mistaken for the item bar above it:
+/// how much of it has arrived, in bytes when the app could size it, and how
+/// many items are left.
 private struct OverallBar: View {
-    let fraction: Double
-    let remaining: Int
+    let state: DownloadsActivityAttributes.ContentState
+    let isStale: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("All downloads · \(remaining.formatted()) remaining")
+            Text(label)
                 .font(.caption2)
                 .monospacedDigit()
                 .lineLimit(1)
                 .foregroundStyle(ActivityPalette.dim)
-            ProgressView(value: fraction).tint(ActivityPalette.accent)
+            ProgressView(value: state.fraction).tint(ActivityPalette.accent)
         }
+    }
+
+    private var label: String {
+        let remaining = "\(state.remaining.formatted()) remaining"
+        // Stale is the app gone quiet behind a running batch: the bytes it
+        // last quoted are no longer the bytes, so they go with the
+        // percentage. See the note at the top of this file.
+        if !isStale, let bytes = state.bytesLine { return "\(bytes) · \(remaining)" }
+        return "All downloads · \(remaining)"
     }
 }
 

@@ -8,13 +8,14 @@
 //  and every spelling of its genre. `StationRanker` then picks and orders
 //  from the pool.
 //
-//  The pool is kept for as long as the station plays. Each song finished,
-//  skipped or thumbed feeds `StationSession`, and the music player re-deals
-//  what is still to come from the same pool (see `MusicPlayer.restation`).
-//  A thumbs-up also widens the pool towards the song it was given to.
+//  The pool is kept for as long as the station plays. Each song finished or
+//  skipped feeds `StationSession`, and the music player re-deals what is
+//  still to come from the same pool (see `MusicPlayer.restation`).
 //
-//  Nothing outlives the station. A thumb is advice to the mix playing, not
-//  a verdict on the song: the next station starts from the seed, the
+//  Nothing outlives the station but one thing: Surprise Me remembers, by
+//  time of day and by car or not, which genres its sessions leaned toward
+//  (`MoodMemory`), and starts the next one with a light nudge that way. The
+//  nudge fades within a few songs; everything else is the seed, the
 //  server's own record of the account — favourites, play counts — and the
 //  points the listener has spent on what stations favour (`MixPoints`).
 
@@ -31,8 +32,8 @@ final class LiveStation {
     /// Built from downloads only — no server was asked.
     let isLocal: Bool
     @ObservationIgnored private(set) var pool: [String: BaseItem] = [:]
-    /// Watched, so a thumb redraws the buttons showing it.
-    var session = StationSession()
+    /// Watched, so the "what's leading" card redraws as it moves.
+    var session: StationSession
     /// Songs the pool has already been widened from.
     @ObservationIgnored fileprivate var widenedFrom = Set<String>()
     /// Each song's luck, 0..<1, drawn once: the Surprise dial says how much
@@ -44,6 +45,14 @@ final class LiveStation {
         self.seed = seed
         self.profile = profile
         self.isLocal = isLocal
+        // A Surprise Mix drifts faster — a forty-minute session is a dozen
+        // songs, and the mood at the end of it is not the one at the start —
+        // and opens with the genres this time of day has leaned toward.
+        if profile.isSurprise {
+            session = StationSession(decay: 0.85, prior: MoodMemory.prior())
+        } else {
+            session = StationSession()
+        }
         add(pool)
     }
 
@@ -149,7 +158,8 @@ enum GenreCatalog {
         for (key, pairs) in byKey {
             if let name = pairs.compactMap(\.Name).first(where: { MusicNames.isLatin($0) && !$0.isEmpty }) { spellings[key] = name }
         }
-        latin.withLock { $0 = spellings }
+        let found = spellings
+        latin.withLock { $0 = found }
     }
 
     nonisolated static func latinSpelling(forKey key: String) -> String? {
@@ -342,8 +352,9 @@ enum StationBuilder {
 
     // MARK: Widening
 
-    /// Pull in more like `song` — after a thumbs-up, or when the pool runs
-    /// low. Once per song. False when the pool is no bigger for it.
+    /// Pull in more like `song` — when a Surprise Mix has found a direction
+    /// (see `StationSession.supports`), or when the pool runs low. Once per
+    /// song. False when the pool is no bigger for it.
     @discardableResult
     static func widen(_ station: LiveStation, from song: BaseItem) async -> Bool {
         guard !station.widenedFrom.contains(song.Id) else { return false }
@@ -471,7 +482,7 @@ struct TagCoverage: Sendable {
 
 /// What a listener did with one song.
 enum ListenReaction: Sendable {
-    case finished, heardMost, skippedMid, skippedEarly, thumbUp, thumbDown, removed
+    case finished, heardMost, skippedMid, skippedEarly, removed
 
     /// How a song leaving the player reads. `heard` is seconds actually
     /// played, seeks not counted. Nil when it says nothing either way.
@@ -494,17 +505,26 @@ enum ListenReaction: Sendable {
 /// on beyond its seed. Each reaction fades the ones before it a little, so
 /// the last few songs steer hardest, and the whole of it is forgotten when
 /// the station ends. That is what makes a station change course after two
-/// skips, and what keeps one evening's mood out of the next.
+/// skips. A Surprise Mix also opens with `prior`, a few genres remembered
+/// from earlier sessions at this time of day, which fades out as soon as
+/// there are reactions of this session's own to go on.
 struct StationSession: Sendable {
     private(set) var artists: [String: Double] = [:]
     private(set) var genres: [String: Double] = [:]
-    /// Skipped, removed or turned down while this station played: not again.
+    /// Skipped or removed while this station played: not again.
     private(set) var passed = Set<String>()
-    /// Thumbs given in this station, by song: 1 up, -1 down.
-    private(set) var thumbs: [String: Int] = [:]
     /// How many reactions this station has had: how far a Surprise Mix has
     /// come from being a shuffle.
     private(set) var reactions = 0
+    /// How much of what came before each reaction keeps.
+    let decay: Double
+    /// Genre keys to -1...1: the opening nudge, from `MoodMemory`.
+    let prior: [String: Double]
+
+    init(decay: Double = 0.9, prior: [String: Double] = [:]) {
+        self.decay = decay
+        self.prior = prior
+    }
     /// How each artist is spelled, by the keys `MusicKeys.artists` gives it
     /// — an id, a lowercased name — so `artistLeanings` can say who.
     private(set) var artistNames: [String: String] = [:]
@@ -543,24 +563,58 @@ struct StationSession: Sendable {
 
     mutating func note(_ song: BaseItem, _ reaction: ListenReaction) {
         reactions += 1
-        for k in artists.keys { artists[k]! *= 0.9 }
-        for k in genres.keys { genres[k]! *= 0.9 }
+        for k in artists.keys { artists[k]! *= decay }
+        for k in genres.keys { genres[k]! *= decay }
         shift(song, by: Self.weight(reaction))
-        if [.skippedEarly, .skippedMid, .thumbDown, .removed].contains(reaction) { passed.insert(song.Id) }
+        if [.skippedEarly, .skippedMid, .removed].contains(reaction) { passed.insert(song.Id) }
     }
 
-    /// Thumbs up (1), down (-1) or neither (nil). A change takes back what
-    /// the old thumb said before the new one has its say.
-    mutating func setThumb(_ song: BaseItem, _ value: Int?) {
-        let old = thumbs[song.Id]
-        guard old != value else { return }
-        if let old {
-            let w = Self.weight(old > 0 ? .thumbUp : .thumbDown)
-            shift(song, by: (-w.artist, -w.genre))
-            if old < 0 { passed.remove(song.Id) }
-        }
-        thumbs[song.Id] = value
-        if let value { note(song, value > 0 ? .thumbUp : .thumbDown) }
+    /// How far a Surprise Mix's own reactions count yet, 0...1.
+    ///
+    /// The first song finished used to steer the next twenty-five as hard as
+    /// any later one: a song nobody chose, let play because nobody minded,
+    /// tilted the deal toward itself before there was anything else to go
+    /// on. Now the session's leanings come in gradually — about a fifth after
+    /// one reaction, half after three, nine-tenths by the tenth — which, at
+    /// a dozen songs to a forty-minute session, is a shuffle for the first
+    /// few and a mix by the middle.
+    var ramp: Double { 1 - exp(-Double(reactions) / 4) }
+
+    /// What a Surprise Mix makes of the session so far, for one song: its
+    /// leanings let in by `ramp`, and the remembered mood, fading.
+    ///
+    /// Leaning away comes in faster than leaning toward. A skip is the one
+    /// signal that is never passive, and someone who skips a lot is saying
+    /// most of what they have to say that way.
+    func surpriseLean(for song: BaseItem) -> Double {
+        let own = lean(for: song)
+        let share = own >= 0 ? ramp : ramp.squareRoot()
+        return own * share + priorLean(for: song)
+    }
+
+    /// The remembered mood's say over one song: up to a point and a half
+    /// either way to begin with — a nudge against a shuffle's five points of
+    /// luck — and a third of that after three reactions, next to nothing
+    /// after nine.
+    func priorLean(for song: BaseItem) -> Double {
+        guard !prior.isEmpty else { return 0 }
+        let keys = MusicKeys.genres(of: song)
+        guard !keys.isEmpty else { return 0 }
+        let mood = keys.reduce(0.0) { $0 + (prior[$1] ?? 0) } / Double(keys.count)
+        return 1.5 * mood * exp(-Double(reactions) / 3)
+    }
+
+    /// Whether a Surprise Mix has heard enough in this song's direction to
+    /// go looking for more of it: two songs by its artist played out, or two
+    /// in its genre, and never in the first few songs. Before this, every
+    /// song finished pulled sixty like it into the pool — the first one
+    /// included, which is how a session ended up being about whatever
+    /// happened to play first.
+    func supports(_ song: BaseItem) -> Bool {
+        guard reactions >= 3 else { return false }
+        let artist = MusicKeys.artists(of: song).map { artists[$0] ?? 0 }.max() ?? 0
+        let genre = MusicKeys.genres(of: song).map { genres[$0] ?? 0 }.max() ?? 0
+        return artist >= 1.5 || genre >= 0.9
     }
 
     func lean(for song: BaseItem) -> Double {
@@ -575,14 +629,12 @@ struct StationSession: Sendable {
 
     private static func weight(_ reaction: ListenReaction) -> (artist: Double, genre: Double) {
         switch reaction {
-        // One thumbs-down is mostly about the song; two or three in a row
-        // are about the artist. A skip says less than either.
+        // One skip is mostly about the song; two or three by the same
+        // artist are about the artist.
         case .finished: (1, 0.5)
         case .heardMost: (0.4, 0.2)
         case .skippedMid: (-0.5, -0.2)
         case .skippedEarly: (-1, -0.4)
-        case .thumbUp: (2, 0.8)
-        case .thumbDown: (-1.5, -0.5)
         case .removed: (-0.6, -0.25)
         }
     }
@@ -599,9 +651,9 @@ struct StationSession: Sendable {
         }
     }
 
-    /// Stations once learned from every song for weeks and kept every thumb
-    /// for good, in a file of their own. They learn only while they play
-    /// now, so what that file kept is let go.
+    /// Stations once learned from every song for weeks and kept every
+    /// reaction for good, in a file of their own. They learn only while they
+    /// play now, so what that file kept is let go.
     nonisolated static func forgetOldTaste() {
         let file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("FellyJin", isDirectory: true)

@@ -17,11 +17,12 @@
 //  And, parked, the films: since iOS 26.4 a car that can show video lets a
 //  CarPlay app start one from a list, and carries the picture to its own
 //  screen over the same route AirPlay uses — `PlayerModel`'s player already
-//  allows external playback, so the tab below is the whole of it. When the
-//  car says no (it is moving), the system plays the sound alone and shows
-//  Now Playing instead; none of that is decided here. That tab needs the
-//  CarPlay *video* entitlement as well as the audio one, and `FJCarPlayVideo`
-//  set in Info.plist once Apple has granted it: a template feature used
+//  allows external playback, so the Video tab is the whole of it: Next Up as
+//  wide stills, then each library's newest as posters. The tab is there only
+//  while the car is parked (see `offersVideo`); if the car still refuses
+//  video, the system plays the sound alone and shows Now Playing instead.
+//  It needs the `com.apple.developer.carplay-video` entitlement as well as
+//  the audio one, and `FJCarPlayVideo` in Info.plist: a template feature used
 //  without its entitlement is one more of the car's exceptions.
 //
 //  Needs the `com.apple.developer.carplay-audio` entitlement on the App ID
@@ -51,15 +52,29 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     }
     private var shape: Shape?
 
+    /// The tab bar the car is showing, so a tab can come and go without
+    /// replacing it — which would take Now Playing off the screen with it.
+    private var tabBar: CPTabBarTemplate?
+
     /// Whether there is a Video tab: a car that can show video, a build that
-    /// holds the entitlement for it, and a server with something to watch.
+    /// holds the entitlement for it, a server with something to watch — and
+    /// a car that is parked. CarPlay has no "parked" to ask for; what it has
+    /// is the lists it shortens once the car moves, so the tab goes when they
+    /// are limited and comes back when they aren't. A car that never limits
+    /// them keeps the tab, and the system plays sound only while it moves.
     @MainActor
     private var offersVideo: Bool {
         guard #available(iOS 26.4, *),
               Bundle.main.object(forInfoDictionaryKey: "FJCarPlayVideo") as? Bool == true,
-              sessionConfiguration?.supportsVideoPlayback == true
+              let sessionConfiguration,
+              sessionConfiguration.supportsVideoPlayback,
+              !sessionConfiguration.limitedUserInterfaces.contains(.lists)
         else { return false }
-        return !AppModel.shared.libraries.isEmpty || DownloadManager.shared.records.contains { !$0.isAudio && $0.status == .complete }
+        return !AppModel.shared.libraries.isEmpty
+    }
+
+    func sessionConfiguration(_ sessionConfiguration: CPSessionConfiguration, limitedUserInterfacesChanged limitedUserInterfaces: CPLimitableUserInterface) {
+        Task { @MainActor in self.rebuildRoot() }
     }
 
     func templateApplicationScene(
@@ -95,6 +110,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         self.interfaceController = nil
         sessionConfiguration = nil
         shape = nil
+        tabBar = nil
         songRows = []
         Task { @MainActor in CPNowPlayingTemplate.shared.remove(self) }
     }
@@ -113,9 +129,11 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             music: app.hasMusic, books: app.hasBooks, video: offersVideo
         )
         guard next != shape else { return }
+        let sameAccount = shape?.account == next.account
         shape = next
         songRows = []
         listenNow = nil
+        video = nil
         listenNowFilledAt = .distantPast
 
         var tabs: [CPTemplate] = []
@@ -138,7 +156,16 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                 tabs = [messageTemplate("Aquarium", "Nothing to listen to", "This server has no music or audiobook library.")]
             }
         }
-        interfaceController.setRootTemplate(CPTabBarTemplate(templates: tabs), animated: false, completion: nil)
+        // The same account with a tab more or less — the car parking or
+        // pulling away, a library appearing — keeps the tab bar and whatever
+        // is open over it; anyone else starts from the top.
+        if sameAccount, let tabBar, tabBar.templates.count > 0, next.account != nil {
+            tabBar.updateTemplates(tabs)
+        } else {
+            let tabBar = CPTabBarTemplate(templates: tabs)
+            self.tabBar = tabBar
+            interfaceController.setRootTemplate(tabBar, animated: false, completion: nil)
+        }
         configureNowPlaying()
         if next.music { Task { @MainActor in await self.fillListenNow() } }
     }
@@ -174,7 +201,6 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             _ = player.hasUpNext
             _ = player.sleepDeadline
             _ = player.station
-            _ = player.thumb
         }) { [weak self] in
             self?.markPlayingRows()
             self?.configureNowPlaying()
@@ -202,7 +228,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             // once, when the car connected: an hour into a drive it was still
             // the list from the driveway.
             if aTemplate === self.listenNow { await self.fillListenNow() }
-            // Continue Watching moves every time something is watched.
+            // Next Up moves every time something is watched.
             if aTemplate === self.video { await self.fillVideo() }
             self.markPlayingRows()
         }
@@ -498,10 +524,13 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         return template
     }
 
-    /// What to carry on with, then the libraries. Offline, what is on the
-    /// iPhone — a charging stop is where the server is least likely to answer.
+    /// The parked home page: Next Up as wide stills, to pick up a show where
+    /// it was left, then a row of posters for what is new in each library.
+    /// Every picture plays when pressed, a show opens its episodes. Offline
+    /// there is nothing to stream, so the page says so.
     @MainActor
     private func fillVideo() async {
+        guard #available(iOS 26.4, *) else { return }
         guard let video, !isFillingVideo, Date().timeIntervalSince(videoFilledAt) > 30 else { return }
         isFillingVideo = true
         defer { isFillingVideo = false }
@@ -509,27 +538,91 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         let client = JellyfinClient.shared
         var sections: [CPListSection] = []
         if !client.isOffline {
-            async let resumed = client.resume()
-            async let next = client.nextUp()
-            if let items = try? await resumed, !items.isEmpty {
-                sections.append(CPListSection(items: items.prefix(6).map { videoItem($0) }, header: "Continue Watching", sectionIndexTitle: nil))
-            }
-            if let items = try? await next, !items.isEmpty {
-                sections.append(CPListSection(items: items.prefix(6).map { videoItem($0) }, header: "Next Up", sectionIndexTitle: nil))
-            }
             let libraries = AppModel.shared.libraries
-            if !libraries.isEmpty {
-                sections.append(CPListSection(items: libraries.map { libraryDoor($0) }, header: "Libraries", sectionIndexTitle: nil))
+            async let next = client.nextUp()
+            let latest = await withTaskGroup(of: (Int, [BaseItem]).self) { group in
+                for (i, library) in libraries.enumerated() {
+                    group.addTask { @MainActor in (i, (try? await client.latest(parentId: library.Id, limit: Self.rowImageLimit)) ?? []) }
+                }
+                var out = [[BaseItem]](repeating: [], count: libraries.count)
+                for await (i, items) in group { out[i] = items }
+                return out
             }
-        }
-        let records = DownloadManager.shared.records.filter { !$0.isAudio && $0.status == .complete }
-        if !records.isEmpty {
-            let cap = client.isOffline ? CPListTemplate.maximumItemCount : 6
-            sections.append(CPListSection(items: records.prefix(cap).map { downloadedVideoItem($0) }, header: "On This iPhone", sectionIndexTitle: nil))
+            if let items = try? await next, let row = await nextUpRow(Array(items.prefix(Self.rowImageLimit))) {
+                sections.append(CPListSection(items: [row], header: "Next Up", sectionIndexTitle: nil))
+            }
+            var rows: [CPListTemplateItem] = []
+            for (library, items) in zip(libraries, latest) {
+                if let row = await recentlyAddedRow(library.title, items: items) { rows.append(row) }
+            }
+            if !rows.isEmpty {
+                sections.append(CPListSection(items: rows, header: "Recently Added", sectionIndexTitle: nil))
+            }
         }
         video.updateSections(sections)
         video.emptyViewTitleVariants = ["Nothing to watch"]
-        video.emptyViewSubtitleVariants = [client.isOffline ? "The server is out of reach and no video is downloaded." : ""]
+        video.emptyViewSubtitleVariants = [client.isOffline ? "The server is out of reach." : ""]
+    }
+
+    /// The episodes to watch next, as cards the width of a still with the
+    /// show and the episode under each.
+    @available(iOS 26.4, *)
+    @MainActor
+    private func nextUpRow(_ episodes: [BaseItem]) async -> CPListImageRowItem? {
+        guard !episodes.isEmpty else { return nil }
+        let images = await loadImages(episodes.map { Artwork.still(for: $0, width: 640) })
+        let elements: [CPListImageRowItemCardElement] = episodes.indices.compactMap { i in
+            let episode = episodes[i]
+            guard let image = images[i] ?? symbolTile("tv", tint: Self.placeholderTint) else { return nil }
+            let subtitle = [episode.episodeLabel, episode.SeriesName == nil ? nil : episode.title].compactMap { $0 }.joined(separator: " · ")
+            let card = CPListImageRowItemCardElement(
+                image: image, showsImageFullHeight: images[i] != nil,
+                title: episode.SeriesName ?? episode.title, subtitle: subtitle.isEmpty ? nil : subtitle, tintColor: nil
+            )
+            card.playbackConfiguration = videoPlayback(episode)
+            return card
+        }
+        guard elements.count == episodes.count else { return nil }
+        let row = CPListImageRowItem(text: nil, cardElements: elements, allowsMultipleLines: false)
+        row.listImageRowHandler = { _, index, done in
+            guard episodes.indices.contains(index) else { return done() }
+            Task { @MainActor in
+                await PlayerModel.shared.play(item: episodes[index])
+                done()
+            }
+        }
+        return row
+    }
+
+    /// A library's newest films and shows, as posters: a film plays, a show
+    /// opens its episodes.
+    @available(iOS 26.4, *)
+    @MainActor
+    private func recentlyAddedRow(_ title: String, items: [BaseItem]) async -> CPListImageRowItem? {
+        guard !items.isEmpty else { return nil }
+        let images = await loadImages(items.map { Artwork.poster(for: $0, width: 300) })
+        let elements: [CPListImageRowItemImageGridElement] = items.indices.compactMap { i in
+            let item = items[i]
+            guard let image = images[i] ?? symbolTile(item.isSeries ? "tv" : "film", tint: Self.placeholderTint) else { return nil }
+            let element = CPListImageRowItemImageGridElement(image: image, imageShape: .roundedRectangle, title: item.title, accessorySymbolName: nil)
+            if !item.isSeries { element.playbackConfiguration = videoPlayback(item) }
+            return element
+        }
+        guard elements.count == items.count else { return nil }
+        let row = CPListImageRowItem(text: title, imageGridElements: elements, allowsMultipleLines: false)
+        row.listImageRowHandler = { [weak self] _, index, done in
+            guard let self, items.indices.contains(index) else { return done() }
+            let item = items[index]
+            Task { @MainActor in
+                if item.isSeries {
+                    await self.openSeries(item)
+                } else {
+                    await PlayerModel.shared.play(item: item)
+                }
+                done()
+            }
+        }
+        return row
     }
 
     /// A film or an episode: a row that plays. The car is told it is video,
@@ -562,22 +655,23 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     }
 
     @MainActor
-    private func downloadedVideoItem(_ record: DownloadRecord) -> CPListItem {
-        let row = CPListItem(text: record.title, detailText: "Downloaded", image: symbolTile("arrow.down.circle", tint: Self.placeholderTint))
-        markAsVideo(row, elapsed: 0, duration: 0)
-        row.handler = { _, done in
-            Task { @MainActor in
-                PlayerModel.shared.playLocal(record)
-                done()
-            }
-        }
-        return row
-    }
-
-    @MainActor
     private func markAsVideo(_ row: CPListItem, elapsed: Double, duration: Double) {
         guard #available(iOS 26.4, *) else { return }
-        row.playbackConfiguration = CPPlaybackConfiguration(
+        row.playbackConfiguration = videoPlayback(elapsed: elapsed, duration: duration)
+    }
+
+    /// Tells the car a picture is video, so — parked — it brings its own
+    /// player up rather than Now Playing.
+    @available(iOS 26.4, *)
+    @MainActor
+    private func videoPlayback(_ item: BaseItem) -> CPPlaybackConfiguration {
+        videoPlayback(elapsed: Double(item.userData.positionTicks) / 10_000_000, duration: item.runtimeSeconds)
+    }
+
+    @available(iOS 26.4, *)
+    @MainActor
+    private func videoPlayback(elapsed: Double, duration: Double) -> CPPlaybackConfiguration {
+        CPPlaybackConfiguration(
             preferredPresentation: .video,
             playbackAction: .play,
             elapsedTime: CMTime(seconds: max(0, elapsed), preferredTimescale: 600),
@@ -585,71 +679,32 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         )
     }
 
-    /// A library: its films to play, its shows to open.
-    @MainActor
-    private func libraryDoor(_ library: BaseItem) -> CPListItem {
-        let row = CPListItem(text: library.title, detailText: nil, image: symbolTile(library.CollectionType == "tvshows" ? "tv" : "film"))
-        row.accessoryType = .disclosureIndicator
-        row.handler = { [weak self] _, done in
-            Task { @MainActor in
-                guard let self else { return done() }
-                var query = JellyfinClient.LibraryQuery()
-                query.limit = CPListTemplate.maximumItemCount
-                switch library.CollectionType {
-                case "tvshows": query.includeTypes = "Series"
-                case "movies": query.includeTypes = "Movie"
-                default: query.includeTypes = "Movie,Series,Video"
-                }
-                let items = (try? await JellyfinClient.shared.libraryItems(parentId: library.Id, query: query).items) ?? []
-                let rows = items.prefix(CPListTemplate.maximumItemCount).map { $0.isSeries ? self.seriesItem($0) : self.videoItem($0) }
-                let list = CPListTemplate(title: library.title, sections: [CPListSection(items: Array(rows))])
-                list.emptyViewTitleVariants = ["Nothing here"]
-                list.emptyViewSubtitleVariants = ["The server had nothing to list."]
-                self.push(list)
-                done()
-            }
-        }
-        return row
-    }
-
     /// A show: its episodes, a section to a season, the next unwatched one
     /// offered first.
     @MainActor
-    private func seriesItem(_ series: BaseItem) -> CPListItem {
-        let row = CPListItem(text: series.title, detailText: series.ProductionYear.map(String.init), image: symbolTile("tv", tint: Self.placeholderTint))
-        row.accessoryType = .disclosureIndicator
-        if let url = Artwork.poster(for: series, width: 160) {
-            Task { if let image = await ImageLoader.shared.load(url) { row.setImage(image) } }
+    private func openSeries(_ series: BaseItem) async {
+        let episodes = (try? await JellyfinClient.shared.episodes(seriesId: series.Id, seasonId: nil)) ?? []
+        var sections: [CPListSection] = []
+        var room = CPListTemplate.maximumItemCount
+        if let next = episodes.first(where: { !$0.userData.played }), episodes.first?.Id != next.Id {
+            sections.append(CPListSection(items: [videoItem(next, showsSeries: false)], header: "Next", sectionIndexTitle: nil))
+            room -= 1
         }
-        row.handler = { [weak self] _, done in
-            Task { @MainActor in
-                guard let self else { return done() }
-                let episodes = (try? await JellyfinClient.shared.episodes(seriesId: series.Id, seasonId: nil)) ?? []
-                var sections: [CPListSection] = []
-                var room = CPListTemplate.maximumItemCount
-                if let next = episodes.first(where: { !$0.userData.played }), episodes.first?.Id != next.Id {
-                    sections.append(CPListSection(items: [self.videoItem(next, showsSeries: false)], header: "Next", sectionIndexTitle: nil))
-                    room -= 1
-                }
-                var seasons: [(Int, [BaseItem])] = []
-                for episode in episodes.prefix(room) {
-                    let season = episode.ParentIndexNumber ?? 1
-                    if seasons.last?.0 == season { seasons[seasons.count - 1].1.append(episode) } else { seasons.append((season, [episode])) }
-                }
-                if seasons.count + sections.count <= CPListTemplate.maximumSectionCount {
-                    sections += seasons.map { number, list in
-                        CPListSection(items: list.map { self.videoItem($0, showsSeries: false) }, header: number == 0 ? "Specials" : "Season \(number)", sectionIndexTitle: nil)
-                    }
-                } else {
-                    sections.append(CPListSection(items: seasons.flatMap(\.1).map { self.videoItem($0, showsSeries: false) }))
-                }
-                let list = CPListTemplate(title: series.title, sections: sections)
-                list.emptyViewTitleVariants = ["No episodes"]
-                self.push(list)
-                done()
+        var seasons: [(Int, [BaseItem])] = []
+        for episode in episodes.prefix(room) {
+            let season = episode.ParentIndexNumber ?? 1
+            if seasons.last?.0 == season { seasons[seasons.count - 1].1.append(episode) } else { seasons.append((season, [episode])) }
+        }
+        if seasons.count + sections.count <= CPListTemplate.maximumSectionCount {
+            sections += seasons.map { number, list in
+                CPListSection(items: list.map { videoItem($0, showsSeries: false) }, header: number == 0 ? "Specials" : "Season \(number)", sectionIndexTitle: nil)
             }
+        } else {
+            sections.append(CPListSection(items: seasons.flatMap(\.1).map { videoItem($0, showsSeries: false) }))
         }
-        return row
+        let list = CPListTemplate(title: series.title, sections: sections)
+        list.emptyViewTitleVariants = ["No episodes"]
+        self.push(list)
     }
 
     // MARK: - Items
@@ -861,8 +916,18 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// station is named for what it is, not for its seed.
     @MainActor
     private func covers(for items: [BaseItem], titles: [String]? = nil, fallback: String) async -> [(title: String, image: UIImage)] {
-        let urls = items.map { MusicArt.url($0, width: 300) }
-        let images = await withTaskGroup(of: (Int, UIImage?).self) { group in
+        let images = await loadImages(items.map { MusicArt.url($0, width: 300) })
+        return items.indices.compactMap { i in
+            guard let image = images[i] ?? symbolTile(fallback, tint: Self.placeholderTint) else { return nil }
+            return (titles?[i] ?? items[i].title, image)
+        }
+    }
+
+    /// Pictures fetched side by side, each in its place; nil where there was
+    /// no URL or nothing came back.
+    @MainActor
+    private func loadImages(_ urls: [URL?]) async -> [UIImage?] {
+        await withTaskGroup(of: (Int, UIImage?).self) { group in
             for (i, url) in urls.enumerated() {
                 group.addTask {
                     guard let url else { return (i, nil) }
@@ -872,10 +937,6 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             var out = [UIImage?](repeating: nil, count: urls.count)
             for await (i, image) in group { out[i] = image }
             return out
-        }
-        return items.indices.compactMap { i in
-            guard let image = images[i] ?? symbolTile(fallback, tint: Self.placeholderTint) else { return nil }
-            return (titles?[i] ?? items[i].title, image)
         }
     }
 
@@ -955,9 +1016,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// The buttons under the artwork, for what is playing: a song gets
     /// shuffle, repeat and a star; a book gets its speed instead, since
     /// nobody shuffles a novel. Both get the sleep timer. A station's songs
-    /// get thumbs down and up in place of shuffle and repeat, which a
-    /// station deals for itself — the car allows five buttons. The thumbs
-    /// are the station's, and go with it.
+    /// get neither shuffle nor repeat: a station deals for itself, and
+    /// skipping is how it is steered.
     @MainActor
     private func configureNowPlaying() {
         let template = CPNowPlayingTemplate.shared
@@ -973,18 +1033,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         var buttons: [CPNowPlayingButton] = []
         if current.isAudiobook {
             buttons.append(CPNowPlayingPlaybackRateButton { _ in MusicPlayer.shared.stepSpeed(1) })
-        } else if player.canThumb {
-            let thumb = player.thumb
-            if let down = UIImage(systemName: thumb == -1 ? "hand.thumbsdown.fill" : "hand.thumbsdown") {
-                buttons.append(CPNowPlayingImageButton(image: down) { _ in
-                    Task { @MainActor in MusicPlayer.shared.setThumb(thumb == -1 ? nil : -1) }
-                })
-            }
-            if let up = UIImage(systemName: thumb == 1 ? "hand.thumbsup.fill" : "hand.thumbsup") {
-                buttons.append(CPNowPlayingImageButton(image: up) { _ in
-                    Task { @MainActor in MusicPlayer.shared.setThumb(thumb == 1 ? nil : 1) }
-                })
-            }
+        } else if player.station != nil, current.isSong {
+            // Nothing in place of shuffle and repeat; see above.
         } else {
             buttons.append(CPNowPlayingShuffleButton { _ in MusicPlayer.shared.toggleShuffle() })
             buttons.append(CPNowPlayingRepeatButton { _ in MusicPlayer.shared.repeatMode = MusicPlayer.shared.repeatMode.next })

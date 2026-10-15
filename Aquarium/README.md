@@ -232,13 +232,6 @@ now, and keeps the Now Playing and Siri Remote parts of this list):
   is watching. Everyone needs an account that can see the title. Not Apple
   TV, whose player has no coordinator to join. Needs Group Activities on the
   App ID (`com.apple.developer.group-session`).
-- **New episode notifications** (iPhone, iPad). Settings → Appearance → Home
-  → "Tell me about new episodes": a notification when an episode *added to
-  the server* since the last look turns up in Next Up — Next Up moving on
-  because you finished something is not news. Looked for whenever Home
-  loads and, with Background App Refresh on, every few hours in the
-  background through `BGAppRefreshTask`; a tap opens the episode, Play plays
-  it (`Core/NextUpAlerts.swift`).
 - Picture in Picture, and AirPlay to another device.
 - The lock screen, Control Centre and Now Playing transport, plus media keys on
   a Mac keyboard and the Siri Remote on Apple TV — the counterpart to MPRIS.

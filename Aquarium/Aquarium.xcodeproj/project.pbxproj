@@ -28,6 +28,9 @@
 		FE11A5D00000000000000225 /* WatchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000301 /* WatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FE11A5D00000000000000226 /* WatchWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000302 /* WatchWidgets.swift */; };
 		FE11A5D00000000000000401 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; platformFilters = (tvos, ); productRef = FE11A5D00000000000000402 /* MPVKit */; };
+		FE11A5D00000000000000611 /* FollowTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000601 /* FollowTypes.swift */; };
+		FE11A5D00000000000000612 /* FollowTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000601 /* FollowTypes.swift */; };
+		FE11A5D00000000000000613 /* FollowWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000602 /* FollowWidget.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -123,6 +126,8 @@
 		FE11A5D00000000000000302 /* WatchWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchWidgets.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000303 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		FE11A5D00000000000000304 /* WatchWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WatchWidgets.entitlements; sourceTree = "<group>"; };
+		FE11A5D00000000000000601 /* FollowTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowTypes.swift; sourceTree = "<group>"; };
+		FE11A5D00000000000000602 /* FollowWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowWidget.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -247,6 +252,7 @@
 				FE11A5D00000000000000206 /* WatchSyncTypes.swift */,
 				FE11A5D00000000000000207 /* WatchWidgetSnapshot.swift */,
 				FE11A5D00000000000000107 /* WidgetTypes.swift */,
+				FE11A5D00000000000000601 /* FollowTypes.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -258,6 +264,7 @@
 				FE11A5D00000000000000103 /* ListeningLiveActivity.swift */,
 				FE11A5D00000000000000104 /* DownloadsLiveActivity.swift */,
 				FE11A5D00000000000000108 /* NowPlayingWidget.swift */,
+				FE11A5D00000000000000602 /* FollowWidget.swift */,
 				FE11A5D00000000000000105 /* Info.plist */,
 				FE11A5D00000000000000109 /* LiveActivities.entitlements */,
 			);
@@ -508,6 +515,7 @@
 				FE11A5D00000000000000020 /* TopShelfSnapshot.swift in Sources */,
 				FE11A5D00000000000000120 /* LiveActivityTypes.swift in Sources */,
 				FE11A5D00000000000000126 /* WidgetTypes.swift in Sources */,
+				FE11A5D00000000000000611 /* FollowTypes.swift in Sources */,
 				FE11A5D00000000000000220 /* WatchSyncTypes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -531,6 +539,8 @@
 				FE11A5D00000000000000128 /* NowPlayingWidget.swift in Sources */,
 				FE11A5D00000000000000121 /* LiveActivityTypes.swift in Sources */,
 				FE11A5D00000000000000127 /* WidgetTypes.swift in Sources */,
+				FE11A5D00000000000000612 /* FollowTypes.swift in Sources */,
+				FE11A5D00000000000000613 /* FollowWidget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -737,11 +747,9 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
-				"INFOPLIST_KEY_NSCameraUsageDescription[sdk=iphoneos*]" = "Aquarium films the Apple TV's audio sync clip to time its flash against its beep, only while you measure.";
-				"INFOPLIST_KEY_NSCameraUsageDescription[sdk=iphonesimulator*]" = "Aquarium films the Apple TV's audio sync clip to time its flash against its beep, only while you measure.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Aquarium films the Apple TV's audio sync clip to time its flash against its beep, only while you measure.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Aquarium connects to your Jellyfin server, which is usually on your own network.";
-				"INFOPLIST_KEY_NSMicrophoneUsageDescription[sdk=iphoneos*]" = "Aquarium listens for the Apple TV's sync clip beep to time it against the flash, only while you measure.";
-				"INFOPLIST_KEY_NSMicrophoneUsageDescription[sdk=iphonesimulator*]" = "Aquarium listens for the Apple TV's sync clip beep to time it against the flash, only while you measure.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Aquarium listens for the Apple TV's sync clip beep to time it against the flash, only while you measure.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
@@ -809,11 +817,9 @@
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
-				"INFOPLIST_KEY_NSCameraUsageDescription[sdk=iphoneos*]" = "Aquarium films the Apple TV's audio sync clip to time its flash against its beep, only while you measure.";
-				"INFOPLIST_KEY_NSCameraUsageDescription[sdk=iphonesimulator*]" = "Aquarium films the Apple TV's audio sync clip to time its flash against its beep, only while you measure.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Aquarium films the Apple TV's audio sync clip to time its flash against its beep, only while you measure.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Aquarium connects to your Jellyfin server, which is usually on your own network.";
-				"INFOPLIST_KEY_NSMicrophoneUsageDescription[sdk=iphoneos*]" = "Aquarium listens for the Apple TV's sync clip beep to time it against the flash, only while you measure.";
-				"INFOPLIST_KEY_NSMicrophoneUsageDescription[sdk=iphonesimulator*]" = "Aquarium listens for the Apple TV's sync clip beep to time it against the flash, only while you measure.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Aquarium listens for the Apple TV's sync clip beep to time it against the flash, only while you measure.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;

@@ -20,10 +20,15 @@ struct AquariumLiveActivities: WidgetBundle {
         // The Now Playing card, and — from iOS 18 — the Control Centre
         // buttons. See NowPlayingWidget.swift.
         NowPlayingWidget()
+        // The configurable tile for one title — see FollowWidget.swift.
+        FollowWidget()
         if #available(iOS 18.0, *) {
             ResumeWatchingControl()
             ShuffleMusicControl()
             ResumeAudiobookControl()
+            PlayPauseControl()
+            SkipSegmentControl()
+            NextEpisodeControl()
         }
     }
 }

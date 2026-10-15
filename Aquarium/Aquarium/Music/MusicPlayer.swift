@@ -85,12 +85,12 @@ final class MusicPlayer {
     /// The track reached the end of the queue and stopped; Play starts it over.
     private(set) var reachedEndOfQueue = false
     /// The station the queue is being dealt from, when it is one. It re-deals
-    /// Up Next after every song finished or skipped and every thumb. Nil for
-    /// an album, a playlist or anything else picked by hand — and then there
-    /// is nothing for a thumb to steer.
+    /// Up Next after every song finished or skipped. Nil for an album, a
+    /// playlist or anything else picked by hand.
     private(set) var station: LiveStation? {
         didSet {
-            // The lock screen's thumbs come and go with the station.
+            // Shuffle and repeat mean nothing to a station, which deals for
+            // itself; the lock screen's controls follow.
             if station !== oldValue { NowPlaying.shared.refreshCommandAvailability() }
         }
     }
@@ -843,65 +843,21 @@ final class MusicPlayer {
               )
         else { return }
         station.session.note(prepared.item, reaction)
-        // A Surprise Mix grows towards what is heard to the end: more like
-        // it joins the pool, once per song, and the next deal can reach it.
-        if station.profile.isSurprise, reaction == .finished {
+        if station.profile.isSurprise {
+            // The mood this session is in, a step at a time, for the next
+            // one at this time of day — see `MoodMemory`.
+            MoodMemory.record(station.session)
+        }
+        // A Surprise Mix grows towards what is heard to the end — once the
+        // session has backed that direction more than once: more like it
+        // joins the pool, once per song, and the next deal can reach it.
+        if station.profile.isSurprise, reaction == .finished, station.session.supports(prepared.item) {
             Task {
                 let grew = await StationBuilder.widen(station, from: prepared.item)
                 if grew, self.station === station { self.scheduleRestation() }
             }
         }
         scheduleRestation()
-    }
-
-    /// Whether thumbs mean anything now: a station is dealing the queue and
-    /// a song is playing. A thumb is advice to that station and nothing
-    /// else, so an album or a playlist picked by hand offers none.
-    var canThumb: Bool { station != nil && current?.isSong == true }
-
-    /// The thumb on the song playing, in this station: 1 up, -1 down, nil
-    /// neither — and nil whenever `canThumb` is false.
-    var thumb: Int? {
-        guard let station, let song = current, song.isSong else { return nil }
-        return station.session.thumbs[song.Id]
-    }
-
-    /// Thumbs up (1), down (-1) or neither (nil) for the song playing, told
-    /// to the station playing it and forgotten when it ends. Down also skips
-    /// the song, and this station never deals it again; up pulls in more
-    /// like it. Does nothing when `canThumb` is false.
-    func setThumb(_ value: Int?) {
-        guard canThumb, let station, let song = current else { return }
-        guard station.session.thumbs[song.Id] != value else { return }
-        station.session.setThumb(song, value)
-        // The lock screen shows the thumb too, and after a skip, the next
-        // song's lack of one.
-        defer { NowPlaying.shared.refreshCommandAvailability() }
-        if value == -1 {
-            if let c = currentIndex {
-                let later = queue.indices.filter { $0 > c && queue[$0].item.Id == song.Id }
-                for i in later.reversed() { queue.remove(at: i) }
-            }
-            // The thumb has said all there is to say about it: the skip that
-            // follows isn't counted again as a skip.
-            if let prepared = currentPrepared {
-                learnedFrom = ObjectIdentifier(prepared.avItem)
-                heardSeconds = 0
-                lastTickPosition = nil
-            }
-            // `learn` won't ask for the re-deal, having been told the song is
-            // already accounted for.
-            if hasNext { skipNext() }
-            scheduleRestation()
-        } else if value == 1 {
-            // More like this, as well as more of this.
-            Task {
-                await StationBuilder.widen(station, from: song)
-                scheduleRestation()
-            }
-        } else {
-            scheduleRestation()
-        }
     }
 
     /// Re-deal once whatever is under way has settled — `currentIndex` has

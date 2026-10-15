@@ -60,6 +60,9 @@ struct AquariumApp: App {
                 case .resumeWatching: Task { await AppModel.shared.continueWatching() }
                 case .shuffleMusic: Task { await MusicActions.shuffleAll() }
                 case .resumeAudiobook: Task { await MusicActions.resumeBook() }
+                case .togglePlayPause: _ = PlayerActions.togglePlayPause()
+                case .skipSegment: _ = PlayerActions.skipSegment()
+                case .nextEpisode: Task { await PlayerActions.next() }
                 }
             }
         }
@@ -176,25 +179,50 @@ struct AquariumApp: App {
 }
 
 #if os(iOS)
+import BackgroundTasks
 import UIKit
 
 /// What UIKit still has to answer for itself: the completion handler the
 /// system hands back when it wakes the app to finish a background download,
 /// and which orientations the app will accept.
 final class AppDelegate: NSObject, UIApplicationDelegate {
-    /// The background look for new episodes has to be registered before
-    /// launching finishes — see Core/NextUpAlerts.swift.
+    /// Coming forward is heard here as a notification, not as
+    /// `applicationDidBecomeActive`. This app runs in scenes — CarPlay needs
+    /// one — and in a scene-based app UIKit never calls that on the app
+    /// delegate. It used to be implemented here and did nothing: the watch
+    /// was never sent a fresh sign-in on coming forward. The notification is
+    /// still posted, once the app as a whole changes state.
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        MainActor.assumeIsolated { NextUpAlerts.shared.register() }
+        Self.forgetNewEpisodeAlerts()
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.appBecameActive() }
+        }
         return true
     }
 
-    /// Going behind: book the next look for new episodes.
-    func applicationDidEnterBackground(_ application: UIApplication) {
-        MainActor.assumeIsolated { NextUpAlerts.shared.schedule() }
+    /// The new-episode, new-title and upgrade notifications are gone, and
+    /// with them the background look behind them. What they left on a device
+    /// that had them goes once: the switches, the per-account memory of what
+    /// had been seen, the fingerprints of the library, and any background
+    /// look still booked with the system.
+    private static func forgetNewEpisodeAlerts() {
+        let defaults = UserDefaults.standard
+        let flag = "removed_notifications_v1"
+        guard !defaults.bool(forKey: flag) else { return }
+        defaults.set(true, forKey: flag)
+        for key in defaults.dictionaryRepresentation().keys
+        where ["new_episode_alerts", "new_title_alerts", "upgrade_alerts"].contains(key)
+            || key.hasPrefix("nextup_known_") || key.hasPrefix("nextup_checked_") {
+            defaults.removeObject(forKey: key)
+        }
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.removeItem(at: base.appendingPathComponent("ContentAlerts", isDirectory: true))
+        BGTaskScheduler.shared.cancelAllTaskRequests()
     }
 
     func application(
@@ -217,13 +245,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     /// started last night is in progress now — and whatever it handed over
     /// while the phone was asleep goes on to the server. And a holiday icon
     /// whose season is over comes off the Home Screen.
-    func applicationDidBecomeActive(_ application: UIApplication) {
-        MainActor.assumeIsolated {
-            WatchLink.shared.sendContext()
-            WatchLink.shared.forward()
-            WatchLink.shared.resumeFetches()
-            AppIconChoice.retireOutOfSeason()
-        }
+    @MainActor
+    private func appBecameActive() {
+        WatchLink.shared.sendContext()
+        WatchLink.shared.forward()
+        WatchLink.shared.resumeFetches()
+        AppIconChoice.retireOutOfSeason()
     }
 
     /// The other job: answering which way round the app may be. The Info.plist

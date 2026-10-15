@@ -1022,7 +1022,6 @@ struct VideoSurface: UIViewControllerRepresentable {
         controller.allowsPictureInPicturePlayback = true
         controller.canStartPictureInPictureAutomaticallyFromInline = true
         controller.updatesNowPlayingInfoCenter = false
-        context.coordinator.player = player
         context.coordinator.bindExtras(to: player)
         context.coordinator.installExtras()
         #else
@@ -1071,10 +1070,6 @@ struct VideoSurface: UIViewControllerRepresentable {
     final class Coordinator: NSObject, AVPlayerViewControllerDelegate, UIGestureRecognizerDelegate {
         weak var controller: AVPlayerViewController?
         private var lastSignature = ""
-        #if os(iOS)
-        /// The model, for the resync when Picture in Picture ends.
-        weak var player: PlayerModel?
-        #endif
 
         /// What `applyLiveChrome` last set, so the property below is only
         /// ever assigned when the answer changes. Assigning it makes AVKit
@@ -1495,15 +1490,6 @@ struct VideoSurface: UIViewControllerRepresentable {
             completionHandler: @escaping (Bool) -> Void
         ) {
             completionHandler(true)
-        }
-
-        /// The sound has been seen to come back from Picture in Picture out
-        /// of step with the picture — the audio route and the renderers are
-        /// torn down and rebuilt around the floating window and again on the
-        /// way back — so the two are flushed and restarted together once the
-        /// video is back in the app. See `PlayerModel.resyncAudio`.
-        nonisolated func playerViewControllerDidStopPictureInPicture(_ playerViewController: AVPlayerViewController) {
-            Task { @MainActor [weak self] in self?.player?.resyncAudio() }
         }
         #endif
     }
