@@ -66,14 +66,18 @@ struct ItemDetailView: View {
     /// the strip. Putting focus on the page's first action as soon as there is
     /// one fixes both.
     private enum DetailFocus: Hashable {
-        case play, quality, favorite, watched, trailer, episode(String), cast(String)
+        case play, quality, favorite, watched, trailer, episode(String), season(String), cast(String)
 
         /// One of the buttons under the artwork, rather than a row further down.
         var isAction: Bool {
             switch self {
-            case .episode, .cast: false
+            case .episode, .season, .cast: false
             default: true
             }
+        }
+
+        var isSeason: Bool {
+            if case .season = self { true } else { false }
         }
     }
     @FocusState private var focus: DetailFocus?
@@ -302,14 +306,20 @@ struct ItemDetailView: View {
                 // press to reach. The buttons are the top of the page as far as
                 // the selector goes, so they show it as it opened.
                 .onChange(of: focus) { previous, now in
-                    // Down from the buttons onto the cast starts the row at its
-                    // first face. A directional move is settled by geometry
-                    // alone, and the engine was landing on whichever headshot
-                    // lay under the middle of the row of buttons — the fifth or
-                    // so on a film, with the first four scrolled past. Caught on
+                    // Down onto the seasons or the cast starts the row at its
+                    // first card. A directional move is settled by geometry
+                    // alone, and the engine was landing on whichever card lay
+                    // under the middle of the row above — the fifth or so
+                    // headshot on a film, the last season on a show (with the
+                    // cast below then entered at its far end too). Caught on
                     // arrival, the way the guide catches its own (see
-                    // `TVGuideView`); within the row, focus is left alone.
-                    if previous?.isAction == true, case .cast(let id)? = now,
+                    // `TVGuideView`); within a row, focus is left alone.
+                    if previous?.isAction == true, case .season(let id)? = now,
+                       let first = seasons.first?.Id, id != first {
+                        focus = .season(first)
+                        return
+                    }
+                    if previous?.isAction == true || previous?.isSeason == true, case .cast(let id)? = now,
                        let first = item.flatMap({ mergedCast($0.People ?? []).first })?.id, id != first {
                         focus = .cast(first)
                         return
@@ -1156,6 +1166,9 @@ struct ItemDetailView: View {
                                 )
                             }
                             .buttonStyle(PosterButtonStyle())
+                            #if os(tvOS)
+                            .focused($focus, equals: .season(season.Id))
+                            #endif
                             .itemContextMenu(season)
                             .macOpensOnReturn { app.push(.item(season.Id)) }
                             .help(season.title)
