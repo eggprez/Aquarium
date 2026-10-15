@@ -24,6 +24,15 @@ fn write_queue(q: &[Value]) {
 /// queue entry and mirrors position into the download's meta.json so the
 /// Downloads UI can offer resume.
 pub fn store_local(item_id: &str, position_ticks: u64, played: bool) {
+    // The id becomes a path under the downloads folder below and a server
+    // path at sync time, so it gets the same check a download's folder does.
+    let dir = match crate::downloads::item_dir(item_id) {
+        Ok(dir) => dir,
+        Err(e) => {
+            crate::debug_log_line(&format!("progress: not stored: {e}"));
+            return;
+        }
+    };
     let mut q = read_queue();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -46,7 +55,7 @@ pub fn store_local(item_id: &str, position_ticks: u64, played: bool) {
     write_queue(&q);
 
     // Mirror into download metadata for the Downloads view.
-    let meta_path = config::downloads_dir().join(item_id).join("meta.json");
+    let meta_path = dir.join("meta.json");
     if let Ok(s) = std::fs::read_to_string(&meta_path) {
         if let Ok(mut meta) = serde_json::from_str::<Value>(&s) {
             meta["position_ticks"] = json!(if played { 0 } else { position_ticks });
