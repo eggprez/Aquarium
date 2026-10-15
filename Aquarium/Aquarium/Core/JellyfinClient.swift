@@ -1013,9 +1013,11 @@ final class JellyfinClient {
     }
 
     /// A user's picture, for the account lists. Served without a token, so it
-    /// can be drawn for an account that is not the one signed in.
+    /// can be drawn for an account that is not the one signed in. `/UserImage`
+    /// (10.9 and later) rather than `/Users/{id}/Images/Primary`, which 12.x has
+    /// dropped from its API description along with the rest of `/Users/{id}/…`.
     static func avatarURL(for account: SavedSession, width: Int = 160) -> URL? {
-        URL(string: "\(account.server)/Users/\(account.userId)/Images/Primary?maxWidth=\(width)&quality=90")
+        URL(string: "\(account.server)/UserImage?userId=\(account.userId)&maxWidth=\(width)&quality=90")
     }
 
     /// Sign out. Returns whether the server confirmed the token was revoked;
