@@ -561,7 +561,7 @@ final class AppModel {
                 // sidebar has the field itself, at its top, the way Music's
                 // does — see `sidebarSearchTerm` — so it has no row either.
                 #if !os(macOS)
-                if Self.usesSidebar { out.append(.search) }
+                if usesSidebar { out.append(.search) }
                 #endif
             case .libraries:
                 for library in libraries {
@@ -630,24 +630,36 @@ final class AppModel {
         return selection
         #else
         guard isOfflineShell else { return selection }
-        let shown = Self.usesSidebar ? sections : tabSections
+        let shown = usesSidebar ? sections : tabSections
         return shown.contains(selection) ? selection : .downloads
         #endif
     }
 
     /// Going offline or coming back: put the selection somewhere that exists.
-    /// Offline that is Downloads. Back online it is wherever they already are
-    /// if the full shell still has that as a tab, and Home if it doesn't.
+    /// Offline that is Downloads. Back online it is where they were before the
+    /// server went, if Downloads is still where it left them; otherwise
+    /// wherever they already are if the full shell still has that as a tab,
+    /// and Home if it doesn't.
     func reconcileSelection() {
         #if !os(tvOS)
         if isOfflineShell {
             // Always Downloads, wherever they were — the same place an app
             // opened offline starts. More starts at its list, since whatever
             // was pushed in it came from the server.
+            if selectionBeforeOffline == nil { selectionBeforeOffline = selection }
             selection = .downloads
             paths[AppSection.more.id] = nil
             routeStacks[AppSection.more.id] = nil
             return
+        }
+        // A server that was gone for a few seconds moved them to Downloads
+        // and, coming back, left them there: a timeout on Live TV ended on a
+        // page of downloads nobody asked for. If Downloads is still where it
+        // put them, they go back to where they were — whose stack, apart from
+        // More's, is still as they left it.
+        if let before = selectionBeforeOffline {
+            selectionBeforeOffline = nil
+            if selection == .downloads { selection = before }
         }
         #if os(iOS)
         if UIDevice.current.userInterfaceIdiom == .phone {
@@ -666,6 +678,10 @@ final class AppModel {
         if !sections.contains(selection), selection != .more { selection = .home }
         #endif
     }
+
+    /// Where the shell was when it last went offline, for `reconcileSelection`
+    /// to go back to. Nil while online.
+    @ObservationIgnored private var selectionBeforeOffline: AppSection?
 
     /// What the tab bar and the sidebar bind their selection to.
     var shownSelectionBinding: Binding<AppSection> {
@@ -804,18 +820,52 @@ final class AppModel {
         return out
     }
 
-    /// Whether this device's shell is the sidebar rather than the tab bar —
-    /// the idiom, not the size class, for the reason `RootView.adaptiveShell`
-    /// gives.
-    static var usesSidebar: Bool {
+    /// Whether the shell on screen is the sidebar rather than the tab bar.
+    ///
+    /// On iOS that is `RootView.adaptiveShell`'s decision, from the idiom *and*
+    /// the size class, and the shell reports it here — see `shellChanged`. It
+    /// used to be the idiom alone, which an iPad in Slide Over or a narrow
+    /// third of Split View contradicts: the shell there is the tab bar, and
+    /// `show` went on selecting sections the bar hasn't got — "Go to
+    /// Downloads", "Show Download Progress", a music shelf's See All — which
+    /// shows nothing at all.
+    var usesSidebar: Bool {
         #if os(iOS)
-        UIDevice.current.userInterfaceIdiom != .phone
+        sidebarShown
         #elseif os(macOS)
         true
         #else
         false
         #endif
     }
+
+    #if os(iOS)
+    /// What `RootView.adaptiveShell` last laid out. The idiom until it says
+    /// otherwise, which is what an iPad at full width gets anyway.
+    private var sidebarShown = UIDevice.current.userInterfaceIdiom != .phone
+
+    /// The shell has swapped between the sidebar and the tab bar — an iPad
+    /// going into or out of Slide Over or a narrow split. The selection goes
+    /// where the new shell has it, the way `reconcileSelection` does for the
+    /// offline shell: a section the bar has no tab for opens inside More, and
+    /// More, which a sidebar has no row for, becomes whatever it had open.
+    func shellChanged(toSidebar sidebar: Bool) {
+        guard sidebar != sidebarShown else { return }
+        sidebarShown = sidebar
+        if sidebar {
+            guard selection == .more else { return }
+            if case .section(let section)? = routeStacks[AppSection.more.id]?.first, sections.contains(section) {
+                selection = section
+            } else {
+                selection = .home
+            }
+            paths[AppSection.more.id] = nil
+            routeStacks[AppSection.more.id] = nil
+        } else if !tabSections.contains(selection) {
+            show(selection)
+        }
+    }
+    #endif
 
     /// A phone's tab bar, in order.
     ///
@@ -853,7 +903,7 @@ final class AppModel {
         #if os(tvOS)
         selection = section
         #else
-        if primaryTabs.contains(section) || (Self.usesSidebar && sections.contains(section)) {
+        if primaryTabs.contains(section) || (usesSidebar && sections.contains(section)) {
             selection = section
             return
         }
@@ -1208,7 +1258,11 @@ final class AppModel {
         #if os(iOS)
         if isOfflineShell {
             reconcileSelection()
-        } else if !primaryTabs.contains(selection), selection != .more {
+        } else if !(usesSidebar ? allSections : primaryTabs).contains(selection), selection != .more {
+            // A sidebar lists every section, so only one that has gone — a
+            // library removed — sends it Home. On the bar it was any section
+            // without a tab, which on an iPad was most of the sidebar: the
+            // server coming back after a blip took Live TV away to Home.
             selection = .home
         }
         #endif

@@ -23,26 +23,12 @@ struct RootView: View {
     @Namespace private var posterZoom
 
     /// iPad/Mac sidebar visibility, held explicitly rather than left to
-    /// `NavigationSplitView`'s own state: the detail column wraps its own
-    /// `NavigationStack`, and that inner stack's toolbar can end up owning
-    /// the chrome instead of the split view's, which sometimes drops the
-    /// system's automatic sidebar-toggle button once the sidebar is
-    /// collapsed — stranding the sidebar with no way back short of force-
-    /// quitting. Driving visibility ourselves, with our own toggle in the
-    /// detail toolbar, means there is always a button that can bring it back.
+    /// `NavigationSplitView`'s own state: the system's sidebar toggle lives in
+    /// the navigation bar, and the pages that hide that bar — Home, a title,
+    /// Live TV — hide the toggle with it, stranding the sidebar with no way
+    /// back. Driving visibility ourselves lets those pages draw a toggle of
+    /// their own — see `showSidebar`.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
-
-    #if os(iOS)
-    /// The floating sidebar toggle's circle, and where it sits from the
-    /// detail column's leading edge.
-    private static let sidebarToggleSize: CGFloat = 36
-    private static let sidebarToggleLeading: CGFloat = 12
-    /// How much further in than its gutter a page's own top bar has to start
-    /// to clear that button, with a little air after it.
-    private static var sidebarToggleClearance: CGFloat {
-        max(0, sidebarToggleLeading + sidebarToggleSize + 8 - Metrics.gutter)
-    }
-    #endif
 
     var body: some View {
         Group {
@@ -431,39 +417,13 @@ struct RootView: View {
                 .withMiniPlayer()
             )
             #if os(iOS)
-            // A floating toggle rather than a `.toolbar` item on the stack
-            // above: Home draws its own header and hides the system
-            // navigation bar outright (`.toolbar(.hidden, for: .navigationBar)`
-            // in `HomeView`), and other sections may do the same, so a
-            // toolbar-hosted button would come and go with whatever the
-            // current page decides about its own chrome — which is exactly
-            // how the sidebar ended up with no way back. This sits outside
-            // that NavigationStack entirely, so it is there no matter what
-            // page is showing or what that page does with its own toolbar.
-            //
-            // The pages underneath draw their own bars in that same corner —
-            // the wordmark on Home, the back button on a title — so while the
-            // button is there, every `AppTopBar` is told to start to the right
-            // of it. See `sidebarToggleInset`.
-            .overlay(alignment: .topLeading) {
-                if sidebarVisibility == .detailOnly {
-                    Button {
-                        sidebarVisibility = .all
-                    } label: {
-                        Image(systemName: "sidebar.leading")
-                            .font(.body.weight(.semibold))
-                            .frame(width: Self.sidebarToggleSize, height: Self.sidebarToggleSize)
-                            .background(.thinMaterial, in: Circle())
-                    }
-                    .accessibilityLabel("Show sidebar")
-                    .padding(.top, 8)
-                    .padding(.leading, Self.sidebarToggleLeading)
-                }
-            }
-            .environment(
-                \.sidebarToggleInset,
-                sidebarVisibility == .detailOnly ? Self.sidebarToggleClearance : 0
-            )
+            // The way back to a collapsed sidebar, for the pages without a
+            // navigation bar to hold the system's: each of them draws it at
+            // the leading end of its own bar (see `AppTopBar`). Every other
+            // page has the system's toggle in its bar, so this is handed down
+            // rather than floated over the column, which drew a second toggle
+            // under the system's on all of those.
+            .environment(\.showSidebar, showSidebarAction)
             #endif
         }
         #if os(macOS)
@@ -497,6 +457,12 @@ struct RootView: View {
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
 
+    /// Brings the sidebar back, while it is collapsed — see `showSidebar`.
+    private var showSidebarAction: (() -> Void)? {
+        guard sidebarVisibility == .detailOnly else { return nil }
+        return { sidebarVisibility = .all }
+    }
+
     /// iPad gets the sidebar, iPhone the tab bar. Same sections either way.
     ///
     /// The idiom is asked for as well as the size class, and it is not
@@ -509,13 +475,20 @@ struct RootView: View {
     /// phone's permission to be in landscape at all: it let go halfway through
     /// the turn, the phone was told to go back to portrait, and the rotation
     /// ended up stuck between the two. See `OrientationLock`.
+    ///
+    /// The model is told which it is, because it is what decides where `show`
+    /// sends a section — see `AppModel.usesSidebar`.
     @ViewBuilder
     private var adaptiveShell: some View {
-        if sizeClass == .regular, UIDevice.current.userInterfaceIdiom != .phone {
-            sidebarShell
-        } else {
-            tabShell
+        let sidebar = sizeClass == .regular && UIDevice.current.userInterfaceIdiom != .phone
+        Group {
+            if sidebar {
+                sidebarShell
+            } else {
+                tabShell
+            }
         }
+        .onChange(of: sidebar, initial: true) { _, now in app.shellChanged(toSidebar: now) }
     }
 
     private var tabShell: some View {
@@ -552,6 +525,14 @@ struct RootView: View {
 
     private func destination(_ route: Route) -> some View {
         RouteDestination(route: route)
+            // A pushed page on the app's own colour, as the section it was
+            // pushed from is (see `SectionView`). Left to itself a page was
+            // the system's black or white — a person's page, a library opened
+            // from Home, a title's body under its own bar — a shade off the
+            // page it had come from, and off its own bar.
+            #if os(iOS)
+            .background(Theme.background)
+            #endif
     }
 }
 
