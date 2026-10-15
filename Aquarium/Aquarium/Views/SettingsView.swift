@@ -539,8 +539,9 @@ struct SettingsView: View {
         }
     }
 
-    /// Stations learn only while they play — thumbs included — so there is
-    /// nothing kept here to count or forget.
+    /// Stations learn only while they play, so there is nothing kept here
+    /// to count or forget — but for the moods Surprise Me remembers by time
+    /// of day, which are only a place to start (see `MoodMemory`).
     private var stationsSection: some View {
         @Bindable var prefs = prefs
         return Section {
@@ -1150,21 +1151,10 @@ private struct AppearanceSettingsPage: View {
             Section {
                 Toggle(Copy.hideContinueWatching.name ?? "", isOn: $prefs.hidesContinueWatching)
                 Toggle(Copy.clearAbandoned.name ?? "", isOn: $prefs.clearsAbandonedEpisodes)
-                Toggle(Copy.newEpisodeAlerts.name ?? "", isOn: $prefs.newEpisodeAlerts)
-                    // Turning it on asks to notify; refused, it goes back off.
-                    .onChange(of: prefs.newEpisodeAlerts) { _, on in
-                        guard on else { return }
-                        Task {
-                            if await !NextUpAlerts.shared.enable() {
-                                prefs.newEpisodeAlerts = false
-                                app.toast("Notifications are off for Aquarium — turn them on in Settings", tone: .error)
-                            }
-                        }
-                    }
             } header: {
                 Text("Home")
             } footer: {
-                SettingsFooter(Copy.hideContinueWatching, Copy.clearAbandoned, Copy.newEpisodeAlerts)
+                SettingsFooter(Copy.hideContinueWatching, Copy.clearAbandoned)
             }
         }
         .formStyle(.grouped)
@@ -2136,10 +2126,6 @@ enum SettingsCopy {
     static let powerAwareQuality = SettingNote(
         name: "Ease off when the device is struggling",
         text: "Holds the stream to 1080p at 10 Mbps while the device is running hot or in Low Power Mode, and to 720p when it is at its thermal limit — before the picture starts to stutter rather than after. It climbs back the usual way once things settle. Only with adaptive quality on."
-    )
-    static let newEpisodeAlerts = SettingNote(
-        name: "Tell me about new episodes",
-        text: "A notification when an episode new to the server turns up in Next Up — a show you're watching got a new one. Looked for whenever Home loads, and now and then in the background, which needs Background App Refresh on for Aquarium."
     )
     static let defaultQuality = SettingNote(
         name: "Default quality",

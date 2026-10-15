@@ -300,10 +300,6 @@ struct NowPlayingView: View {
                 .disabled(song.isAudiobook)
             }
             Spacer()
-            if music.canThumb {
-                thumbButton(value: -1)
-                thumbButton(value: 1)
-            }
             Button {
                 Task { await toggleFavorite(song) }
             } label: {
@@ -315,29 +311,6 @@ struct NowPlayingView: View {
             }
             .buttonStyle(.plain)
         }
-    }
-
-    /// Advice to the station playing, and only there: down skips the song
-    /// and steers away from it, up steers towards it. Both are forgotten when
-    /// the station ends. Tapped again, either is taken back.
-    private func thumbButton(value: Int) -> some View {
-        let on = music.thumb == value
-        let symbol = value > 0 ? "hand.thumbsup" : "hand.thumbsdown"
-        return Button {
-            music.setThumb(on ? nil : value)
-            guard !on else { return }
-            app.toast(value > 0 ? "More like this" : "Less like this", tone: .ok)
-        } label: {
-            Image(systemName: on ? symbol + ".fill" : symbol)
-                .font(.title3)
-                .foregroundStyle(on ? Theme.accent : .white.opacity(0.8))
-                .frame(width: 36, height: 36)
-                .background(.white.opacity(0.12), in: Circle())
-                .contentTransition(.symbolEffect(.replace))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(value > 0 ? "Thumbs Up" : "Thumbs Down")
-        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     @ViewBuilder
@@ -513,7 +486,8 @@ struct NowPlayingView: View {
                 .opacity(song.isAudiobook ? 0.3 : 1)
             }
             // A station only: what it has come to lean toward, by points —
-            // the artists and genres its skips and thumbs have put ahead.
+            // the artists and genres what was played out and skipped has
+            // put ahead.
             if music.station != nil, song.isSong {
                 Spacer()
                 toggle("chart.bar.xaxis", isOn: showLeanings, label: "What's leading in the mix") {
@@ -578,7 +552,7 @@ struct NowPlayingView: View {
 
 /// The station's standings: the genres and artists that are ahead on
 /// points right now, and the ones falling behind, read off
-/// `StationSession`. Every finished song, skip and thumb moves them, and
+/// `StationSession`. Every finished song and skip moves them, and
 /// the last few move them most, so this is the mix's mood at this moment
 /// rather than a record of taste.
 private struct StationLeaningsSheet: View {
@@ -589,9 +563,17 @@ private struct StationLeaningsSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                if station.profile.isSurprise, !MoodMemory.describe(session.prior).isEmpty, session.reactions < 9 {
+                    // The remembered mood, while it still has a say — see
+                    // `StationSession.priorLean`.
+                    Section {
+                        Text("Started with a lean toward \(MoodMemory.describe(session.prior).formatted(.list(type: .and))), from what you've played at this time of day. It fades as you skip and let songs play.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 if session.reactions == 0 {
                     Section {
-                        Text("Nothing is ahead yet. Let a few songs play out, skip the ones that don't fit, or give a thumb, and the mix starts to lean.")
+                        Text("Nothing is ahead yet. Let a few songs play out and skip the ones that don't fit, and the mix starts to lean.")
                             .foregroundStyle(.secondary)
                     }
                 } else {
@@ -627,7 +609,7 @@ private struct StationLeaningsSheet: View {
     }
 
     /// Ahead first, then whatever has slipped below zero — a skipped artist,
-    /// a genre thumbed down — so the card says what the mix is steering away
+    /// a genre skipped a few times — so the card says what the mix is steering away
     /// from as well as toward.
     @ViewBuilder
     private func standings(_ title: String, _ all: [Leaning]) -> some View {

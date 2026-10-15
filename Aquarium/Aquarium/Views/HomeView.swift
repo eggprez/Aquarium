@@ -724,9 +724,8 @@ struct HomeView: View {
         // The home screen icon's press-and-hold menu leads with the same
         // title this page does.
         if failure == nil { QuickActions.update(resume: resume, nextUp: shownNextUp) }
-        // And a fresh Next Up is the moment to notice an episode new to the
-        // server — see Core/NextUpAlerts.swift.
-        if failure == nil { NextUpAlerts.shared.note(nextUp: nextUp) }
+        // And the Follow tile's choices — see Core/FollowFeed.swift.
+        if failure == nil { FollowFeed.shared.update(resume: resume, nextUp: shownNextUp) }
         #elseif os(macOS)
         // The Dock icon's menu is the same list: what was left part-watched,
         // then what is next.

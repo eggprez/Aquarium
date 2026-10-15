@@ -95,11 +95,15 @@ struct NowPlayingSnapshot: Codable, Hashable, Sendable {
 
 // MARK: - Controls
 
-/// What a Control Centre button asks of the app.
+/// What a Control Centre button, or a button on the Now Playing card, asks
+/// of the app.
 enum ControlAction: Sendable {
     case resumeWatching
     case shuffleMusic
     case resumeAudiobook
+    case togglePlayPause
+    case skipSegment
+    case nextEpisode
 }
 
 enum ControlActions {
@@ -150,6 +154,47 @@ struct ResumeAudiobookControlIntent: AudioPlaybackIntent {
 
     func perform() async throws -> some IntentResult {
         await ControlActions.send(.resumeAudiobook)
+        return .result()
+    }
+}
+
+/// Pause or play, from the Now Playing card's button and from Control
+/// Centre. An audio intent, so the system runs it in the app's process
+/// without bringing the app forward — a widget's button has to.
+struct PlayPauseWidgetIntent: AudioPlaybackIntent {
+    static let title: LocalizedStringResource = "Play or Pause"
+    static let description = IntentDescription("Pauses what's playing, or starts it again.")
+    static let isDiscoverable = false
+
+    func perform() async throws -> some IntentResult {
+        await ControlActions.send(.togglePlayPause)
+        return .result()
+    }
+}
+
+/// Past the intro or the credits, when the server has marked one.
+struct SkipSegmentWidgetIntent: AudioPlaybackIntent {
+    static let title: LocalizedStringResource = "Skip Intro or Credits"
+    static let description = IntentDescription("Jumps past the intro or the credits.")
+    static let isDiscoverable = false
+
+    func perform() async throws -> some IntentResult {
+        await ControlActions.send(.skipSegment)
+        return .result()
+    }
+}
+
+/// The next episode now. Opens the app: a film's next episode is a new
+/// stream, and a new stream is worth being in front for.
+@available(iOS 18.0, *)
+struct NextEpisodeControlIntent: AppIntent {
+    static let title: LocalizedStringResource = "Next Episode"
+    static let description = IntentDescription("Starts the next episode now.")
+    static let openAppWhenRun = true
+    static let isDiscoverable = false
+
+    func perform() async throws -> some IntentResult {
+        await ControlActions.send(.nextEpisode)
         return .result()
     }
 }

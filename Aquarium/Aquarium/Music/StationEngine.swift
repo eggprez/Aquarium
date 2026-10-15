@@ -488,8 +488,9 @@ enum StationRanker {
         if profile.isSurprise {
             // A shuffle first: luck outweighs everything else the score
             // reads. Each reaction wears it down, and what the listener has
-            // finished and skipped — `session.lean` — takes over, so the
-            // shuffle turns into a mix of its own over an hour or so.
+            // finished and skipped — `session.surpriseLean`, let in a little
+            // more with each — takes over, so the shuffle turns into a mix
+            // of its own by the middle of a forty-minute session.
             let reactions = Double(session?.reactions ?? 0)
             jitter = max(jitter, 5 * exp(-reactions / 8))
         }
@@ -497,7 +498,9 @@ enum StationRanker {
             guard !exclude.contains(song.Id), song.Id != profile.songId else { return nil }
             let likeness = profile.likeness(song, points: points)
             var score = likeness ?? -4
-            if let session { score += session.lean(for: song) }
+            if let session {
+                score += profile.isSurprise ? session.surpriseLean(for: song) : session.lean(for: song)
+            }
             // The server's own record of the song: starred, and how often it
             // has been played anywhere — or that it never has been.
             let plays = song.userData.PlayCount ?? 0

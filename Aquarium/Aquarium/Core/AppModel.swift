@@ -1598,6 +1598,10 @@ final class AppModel {
         selection = .home
         LiveTVStore.shared.reset()
         Preferences.shared.clearRecentSearches()
+        #if os(iOS)
+        // The Follow tile's choices go with the account.
+        FollowFeed.shared.wipe()
+        #endif
         #if os(macOS)
         sidebarSearchTerm = ""
         clearDockMenu()

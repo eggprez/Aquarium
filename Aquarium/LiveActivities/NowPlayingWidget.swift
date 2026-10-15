@@ -131,9 +131,14 @@ private struct NowPlayingCard: View {
                     .font(.footnote.weight(.semibold))
                     .lineLimit(2)
                 HStack(spacing: 6) {
-                    Image(systemName: snapshot.isPlaying ? "play.fill" : "pause.fill")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(ActivityPalette.accentText)
+                    Button(intent: PlayPauseWidgetIntent()) {
+                        Image(systemName: snapshot.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 26, height: 26)
+                            .background(ActivityPalette.accent, in: Circle())
+                    }
+                    .buttonStyle(.plain)
                     bar(snapshot)
                 }
             }
@@ -173,8 +178,23 @@ private struct NowPlayingCard: View {
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(ActivityPalette.dim)
             }
+            // Pause or play without opening the app. The intent is an audio
+            // one, which the system runs in the app's process in the
+            // background — see Shared/WidgetTypes.swift.
+            playPause(snapshot)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    private func playPause(_ snapshot: NowPlayingSnapshot) -> some View {
+        Button(intent: PlayPauseWidgetIntent()) {
+            Image(systemName: snapshot.isPlaying ? "pause.fill" : "play.fill")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(ActivityPalette.accent, in: Circle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func rectangular(_ snapshot: NowPlayingSnapshot) -> some View {
@@ -271,5 +291,44 @@ struct ResumeAudiobookControl: ControlWidget {
         }
         .displayName("Resume Audiobook")
         .description("Picks up the audiobook you were listening to.")
+    }
+}
+
+@available(iOS 18.0, *)
+struct PlayPauseControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: "scottai.FellyJin.control.playpause") {
+            ControlWidgetButton(action: PlayPauseWidgetIntent()) {
+                Label("Play or Pause", systemImage: "playpause.fill")
+            }
+        }
+        .displayName("Play or Pause")
+        .description("Pauses what's playing, or starts it again.")
+    }
+}
+
+@available(iOS 18.0, *)
+struct SkipSegmentControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: "scottai.FellyJin.control.skip") {
+            ControlWidgetButton(action: SkipSegmentWidgetIntent()) {
+                Label("Skip Intro", systemImage: "forward.fill")
+            }
+        }
+        .displayName("Skip Intro")
+        .description("Jumps past the intro or the credits.")
+    }
+}
+
+@available(iOS 18.0, *)
+struct NextEpisodeControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: "scottai.FellyJin.control.next") {
+            ControlWidgetButton(action: NextEpisodeControlIntent()) {
+                Label("Next Episode", systemImage: "forward.end.fill")
+            }
+        }
+        .displayName("Next Episode")
+        .description("Starts the next episode now.")
     }
 }

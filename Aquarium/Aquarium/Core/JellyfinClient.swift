@@ -2275,10 +2275,53 @@ final class JellyfinClient {
         }
         let resolved = effectiveQuality(item: item, quality: quality)
         if resolved.original {
-            let size = item.MediaSources?.first?.Size ?? 0
+            let source = item.MediaSources?.first
+            // Rewrapped rather than sent as it sits: what comes down is the
+            // picture and one soundtrack, not the file. See `remuxSize`.
+            if !DeviceProfile.canPlayAsFile(source), let remux = remuxSize(item: item) { return remux }
+            let size = source?.Size ?? 0
             return size > 0 ? size : nil
         }
         return transcodeSize(item: item, quality: resolved)
+    }
+
+    /// What an original-quality download that has to be rewrapped will weigh.
+    ///
+    /// The source file's size was the figure used, and it is the wrong one:
+    /// an MKV carries every soundtrack and subtitle the release came with —
+    /// commentary, dubs, a lossless track beside a lossy one — and the
+    /// rewrap brings down the picture and one soundtrack, as AAC unless it
+    /// already was. Started from the whole file, the total on the Downloads
+    /// page could only fall as the transfer went on. The picture's own
+    /// bitrate and one AAC soundtrack instead; nil when the server doesn't
+    /// say what the picture's bitrate is.
+    static func remuxSize(item: BaseItem) -> Int64? {
+        guard let ticks = item.RunTimeTicks, ticks > 0,
+              let source = item.MediaSources?.first,
+              let videoBitrate = source.streams.first(where: { $0.type == "Video" })?.BitRate, videoBitrate > 0
+        else { return nil }
+        let seconds = Double(ticks) / 10_000_000
+        let audios = source.streams.filter { $0.type == "Audio" }
+        let audio = audios.first { $0.Index == source.DefaultAudioStreamIndex } ?? audios.first(where: { $0.IsDefault == true }) ?? audios.first
+        var audioBitrate = 0
+        if let audio {
+            if audio.Codec?.lowercased() == "aac", let rate = audio.BitRate, rate > 0 {
+                // Copied across as it is.
+                audioBitrate = rate
+            } else {
+                // Encoded to AAC: about 128 kbps a pair of channels, as the
+                // server does when no bitrate is asked for, and never more
+                // than the source had.
+                let channels = max(2, audio.Channels ?? 2)
+                audioBitrate = min(640_000, 128_000 * channels / 2)
+                if let rate = audio.BitRate, rate > 0 { audioBitrate = min(audioBitrate, rate) }
+            }
+        }
+        let estimate = byteCount(Double(videoBitrate + audioBitrate) / 8 * seconds * 1.02)
+        guard estimate > 0 else { return nil }
+        // Never more than the file it is made from.
+        if let size = source.Size, size > 0 { return min(estimate, size) }
+        return estimate
     }
 
     /// What an encode at this rung would weigh. Nil when there is nothing to

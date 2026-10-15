@@ -112,6 +112,11 @@ struct RootView: View {
                 // hold the shell steady. That frame is the flash.
                 client.enterForeground()
                 client.beginRecheck()
+                #if !os(tvOS)
+                // Transfers kept going while the app was away; count what
+                // they wrote — see `DownloadManager.appBecameActive`.
+                DownloadManager.shared.appBecameActive()
+                #endif
                 Task {
                     await app.refreshConnectivity()
                     #if !os(tvOS)

@@ -51,16 +51,11 @@ final class NowPlaying {
         centre.skipBackwardCommand.isEnabled = !onStage || music.current?.isAudiobook == true
         centre.changeShuffleModeCommand.isEnabled = onStage
         centre.changeRepeatModeCommand.isEnabled = onStage
-        // Thumbs, for a song in a station: what a watch, a car or a pair of
-        // headphones with the controls for it shows. They steer the station
-        // playing and mean nothing to an album or a playlist, so those get
-        // none.
-        let canThumb = onStage && music.canThumb
-        let thumb = canThumb ? music.thumb : nil
-        centre.likeCommand.isEnabled = canThumb
-        centre.dislikeCommand.isEnabled = canThumb
-        centre.likeCommand.isActive = thumb == 1
-        centre.dislikeCommand.isActive = thumb == -1
+        // No like or dislike: stations are steered by skipping and letting
+        // songs play, and a watch, a car or headphones that offer those
+        // buttons get none to show.
+        centre.likeCommand.isEnabled = false
+        centre.dislikeCommand.isEnabled = false
         if onStage {
             centre.changeShuffleModeCommand.currentShuffleType = music.isShuffled ? .items : .off
             centre.changeRepeatModeCommand.currentRepeatType = {
@@ -152,24 +147,6 @@ final class NowPlaying {
         centre.previousTrackCommand.addTarget { [weak self] _ in
             guard let self, self.musicHasTheStage else { return .noSuchContent }
             self.music.skipPrevious()
-            return .success
-        }
-        centre.likeCommand.localizedTitle = "Thumbs Up"
-        centre.likeCommand.localizedShortTitle = "Like"
-        centre.dislikeCommand.localizedTitle = "Thumbs Down"
-        centre.dislikeCommand.localizedShortTitle = "Dislike"
-        centre.likeCommand.addTarget { [weak self] event in
-            guard let self, self.musicHasTheStage, self.music.canThumb,
-                  let event = event as? MPFeedbackCommandEvent else { return .noSuchContent }
-            self.music.setThumb(event.isNegative ? nil : 1)
-            self.refreshCommandAvailability()
-            return .success
-        }
-        centre.dislikeCommand.addTarget { [weak self] event in
-            guard let self, self.musicHasTheStage, self.music.canThumb,
-                  let event = event as? MPFeedbackCommandEvent else { return .noSuchContent }
-            self.music.setThumb(event.isNegative ? nil : -1)
-            self.refreshCommandAvailability()
             return .success
         }
         centre.changeShuffleModeCommand.addTarget { [weak self] event in

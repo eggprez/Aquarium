@@ -135,6 +135,9 @@ final class LibraryIndex {
     func wipe() {
         #if os(iOS) || os(macOS)
         SpotlightIndexer.shared.wipe()
+        #if os(iOS)
+        FollowFeed.shared.wipe()
+        #endif
         #endif
         loadTask?.cancel()
         syncTask?.cancel()

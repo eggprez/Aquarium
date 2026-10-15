@@ -544,9 +544,19 @@ final class TransportBarExtras {
         if let audio = audioMenu(state) { items.append(audio) }
         if let subtitles = subtitlesMenu(state) { items.append(subtitles) }
         items.append(languagesMenu(state))
-        // No audio sync entry: the sound is put back in step on its own
-        // when Picture in Picture ends, which is where it was found to
-        // drift, and the Apple TV is where the offset is measured and set.
+        // Offered by hand and never done unasked: the sound has been seen to
+        // come back from Picture in Picture out of step, but a resync is a
+        // visible hiccup, and doing it on every return would cost the many
+        // that came back fine for the few that didn't. The Apple TV is where
+        // a constant offset is measured and set.
+        if state.canResync {
+            items.append(UIAction(
+                title: "Resync audio",
+                image: UIImage(systemName: "arrow.triangle.2.circlepath")
+            ) { [weak self] _ in
+                self?.onResync()
+            })
+        }
         items.append(UIMenu(title: "Sleep", image: UIImage(systemName: "moon"), children: sleep))
         // What was queued by hand. A row plays its title now; the rows
         // above it go.

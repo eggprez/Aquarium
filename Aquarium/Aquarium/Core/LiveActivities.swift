@@ -89,6 +89,10 @@ final class LiveActivityCenter {
             PlayerModel.shared.cancelSleepTimer()
         case .setDownloadsPaused(let paused):
             DownloadManager.shared.setPaused(paused)
+        case .togglePlayPause:
+            _ = PlayerActions.togglePlayPause()
+        case .skipSegment:
+            _ = PlayerActions.skipSegment()
         }
         // Said now rather than when Observation gets round to it: the system
         // redraws the activity as the intent returns.
@@ -272,7 +276,8 @@ final class LiveActivityCenter {
         if player.isActive, let deadline = player.sleepDeadline {
             return .init(
                 title: player.title, subtitle: nil, isPlaying: !player.isPaused,
-                sleepDeadline: deadline, isVideo: true
+                sleepDeadline: deadline, isVideo: true,
+                skipLabel: PlayerActions.skipLabel
             )
         }
         return nil
@@ -450,6 +455,15 @@ final class LiveActivityCenter {
     private static let baselineCompleteKey = "liveActivity.downloads.baselineComplete"
     private static let baselineFailedKey = "liveActivity.downloads.baselineFailed"
 
+    /// The bytes already downloaded when the batch began, beside the counts
+    /// above: what has landed since is the difference, so the batch can be
+    /// quoted in bytes without keeping a list of what is in it.
+    private var baselineBytes: Int64 {
+        get { Int64(UserDefaults.standard.double(forKey: Self.baselineBytesKey)) }
+        set { UserDefaults.standard.set(Double(newValue), forKey: Self.baselineBytesKey) }
+    }
+    private static let baselineBytesKey = "liveActivity.downloads.baselineBytes"
+
     /// No more than one update a second, and no more than one every few for
     /// a bar that has only crept: a library of songs lands one a second for
     /// twenty minutes, and a film reports its bytes twice a second for an hour.
@@ -494,32 +508,26 @@ final class LiveActivityCenter {
             let single = manager.queue.first?.type ?? tally.running.first?.type
             guard inFlight > 1 || single != "Audio" else { return }
             baseline = (tally.completeCount, tally.failed.count)
+            baselineBytes = tally.completeBytes
         }
-        // A stream download — every transcode — gets a Live Activity from
-        // iOS itself, with no way to turn it off short of letting the system
-        // put the transfer off until it pleases. Two activities for one
-        // download is one too many, so this one steps aside while any stream
-        // is running and comes back for what iOS doesn't cover: songs, files
-        // and a paused queue. The batch carries on counting underneath, and
-        // ending here rather than finishing means no "Downloaded" card after
-        // the system's own has gone.
-        if tally.running.contains(where: { $0.transport == .hls }) {
-            if let activity = downloading {
-                downloading = nil
-                downloadsSent = nil
-                downloadsTrailing?.cancel()
-                downloadsTrailing = nil
-                end(activity)
-            }
-            return
-        }
+        // A stream download — every transcode, and an original that has to
+        // be rewrapped — also gets a Live Activity from iOS itself, which
+        // can't be turned off short of letting the system put the transfer
+        // off until it pleases. That one shows a combined percentage; this
+        // one shows the batch in bytes, item by item, with a pause. Both stay.
         let counts = batchCounts(tally)
         let total = counts.done + counts.failed + inFlight
+        let bytes = batchBytes(tally, manager.inFlightBytes)
 
         var arriving = 0.0
         for record in tally.running {
             arriving += Self.itemFraction(record, live[record.itemId]) ?? 0
         }
+        let byCount = min((Double(counts.done + counts.failed) + arriving) / Double(max(total, 1)), 1)
+        // In bytes when every item could be sized, which is the honest share
+        // of a batch that mixes a film with a dozen songs; by count when one
+        // couldn't, rather than a share of a total with a hole in it.
+        let fraction = bytes.map { $0.total > 0 ? min(Double($0.received) / Double($0.total), 1) : byCount } ?? byCount
         let current = paused ? nil : tally.running.first
         let currentFraction = current.flatMap { Self.itemFraction($0, live[$0.itemId]) }
         let span = current.flatMap { itemSpan(itemId: $0.itemId, title: $0.title, fraction: currentFraction) }
@@ -530,13 +538,31 @@ final class LiveActivityCenter {
             phase: paused ? .paused : .running,
             done: counts.done, failed: counts.failed, total: total,
             currentTitle: current?.title,
-            fraction: min((Double(counts.done + counts.failed) + arriving) / Double(max(total, 1)), 1),
+            fraction: fraction,
             currentFraction: currentFraction,
             currentStart: span?.start,
             currentEnd: span?.end,
-            nextTitle: next?.title
+            nextTitle: next?.title,
+            receivedBytes: bytes?.received,
+            totalBytes: bytes?.total,
+            totalIsEstimate: bytes?.estimated
         )
         push(state)
+    }
+
+    /// The batch in bytes: what landed since it began, plus what is waiting
+    /// or arriving. Nil when anything in flight had nothing to size it by.
+    private func batchBytes(
+        _ tally: DownloadManager.Tally, _ inFlight: DownloadManager.InFlightBytes
+    ) -> (received: Int64, total: Int64, estimated: Bool)? {
+        guard inFlight.unsized == 0 else { return nil }
+        // A download deleted mid-batch takes its bytes out of the tally; the
+        // batch never quotes less than nothing for it.
+        let landed = max(0, tally.completeBytes - baselineBytes)
+        let received = landed + inFlight.received
+        let total = max(landed + inFlight.total, received)
+        guard total > 0 else { return nil }
+        return (received, total, inFlight.estimated)
     }
 
     /// How far one transfer has got, 0...1, or nil when that can't be told.
@@ -618,6 +644,11 @@ final class LiveActivityCenter {
         var sameButFraction = state
         sameButFraction.fraction = sent.fraction
         sameButFraction.currentFraction = sent.currentFraction
+        // Bytes climb with every reading and a projected total settles as it
+        // goes; both are the bar creeping, not news.
+        sameButFraction.receivedBytes = sent.receivedBytes
+        sameButFraction.totalBytes = sent.totalBytes
+        sameButFraction.totalIsEstimate = sent.totalIsEstimate
         let onlyCrept = sameButFraction == sent
         if onlyCrept, abs(state.fraction - sent.fraction) < 0.01,
            abs((state.currentFraction ?? 0) - (sent.currentFraction ?? 0)) < 0.02 { return }
@@ -668,7 +699,9 @@ final class LiveActivityCenter {
     private func finishDownloads() {
         downloadsTrailing?.cancel()
         downloadsTrailing = nil
-        let counts = batchCounts(DownloadManager.shared.tally)
+        let finalTally = DownloadManager.shared.tally
+        let counts = batchCounts(finalTally)
+        let landedBytes = max(0, finalTally.completeBytes - baselineBytes)
         baseline = nil
         downloadsSent = nil
         downloadsDismissed = false
@@ -683,7 +716,10 @@ final class LiveActivityCenter {
         }
         let state = Downloads.ContentState(
             phase: .finished, done: counts.done, failed: counts.failed, total: total,
-            currentTitle: nil, fraction: 1
+            currentTitle: nil, fraction: 1,
+            receivedBytes: landedBytes > 0 ? landedBytes : nil,
+            totalBytes: landedBytes > 0 ? landedBytes : nil,
+            totalIsEstimate: false
         )
         // A failure stays until it has been seen; a clean finish is only
         // worth a few minutes of Lock Screen.
