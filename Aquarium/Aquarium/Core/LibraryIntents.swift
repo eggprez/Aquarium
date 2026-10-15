@@ -68,7 +68,7 @@ extension JellyfinClient {
         } else {
             q.append(.init(name: "searchTerm", value: term))
         }
-        let items = try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))").items
+        let items = try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))").items
         return items.filter { $0.kind == "BoxSet" || ($0.MediaType ?? "Video") != "Audio" }
     }
 
@@ -79,7 +79,7 @@ extension JellyfinClient {
             URLQueryItem(name: "ParentId", value: boxSetId),
             URLQueryItem(name: "Fields", value: "ProductionYear,UserData,RunTimeTicks,Genres"),
         ]
-        return try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))").items
+        return try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))").items
     }
 }
 
