@@ -18,6 +18,7 @@ import {
 import {
   el,
   clear,
+  asButton,
   art,
   toast,
   attachContextMenu,
@@ -37,6 +38,8 @@ let queueListenerInstalled = false;
 let playbackListenerInstalled = false;
 /** Guards the self-heal re-render below against stacking up on progress ticks. */
 let healingQueueTab = false;
+/** Bumped by every `renderDownloads`, so only the latest one paints. */
+let renderSeq = 0;
 
 // ---------- Helpers ----------
 
@@ -150,7 +153,12 @@ function libCard(opts: {
         }, [icon("shuffle", 14)])
       : null,
   ]);
-  const card = el("div", { class: "card", onClick: opts.onOpen }, [
+  const card = el("div", {
+    class: "card",
+    "aria-label": opts.sub ? `${opts.title} — ${opts.sub}` : opts.title,
+    onClick: opts.onOpen,
+    ...asButton(opts.onOpen),
+  }, [
     poster,
     el("div", { class: "card-title" }, [opts.title]),
     el("div", { class: "card-sub" }, [opts.sub]),
@@ -419,16 +427,23 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
   if (openSeason != null && !bySeason.has(openSeason)) openSeason = null;
 
   const seasonTitle = (n: number) => (n >= 0 ? `Season ${n}` : "Episodes");
+  // The breadcrumb links back up a level.
+  const toAllShows = (): void => {
+    openSeries = null;
+    renderTvTab(pane, tv, root);
+  };
+  const toSeasons = (): void => {
+    openSeason = null;
+    renderTvTab(pane, tv, root);
+  };
 
   if (openSeason == null) {
     // One series: a grid of its downloaded seasons.
     pane.append(
       el("div", { class: "lib-crumb" }, [
         el("a", {
-          onClick: () => {
-            openSeries = null;
-            renderTvTab(pane, tv, root);
-          },
+          onClick: toAllShows,
+          ...asButton(toAllShows),
         }, [icon("arrow-left"), "All shows"]),
         el("span", {}, [openSeries]),
         el("span", { class: "row-actions" }, [
@@ -476,10 +491,8 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
   pane.append(
     el("div", { class: "lib-crumb" }, [
       el("a", {
-        onClick: () => {
-          openSeason = null;
-          renderTvTab(pane, tv, root);
-        },
+        onClick: toSeasons,
+        ...asButton(toSeasons),
       }, [icon("arrow-left"), "Seasons"]),
       el("span", {}, [`${openSeries} · ${seasonTitle(openSeason)}`]),
       el("span", { class: "row-actions" }, [
@@ -744,15 +757,22 @@ export async function renderDownloads(
   // change, and after playback. Only the first paint gets a placeholder; a
   // refresh keeps the current content on screen until the new one is ready,
   // instead of flashing the whole page.
-  if (!root.querySelector(".dl-tabs")) {
+  let marker: Element | null = root.querySelector(".dl-tabs");
+  if (!marker) {
     clear(root);
-    root.append(skeletonGrid(10));
+    marker = skeletonGrid(10);
+    root.append(marker);
   }
+  const seq = ++renderSeq;
 
   const [items, pending] = await Promise.all([
     invoke<any[]>("downloads_list"),
     invoke<number>("progress_pending"),
   ]);
+  // Navigated away while loading (the page that was here is gone), or a newer
+  // refresh has started and will paint fresher data: either way, not ours to
+  // draw over.
+  if (seq !== renderSeq || !document.contains(marker)) return;
   const waiting = getQueuedDownloads();
 
   const completed = items.filter((d) => d.status === "complete");

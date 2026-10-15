@@ -46,7 +46,7 @@ fn read(conn: &Connection) -> Option<u32> {
 
 /// "dark" | "light" | "no-preference" | "unknown" (portal unavailable — the
 /// frontend then falls back to matchMedia).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn system_color_scheme() -> String {
     let Ok(conn) = Connection::new_session() else {
         crate::debug_log_line("theme: no session bus; falling back to matchMedia");

@@ -413,6 +413,10 @@ export async function renderSearch(root: HTMLElement, term: string): Promise<voi
     }
   }
 
+  // Why the last page didn't arrive, so a search that failed outright isn't
+  // drawn as one that found nothing.
+  let failure: any = null;
+
   async function loadPage(): Promise<void> {
     moreBtn.disabled = true;
     moreBtn.textContent = "Loading…";
@@ -421,7 +425,9 @@ export async function renderSearch(root: HTMLElement, term: string): Promise<voi
       found.push(...r.Items);
       total = r.TotalRecordCount;
       startIndex += SEARCH_PAGE;
-    } catch {
+      failure = null;
+    } catch (e) {
+      failure = e;
       total = found.length;
     } finally {
       moreBtn.disabled = false;
@@ -437,6 +443,10 @@ export async function renderSearch(root: HTMLElement, term: string): Promise<voi
   if (!document.contains(placeholder)) return;
   placeholder.remove();
 
+  if (!found.length && failure) {
+    root.append(errorState("Search didn't go through", failure, () => void renderSearch(root, term)));
+    return;
+  }
   if (!found.length) {
     root.append(
       emptyState({
