@@ -15,7 +15,7 @@
 		</dict>
 	</array>
 	<key>FJCarPlayVideo</key>
-	<true/>
+	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
