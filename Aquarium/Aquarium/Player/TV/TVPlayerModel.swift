@@ -190,6 +190,7 @@ final class PlayerModel {
         made.volume = volume * 100
         engine = made
         refreshSubtitleStyling()
+        applyFraming()
         NowPlaying.shared.attach(to: self)
         return made
     }
@@ -1285,6 +1286,15 @@ final class PlayerModel {
             engine.set("sub-outline-size", "0")
             engine.set("sub-shadow-offset", "0")
         }
+    }
+
+    /// Fit or Fill, from Settings. mpv's `panscan` at 1 grows a picture whose
+    /// shape isn't the screen's until it covers it, cropping what spills
+    /// over (what Fill is on the other platforms' players), and at 0 shows
+    /// the whole frame. A property of the player rather than of a file, so
+    /// it holds for everything opened after.
+    func applyFraming() {
+        engine?.set("panscan", prefs.fillScreen ? "1.0" : "0.0")
     }
 
     // MARK: - Quality

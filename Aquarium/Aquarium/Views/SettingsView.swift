@@ -2227,6 +2227,18 @@ enum SettingsCopy {
         name: "Refresh channel list & guide now",
         text: "Downloads the channels and the guide again straight away, instead of waiting for the next scheduled refresh."
     )
+    #if os(tvOS)
+    // The Apple TV plays through mpv, not Apple's player: its framing is only
+    // set here (the player has no control for it), and the picture controls
+    // missing are a choice rather than something the player can't do.
+    static let framing = SettingNote(
+        name: "Framing",
+        text: "Fill is how you put a 2.35:1 film on a 16:9 screen without watching it between black bars. It does cut the edges of the frame off."
+    )
+    static let pictureControls = SettingNote(
+        text: "There are no brightness, contrast or colour controls here: the television's own picture settings are the place for them, and they apply to everything on screen."
+    )
+    #else
     static let framing = SettingNote(
         name: "Framing",
         text: "Fill is how you put a 2.35:1 film on a 16:9 screen without watching it between black bars. It does cut the edges of the frame off. Also reachable from the player itself, so it can be judged against what's on screen."
@@ -2234,6 +2246,7 @@ enum SettingsCopy {
     static let pictureControls = SettingNote(
         text: "There are no brightness, contrast or colour controls: Apple's video player has no way to adjust the picture of a stream."
     )
+    #endif
     static let concurrency = SettingNote(
         name: "Parallel downloads",
         text: "How many transfers run at once. One at a time is kindest to a server that has to transcode each of them."
@@ -2281,10 +2294,17 @@ enum SettingsCopy {
     static var aboutLines: [String] {
         ["Aquarium \(Bundle.appVersion) (\(Bundle.appBuild))", "Playback engine: AVFoundation", about.text]
     }
+    #if os(tvOS)
+    static let playbackEngine = SettingNote(
+        name: "Playback engine",
+        text: "mpv, which opens the original file whatever it is — Matroska, DTS and TrueHD included — so the server is rarely asked to convert one, mostly when a lower quality is chosen. The picture is decoded by Apple TV's hardware wherever it takes the codec."
+    )
+    #else
     static let playbackEngine = SettingNote(
         name: "Playback engine",
         text: "Apple's AVFoundation, the same media framework the system's own players are built on — so what plays directly, and what the server is asked to convert, follows what this device supports."
     )
+    #endif
 }
 
 extension SettingsView {
@@ -2369,7 +2389,12 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .account: "Who is signed in and where, how the connection is secured, the other accounts on this device, and signing out."
         case .appearance: "Light or dark, the icon on the Home Screen, and the order of the tabs."
+        #if os(tvOS)
+        // No adaptive quality on the Apple TV's player — see `VideoSettingsPage`.
+        case .video: "The quality a stream opens at, how a wide picture is framed, what happens at the end of an episode, and the spoken language a video opens with."
+        #else
         case .video: "The quality a stream opens at, whether it adapts, how a wide picture is framed, what happens at the end of an episode, and the spoken language a video opens with."
+        #endif
         case .audio: "The delay that keeps sound and picture together, and downmixing surround for a stereo setup."
         case .subtitles: "Which subtitles a video opens with, whether only the forced track shows, and how large they are drawn and on what."
         case .music: "Keeping the music going, levelling quiet albums against loud ones, lossless over cellular, and how stations choose."
