@@ -69,6 +69,9 @@ struct FollowWidget: Widget {
 private struct FollowCard: View {
     let entry: FollowEntry
     @Environment(\.widgetFamily) private var family
+    /// Full colour, or the Home Screen's tinted and clear styles — see
+    /// `NowPlayingCard`, which handles them the same way.
+    @Environment(\.widgetRenderingMode) private var renderingMode
 
     var body: some View {
         Group {
@@ -90,6 +93,7 @@ private struct FollowCard: View {
             Image(systemName: "tv")
                 .font(.title2)
                 .foregroundStyle(ActivityPalette.accentText)
+                .widgetAccentable()
             Text(entry.isEmpty ? "Nothing to follow yet" : "That title has gone")
                 .font(.headline)
             Text(entry.isEmpty ? "Open Aquarium to load your library." : "Edit the widget to pick another.")
@@ -104,10 +108,13 @@ private struct FollowCard: View {
             poster(cornerRadius: 0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
-            LinearGradient(
-                colors: [.clear, ActivityPalette.background.opacity(0.92)],
-                startPoint: .center, endPoint: .bottom
-            )
+                .opacity(renderingMode == .fullColor ? 1 : 0.4)
+            if renderingMode == .fullColor {
+                LinearGradient(
+                    colors: [.clear, ActivityPalette.background.opacity(0.92)],
+                    startPoint: .center, endPoint: .bottom
+                )
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
                     .font(.footnote.weight(.semibold))
@@ -133,6 +140,7 @@ private struct FollowCard: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(ActivityPalette.accentText)
                     .textCase(.uppercase)
+                    .widgetAccentable()
                 Text(item.title)
                     .font(.headline)
                     .lineLimit(2)
@@ -168,6 +176,7 @@ private struct FollowCard: View {
         if let image = entry.artwork {
             Image(uiImage: image)
                 .resizable()
+                .widgetArtwork()
                 .aspectRatio(contentMode: .fill)
         } else {
             ZStack {
@@ -175,6 +184,7 @@ private struct FollowCard: View {
                 Image(systemName: entry.entry?.isSeries == true ? "tv" : "film")
                     .font(.largeTitle)
                     .foregroundStyle(ActivityPalette.accentText)
+                    .widgetAccentable()
             }
         }
     }
@@ -184,6 +194,7 @@ private struct FollowCard: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.22))
                 Capsule().fill(ActivityPalette.accent).frame(width: proxy.size.width * min(1, max(0, fraction)))
+                    .widgetAccentable()
             }
         }
         .frame(height: 4)

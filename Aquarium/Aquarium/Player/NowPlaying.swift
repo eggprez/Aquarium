@@ -51,6 +51,14 @@ final class NowPlaying {
         centre.skipBackwardCommand.isEnabled = !onStage || music.current?.isAudiobook == true
         centre.changeShuffleModeCommand.isEnabled = onStage
         centre.changeRepeatModeCommand.isEnabled = onStage
+        // The rates the system's menu offers are the ones whoever has the
+        // stage can play. The music player has no 0.5×: offered it anyway, a
+        // book set to it from the lock screen landed somewhere else and the
+        // menu showed no tick at all.
+        let rates = (onStage ? MusicPlayer.speeds : PlayerModel.speeds).map { NSNumber(value: $0) }
+        if centre.changePlaybackRateCommand.supportedPlaybackRates != rates {
+            centre.changePlaybackRateCommand.supportedPlaybackRates = rates
+        }
         // No like or dislike: stations are steered by skipping and letting
         // songs play, and a watch, a car or headphones that offer those
         // buttons get none to show.
@@ -167,12 +175,19 @@ final class NowPlaying {
             return .success
         }
 
+        // Which rates are offered follows the stage — see
+        // `refreshCommandAvailability`.
         centre.changePlaybackRateCommand.supportedPlaybackRates =
             PlayerModel.speeds.map { NSNumber(value: $0) }
         centre.changePlaybackRateCommand.addTarget { [weak self] event in
             guard let self, let event = event as? MPChangePlaybackRateCommandEvent
             else { return .noSuchContent }
-            if self.musicHasTheStage { self.music.speed = Double(event.playbackRate); return .success }
+            if self.musicHasTheStage {
+                // Onto the music player's own steps, whatever was asked.
+                let asked = Double(event.playbackRate)
+                self.music.speed = MusicPlayer.speeds.min { abs($0 - asked) < abs($1 - asked) } ?? 1
+                return .success
+            }
             guard let model = self.model else { return .noSuchContent }
             model.speed = Double(event.playbackRate)
             return .success

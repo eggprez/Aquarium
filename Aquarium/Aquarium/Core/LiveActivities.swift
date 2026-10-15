@@ -57,6 +57,7 @@ final class LiveActivityCenter {
 
         watchListening()
         watchDownloads()
+        settleStaleNowPlaying()
         watchNowPlaying()
 
         // A start refused because the app was behind is asked for again here.
@@ -293,6 +294,21 @@ final class LiveActivityCenter {
     /// is, so a seek the card didn't hear about is caught.
     private var nowPlayingTicker: Task<Void, Never>?
     private static let nowPlayingDrift: Double = 3
+
+    /// A card left saying "playing" by a run that ended without saying so — a
+    /// force-quit, a crash — put right at launch. Nothing else would:
+    /// `publishNowPlaying` only ever pauses a snapshot this run sent itself,
+    /// so the card stayed on "Now Playing" with its bar running until
+    /// something else was played. It keeps the position it last knew, which
+    /// is the last one anybody saw rather than one run on to the end.
+    private func settleStaleNowPlaying() {
+        guard nowPlayingSnapshot() == nil, var stale = NowPlayingSnapshot.read(), stale.isPlaying else { return }
+        stale.isPlaying = false
+        stale.updatedAt = Date()
+        nowPlayingSent = stale
+        NowPlayingSnapshot.write(stale)
+        WidgetCenter.shared.reloadTimelines(ofKind: NowPlayingSnapshot.widgetKind)
+    }
 
     /// What the Home Screen card shows — see Shared/WidgetTypes.swift. Only
     /// the things that name a change are read under observation; the

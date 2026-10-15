@@ -51,6 +51,20 @@ enum ActivityPalette {
     static let smallDim = Color.white.opacity(0.78)
 }
 
+extension Image {
+    /// Cover art and posters in a Home Screen widget, kept as pictures in the
+    /// tinted and clear styles. Left to the system, an image there is drawn
+    /// as a silhouette in the tint, which for a photograph is a solid slab.
+    @ViewBuilder
+    func widgetArtwork() -> some View {
+        if #available(iOS 18.0, *) {
+            self.widgetAccentedRenderingMode(.fullColor)
+        } else {
+            self
+        }
+    }
+}
+
 /// The Lock Screen layout, or the small card for Apple Watch and CarPlay.
 ///
 /// The small card is drawn on an opaque background of our own and always in
