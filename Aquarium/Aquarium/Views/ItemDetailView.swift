@@ -363,9 +363,6 @@ struct ItemDetailView: View {
     @ViewBuilder
     private func scrollCore() -> some View {
         ScrollView {
-            #if os(iOS)
-            scrollProbe
-            #endif
             if isLoading, item == nil {
                 // The page it is about to be, in the shape it will take.
                 VStack(alignment: .leading, spacing: 26) {
@@ -438,6 +435,9 @@ struct ItemDetailView: View {
                 guard let chosen else { return }
                 queue(prompt.items, quality: chosen)
             }
+            // Half a screen is what a paragraph and a few buttons need; a
+            // full-height sheet left them floating in the middle of it.
+            .presentationDetents([.medium, .large])
         }
         #else
         .confirmationDialog(
@@ -462,6 +462,13 @@ struct ItemDetailView: View {
         VStack(alignment: .leading, spacing: 26) { sections(item) }
         #else
         LazyVStack(alignment: .leading, spacing: 26) { sections(item) }
+            #if os(iOS)
+            // Behind the stack rather than above it: as a sibling in the
+            // scroll view the zero-height probe still took the scroll view's
+            // default stack spacing under it, and that was a strip of bare
+            // page between the bar and the artwork.
+            .background(alignment: .top) { scrollProbe }
+            #endif
         #endif
     }
 
@@ -709,6 +716,13 @@ struct ItemDetailView: View {
                 HStack(spacing: 10) {
                     compactActions(item, playable: playable(for: item))
                 }
+                // A line each, whatever the text size. Squeezed at the larger
+                // sizes, a label broke inside a word — "Re-/sume", "Downl/oad"
+                // — for want of a space to break at; shrinking it a little is
+                // the lesser evil, and at the largest sizes the download
+                // button gives up its word altogether (see `compactActions`).
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
             } else {
                 WrappingRow(spacing: 10, rowSpacing: 10) {
                     actionButtons(item, playable: playable(for: item))
@@ -743,6 +757,7 @@ struct ItemDetailView: View {
     #if !os(macOS)
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var isCompact: Bool { sizeClass == .compact }
     #else
     private var isCompact: Bool { false }
@@ -878,8 +893,18 @@ struct ItemDetailView: View {
         .appButtonStyle(highlight: item.userData.isFavorite ? Theme.warn : nil)
 
         #if !os(tvOS)
-        downloadMenu(item)
-            .buttonStyle(.bordered)
+        // Its word only while there is room for it. From the second size up
+        // from the default, "Resume" and "Download" between them no longer fit
+        // a phone's width beside two glyphs, and the glyph alone is the one
+        // the system's own media apps use for this.
+        if dynamicTypeSize >= .xxLarge {
+            downloadMenu(item)
+                .buttonStyle(.bordered)
+                .labelStyle(.iconOnly)
+        } else {
+            downloadMenu(item)
+                .buttonStyle(.bordered)
+        }
         #endif
 
         // Nothing to put behind the glyph on a series whose next episode the
@@ -1212,8 +1237,10 @@ struct ItemDetailView: View {
         let cast = mergedCast(item.People ?? []).prefix(24)
         if !cast.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
+                // The same heading as the seasons and episodes above it.
                 Text("Cast & Crew")
-                    .font(.title3.weight(.semibold))
+                    .font(shelfTitleFont)
+                    .foregroundStyle(Theme.text)
                     .padding(.horizontal, Metrics.gutter)
                 ScrollView(.horizontal, showsIndicators: Self.showsShelfIndicators) {
                     // Lazy, like the season row above it: a film's cast is
@@ -1402,11 +1429,17 @@ struct ItemDetailView: View {
         #endif
     }
 
+    /// The page's own copy is corrected straight away, and every other screen
+    /// showing the item is told, the way the press-and-hold menu tells them —
+    /// a favourite added here was missing from Favorites, and an episode
+    /// marked watched still unticked on the season page, until something else
+    /// happened to reload them. See `ItemMutations`.
     private func toggleFavourite(_ item: BaseItem) async {
         let next = !item.userData.isFavorite
         do {
             try await client.setFavorite(item.Id, favorite: next)
             updateUserData(of: item.Id) { $0.IsFavorite = next }
+            ItemMutations.shared.changed()
         } catch {
             app.toast("Couldn't update favorites", tone: .error)
         }
@@ -1420,6 +1453,7 @@ struct ItemDetailView: View {
                 $0.Played = next
                 $0.PlaybackPositionTicks = 0
             }
+            ItemMutations.shared.changed()
         } catch {
             app.toast("Couldn't update watched state", tone: .error)
         }

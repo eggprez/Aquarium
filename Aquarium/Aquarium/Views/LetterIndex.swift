@@ -17,6 +17,10 @@ import SwiftUI
 struct LetterIndexBar: View {
     static let letters: [String] = ["#"] + (0..<26).map { String(Character(UnicodeScalar(65 + $0)!)) }
 
+    /// How much of the trailing edge the strip takes: its column and the
+    /// margin after it.
+    static let width: CGFloat = 26
+
     /// Called with each letter the finger lands on.
     var onSelect: (String) -> Void
 
@@ -69,7 +73,7 @@ struct LetterIndexBar: View {
             )
             .sensoryFeedback(.selection, trigger: current)
         }
-        .frame(width: 24)
+        .frame(width: Self.width - 2)
         .padding(.trailing, 2)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Index")
@@ -113,12 +117,20 @@ enum LetterIndex {
 }
 
 extension View {
-    /// The strip, down the trailing edge of a scroll view, while `shown`.
+    /// The strip, down the trailing edge of a scroll view, while `shown` —
+    /// and the scroll view's content moved in to clear it.
+    ///
+    /// The strip is wider than the page's gutter, so laid over the content
+    /// as it was it covered the last column's trailing edge, titles and all,
+    /// and took the taps meant for those posters as touches on a letter.
+    /// The margin is only what the gutter doesn't already give, plus a few
+    /// points of air, so the content gives up as little as it can.
     @ViewBuilder
     func letterIndex(shown: Bool, onSelect: @escaping (String) -> Void) -> some View {
-        overlay(alignment: .trailing) {
-            if shown { LetterIndexBar(onSelect: onSelect) }
-        }
+        contentMargins(.trailing, shown ? LetterIndexBar.width + 4 - Metrics.gutter : 0, for: .scrollContent)
+            .overlay(alignment: .trailing) {
+                if shown { LetterIndexBar(onSelect: onSelect) }
+            }
     }
 }
 
