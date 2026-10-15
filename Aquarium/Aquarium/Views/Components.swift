@@ -219,7 +219,10 @@ enum Metrics {
     /// Width of the guide's pinned channel column.
     static var guideChannelColumnWidth: CGFloat {
         #if os(tvOS)
-        return 280
+        // 280 left a name about 150 points beside its 104-point logo, which
+        // cut most of a line-up to a word and an ellipsis. The guide's hours
+        // have the rest of a 1920-point screen to give.
+        return 340
         #elseif os(macOS)
         return 172
         #else
@@ -1073,8 +1076,8 @@ struct RowPressStyle: ButtonStyle {
 /// nothing at all until the selector reached them.
 ///
 /// Both states are drawn here instead, so a button reads the same whether or not
-/// it has focus, and the focus itself is the ring, the lift and the shadow the
-/// rest of the app already uses.
+/// it has focus, and the focus itself is a white fill with the ring, the lift
+/// and the shadow the rest of the app already uses.
 struct TVButtonStyle: ButtonStyle {
     enum Kind { case prominent, secondary }
     var kind: Kind = .secondary
@@ -1113,18 +1116,22 @@ struct TVButtonStyle: ButtonStyle {
         }
     }
 
+    /// Focus turns either kind white. The prominent one used to go from one
+    /// purple to a lighter one, which over a purple-lit backdrop left a focused
+    /// Play with nothing but its thin ring to say so, beside a Details that
+    /// went white.
     private func fill(_ isFocused: Bool) -> Color {
         switch kind {
-        case .prominent: isFocused ? Theme.accent : Theme.accentStrong
+        case .prominent: isFocused ? .white : Theme.accentStrong
         case .secondary: isFocused ? .white : Theme.raised
         }
     }
 
-    /// White on the accent either way; on the secondary style the label has to
-    /// flip with the fill, since focus turns that one white.
+    /// The label flips with the fill: white on the accent, and on white the
+    /// accent for the prominent style and near-black for the secondary.
     private func labelColour(_ isFocused: Bool) -> Color {
         switch kind {
-        case .prominent: .white
+        case .prominent: isFocused ? Theme.accentStrong : .white
         // Focus turns this one's fill white, so the label has to go dark with
         // it — a highlight colour pitched for the raised fill would be the same
         // trap the system style falls into.
@@ -1945,6 +1952,20 @@ struct WrappingRow: Layout {
 // skeletons above — so the layout settles once, when the request goes out,
 // rather than jumping when it lands.
 
+/// The empty, error and offline states' glyph and text column, given the
+/// phone's. A television's are its own: the phone's 420-point column under a
+/// 34-point glyph was a narrow strip in the middle of a 1920-point screen,
+/// read from across a room.
+private enum StateSize {
+    #if os(tvOS)
+    static func glyph(_ phone: CGFloat) -> CGFloat { 72 }
+    static func textWidth(_ phone: CGFloat) -> CGFloat { 960 }
+    #else
+    static func glyph(_ phone: CGFloat) -> CGFloat { phone }
+    static func textWidth(_ phone: CGFloat) -> CGFloat { phone }
+    #endif
+}
+
 struct EmptyState: View {
     var symbol: String = "tray"
     var title: String
@@ -1970,14 +1991,14 @@ struct EmptyState: View {
         #else
         VStack(spacing: 10) {
             Image(systemName: symbol)
-                .font(.system(size: 34))
+                .font(.system(size: StateSize.glyph(34)))
                 .foregroundStyle(Theme.textDim)
             Text(title).font(.headline).foregroundStyle(Theme.text)
             Text(message)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textDim)
-                .frame(maxWidth: 420)
+                .frame(maxWidth: StateSize.textWidth(420))
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .appButtonStyle()
@@ -2011,14 +2032,14 @@ struct ErrorState: View {
         #else
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 32))
+                .font(.system(size: StateSize.glyph(32)))
                 .foregroundStyle(Theme.warn)
             Text(title).font(.headline).foregroundStyle(Theme.text)
             Text(error)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textDim)
-                .frame(maxWidth: 460)
+                .frame(maxWidth: StateSize.textWidth(460))
             if let retry {
                 Button("Try again", action: retry)
                     .appButtonStyle(prominent: true)
@@ -2065,14 +2086,14 @@ struct OfflineState: View {
         #else
         VStack(spacing: 14) {
             Image(systemName: "wifi.slash")
-                .font(.system(size: 34))
+                .font(.system(size: StateSize.glyph(34)))
                 .foregroundStyle(Theme.warn)
             Text("Server offline").font(.title2.weight(.semibold))
             Text(Self.message)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textDim)
-                .frame(maxWidth: 460)
+                .frame(maxWidth: StateSize.textWidth(460))
             HStack(spacing: 12) {
                 if let onDownloads {
                     Button("Go to Downloads", action: onDownloads)

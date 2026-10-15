@@ -201,6 +201,7 @@ private struct ServerSettingsPage: View {
 
 private struct VideoSettingsPage: View {
     @Environment(Preferences.self) private var prefs
+    @Environment(PlayerModel.self) private var player
 
     var body: some View {
         @Bindable var prefs = prefs
@@ -208,13 +209,17 @@ private struct VideoSettingsPage: View {
             SettingGroup(nil, page: .video) {
                 SettingChoice(Copy.defaultQuality, selection: SettingsView.bitrateBinding,
                               options: Quality.choices.map { ($0.maxBitrate, $0.label) }, isFirst: true)
-                SettingToggle(Copy.adaptiveQuality, isOn: $prefs.adaptiveQuality)
+                // No "Adapt quality automatically" here: the Apple TV's mpv
+                // player never steps a stream down by itself, so the switch
+                // would do nothing. Quality is changed by hand from the
+                // player's Quality tab instead.
             }
             SettingGroup("Picture", page: .video) {
                 SettingChoice(Copy.framing, selection: $prefs.fillScreen,
                               options: [(false, "Fit — show the whole frame"), (true, "Fill — crop to the screen")],
                               also: [Copy.pictureControls])
             }
+            .onChange(of: prefs.fillScreen) { _, _ in player.applyFraming() }
             SettingGroup("Playing", page: .video) {
                 SettingToggle(Copy.resume, isOn: $prefs.resumePlayback)
                 SettingToggle(Copy.autoplayNext, isOn: $prefs.autoplayNext)
@@ -459,7 +464,7 @@ private struct AboutSettingsPage: View {
             SettingGroup(nil, page: .about) {
                 SettingInfo("Aquarium", value: "\(Bundle.appVersion) (\(Bundle.appBuild))",
                             notes: [Copy.about], isFirst: true)
-                SettingInfo("Playback engine", value: "AVFoundation", notes: [Copy.playbackEngine])
+                SettingInfo("Playback engine", value: "mpv", notes: [Copy.playbackEngine])
             }
         }
     }

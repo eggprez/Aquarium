@@ -321,9 +321,13 @@ struct HomeView: View {
             Spacer()
             refreshControl
         }
+        // The section is the row the button is on, not the padding above it.
+        // Taken outside the padding it reached the top of the screen, behind
+        // the tab strip, and Down from the strip — which only moves into what
+        // lies below it — went straight past it to the first shelf.
+        .focusSection()
         .padding(.top, max(bleed.top, Self.tabStripClearance))
         .padding(.horizontal, max(bleed.leading, Metrics.gutter))
-        .focusSection()
     }
 
     /// How far down the media bar the tab strip reaches, plus a gap. Measured
@@ -419,7 +423,15 @@ struct HomeView: View {
                 #else
                 .padding(.top, hero == nil ? 12 : 0)
                 #endif
+                #if os(tvOS)
+                // At least the 60 points of overscan a television may crop:
+                // `bleed` reports zero as often as not (see `refreshOverHero`),
+                // and the last shelf's captions ended under 50 points from the
+                // bottom of the screen.
+                .padding(.bottom, 24 + max(bleed.bottom, 60))
+                #else
                 .padding(.bottom, 24 + bleed.bottom)
+                #endif
             }
         }
         .reloadWhenPlaybackEnds { await reload() }
@@ -1116,6 +1128,17 @@ struct HeroHeader: View {
             content
                 .padding(.horizontal, Metrics.gutter)
                 .padding(.bottom, textInset)
+                #if os(tvOS)
+                // A band the width of the screen around the title and the
+                // buttons, so Down from Refresh in the top right corner has
+                // them to land on. The bar's own section can't be that
+                // target: it starts at the top of the screen, around Refresh
+                // and under the tab strip, and the engine only moves into
+                // what lies below where it is — so Down passed the buttons by
+                // and went to the first shelf.
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .focusSection()
+                #endif
         }
         .frame(height: artHeight)
         .clipped()
@@ -1568,9 +1591,21 @@ struct HeroCarousel: View {
     /// fresh countdown on every redraw.
     @State private var ticker = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The set the selector is in, kept on screen after a new draw has
+    /// arrived — see `pages`.
+    @State private var held: [BaseItem]?
+
+    /// What the bar shows: `items`, except that a new draw waits while the
+    /// selector is on one of the pages, for the same reason the ticker does.
+    /// Coming back to Home after a minute away draws again (see
+    /// `HomeView.load`), and focus comes back to the Play it left: the new set
+    /// arriving under it put another title behind a focused button, which
+    /// would have started something nobody had chosen. It goes in when the
+    /// selector moves off.
+    private var pages: [BaseItem] { held ?? items }
 
     private var index: Int {
-        items.firstIndex { $0.Id == position } ?? 0
+        pages.firstIndex { $0.Id == position } ?? 0
     }
 
     var body: some View {
@@ -1582,7 +1617,7 @@ struct HeroCarousel: View {
                 // before anyone swipes towards it. Six backdrops is what this
                 // costs, and `prefetch` was loading them all anyway.
                 HStack(spacing: 0) {
-                    ForEach(items) { item in
+                    ForEach(pages) { item in
                         HeroHeader(
                             item: item,
                             onFocusChange: { inside in
@@ -1605,30 +1640,45 @@ struct HeroCarousel: View {
             .scrollIndicators(.hidden)
             .focusSection()
 
-            if items.count > 1 { pageDots }
+            if pages.count > 1 { pageDots }
         }
         .frame(height: HeroHeader.height + topBleed)
         .onAppear {
-            if position == nil { position = items.first?.Id }
+            if position == nil { position = pages.first?.Id }
         }
         // Focus landing on another page is the swipe that pages the bar. The
         // focus engine scrolls just far enough to show the button it moved to;
         // this finishes the move so the page sits square, not a third of the
         // way across.
         .onChange(of: focusedPage) { _, page in
-            guard let page, page != position else { return }
+            guard let page else {
+                // Not at once: paging from one page to the next can pass
+                // through nil, and letting the new draw in there would swap
+                // the set out in the middle of the swipe.
+                if held != nil {
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        if focusedPage == nil { held = nil }
+                    }
+                }
+                return
+            }
+            guard page != position else { return }
             withAnimation(.easeInOut(duration: 0.45)) { position = page }
         }
+        .onChange(of: items) { old, _ in
+            if focusedPage != nil, held == nil { held = old }
+        }
         .onReceive(ticker) { _ in
-            guard !reduceMotion, focusedPage == nil, items.count > 1 else { return }
-            let next = items[(index + 1) % items.count].Id
+            guard !reduceMotion, focusedPage == nil, pages.count > 1 else { return }
+            let next = pages[(index + 1) % pages.count].Id
             withAnimation(.easeInOut(duration: 0.6)) { position = next }
         }
         // A fresh draw is a fresh bar: it starts at the first of the new set
         // rather than at wherever the old one had got to — which would also be
         // a page that no longer exists whenever the new draw is the shorter of
         // the two.
-        .onChange(of: items.map(\.Id)) { _, _ in position = items.first?.Id }
+        .onChange(of: pages.map(\.Id)) { _, _ in position = pages.first?.Id }
         .task(id: items.map(\.Id)) { await prefetch() }
     }
 
@@ -1648,7 +1698,7 @@ struct HeroCarousel: View {
     /// Where you are in the set, in the corner the text block doesn't reach.
     private var pageDots: some View {
         HStack(spacing: 10) {
-            ForEach(items.indices, id: \.self) { position in
+            ForEach(pages.indices, id: \.self) { position in
                 Capsule()
                     .fill(position == index ? Theme.accent : Color.white.opacity(0.35))
                     .frame(width: position == index ? 34 : 12, height: 12)

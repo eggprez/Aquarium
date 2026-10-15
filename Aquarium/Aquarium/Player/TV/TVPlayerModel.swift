@@ -190,6 +190,7 @@ final class PlayerModel {
         made.volume = volume * 100
         engine = made
         refreshSubtitleStyling()
+        applyFraming()
         NowPlaying.shared.attach(to: self)
         return made
     }
@@ -231,7 +232,16 @@ final class PlayerModel {
         }()
 
         let previous = source
+        let keptDuration = duration
         resetStreamState()
+        // The same title reopened for a track or a quality plays on until the
+        // new file is in (see below), with mpv's reports of it ignored
+        // meanwhile; its timeline holds where the new stream will start
+        // rather than reading 0:00 under a picture that is still playing.
+        if sameItem, !opts.live {
+            position = startSeconds
+            duration = keptDuration
+        }
         if !sameItem { fullItem = nil }
         if !meta.reopening { liveReopens = 0 }
         if !meta.recovering { escalated = false }
@@ -887,6 +897,9 @@ final class PlayerModel {
         _ = await (reported, released)
         if closingReport != nil {
             Task { await LibraryIndex.shared.sync(minimumGap: 5) }
+            // Once the server has heard where it stopped, so Next Up has
+            // moved on — see `TopShelf.refresh`.
+            Task { await TopShelf.refresh() }
         }
     }
 
@@ -1171,8 +1184,11 @@ final class PlayerModel {
         guard let engine else { return }
         let streams = serverStreams
         // Audio: by index in the file on a direct play; a transcode carries
-        // only the one it was asked for.
-        if !isTranscoding, let index = wantedTracks.audio,
+        // only the one it was asked for. With nothing asked for, the server's
+        // default — which follows the user's audio language on the server —
+        // rather than mpv's, which is only the file's own flag.
+        let audioIndex = wantedTracks.audio ?? streams?.DefaultAudioStreamIndex
+        if !isTranscoding, let index = audioIndex,
            let track = tracks.first(where: { $0.kind == .audio && $0.fileIndex == index }) {
             engine.selectAudio(track.id)
         }
@@ -1285,6 +1301,15 @@ final class PlayerModel {
             engine.set("sub-outline-size", "0")
             engine.set("sub-shadow-offset", "0")
         }
+    }
+
+    /// Fit or Fill, from Settings. mpv's `panscan` at 1 grows a picture whose
+    /// shape isn't the screen's until it covers it, cropping what spills
+    /// over (what Fill is on the other platforms' players), and at 0 shows
+    /// the whole frame. A property of the player rather than of a file, so
+    /// it holds for everything opened after.
+    func applyFraming() {
+        engine?.set("panscan", prefs.fillScreen ? "1.0" : "0.0")
     }
 
     // MARK: - Quality

@@ -356,10 +356,12 @@ struct SearchView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textDim)
                     Spacer()
+                    #if !os(tvOS)
                     Button("Clear") { prefs.clearRecentSearches() }
                         .buttonStyle(.plain)
                         .font(.caption)
                         .foregroundStyle(Theme.accent)
+                    #endif
                 }
                 ForEach(prefs.recentSearches, id: \.self) { recent in
                     Button {
@@ -376,6 +378,17 @@ struct SearchView: View {
                     }
                     .rowButtonStyle()
                 }
+                #if os(tvOS)
+                // Under the list rather than beside its heading. Up there it
+                // was the nearest thing below the search field, so the first
+                // press down landed on it, and down and a click wiped the
+                // history.
+                Button("Clear") { prefs.clearRecentSearches() }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(Theme.accent)
+                    .padding(.top, 10)
+                #endif
             }
             .padding(.horizontal, Metrics.gutter)
         }
