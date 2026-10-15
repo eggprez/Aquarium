@@ -199,6 +199,25 @@ extension View {
         #endif
     }
 
+    /// Paints a `Form` or a `List` in the app's own background colour rather
+    /// than the system's grouped one — the page under a `paletteBar`.
+    ///
+    /// The grouped background is pure black in dark mode, so every settings
+    /// page sat under a bar of the app's near-black with a seam where the one
+    /// met the other once the page scrolled, and an iPad's Settings, which is
+    /// all list, was a shade darker than every page around it. The rows keep
+    /// the system's raised fill, which reads on the page colour in both
+    /// appearances.
+    @ViewBuilder
+    func palettePage() -> some View {
+        #if os(iOS)
+        scrollContentBackground(.hidden)
+            .background(Theme.background)
+        #else
+        self
+        #endif
+    }
+
     /// Applies the user's theme choice. `auto` leaves it to the system.
     @ViewBuilder
     func themed(_ pref: ThemePref) -> some View {
@@ -234,6 +253,11 @@ struct StatusPill: View {
         #else
         Text(text)
             .font(.caption.weight(.semibold))
+            // A word in a capsule is one line at its own width. Squeezed by
+            // what it sits beside, it broke as "Con-/nected" rather than give
+            // up a point.
+            .lineLimit(1)
+            .fixedSize()
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
             .background(colour.opacity(0.16), in: Capsule())
