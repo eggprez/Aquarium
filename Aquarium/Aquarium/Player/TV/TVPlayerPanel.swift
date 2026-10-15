@@ -38,6 +38,9 @@ struct TVPlayerPanel: View {
     let artwork: InfoArtwork
 
     @FocusState private var focusedTab: PlayerTab?
+    /// Whether focus has reached the row of tabs since the panel opened —
+    /// see the retry in `body`.
+    @State private var tabWasFocused = false
 
     /// The tabs this stream has something to show in.
     private var tabs: [PlayerTab] {
@@ -87,8 +90,11 @@ struct TVPlayerPanel: View {
         // A row longer than the panel scrolls inside it rather than running
         // off its edge.
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .padding(.horizontal, 40)
-        .padding(.top, 30)
+        // Clear of the 60 pt a television may crop off each edge, glass and
+        // all: a panel cut off at the top of the screen looked broken. 62
+        // across puts its insides on the timeline's 90.
+        .padding(.horizontal, 62)
+        .padding(.top, 60)
         .onChange(of: focusedTab) { was, focused in
             // Belt to the braces above: should focus reach another tab from
             // a choice anyway, back to the one it belongs to.
@@ -96,7 +102,10 @@ struct TVPlayerPanel: View {
                 focusedTab = tab
                 return
             }
-            if let focused { tab = focused }
+            if let focused {
+                tab = focused
+                tabWasFocused = true
+            }
             tabsFocused = focused != nil
         }
         .defaultFocus($focusedTab, tab ?? .info)
@@ -104,11 +113,14 @@ struct TVPlayerPanel: View {
         // the first claim can land while `RemoteInput` still holds focus and
         // be refused, which leaves focus nowhere — and Menu, with nothing
         // focused to take it, closing the player instead of the panel.
+        // Only until a tab has had it once: after that, nothing focused on
+        // the row means a press down into the choices, which a retry would
+        // undo.
         .onAppear { focusedTab = tab }
         .task {
             for _ in 0..<5 {
                 try? await Task.sleep(for: .milliseconds(100))
-                if focusedTab != nil { return }
+                if focusedTab != nil || tabWasFocused { return }
                 focusedTab = tab ?? .info
             }
         }

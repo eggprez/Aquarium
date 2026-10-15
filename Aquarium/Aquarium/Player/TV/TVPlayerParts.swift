@@ -82,10 +82,15 @@ private struct ChoiceCardLabel<Leading: View>: View {
             leading()
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 if centered { Spacer(minLength: 0) }
+                // Only a card sharing its row's width shrinks its title to
+                // fit. One of its own width — a long track name, with the
+                // tick beside it — takes a third line instead: shrunk, the
+                // chosen track read smaller than the ones beside it and was
+                // cut off all the same.
                 Text(title)
                     .font(.headline)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.75)
+                    .lineLimit(width == nil ? 2 : 3)
+                    .minimumScaleFactor(width == nil ? 0.75 : 1)
                     .multilineTextAlignment(centered ? .center : .leading)
                 Spacer(minLength: 0)
                 if isSelected, !tickInCorner { checkmark }
