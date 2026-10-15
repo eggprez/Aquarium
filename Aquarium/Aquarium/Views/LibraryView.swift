@@ -51,6 +51,9 @@ struct LibraryView: View {
     /// The tiles or rows selected, shared by the grid and the table so a
     /// selection survives switching between them. The toolbar acts on it.
     @State private var selection: Set<String> = []
+    /// Whether this page is on screen rather than under one pushed over it —
+    /// see where the Item menu's value is published.
+    @State private var isOnScreen = false
     @Environment(PlayerModel.self) private var player
     @Environment(\.openWindow) private var openWindow
     #endif
@@ -224,10 +227,9 @@ struct LibraryView: View {
             }
             activeSearchTerm = searchTerm
         }
-        // View ▸ Refresh (⌘R), and the app coming back to the front.
-        .onChange(of: MacCommandRequests.shared.refresh) { _, _ in
-            Task { await reload() }
-        }
+        // View ▸ Refresh (⌘R), and the app coming back to the front — while
+        // this is the page in front. See `onMacRefresh`.
+        .onMacRefresh { Task { await reload() } }
         // The controls are the library's to remember — see `LibraryFilters`.
         .onChange(of: currentFilters) { _, filters in
             filters.save(for: parentId)
@@ -241,7 +243,15 @@ struct LibraryView: View {
         // The Item menu, for the one title selected. Only a title's own page
         // published it, so with a film picked out in the grid — "1 Selected"
         // in the toolbar — Item ▸ Play, ⌘D and ⌥⌘O were all greyed out.
-        .focusedSceneValue(\.itemMenuActions, selectedItemActions)
+        //
+        // Only while this page is on screen. A title pushed over it publishes
+        // the same value, and with both set the Item menu could act on the
+        // film still selected in the grid underneath instead of the title in
+        // front of you. A pushed page takes this one off screen, which is
+        // what `isOnScreen` follows.
+        .focusedSceneValue(\.itemMenuActions, isOnScreen ? selectedItemActions : nil)
+        .onAppear { isOnScreen = true }
+        .onDisappear { isOnScreen = false }
         #endif
         #if os(iOS)
         // The filter bar is the one place in the app where a tap changes what

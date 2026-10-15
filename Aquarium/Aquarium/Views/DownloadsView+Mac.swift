@@ -93,10 +93,9 @@ struct MacDownloadsView: View {
         .task(id: completeCount) {
             freeSpace = await Task.detached(priority: .utility) { DownloadManager.freeSpace() }.value
         }
-        // View ▸ Refresh: send what is waiting and ask the server what it knows.
-        .onChange(of: MacCommandRequests.shared.refresh) { _, _ in
-            Task { await sync() }
-        }
+        // View ▸ Refresh: send what is waiting and ask the server what it
+        // knows — while this is the page in front. See `onMacRefresh`.
+        .onMacRefresh { Task { await sync() } }
     }
 
     /// "42 items · 120 GB · 310 GB free", where the phone has a card.

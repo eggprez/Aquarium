@@ -156,11 +156,6 @@ struct MacSidebarFooter<Status: View>: View {
                 .padding(.vertical, 8)
         }
         .animation(.easeOut(duration: 0.2), value: player.isActive)
-        // The same count as the sidebar's badge on Downloads, on the Dock icon,
-        // so a queue left running can be watched from anywhere.
-        .onChange(of: transfersLeft, initial: true) { _, count in
-            NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
-        }
         .confirmationDialog(
             "Sign out of \(client.session?.server ?? "this server")?",
             isPresented: $confirmSignOut,
@@ -169,12 +164,6 @@ struct MacSidebarFooter<Status: View>: View {
             Button("Sign Out", role: .destructive) { Task { await app.signOut() } }
             Button("Cancel", role: .cancel) {}
         }
-    }
-
-    private var transfersLeft: Int {
-        DownloadManager.shared.records.lazy
-            .filter { $0.status == .queued || $0.status == .downloading }
-            .count
     }
 
     // MARK: Now playing

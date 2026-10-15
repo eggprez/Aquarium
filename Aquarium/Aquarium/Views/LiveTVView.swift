@@ -74,8 +74,10 @@ struct LiveTVView: View {
                 }
             }
             // View ▸ Refresh, ⌘R. A counter from the menu rather than a
-            // shortcut on the button, so the key is bound in one place.
-            .onChange(of: MacCommandRequests.shared.refresh) { _, _ in refresh() }
+            // shortcut on the button, so the key is bound in one place — and
+            // heard only while the guide is the page in front. See
+            // `onMacRefresh`.
+            .onMacRefresh { refresh() }
         #endif
     }
 

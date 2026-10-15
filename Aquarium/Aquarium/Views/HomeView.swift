@@ -428,8 +428,9 @@ struct HomeView: View {
         // View ▸ Refresh (⌘R), the sidebar row's Refresh, and the app coming
         // back to the front after a while away all arrive here as one
         // counter — see `MacCommandRequests.refresh`. Only while Home is the
-        // page in front: a title pushed over it answers its own ⌘R.
-        .onChange(of: MacCommandRequests.shared.refresh) { _, _ in
+        // page in front, in the window in front: a title pushed over it, or a
+        // title window, answers its own ⌘R. See `onMacRefresh`.
+        .onMacRefresh {
             guard isFrontmost else { return }
             Task { await reload(fresh: true) }
         }

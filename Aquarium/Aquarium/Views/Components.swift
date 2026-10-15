@@ -2193,10 +2193,18 @@ struct ToastOverlay: View {
     /// pauses on hover" comes to without a timer of this view's own to pause.
     @State private var held: Toast?
     @State private var release: Task<Void, Never>?
+    /// The title or library window this overlay is in; nil on the main
+    /// window. See `shown`.
+    @Environment(\.routeWindowNavigator) private var window
     #endif
 
     private var shown: [Toast] {
         #if os(macOS)
+        // In the window being worked in, and no other. Every window has one
+        // of these over one shared list, so a toast used to appear in all of
+        // them at once — and Escape in any of them took it down everywhere.
+        // See `AppModel.isWorkingWindow`.
+        guard app.isWorkingWindow(window) else { return [] }
         if let held, !app.toasts.contains(held) { return app.toasts + [held] }
         #endif
         return app.toasts
