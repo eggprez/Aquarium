@@ -557,6 +557,18 @@ struct RouteDestination: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
+        page
+            #if os(macOS)
+            // Every pushed page, not only a title's: a person's, a library's
+            // and Search's results carry horizontal shelves too, and any of
+            // them would size the window the way a title page did — see
+            // `macWindowSizedPage`.
+            .macWindowSizedPage()
+            #endif
+    }
+
+    @ViewBuilder
+    private var page: some View {
         switch route {
         case .item(let id):
             ZoomedDestination(itemId: id, source: app.pendingZoomSource) {
