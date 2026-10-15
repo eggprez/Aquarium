@@ -403,6 +403,10 @@ struct ItemDetailView: View {
             }
         }
         .coordinateSpace(name: Self.scrollSpace)
+        #if os(macOS)
+        // Without this, opening a title grew the window — see the modifier.
+        .macWindowSizedPage()
+        #endif
         // Keyed on the item: on tvOS the detail root can go straight from one
         // item to another, and SwiftUI keeps this view rather than making a
         // new one, so an unkeyed task would leave the first item showing.

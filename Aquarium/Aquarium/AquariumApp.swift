@@ -110,6 +110,15 @@ struct AquariumApp: App {
                 #if !os(tvOS)
                 .onContinueUserActivity(PlaybackHandoff.activityType) { app.continueActivity($0) }
                 #endif
+                // The smallest the main window is worth drawing at: the page
+                // beside a full-width sidebar as wide as a title window's
+                // smallest (see `RouteWindow`), and tall enough for the hero
+                // and a shelf under it. Left to its content the window had no
+                // floor worth the name, and the Library and Live TV toolbars
+                // ran out of room long before it was reached.
+                #if os(macOS)
+                .frame(minWidth: 960, minHeight: 600)
+                #endif
         }
         #if os(macOS)
         .defaultSize(width: 1180, height: 780)
