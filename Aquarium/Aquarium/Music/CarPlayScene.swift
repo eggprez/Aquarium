@@ -226,8 +226,21 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     private func fillListenNow() async {
         guard let listenNow, !isFillingListenNow, Date().timeIntervalSince(listenNowFilledAt) > 90 else { return }
         isFillingListenNow = true
-        defer { isFillingListenNow = false }
         listenNowFilledAt = Date()
+        await fill(listenNow)
+        isFillingListenNow = false
+        // The root was rebuilt while this was out — a sign-in, a music
+        // library turning up — and what was just filled is a tab no longer on
+        // screen. The new tab asked for its own fill meanwhile and was turned
+        // away by the one running, so it said "Loading…" for good.
+        if let current = self.listenNow, current !== listenNow {
+            listenNowFilledAt = .distantPast
+            await fillListenNow()
+        }
+    }
+
+    @MainActor
+    private func fill(_ listenNow: CPListTemplate) async {
         let client = JellyfinClient.shared
         // A car is where the server is most often out of reach, and where an
         // empty screen is least welcome: the same page, from this device.

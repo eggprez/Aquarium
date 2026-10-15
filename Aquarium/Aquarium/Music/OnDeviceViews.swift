@@ -641,7 +641,15 @@ struct OnDeviceCollectionView: View {
                 .buttonStyle(.plain)
             }
             Button {
-                Task { await MusicMixes.startStation(from: subject, title: "\(subject.title) Station") }
+                // From the downloads alone, like the stations on the
+                // Downloaded page: this page is what is on the device, and a
+                // station built from the server streamed songs that aren't.
+                Task {
+                    let result = await MusicMixes.startStation(
+                        from: subject, title: "\(subject.title) Station", localOnly: true
+                    )
+                    if !result.started { app.toast("Nothing on this device to build that from", tone: .error) }
+                }
             } label: {
                 Label("Start Station", systemImage: "dot.radiowaves.left.and.right")
             }

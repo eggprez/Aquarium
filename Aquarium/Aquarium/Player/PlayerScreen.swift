@@ -342,7 +342,7 @@ struct PlayerScreen: View {
                 // button that quietly did nothing at all.
                 if player.item != nil {
                     Button(Self.label(mac: "Try a Smaller Stream", elsewhere: "Try a smaller stream")) {
-                        Task { await player.switchQuality(to: 4_000_000) }
+                        Task { await player.switchQuality(to: Quality.smallerStream(than: player.currentBitrate)) }
                     }
                     .appButtonStyle(prominent: !player.canRetry)
                 }
