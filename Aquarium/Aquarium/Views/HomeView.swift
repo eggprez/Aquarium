@@ -935,6 +935,8 @@ struct HeroHeader: View {
     /// How tall to draw this one. The platform's fixed `height` unless the
     /// caller knows better — the Mac carousel derives it from the window's
     /// width, so a wide window gets a taller picture rather than a strip.
+    /// On iOS a hero nobody has measured (`availableWidth` zero) measures
+    /// itself and takes `height(forWidth:)` instead — see `resolvedHeight`.
     var heroHeight: CGFloat = Self.height
     /// The width the hero has been given, where the caller has measured it;
     /// zero means "unknown", and the fixed sizes below stand in. On the Mac
@@ -965,6 +967,13 @@ struct HeroHeader: View {
     @State private var isHoveringBackdrop = false
     #endif
 
+    #if os(iOS)
+    @Environment(\.displayScale) private var displayScale
+    /// The width this hero was laid out at, for one whose caller didn't
+    /// measure it — a detail page's. Zero until the first layout pass.
+    @State private var measuredWidth: CGFloat = 0
+    #endif
+
     /// How tall the hero is on this platform. Shared so the skeleton that
     /// stands in for it, and the carousel that pages through several, agree
     /// with the real thing rather than each carrying their own copy of the
@@ -987,9 +996,38 @@ struct HeroHeader: View {
         #endif
     }
 
+    /// How tall the hero is for a given width.
+    ///
+    /// The fixed `height` everywhere but an iPad. There, 300 points across a
+    /// 13-inch screen was a 4:1 strip cut out of the middle of a 16:9
+    /// backdrop; it follows the width instead, the way the Mac carousel's
+    /// does — a 2.4:1 band, between the phone's height and one that leaves
+    /// the first shelf on screen. A phone is never given more than `height`:
+    /// held upright it is narrower than the band would want, and on its side
+    /// the picture would take the whole screen.
+    static func height(forWidth width: CGFloat) -> CGFloat {
+        #if os(iOS)
+        guard !Metrics.isPhone, width > 0 else { return Self.height }
+        return min(560, max(Self.height, (width / 2.4).rounded()))
+        #else
+        return Self.height
+        #endif
+    }
+
+    /// The height this one is drawn at: the caller's, or — for an iOS hero
+    /// the caller didn't measure — the one its own width calls for.
+    private var resolvedHeight: CGFloat {
+        #if os(iOS)
+        guard availableWidth <= 0 else { return heroHeight }
+        return Self.height(forWidth: measuredWidth)
+        #else
+        return heroHeight
+        #endif
+    }
+
     /// The picture is taller by whatever it is bleeding through; the text block
     /// is pinned to the bottom, so it stays exactly where it was.
-    private var artHeight: CGFloat { heroHeight + topBleed }
+    private var artHeight: CGFloat { resolvedHeight + topBleed }
 
     /// The name the hero leads with: the show's for an episode or a season,
     /// the title's own for anything else. Shared with the toolbar's Play
@@ -1119,6 +1157,9 @@ struct HeroHeader: View {
         }
         .frame(height: artHeight)
         .clipped()
+        #if os(iOS)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { measuredWidth = $0 }
+        #endif
         // A sidebar's hero is one view handed a different item rather than a
         // new one per title, so a missing wordmark has to stop being missing
         // when the item under it changes.
@@ -1167,6 +1208,13 @@ struct HeroHeader: View {
         #if os(macOS)
         guard availableWidth > 0 else { return Self.backdropWidth }
         return min(3840, ImageLoader.requestWidth(points: availableWidth, displayScale: displayScale))
+        #elseif os(iOS)
+        // Never less than the fixed number, which a phone already fills, and
+        // more where the screen needs it: 1600 pixels across a 13-inch iPad
+        // was being stretched to more than 2600.
+        let width = availableWidth > 0 ? availableWidth : measuredWidth
+        guard width > 0 else { return Self.backdropWidth }
+        return max(Self.backdropWidth, min(3840, ImageLoader.requestWidth(points: width, displayScale: displayScale)))
         #else
         return Self.backdropWidth
         #endif
@@ -1673,28 +1721,41 @@ struct HeroCarousel: View {
     let items: [BaseItem]
 
     @State private var index = 0
-    /// Held in state so it belongs to the view's lifetime: built inline it
-    /// would be a new publisher, and a fresh countdown, on every redraw.
-    @State private var ticker = Timer.publish(every: 8, on: .main, in: .common).autoconnect()
+    /// The bar's own width, which on an iPad decides its height — see
+    /// `HeroHeader.height(forWidth:)`. Zero until the first layout pass.
+    @State private var width: CGFloat = 0
     /// Something that moves on its own is exactly what this setting is for.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var height: CGFloat { HeroHeader.height(forWidth: width) }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             TabView(selection: $index) {
                 ForEach(Array(items.enumerated()), id: \.element.Id) { position, item in
-                    HeroHeader(item: item)
+                    HeroHeader(item: item, heroHeight: height, availableWidth: width)
                         .tag(position)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: HeroHeader.height)
+            .frame(height: height)
 
             if items.count > 1 { pageDots }
         }
-        .frame(height: HeroHeader.height)
-        .onReceive(ticker) { _ in
-            guard !reduceMotion, items.count > 1 else { return }
+        .frame(height: height)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        // Eight seconds from whichever page is showing, however it got there.
+        //
+        // A timer running on its own clock turned the page 2–6 seconds after
+        // a swipe — whatever was left of the count when the finger landed —
+        // and it kept turning behind a title pushed over Home. Keyed on the
+        // page, the count starts again with every turn, the bar's own or a
+        // swipe; and a task ends when its view goes off screen, so nothing
+        // turns while nobody can see it, and a fresh eight seconds starts
+        // when Home is back.
+        .task(id: index) {
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled, !reduceMotion, items.count > 1 else { return }
             withAnimation(.easeInOut(duration: 0.5)) {
                 index = (index + 1) % items.count
             }

@@ -742,10 +742,11 @@ private typealias Copy = SettingsCopy
 /// the right (`SettingsSplitPage`), the way iPadOS Settings works; narrower,
 /// it is the phone's page.
 struct SettingsView: View {
+    @Environment(AppModel.self) private var app
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
-        if AppModel.usesSidebar && sizeClass == .regular {
+        if app.usesSidebar && sizeClass == .regular {
             SettingsSplitPage()
         } else {
             SettingsListPage()
@@ -762,6 +763,7 @@ private struct SettingsListPage: View {
         .formStyle(.grouped)
         .screenTitle("Settings")
         .paletteBar()
+        .palettePage()
     }
 }
 
@@ -785,26 +787,32 @@ private struct SettingsSplitPage: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(page.title)
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(Theme.text)
-                    Text(page.note)
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textDim)
-                        .fixedSize(horizontal: false, vertical: true)
+            // The page's heading pinned over its form rather than stacked
+            // above it, on the page colour: stacked, the form's sections
+            // scrolled up into the heading's last line and were cut through
+            // under it.
+            SettingsPageView(page: page)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(page.title)
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                        Text(page.note)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.textDim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 36)
+                    .padding(.top, 24)
+                    .padding(.bottom, 4)
+                    .background(Theme.background)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 36)
-                .padding(.top, 24)
-                .padding(.bottom, 4)
-                SettingsPageView(page: page)
-            }
-            .frame(maxWidth: .infinity)
-            .id(page)
+                .frame(maxWidth: .infinity)
+                .id(page)
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        // Both columns, the list and the page beside it.
+        .palettePage()
         .screenTitle("Settings")
         .paletteBar()
     }
@@ -921,6 +929,7 @@ extension View {
         self
             .screenTitle(page.title)
             .paletteBar()
+            .palettePage()
             .clearsBottomChrome()
     }
 }
@@ -978,19 +987,26 @@ struct SettingsAccountCard: View {
         HStack(spacing: 14) {
             if let session = client.session {
                 AccountAvatar(account: session, size: 48)
+                // The state beside the name rather than beside both lines, so
+                // the server's address has the card's whole width under them.
+                // In the iPad's 320-point list column, or at the larger text
+                // sizes on a phone, the pill took that width from the address
+                // and cut it to "medi…glass".
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(session.userName.isEmpty ? "Unnamed user" : session.userName)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.text)
-                        .lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(session.userName.isEmpty ? "Unnamed user" : session.userName)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        StatusPill(text: client.isOffline ? "Offline" : "Connected", tone: client.isOffline ? .warn : .ok)
+                    }
                     Text(session.serverLabel)
                         .font(.subheadline)
                         .foregroundStyle(Theme.textDim)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                Spacer(minLength: 8)
-                StatusPill(text: client.isOffline ? "Offline" : "Connected", tone: client.isOffline ? .warn : .ok)
             } else {
                 SettingsTile(page: .account, size: 48)
                 VStack(alignment: .leading, spacing: 2) {
@@ -1139,11 +1155,11 @@ private struct AppearanceSettingsPage: View {
                     TabBarSettingsView()
                         .clearsBottomChrome()
                 } label: {
-                    LabeledContent(AppModel.usesSidebar ? "Sidebar" : "Tab Bar",
+                    LabeledContent(app.usesSidebar ? "Sidebar" : "Tab Bar",
                                    value: prefs.tabBarOrder.isEmpty ? "Default" : "Custom")
                 }
             } footer: {
-                Text(AppModel.usesSidebar
+                Text(app.usesSidebar
                      ? "The order of the sections in the sidebar."
                      : "Which sections have a place in the tab bar, and in what order. The rest are listed under More.")
             }
@@ -1459,6 +1475,7 @@ private struct CustomPlaylistSettingsPage: View {
         .formStyle(.grouped)
         .screenTitle("Custom playlist")
         .paletteBar()
+        .palettePage()
     }
 }
 
@@ -1559,6 +1576,7 @@ private struct StationMixSettingsPage: View {
         .formStyle(.grouped)
         .screenTitle(Copy.stationMix.name ?? "")
         .paletteBar()
+        .palettePage()
     }
 }
 

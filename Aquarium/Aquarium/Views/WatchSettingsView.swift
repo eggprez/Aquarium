@@ -210,6 +210,7 @@ private struct WatchKeptPage: View {
         .formStyle(.grouped)
         .screenTitle("Kept on the Watch")
         .paletteBar()
+        .palettePage()
         .task { await playlists.ensureLoaded() }
     }
 
@@ -295,6 +296,7 @@ private struct WatchStoragePage: View {
         .formStyle(.grouped)
         .screenTitle("Storage on the Watch")
         .paletteBar()
+        .palettePage()
         .task { link.requestInventory() }
         .confirmationDialog("Remove everything from the watch?", isPresented: $confirmAll, titleVisibility: .visible) {
             Button("Remove Everything", role: .destructive) {
@@ -343,6 +345,7 @@ private struct WatchTransfersPage: View {
         .formStyle(.grouped)
         .screenTitle("Transfers")
         .paletteBar()
+        .palettePage()
     }
 
     /// Moving first, furthest along at the top; then waiting, in the order
@@ -417,6 +420,7 @@ private struct WatchDiagnosticsPage: View {
         .formStyle(.grouped)
         .screenTitle("Diagnostics")
         .paletteBar()
+        .palettePage()
         .task { link.reloadWatchLogs() }
     }
 
