@@ -23,26 +23,12 @@ struct RootView: View {
     @Namespace private var posterZoom
 
     /// iPad/Mac sidebar visibility, held explicitly rather than left to
-    /// `NavigationSplitView`'s own state: the detail column wraps its own
-    /// `NavigationStack`, and that inner stack's toolbar can end up owning
-    /// the chrome instead of the split view's, which sometimes drops the
-    /// system's automatic sidebar-toggle button once the sidebar is
-    /// collapsed — stranding the sidebar with no way back short of force-
-    /// quitting. Driving visibility ourselves, with our own toggle in the
-    /// detail toolbar, means there is always a button that can bring it back.
+    /// `NavigationSplitView`'s own state: the system's sidebar toggle lives in
+    /// the navigation bar, and the pages that hide that bar — Home, a title,
+    /// Live TV — hide the toggle with it, stranding the sidebar with no way
+    /// back. Driving visibility ourselves lets those pages draw a toggle of
+    /// their own — see `showSidebar`.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
-
-    #if os(iOS)
-    /// The floating sidebar toggle's circle, and where it sits from the
-    /// detail column's leading edge.
-    private static let sidebarToggleSize: CGFloat = 36
-    private static let sidebarToggleLeading: CGFloat = 12
-    /// How much further in than its gutter a page's own top bar has to start
-    /// to clear that button, with a little air after it.
-    private static var sidebarToggleClearance: CGFloat {
-        max(0, sidebarToggleLeading + sidebarToggleSize + 8 - Metrics.gutter)
-    }
-    #endif
 
     var body: some View {
         Group {
@@ -202,11 +188,13 @@ struct RootView: View {
             Text(app.blockingMessage ?? "")
         }
         // What an error toast becomes on a Mac — see `AppModel.toast` and
-        // `presentAlert`. On the main window, whichever page is in front.
+        // `presentAlert`. On the main window, whichever page is in front —
+        // unless a title window is the one being worked in, which shows its
+        // own (see `takesAlerts`).
         .alert(
             app.pendingAlert?.title ?? "",
             isPresented: Binding(
-                get: { app.pendingAlert != nil },
+                get: { app.pendingAlert != nil && takesAlerts },
                 set: { if !$0 { app.pendingAlert = nil } }
             ),
             presenting: app.pendingAlert
@@ -313,6 +301,17 @@ struct RootView: View {
                 path.wrappedValue = new
             }
         )
+    }
+
+    /// Whether `pendingAlert` is this window's to show. On a Mac, only while
+    /// no title or library window is the one being worked in — that window
+    /// shows it instead; see `RouteWindow` and `AppModel.isWorkingWindow`.
+    private var takesAlerts: Bool {
+        #if os(macOS)
+        app.isWorkingWindow(nil)
+        #else
+        true
+        #endif
     }
 
     private var addingAccountBinding: Binding<Bool> {
@@ -467,39 +466,13 @@ struct RootView: View {
                 .withMiniPlayer()
             )
             #if os(iOS)
-            // A floating toggle rather than a `.toolbar` item on the stack
-            // above: Home draws its own header and hides the system
-            // navigation bar outright (`.toolbar(.hidden, for: .navigationBar)`
-            // in `HomeView`), and other sections may do the same, so a
-            // toolbar-hosted button would come and go with whatever the
-            // current page decides about its own chrome — which is exactly
-            // how the sidebar ended up with no way back. This sits outside
-            // that NavigationStack entirely, so it is there no matter what
-            // page is showing or what that page does with its own toolbar.
-            //
-            // The pages underneath draw their own bars in that same corner —
-            // the wordmark on Home, the back button on a title — so while the
-            // button is there, every `AppTopBar` is told to start to the right
-            // of it. See `sidebarToggleInset`.
-            .overlay(alignment: .topLeading) {
-                if sidebarVisibility == .detailOnly {
-                    Button {
-                        sidebarVisibility = .all
-                    } label: {
-                        Image(systemName: "sidebar.leading")
-                            .font(.body.weight(.semibold))
-                            .frame(width: Self.sidebarToggleSize, height: Self.sidebarToggleSize)
-                            .background(.thinMaterial, in: Circle())
-                    }
-                    .accessibilityLabel("Show sidebar")
-                    .padding(.top, 8)
-                    .padding(.leading, Self.sidebarToggleLeading)
-                }
-            }
-            .environment(
-                \.sidebarToggleInset,
-                sidebarVisibility == .detailOnly ? Self.sidebarToggleClearance : 0
-            )
+            // The way back to a collapsed sidebar, for the pages without a
+            // navigation bar to hold the system's: each of them draws it at
+            // the leading end of its own bar (see `AppTopBar`). Every other
+            // page has the system's toggle in its bar, so this is handed down
+            // rather than floated over the column, which drew a second toggle
+            // under the system's on all of those.
+            .environment(\.showSidebar, showSidebarAction)
             #endif
         }
         #if os(macOS)
@@ -534,6 +507,12 @@ struct RootView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.devicePose) private var pose
 
+    /// Brings the sidebar back, while it is collapsed — see `showSidebar`.
+    private var showSidebarAction: (() -> Void)? {
+        guard sidebarVisibility == .detailOnly else { return nil }
+        return { sidebarVisibility = .all }
+    }
+
     /// iPad gets the sidebar, iPhone the tab bar. Same sections either way.
     ///
     /// The idiom is asked for as well as the size class, and it is not
@@ -550,8 +529,8 @@ struct RootView: View {
     /// A foldable's inside screen is the exception to "no iPhone shows a
     /// sidebar": it is the phone idiom at an iPad's size, regular both ways,
     /// which no phone on its side ever is. So the pose, not the idiom, is
-    /// what lets it through — see `DevicePose`. The model learns which shell
-    /// it got, because that decides where `show` sends a section — see
+    /// what lets it through — see `DevicePose`. The model is told which it
+    /// got, because that decides where `show` sends a section — see
     /// `AppModel.usesSidebar`.
     @ViewBuilder
     private var adaptiveShell: some View {
@@ -601,6 +580,14 @@ struct RootView: View {
 
     private func destination(_ route: Route) -> some View {
         RouteDestination(route: route)
+            // A pushed page on the app's own colour, as the section it was
+            // pushed from is (see `SectionView`). Left to itself a page was
+            // the system's black or white — a person's page, a library opened
+            // from Home, a title's body under its own bar — a shade off the
+            // page it had come from, and off its own bar.
+            #if os(iOS)
+            .background(Theme.background)
+            #endif
     }
 }
 
@@ -612,6 +599,18 @@ struct RouteDestination: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
+        page
+            #if os(macOS)
+            // Every pushed page, not only a title's: a person's, a library's
+            // and Search's results carry horizontal shelves too, and any of
+            // them would size the window the way a title page did — see
+            // `macWindowSizedPage`.
+            .macWindowSizedPage()
+            #endif
+    }
+
+    @ViewBuilder
+    private var page: some View {
         switch route {
         case .item(let id):
             ZoomedDestination(itemId: id, source: app.pendingZoomSource) {

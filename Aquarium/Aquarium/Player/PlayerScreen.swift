@@ -375,7 +375,7 @@ struct PlayerScreen: View {
                 // button that quietly did nothing at all.
                 if player.item != nil {
                     Button(Self.label(mac: "Try a Smaller Stream", elsewhere: "Try a smaller stream")) {
-                        Task { await player.switchQuality(to: 4_000_000) }
+                        Task { await player.switchQuality(to: Quality.smallerStream(than: player.currentBitrate)) }
                     }
                     .appButtonStyle(prominent: !player.canRetry)
                 }
@@ -397,6 +397,9 @@ struct PlayerScreen: View {
         // the way it does on a phone.
         .zIndex(2)
         .playerOverlayScheme()
+        // With one of its buttons focused, Space presses it rather than the
+        // Playback menu's Play / Pause — see `playerKeysYielded`.
+        .focusedValue(\.playerKeysYielded, true)
         #elseif !os(tvOS)
         // AVKit's own transport chrome (the top icon row, the bottom
         // scrubber/transport bar) lives in a native view AVKit manages

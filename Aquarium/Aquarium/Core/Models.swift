@@ -33,7 +33,7 @@ struct MediaStream: Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case Index, Codec, Language, DisplayTitle, Title, Height, Width
         case Channels, ChannelLayout, IsDefault, IsForced, IsExternal, BitRate
-        case BitDepth, Profile, RealFrameRate, AverageFrameRate, VideoRange
+        case BitDepth, Profile, RealFrameRate, AverageFrameRate, VideoRange, VideoRangeType
         case DeliveryMethod, DeliveryUrl
         case type = "Type"
     }
@@ -66,6 +66,11 @@ struct MediaStream: Codable, Hashable, Sendable {
     /// Only ever trusted alongside the codec — see
     /// `JellyfinClient.claimsHDRItCannotCarry`.
     var VideoRange: String?
+    /// The finer reading: `SDR`, `HDR10`, `HLG`, and for Dolby Vision `DOVI`
+    /// — a file with nothing but the Dolby layer — or `DOVIWithHDR10` and the
+    /// like, whose base layer plays without it. See
+    /// `DeviceProfile.playsDolbyVision`.
+    var VideoRangeType: String?
     /// How a subtitle reaches the client — `Embed`, `External`, `Hls`,
     /// `Encode` — and, for `External`, the server path it is fetched from.
     /// Only the mpv player on Apple TV reads these: it adds an external

@@ -64,8 +64,11 @@ struct NowPlayingSnapshot: Codable, Hashable, Sendable {
     /// Where a tap on the card lands.
     var link: URL? {
         guard isVideo else { return URL(string: "aquarium://nowplaying") }
-        // A download playing with no server item has no page to open.
-        return itemId.isEmpty ? nil : URL(string: "aquarium://item/\(itemId)")
+        // A download playing with no server item has no page to open, and
+        // Downloads is where it lives. Nil used to fall through to the music
+        // player's Now Playing, which for a film is nothing at all, so the
+        // tap did nothing.
+        return itemId.isEmpty ? URL(string: "aquarium://downloads") : URL(string: "aquarium://item/\(itemId)")
     }
 
     static func read() -> NowPlayingSnapshot? {

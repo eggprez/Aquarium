@@ -108,9 +108,10 @@ struct PlayerScreen: View {
                     TVPlayerPanel(tab: $panel, tabsFocused: $panelTabsFocused, schedule: schedule, artwork: artwork)
                     Spacer()
                 }
-                // Past tvOS's overscan margins, the way the system's own
-                // player panels go: the panel's insides keep their distance
-                // from the edge, the glass needn't.
+                // Placed by the panel itself, against the screen's edges
+                // rather than the safe area's: it keeps the whole of its
+                // glass inside tvOS's 60 pt overscan margin, and lines its
+                // tabs up with the timeline below — see `TVPlayerPanel`.
                 .ignoresSafeArea()
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -308,6 +309,11 @@ struct PlayerScreen: View {
         case .down:
             if player.isLive {
                 player.switchChannel(by: -1)
+                showControls()
+            } else if scrub != nil {
+                // Not over a scrub waiting for its click, as a swipe down
+                // isn't either: the panel would cover the knob, and the
+                // scrub would still be armed once it was put away.
                 showControls()
             } else {
                 panel = openingTab

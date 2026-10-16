@@ -40,8 +40,8 @@ and behaviour of the player **exactly** as it is today.
 The app forces `GDK_BACKEND=x11` in [`main.rs`](src-tauri/src/main.rs) and strips
 `WAYLAND_DISPLAY` from mpv's environment in [`player.rs`](src-tauri/src/player.rs)
 for one reason: embedding is done by creating an X11 child window and handing
-its id to mpv as `--wid` (`embed.rs`, replaced in Phase 1 and parked at
-`src-tauri/src/embed.rs.x11-backup`).
+its id to mpv as `--wid` (`embed.rs`, replaced in Phase 1; it and its
+`embed.rs.x11-backup` copy are now only in git history).
 
 Wayland has no window reparenting. A client cannot hand another process a
 surface id and have it draw there. mpv's `--wid` is documented as X11/win32/cocoa
@@ -134,7 +134,7 @@ Under Option A, one thing needs a new mechanism. Today, revealing the
 auto-hiding bar in fullscreen uses the X11 SHAPE extension to *clip* the bottom
 72 CSS px off the video window rather than resize it — because resizing makes
 mpv re-fit the picture and the whole frame visibly jumps
-(`embed.rs:79`, in the backup). Wayland has no SHAPE equivalent.
+(`embed.rs:79`, in git history). Wayland has no SHAPE equivalent.
 
 With the render API we own the pixels, so the fix is better than the workaround:
 
@@ -253,8 +253,8 @@ bug is Wayland-specific and useless for judging performance.
 
 ### Phase 1 — `embed.rs` → `surface.rs` ✅ done
 
-Three new modules, and `embed.rs` gone (this tree is not under version control,
-so the old one is parked at `src-tauri/src/embed.rs.x11-backup`):
+Three new modules, and `embed.rs` gone (it was parked for a while as
+`src-tauri/src/embed.rs.x11-backup`; both copies are now only in git history):
 
 | File | What it is |
 | --- | --- |

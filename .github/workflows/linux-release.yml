@@ -18,6 +18,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The .deb is stamped with tauri.conf.json's version, not the tag's, so a
+      # tag pushed without running bump-version.sh would publish a package apt
+      # treats as the one already installed. Fail before building instead.
+      - name: Check tag matches version
+        run: |
+          conf="$(jq -r .version src-tauri/tauri.conf.json)"
+          pkg="$(jq -r .version package.json)"
+          cargo="$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -1)"
+          echo "tauri.conf.json=$conf package.json=$pkg Cargo.toml=$cargo"
+          if [ "$conf" != "$pkg" ] || [ "$conf" != "$cargo" ]; then
+            echo "::error::Version files disagree; run ./bump-version.sh"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$conf" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match version $conf; bump the version (./bump-version.sh) and re-tag"
+            exit 1
+          fi
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: actions/setup-node@v4

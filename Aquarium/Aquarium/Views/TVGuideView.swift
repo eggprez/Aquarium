@@ -530,7 +530,21 @@ struct TVGuideView: View {
                     now: nowTick
                 )
                 .frame(height: rulerHeight)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                // From zero: the viewport's width, whatever the ruler's own.
+                //
+                // The ruler is the whole schedule laid out — six hours is
+                // 2,160 points — and a frame with only a maximum takes its
+                // child's width when the child is the wider of the two. So
+                // this strip came out as wide as the schedule rather than the
+                // window; the clip below clipped nothing; the width reported
+                // for "the end has scrolled into view" was the schedule's; and
+                // the header, wider than the guide under it, was centred over
+                // it, which slid the ruler left by half the overflow — the 90
+                // minutes it ran ahead of the programmes beneath it. With a
+                // minimum of zero the strip takes the width it is offered, the
+                // ruler starts at the channel column's edge as the rows do,
+                // and the offset is all that moves it.
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .clipped()
                 .background {
                     GeometryReader { g in
@@ -659,7 +673,7 @@ struct TVGuideView: View {
             }
             // Sizing every child doesn't size the column: a LazyVStack takes
             // the whole width it is offered rather than the width its rows
-            // want, so this one claimed half the screen and drew its 280-point
+            // want, so this one claimed half the screen and drew its fixed-width
             // cells centred in the middle of it — a band of empty space down
             // each side of the channel names, and the programmes starting a
             // third of the way across a television. Pinned to the column
@@ -1436,6 +1450,12 @@ private struct ChannelGuideCell: View {
         #endif
     }
 
+    #if os(tvOS)
+    private static let initialsSize: CGFloat = 24
+    #elseif os(iOS)
+    private static let initialsSize: CGFloat = 11
+    #endif
+
     private var content: some View {
         HStack(spacing: 8) {
             RemoteImage(url: logoURL, contentMode: .fit, onResolved: { hasLogo = $0 })
@@ -1449,7 +1469,9 @@ private struct ChannelGuideCell: View {
                             .font(.system(size: 11, weight: .semibold))
                             .lineLimit(1)
                             #else
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            // A phone's size in a television's 104-point tile
+                            // was a smudge in its middle.
+                            .font(.system(size: Self.initialsSize, weight: .semibold, design: .rounded))
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
                             #endif
@@ -1474,7 +1496,10 @@ private struct ChannelGuideCell: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(Theme.text)
                     #if os(tvOS)
-                    .lineLimit(1)
+                    // The 96-point row holds the number and two lines; on
+                    // one, most names were cut to their first word or two.
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
                     #elseif os(macOS)
                     // A Mac's row is 40 points: a number and one line, or two
                     // lines with no number. Truncated rather than shrunk —

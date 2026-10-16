@@ -40,6 +40,9 @@ struct PlayerWindow: View {
         .inspector(isPresented: streamInfoBinding) {
             StreamInfoInspector(player: player)
                 .inspectorColumnWidth(min: 260, ideal: 300, max: 440)
+                // Clicked into, the inspector's arrows scroll it and its
+                // space bar is its own — see `playerKeysYielded`.
+                .focusedValue(\.playerKeysYielded, true)
         }
         .navigationTitle(player.isActive ? player.title : "Player")
         // Space, [ and ] belong to the player while this window is in front,
@@ -153,6 +156,22 @@ extension FocusedValues {
         get { self[PlayerWindowFocusedKey.self] }
         set { self[PlayerWindowFocusedKey.self] = newValue }
     }
+
+    /// Set while the keyboard is in something of the player's that wants the
+    /// bare keys for itself: the Stream Info inspector, whose arrows scroll
+    /// it, and the error card, whose focused button Space presses. A menu's
+    /// key equivalents are looked at before the focused view, so while they
+    /// were bound Space paused a film that wasn't playing instead of pressing
+    /// Close, and ↑ and ↓ turned the volume instead of scrolling. See
+    /// `PlaybackCommands.bare`.
+    var playerKeysYielded: Bool? {
+        get { self[PlayerKeysYieldedKey.self] }
+        set { self[PlayerKeysYieldedKey.self] = newValue }
+    }
+}
+
+private struct PlayerKeysYieldedKey: FocusedValueKey {
+    typealias Value = Bool
 }
 
 /// The Playback menu.
@@ -174,6 +193,7 @@ extension FocusedValues {
 struct PlaybackCommands: Commands {
     let player: PlayerModel
     @FocusedValue(\.playerWindowFocused) private var inPlayer
+    @FocusedValue(\.playerKeysYielded) private var keysYielded
 
     private var state: PlayerMacState { PlayerMacState.shared }
 
@@ -233,9 +253,14 @@ struct PlaybackCommands: Commands {
         gated(key, [])
     }
 
-    /// Any key equivalent, bound only while the player window is in front.
+    /// Any key equivalent, bound only while the player window is in front —
+    /// and one with no modifier not even then, while the keyboard is in a
+    /// control of the player's that has a use for it. See
+    /// `playerKeysYielded`.
     private func gated(_ key: KeyEquivalent, _ modifiers: EventModifiers) -> KeyboardShortcut? {
-        inPlayer == true ? KeyboardShortcut(key, modifiers: modifiers) : nil
+        guard inPlayer == true else { return nil }
+        if modifiers.isEmpty, keysYielded == true { return nil }
+        return KeyboardShortcut(key, modifiers: modifiers)
     }
 }
 #endif

@@ -15,7 +15,8 @@ enum TopShelf {
 
     /// Replace the shelf with these items, newest state wins.
     ///
-    /// Called from Home each time Next Up comes back. Cheap on the common path:
+    /// Called from Home each time Next Up comes back, and through `refresh`
+    /// when playback ends. Cheap on the common path:
     /// a poster already on disk is not fetched again, and the system is only
     /// told the shelf changed once everything is written.
     static func publish(_ items: [BaseItem]) async {
@@ -30,6 +31,19 @@ enum TopShelf {
         // Signed out between Home asking and now: nothing to show.
         guard let sources else { return }
         await Writer.shared.publish(Array(zip(items, sources)))
+    }
+
+    /// Ask the server for Next Up and publish it, for when Home isn't there
+    /// to: after playback ends. A title opened from the shelf itself or a deep
+    /// link can be watched without Home ever being on screen, and the shelf
+    /// would go on offering the episode just finished.
+    @MainActor
+    static func refresh() async {
+        guard let items = try? await JellyfinClient.shared.nextUp() else { return }
+        // The same list Home publishes: less the shows taken off Next Up by
+        // hand — see `HomeRows.visible`.
+        let shown = HomeRows.visible(items, nextUp: items) { Preferences.shared.nextUpHiddenEpisode(seriesId: $0) }
+        await publish(shown)
     }
 
     /// Signing out takes the shelf with it — the posters are the user's library,

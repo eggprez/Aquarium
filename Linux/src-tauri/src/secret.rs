@@ -57,6 +57,12 @@ struct State {
     token: Option<Option<String>>,
     /// Which storage the last lookup proved was in play, for Settings.
     backend: Option<&'static str>,
+    /// A parked revocation, the same way `token` is: `None` = never looked,
+    /// `Some(None)` = nothing parked (or the keyring wouldn't say). Settings
+    /// asks through `app_info` every time the sidebar footer redraws, and
+    /// without this each of those was another keyring read, and another
+    /// unlock prompt while the keyring was locked.
+    pending: Option<Option<Value>>,
 }
 
 /// Held across the blocking Secret Service call on purpose: a second caller
@@ -66,6 +72,7 @@ struct State {
 static STATE: Mutex<State> = Mutex::new(State {
     token: None,
     backend: None,
+    pending: None,
 });
 
 /// A poisoned lock here means some earlier caller panicked mid-lookup. The
@@ -398,25 +405,37 @@ pub fn clear() {
 /// parked revocation while the first API calls are going out still only ever
 /// has one Secret Service conversation open at a time.
 pub fn park_pending_revocation(token: &str, server: &str, device_id: &str) -> Result<(), String> {
-    let _guard = state();
-    let blob = json!({ "token": token, "server": server, "device_id": device_id }).to_string();
-    write(PENDING_ACCOUNT, &blob)
+    let mut st = state();
+    let blob = json!({ "token": token, "server": server, "device_id": device_id });
+    write(PENDING_ACCOUNT, &blob.to_string())?;
+    st.pending = Some(Some(blob));
+    Ok(())
 }
 
+/// Answered from the cache after the first lookup, failed lookups included,
+/// for the same reason as `cached_token`.
 pub fn pending_revocation() -> Option<Value> {
-    let _guard = state();
-    match read(PENDING_ACCOUNT).map(|v| v.or_else(|| adopt_legacy(PENDING_ACCOUNT))) {
+    let mut st = state();
+    if let Some(known) = &st.pending {
+        return known.clone();
+    }
+    let found = match read(PENDING_ACCOUNT).map(|v| v.or_else(|| adopt_legacy(PENDING_ACCOUNT))) {
         Ok(v) => v.and_then(|s| serde_json::from_str::<Value>(&s).ok()),
         Err(e) => {
             crate::debug_log_line(&format!("secret: pending-revocation read failed: {}", e));
             None
         }
-    }
+    };
+    st.pending = Some(found.clone());
+    found
 }
 
 pub fn clear_pending_revocation() {
-    let _guard = state();
-    let _ = wipe(PENDING_ACCOUNT);
+    let mut st = state();
+    // Only a wipe that worked proves nothing is parked any more.
+    if wipe(PENDING_ACCOUNT).is_ok() {
+        st.pending = Some(None);
+    }
 }
 
 /// Whether the keyring is actually usable, for the Settings readout. Answered

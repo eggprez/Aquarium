@@ -79,6 +79,12 @@ private struct ReloadWhenItemsChange: ViewModifier {
     }
 }
 
+#if os(iOS)
+/// How far the press-and-hold preview reaches past the view it lifts — see
+/// `itemContextMenu`.
+private let contextMenuPreviewMargin: CGFloat = 8
+#endif
+
 extension View {
     /// Ask the server again once a press-and-hold menu changes something.
     func reloadWhenItemsChange(_ reload: @escaping () async -> Void) -> some View {
@@ -93,7 +99,23 @@ extension View {
     /// Next Up: the entry only means something where the show is being shown
     /// *because* it is next up.
     func itemContextMenu(_ item: BaseItem, allowsOpen: Bool = false, removesFromNextUp: Bool = false) -> some View {
+        #if os(iOS)
+        // The lifted preview is cut to a rounded rectangle the size of the
+        // view, and a card's last line of text runs to its bottom edge: the
+        // corners took the ends off the line of facts under a poster. So the
+        // preview is drawn with a margin round it, which the negative padding
+        // after takes back out of the layout. Nothing about where the press
+        // lands changes — the margin is empty, and an empty view isn't hit.
+        padding(contextMenuPreviewMargin)
+            .contentShape(
+                .contextMenuPreview,
+                RoundedRectangle(cornerRadius: Theme.cornerRadius + contextMenuPreviewMargin, style: .continuous)
+            )
+            .contextMenu { ItemMenu(item: item, allowsOpen: allowsOpen, removesFromNextUp: removesFromNextUp) }
+            .padding(-contextMenuPreviewMargin)
+        #else
         contextMenu { ItemMenu(item: item, allowsOpen: allowsOpen, removesFromNextUp: removesFromNextUp) }
+        #endif
     }
 }
 

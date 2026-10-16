@@ -115,6 +115,16 @@ struct SessionHandle {
 
 pub struct Player {
     session: Mutex<Option<SessionHandle>>,
+    /// Held for the whole of `play()` and `stop()`. A session is only stored
+    /// in `session` at the end of a start that awaits mpv's shutdown and the
+    /// surface attach, so two overlapping starts (a double press, or adaptive
+    /// quality switching while a play is still coming up) would each find
+    /// nothing to stop and the one stored first would be overwritten without
+    /// being told to quit: a second live core, still playing audio, with no
+    /// handle left to stop it by. A stop landing mid-start would likewise find
+    /// nothing and be lost. Queued behind this, each one sees the session the
+    /// previous one left.
+    transition: Mutex<()>,
     status: Arc<StdMutex<Status>>,
     /// Fullscreen viewport: video covers the player bar too.
     pub viewport_full: AtomicBool,
@@ -177,6 +187,7 @@ impl Player {
     pub fn new() -> Self {
         Self {
             session: Mutex::new(None),
+            transition: Mutex::new(()),
             status: Arc::new(StdMutex::new(Status::default())),
             viewport_full: AtomicBool::new(false),
             bar_reveal: AtomicBool::new(false),
@@ -269,6 +280,13 @@ impl Player {
     }
 
     pub async fn stop(&self) {
+        let _transition = self.transition.lock().await;
+        self.stop_session().await;
+    }
+
+    /// `stop()` without taking `transition`, for `play()`, which already
+    /// holds it.
+    async fn stop_session(&self) {
         self.idle.lock().unwrap().take();
         // Whatever followed the old item says nothing about the new one; the
         // frontend re-answers once it has resolved what's playing.
@@ -312,9 +330,12 @@ impl Player {
     }
 
     pub async fn play(&self, app: AppHandle, req: PlayRequest) -> Result<(), String> {
-        // stop() blocks until the previous mpv session has fully shut down,
+        // One start (or stop) at a time, until the new session is stored or
+        // the start has failed; see `transition`.
+        let _transition = self.transition.lock().await;
+        // This blocks until the previous mpv session has fully shut down,
         // so the new one never overlaps it on the GPU or the video surface.
-        self.stop().await;
+        self.stop_session().await;
         let my_epoch = self.epoch.fetch_add(1, Ordering::SeqCst) + 1;
 
         let title = req.title.clone().unwrap_or_else(|| "Aquarium".to_string());

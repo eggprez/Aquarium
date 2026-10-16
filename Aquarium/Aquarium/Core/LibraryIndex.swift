@@ -337,6 +337,14 @@ final class LibraryIndex {
                     removed: previous.keys.filter { items[$0] == nil }
                 )
                 #endif
+                // And the pictures saved for what is gone come off the disk.
+                let removed = Set(previous.keys.filter { items[$0] == nil })
+                if !removed.isEmpty {
+                    Task {
+                        await ImageLoader.shared.forgetDiskArtwork(for: removed)
+                        artworkBytes = await ImageLoader.shared.diskUsage()
+                    }
+                }
             }
             // The whole library encoded, compressed and written only when some
             // of it changed. The common sync — every return to the app — finds
@@ -450,7 +458,7 @@ final class LibraryIndex {
                 .init(name: "Limit", value: String(pageSize)),
                 .init(name: "EnableTotalRecordCount", value: "true"),
             ]
-            let page = try await fetch("/Users/\(userId)/Items?\(JellyfinClient.encode(q))")
+            let page = try await fetch("/Items?userId=\(userId)&\(JellyfinClient.encode(q))")
             out += page.items
             total = page.TotalRecordCount ?? out.count
             progress(out.count, total)
@@ -468,7 +476,7 @@ final class LibraryIndex {
                 .init(name: "Ids", value: chunk),
                 .init(name: "Fields", value: JellyfinClient.indexFields),
             ]
-            out += try await fetch("/Users/\(userId)/Items?\(JellyfinClient.encode(q))").items
+            out += try await fetch("/Items?userId=\(userId)&\(JellyfinClient.encode(q))").items
         }
         return out
     }
@@ -752,7 +760,12 @@ final class LibraryIndex {
         ].joined(separator: "|")
 
         let list: [String]
-        if let cached = queryCache[key] {
+        // A random order is drawn afresh with each first page and kept only
+        // for the pages after it, so a grid scrolled down doesn't repeat or
+        // skip. Cached outright, every later "Random" — Surprise Me's forty
+        // above all — was the same draw until the library next changed.
+        let freshDraw = query.sortBy == "Random" && query.startIndex == 0
+        if !freshDraw, let cached = queryCache[key] {
             list = cached
         } else {
             var matches = ids.compactMap { items[$0] }.filter { types.contains($0.kind) }

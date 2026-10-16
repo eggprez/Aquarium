@@ -292,12 +292,38 @@ final class TransportBarExtras {
         }
         observations = [
             view.observe(\.alpha, options: [.initial, .new]) { [weak self] view, _ in
-                MainActor.assumeIsolated { self?.row.alpha = view.alpha }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let wasFaded = self.row.alpha < 1
+                    self.row.alpha = view.alpha
+                    if wasFaded, view.alpha >= 1 { self.reglaze() }
+                }
             },
             view.observe(\.isHidden, options: [.initial, .new]) { [weak self] view, _ in
-                MainActor.assumeIsolated { self?.row.isHidden = view.isHidden }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let wasHidden = self.row.isHidden
+                    self.row.isHidden = view.isHidden
+                    if wasHidden, !view.isHidden { self.reglaze() }
+                }
             },
         ]
+    }
+
+    /// Puts the glass back on the pills whenever the bar comes back.
+    ///
+    /// After AVKit's subtitle menu had opened and closed, the pills came back
+    /// as a bare glyph and a word over the picture while AVKit's own capsules
+    /// beside them kept their glass. Liquid Glass is dematerialised with a
+    /// view that is faded right out or hidden, and AVKit restores the effect
+    /// on its own views as the bar returns; nothing restored ours. Setting
+    /// the effect again rebuilds it, and costs nothing when it was intact.
+    /// Before iOS 26 the backing is an ordinary blur, which survives a fade.
+    private func reglaze() {
+        guard #available(iOS 26.0, *) else { return }
+        for pill in [qualityPill, extrasPill] {
+            pill.effect = UIGlassEffect(style: .regular)
+        }
     }
 
     /// AVKit's own naming is the only handle on these views, and this reads a

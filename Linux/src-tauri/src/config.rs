@@ -2,6 +2,7 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// config.json holds the server URL, the user id, and — whenever the desktop
 /// keyring is unavailable — the access token itself. `std::fs::write` creates
@@ -72,13 +73,25 @@ fn harden(path: &Path, mode: u32) {
 pub fn load() -> Value {
     harden(&config_dir(), DIR_MODE);
     harden(&config_path(), FILE_MODE);
-    let mut cfg: Value = std::fs::read_to_string(config_path())
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| json!({}));
-    if !cfg.is_object() {
-        cfg = json!({});
-    }
+    let cfg = match std::fs::read_to_string(config_path()) {
+        Ok(text) => match serde_json::from_str::<Value>(&text) {
+            Ok(v) if v.is_object() => Some(v),
+            Ok(_) => {
+                quarantine("is not a JSON object");
+                None
+            }
+            Err(e) => {
+                quarantine(&e.to_string());
+                None
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            quarantine(&e.to_string());
+            None
+        }
+    };
+    let mut cfg = cfg.unwrap_or_else(|| json!({}));
     // Ensure a persistent device id exists; Jellyfin uses it to identify this install.
     if cfg.get("device_id").and_then(|v| v.as_str()).is_none() {
         cfg["device_id"] = json!(uuid::Uuid::new_v4().to_string());
@@ -87,7 +100,51 @@ pub fn load() -> Value {
     cfg
 }
 
+/// Set when a config.json that couldn't be read also couldn't be set aside;
+/// see `quarantine`.
+static SAVE_BLOCKED: AtomicBool = AtomicBool::new(false);
+
+/// Move a config.json that can't be read aside before anything writes over it.
+///
+/// Starting from defaults is the only way forward, but the first save after
+/// that (the device id below, or any setting) would replace the file, and with
+/// it every setting, the pinned server, the user and, where there is no
+/// keyring, the access token. Kept as `config.json.corrupt-<unix time>` it can
+/// still be repaired by hand. If it can't be moved, it is copied, so the save
+/// that follows still leaves the original intact; if it can't be copied
+/// either, saving is refused for the rest of the session instead.
+fn quarantine(why: &str) {
+    let path = config_path();
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let aside = config_dir().join(format!("config.json.corrupt-{ts}"));
+    let kept = std::fs::rename(&path, &aside)
+        .or_else(|_| std::fs::copy(&path, &aside).map(|_| ()));
+    let msg = match kept {
+        Ok(()) => format!(
+            "config: {} couldn't be read ({why}); kept it as {} and started from defaults",
+            path.display(),
+            aside.display()
+        ),
+        Err(e) => {
+            SAVE_BLOCKED.store(true, Ordering::SeqCst);
+            format!(
+                "config: {} couldn't be read ({why}) and couldn't be set aside ({e}); \
+                 started from defaults and won't save over it",
+                path.display()
+            )
+        }
+    };
+    eprintln!("aquarium: {msg}");
+    crate::debug_log_line(&msg);
+}
+
 pub fn save(cfg: &Value) -> Result<(), String> {
+    if SAVE_BLOCKED.load(Ordering::SeqCst) {
+        return Err("config.json couldn't be read or set aside, so it isn't being overwritten".into());
+    }
     let dir = config_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     harden(&dir, DIR_MODE);

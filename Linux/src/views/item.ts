@@ -9,6 +9,7 @@ import {
 import {
   el,
   clear,
+  asButton,
   art,
   backdropLayer,
   openMenu,
@@ -181,10 +182,11 @@ function playButtons(item: any): HTMLElement {
   const resumeTicks = item.UserData?.PlaybackPositionTicks ?? 0;
 
   if (resumeTicks > 0) {
+    const left = api.remainingText(item.RunTimeTicks, resumeTicks);
     actions.append(
       el("button", { class: "btn primary", onClick: () => playItem(item, { resume: true }) }, [
         icon("play"),
-        `Resume (${api.ticksToText(item.RunTimeTicks - resumeTicks)} left)`,
+        left ? `Resume (${left} left)` : "Resume",
       ]),
       el("button", { class: "btn", onClick: () => playItem(item, { resume: false }) }, ["Play from start"])
     );
@@ -330,7 +332,7 @@ function seriesHeroActions(target: any | null): (HTMLElement | null)[] {
 
   const resumeTicks = target.UserData?.PlaybackPositionTicks ?? 0;
   const code = epCode(target);
-  const left = resumeTicks > 0 ? api.ticksToText(target.RunTimeTicks - resumeTicks) : "";
+  const left = resumeTicks > 0 ? api.remainingText(target.RunTimeTicks, resumeTicks) : "";
 
   const caption = el("div", { class: "detail-nextup" }, [
     resumeTicks > 0 ? "Resume · " : "Next up · ",
@@ -573,6 +575,10 @@ function paintItem(page: HTMLElement, data: ItemData): void {
   // the hero itself would cut off the Quality and Download dropdowns, which
   // open inside it.
   const backdropLayerEl = backdropLayer(backdrop, "detail-backdrop");
+  // The subtitle under an episode's title names its series and opens it.
+  const toSeries = (): void => {
+    if (item.SeriesId) location.hash = `#/item/${item.SeriesId}`;
+  };
   const hero = el("div", { class: "detail-hero" }, [
     backdropLayerEl ? el("div", { class: "detail-backdrop-clip" }, [backdropLayerEl]) : null,
     el("div", { class: "detail-inner" }, [
@@ -587,7 +593,8 @@ function paintItem(page: HTMLElement, data: ItemData): void {
         subtitle
           ? el("div", {
               class: "detail-meta clickable",
-              onClick: () => { if (item.SeriesId) location.hash = `#/item/${item.SeriesId}`; },
+              onClick: toSeries,
+              ...(item.SeriesId ? asButton(toSeries) : {}),
             }, [subtitle])
           : null,
         metaChips(item),

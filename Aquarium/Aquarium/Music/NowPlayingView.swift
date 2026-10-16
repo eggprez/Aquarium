@@ -118,6 +118,7 @@ struct NowPlayingView: View {
     @Environment(AppModel.self) private var app
     @Environment(JellyfinClient.self) private var client
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var sizeClass
     #if os(iOS)
     @Environment(\.devicePose) private var pose
     #endif
@@ -148,6 +149,7 @@ struct NowPlayingView: View {
                             .padding(.horizontal, 24)
                             .padding(.top, 18)
                             .padding(.bottom, 12)
+                            .frame(maxWidth: columnWidth)
                         } lower: {
                             VStack(spacing: 0) {
                                 Spacer(minLength: 0)
@@ -155,6 +157,7 @@ struct NowPlayingView: View {
                                 Spacer(minLength: 0)
                             }
                             .padding(.horizontal, 24)
+                            .frame(maxWidth: columnWidth)
                         }
                     } else {
                         column(song)
@@ -177,6 +180,7 @@ struct NowPlayingView: View {
                     .accessibilityHidden(true)
                     .transition(.opacity)
                 QueueCard { setQueue(false) }
+                    .frame(maxWidth: columnWidth.map { $0 + 80 })
                     .padding(.top, Self.queueCardTop)
                     .transition(.move(edge: .bottom))
                     .zIndex(1)
@@ -204,6 +208,7 @@ struct NowPlayingView: View {
         }
         .padding(.horizontal, 24)
         .padding(.top, 18)
+        .frame(maxWidth: columnWidth)
     }
 
     /// The top bar and the cover — or the lyrics in its place.
@@ -241,6 +246,18 @@ struct NowPlayingView: View {
     /// Where the queue card's top edge sits: just under the top bar, so where
     /// this is playing from stays in view above it.
     private static let queueCardTop: CGFloat = 62
+
+    /// How wide the player may grow, or nil for the whole width.
+    ///
+    /// On an iPad this is a full-screen cover (see `NowPlayingPresenter`),
+    /// and the phone's layout stretched across it put a cover nine hundred
+    /// points wide over a scrubber and a row of transport spread from edge to
+    /// edge. Held to a column instead, the way the rest of the app holds its
+    /// cards and forms to a readable width, the cover is sized by the column
+    /// — or by the height that is left, in landscape — and the controls stay
+    /// within a thumb's reach of each other. The room's colour still fills
+    /// the screen behind it. Split View's compact width is the phone layout.
+    private var columnWidth: CGFloat? { sizeClass == .regular ? 600 : nil }
 
     private func setQueue(_ shown: Bool) {
         withAnimation(.spring(response: 0.38, dampingFraction: 0.88)) { showQueue = shown }

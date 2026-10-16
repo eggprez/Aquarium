@@ -119,12 +119,19 @@ struct SearchView: View {
                     #endif
                     // On a Mac the count is the window's subtitle, not a line
                     // on the page.
-                    #if !os(macOS)
+                    #if os(iOS)
+                    // Under the artists, albums and books, the films and shows
+                    // are one more kind of result and get a heading like the
+                    // others: a bare "8 results" under "Audiobooks" read as
+                    // the count of the audiobooks.
+                    if !results.isEmpty, !music.isEmpty {
+                        ShelfHeading(title: "Films & TV", subtitle: "\(total) result\(total == 1 ? "" : "s")")
+                    } else if !results.isEmpty {
+                        resultCount
+                    }
+                    #elseif !os(macOS)
                     if !results.isEmpty {
-                    Text("\(total) result\(total == 1 ? "" : "s")")
-                        .font(.caption)
-                        .foregroundStyle(Theme.textDim)
-                        .padding(.horizontal, Metrics.gutter)
+                        resultCount
                     }
                     #endif
                     #if os(macOS)
@@ -356,10 +363,12 @@ struct SearchView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textDim)
                     Spacer()
+                    #if !os(tvOS)
                     Button("Clear") { prefs.clearRecentSearches() }
                         .buttonStyle(.plain)
                         .font(.caption)
                         .foregroundStyle(Theme.accent)
+                    #endif
                 }
                 ForEach(prefs.recentSearches, id: \.self) { recent in
                     Button {
@@ -376,11 +385,31 @@ struct SearchView: View {
                     }
                     .rowButtonStyle()
                 }
+                #if os(tvOS)
+                // Under the list rather than beside its heading. Up there it
+                // was the nearest thing below the search field, so the first
+                // press down landed on it, and down and a click wiped the
+                // history.
+                Button("Clear") { prefs.clearRecentSearches() }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(Theme.accent)
+                    .padding(.top, 10)
+                #endif
             }
             .padding(.horizontal, Metrics.gutter)
         }
         #endif
     }
+
+    #if !os(macOS)
+    private var resultCount: some View {
+        Text("\(total) result\(total == 1 ? "" : "s")")
+            .font(.caption)
+            .foregroundStyle(Theme.textDim)
+            .padding(.horizontal, Metrics.gutter)
+    }
+    #endif
 
     #if os(iOS)
     /// Artists, albums and a few songs, ahead of the films and shows. Each

@@ -20,7 +20,14 @@ struct TVTransportBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if !timelineOnly { heading }
+            // Faded rather than removed while scrubbing: the thumbnail and its
+            // time ride up over where the title is, and were drawn across
+            // it. Kept in the layout so the bar doesn't jump down.
+            if !timelineOnly {
+                heading
+                    .opacity(scrub == nil ? 1 : 0)
+                    .animation(.easeOut(duration: 0.2), value: scrub == nil)
+            }
             if player.isLive {
                 LiveTimeline(programme: schedule.now)
             } else {
