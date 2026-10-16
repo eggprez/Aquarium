@@ -171,6 +171,16 @@ final class JellyfinClient {
     /// The token as a query parameter, for HLS segments, whose requests
     /// AVFoundation makes itself without our headers. `ApiKey`, the spelling
     /// every server since 10.9 reads — see the phone's `authorized`.
+    ///
+    /// A trade-off, made on purpose, and only for a transcoded stream: a
+    /// direct file goes with the header alone. The token in the address is
+    /// the account's own session token, and an address is something servers
+    /// write down — Jellyfin's log at debug level, and the access log of any
+    /// reverse proxy in front of it — where a header is not. The alternative
+    /// is no transcoded playback on the watch at all: a playlist fetched with
+    /// the header lists segments that are fetched without it, and each of
+    /// those is refused. The address lives only in memory for as long as the
+    /// stream plays, and is never stored by the app.
     func authorized(_ url: URL) -> URL {
         guard let token, !token.isEmpty,
               var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -546,6 +556,9 @@ final class JellyfinClient {
             guard transcodingUrl.hasPrefix("/"), let url = URL(string: account.server + transcodingUrl) else {
                 throw APIError.message("The server returned a stream address this client couldn't read")
             }
+            // The token rides in this address, which a server or a proxy in
+            // front of it may log; the segments can't be fetched any other
+            // way. See `authorized` for the whole trade-off.
             return WatchStream(url: authorized(url), headers: [:], isTranscode: true, mediaSourceId: ms.Id ?? "", playSessionId: playSessionId)
         }
         let container = ms.Container ?? "mp3"
@@ -650,7 +663,7 @@ final class JellyfinClient {
     func reportPlaying(started: Bool, itemId: String, positionTicks: Int64, paused: Bool, stream: WatchStream?, rate: Double) async {
         let body = ProgressReport(
             ItemId: itemId, PositionTicks: positionTicks, IsPaused: paused,
-            PlayMethod: stream?.isTranscode == true ? "Transcode" : "DirectStream",
+            PlayMethod: stream?.isTranscode == true ? "Transcode" : "DirectPlay",
             MediaSourceId: stream?.mediaSourceId, PlaySessionId: stream?.playSessionId, PlaybackRate: rate
         )
         _ = try? await request(started ? "/Sessions/Playing" : "/Sessions/Playing/Progress", method: "POST", body: body, countsForOffline: false)
@@ -661,12 +674,12 @@ final class JellyfinClient {
     func markPlayed(itemId: String, at date: Date) async throws {
         guard let account else { throw APIError.notConfigured }
         let stamp = ISO8601DateFormatter().string(from: date)
-        try await request("/Users/\(account.userId)/PlayedItems/\(Self.pathId(itemId))?datePlayed=\(stamp)", method: "POST")
+        try await request("/UserPlayedItems/\(Self.pathId(itemId))?userId=\(account.userId)&datePlayed=\(stamp)", method: "POST")
     }
 
     func markUnplayed(itemId: String) async throws {
         guard let account else { throw APIError.notConfigured }
-        try await request("/Users/\(account.userId)/PlayedItems/\(Self.pathId(itemId))", method: "DELETE")
+        try await request("/UserPlayedItems/\(Self.pathId(itemId))?userId=\(account.userId)", method: "DELETE")
     }
 
     /// Send one listening event straight to the server — what the phone does

@@ -500,7 +500,14 @@ final class DownloadManager: NSObject {
     /// server for the item: there is no task and no record yet for `cancel`
     /// to act on, so without this, the fetch completing would start the
     /// transfer the person had just called off.
+    ///
+    /// Only ever for a fetch that is in flight — see `resolving`. Written on
+    /// every cancel, an entry that no fetch was there to consume sat here
+    /// until a later Retry happened to go through `resolveThenStart`, which
+    /// then ate it and left the download queued for ever.
     private var cancelledResolves: Set<String> = []
+    /// The items `resolveThenStart` is asking the server about right now.
+    private var resolving: Set<String> = []
 
     /// How often a running transfer is allowed to redraw and, separately, how
     /// often it writes its byte count to disk.
@@ -1625,7 +1632,7 @@ final class DownloadManager: NSObject {
     func cancel(_ itemId: String) {
         cancelQueued(itemId)
         cancelTasks(for: itemId, keepingProgress: false)
-        cancelledResolves.insert(itemId)
+        if resolving.contains(itemId) { cancelledResolves.insert(itemId) }
         active.remove(itemId)
         forgetProgressThrottle(itemId)
         retryingAfterCancel[itemId] = nil
@@ -2052,7 +2059,9 @@ final class DownloadManager: NSObject {
     /// download that can't be described is left as a failure with a Retry on it
     /// rather than vanishing.
     private func resolveThenStart(_ entry: QueuedDownload) async {
+        resolving.insert(entry.itemId)
         let item = try? await JellyfinClient.shared.item(entry.itemId)
+        resolving.remove(entry.itemId)
         guard cancelledResolves.remove(entry.itemId) == nil else {
             // Called off while its metadata was in flight — see
             // `cancelledResolves`. Neither started nor written off as failed.

@@ -66,12 +66,18 @@ struct ItemDetailView: View {
     /// the strip. Putting focus on the page's first action as soon as there is
     /// one fixes both.
     private enum DetailFocus: Hashable {
-        case play, quality, favorite, watched, trailer, episode(String)
+        case play, quality, favorite, watched, trailer, episode(String), season(String), cast(String)
 
         /// One of the buttons under the artwork, rather than a row further down.
         var isAction: Bool {
-            if case .episode = self { return false }
-            return true
+            switch self {
+            case .episode, .season, .cast: false
+            default: true
+            }
+        }
+
+        var isSeason: Bool {
+            if case .season = self { true } else { false }
         }
     }
     @FocusState private var focus: DetailFocus?
@@ -214,9 +220,15 @@ struct ItemDetailView: View {
 
     #if os(tvOS)
     /// Which control is worth landing on, once the page knows enough to have
-    /// one. Play where there is something to play — a series whose next
-    /// episode the server hasn't named yet has nothing, and the favourite
-    /// button is then the first thing in the row.
+    /// one. Play where there is something to play — a series the server has
+    /// no next episode for has nothing, and the favourite button is then the
+    /// first thing in the row.
+    ///
+    /// A series or season waits for the answer before deciding: its Play has
+    /// nothing behind it until the next episode or the season's list arrives,
+    /// a request after the page itself. Deciding sooner landed on Favorite —
+    /// once placed, focus is never moved again — next to Mark Watched, where
+    /// one stray press changes what the server holds.
     ///
     /// An episode asked for by name outranks all of that: Next Up opens the
     /// season rather than the episode's own page, and the row it means is where
@@ -237,7 +249,9 @@ struct ItemDetailView: View {
             // quits the application from rather than going back a level.
             if isLoading { return nil }
         }
-        return playable(for: item) != nil ? .play : .favorite
+        if playable(for: item) != nil { return .play }
+        if isLoading, item.isSeries || item.isSeason { return nil }
+        return .favorite
     }
     #endif
 
@@ -291,7 +305,25 @@ struct ItemDetailView: View {
                 // and all, still scrolled away, with nothing further up for a
                 // press to reach. The buttons are the top of the page as far as
                 // the selector goes, so they show it as it opened.
-                .onChange(of: focus) { _, now in
+                .onChange(of: focus) { previous, now in
+                    // Down onto the seasons or the cast starts the row at its
+                    // first card. A directional move is settled by geometry
+                    // alone, and the engine was landing on whichever card lay
+                    // under the middle of the row above — the fifth or so
+                    // headshot on a film, the last season on a show (with the
+                    // cast below then entered at its far end too). Caught on
+                    // arrival, the way the guide catches its own (see
+                    // `TVGuideView`); within a row, focus is left alone.
+                    if previous?.isAction == true, case .season(let id)? = now,
+                       let first = seasons.first?.Id, id != first {
+                        focus = .season(first)
+                        return
+                    }
+                    if previous?.isAction == true || previous?.isSeason == true, case .cast(let id)? = now,
+                       let first = item.flatMap({ mergedCast($0.People ?? []).first })?.id, id != first {
+                        focus = .cast(first)
+                        return
+                    }
                     guard now?.isAction == true else { return }
                     withAnimation(.easeInOut(duration: 0.35)) {
                         proxy.scrollTo(Self.topAnchor, anchor: .top)
@@ -333,6 +365,21 @@ struct ItemDetailView: View {
                     }
                     #endif
                 }
+                #if os(macOS)
+                // The page follows the selection as ↑ and ↓ move it. The list
+                // doesn't scroll itself (see `MacEpisodeList`), so on its own
+                // the selection walked off the bottom of the window. Only a
+                // row added to a selection there already: a first click or an
+                // arrival is a row already on screen, or one the arrival above
+                // has placed.
+                .onChange(of: episodeSelection) { old, new in
+                    guard !old.isEmpty, let added = new.subtracting(old).first,
+                          new.subtracting(old).count == 1 else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(MacEpisodeList.anchor(for: added))
+                    }
+                }
+                #endif
         }
         #endif
     }
@@ -363,9 +410,6 @@ struct ItemDetailView: View {
     @ViewBuilder
     private func scrollCore() -> some View {
         ScrollView {
-            #if os(iOS)
-            scrollProbe
-            #endif
             if isLoading, item == nil {
                 // The page it is about to be, in the shape it will take.
                 VStack(alignment: .leading, spacing: 26) {
@@ -403,6 +447,10 @@ struct ItemDetailView: View {
             }
         }
         .coordinateSpace(name: Self.scrollSpace)
+        #if os(macOS)
+        // Without this, opening a title grew the window — see the modifier.
+        .macWindowSizedPage()
+        #endif
         // Keyed on the item: on tvOS the detail root can go straight from one
         // item to another, and SwiftUI keeps this view rather than making a
         // new one, so an unkeyed task would leave the first item showing.
@@ -438,6 +486,9 @@ struct ItemDetailView: View {
                 guard let chosen else { return }
                 queue(prompt.items, quality: chosen)
             }
+            // Half a screen is what a paragraph and a few buttons need; a
+            // full-height sheet left them floating in the middle of it.
+            .presentationDetents([.medium, .large])
         }
         #else
         .confirmationDialog(
@@ -462,6 +513,13 @@ struct ItemDetailView: View {
         VStack(alignment: .leading, spacing: 26) { sections(item) }
         #else
         LazyVStack(alignment: .leading, spacing: 26) { sections(item) }
+            #if os(iOS)
+            // Behind the stack rather than above it: as a sibling in the
+            // scroll view the zero-height probe still took the scroll view's
+            // default stack spacing under it, and that was a strip of bare
+            // page between the bar and the artwork.
+            .background(alignment: .top) { scrollProbe }
+            #endif
         #endif
     }
 
@@ -637,11 +695,21 @@ struct ItemDetailView: View {
                         .frame(width: max(4, geo.size.width * progress))
                 }
             }
+            #if os(tvOS)
+            // The size of Home's bar on the hero: a phone's 168 × 4 was a
+            // hairline from across the room.
+            .frame(width: 320, height: 8)
+            #else
             .frame(width: 168, height: 4)
+            #endif
             #endif
 
             Text(remainingText(progress, of: item))
+                #if os(tvOS)
+                .font(.callout.weight(.medium))
+                #else
                 .font(.caption.weight(.medium))
+                #endif
                 .foregroundStyle(Theme.textDim)
                 .macSelectable()
         }
@@ -709,6 +777,13 @@ struct ItemDetailView: View {
                 HStack(spacing: 10) {
                     compactActions(item, playable: playable(for: item))
                 }
+                // A line each, whatever the text size. Squeezed at the larger
+                // sizes, a label broke inside a word — "Re-/sume", "Downl/oad"
+                // — for want of a space to break at; shrinking it a little is
+                // the lesser evil, and at the largest sizes the download
+                // button gives up its word altogether (see `compactActions`).
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
             } else {
                 WrappingRow(spacing: 10, rowSpacing: 10) {
                     actionButtons(item, playable: playable(for: item))
@@ -743,6 +818,7 @@ struct ItemDetailView: View {
     #if !os(macOS)
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var isCompact: Bool { sizeClass == .compact }
     #else
     private var isCompact: Bool { false }
@@ -878,8 +954,18 @@ struct ItemDetailView: View {
         .appButtonStyle(highlight: item.userData.isFavorite ? Theme.warn : nil)
 
         #if !os(tvOS)
-        downloadMenu(item)
-            .buttonStyle(.bordered)
+        // Its word only while there is room for it. From the second size up
+        // from the default, "Resume" and "Download" between them no longer fit
+        // a phone's width beside two glyphs, and the glyph alone is the one
+        // the system's own media apps use for this.
+        if dynamicTypeSize >= .xxLarge {
+            downloadMenu(item)
+                .buttonStyle(.bordered)
+                .labelStyle(.iconOnly)
+        } else {
+            downloadMenu(item)
+                .buttonStyle(.bordered)
+        }
         #endif
 
         // Nothing to put behind the glyph on a series whose next episode the
@@ -1080,6 +1166,9 @@ struct ItemDetailView: View {
                                 )
                             }
                             .buttonStyle(PosterButtonStyle())
+                            #if os(tvOS)
+                            .focused($focus, equals: .season(season.Id))
+                            #endif
                             .itemContextMenu(season)
                             .macOpensOnReturn { app.push(.item(season.Id)) }
                             .help(season.title)
@@ -1212,8 +1301,10 @@ struct ItemDetailView: View {
         let cast = mergedCast(item.People ?? []).prefix(24)
         if !cast.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
+                // The same heading as the seasons and episodes above it.
                 Text("Cast & Crew")
-                    .font(.title3.weight(.semibold))
+                    .font(shelfTitleFont)
+                    .foregroundStyle(Theme.text)
                     .padding(.horizontal, Metrics.gutter)
                 ScrollView(.horizontal, showsIndicators: Self.showsShelfIndicators) {
                     // Lazy, like the season row above it: a film's cast is
@@ -1225,23 +1316,26 @@ struct ItemDetailView: View {
                                 openPerson(person)
                             } label: {
                                 VStack(spacing: 6) {
-                                    RemoteImage(url: Artwork.person(person, width: 200))
-                                        .frame(width: 78, height: 78)
+                                    RemoteImage(url: Artwork.person(person, width: Self.castPhotoPixels))
+                                        .frame(width: Self.castPhotoSize, height: Self.castPhotoSize)
                                         .clipShape(Circle())
                                     Text(person.Name ?? "")
-                                        .font(.caption.weight(.medium))
+                                        .font(Self.castNameFont)
                                         .lineLimit(2)
                                         .multilineTextAlignment(.center)
                                         .fixedSize(horizontal: false, vertical: true)
                                         .foregroundStyle(Theme.text)
                                     Text(person.Role ?? person.type ?? "")
-                                        .font(.caption2)
+                                        .font(Self.castRoleFont)
                                         .lineLimit(1)
                                         .foregroundStyle(Theme.textDim)
                                 }
-                                .frame(width: 108)
+                                .frame(width: Self.castTileWidth)
                             }
                             .rowButtonStyle()
+                            #if os(tvOS)
+                            .focused($focus, equals: .cast(person.id))
+                            #endif
                             .macOpensOnReturn { openPerson(person) }
                             .help(castHelp(person))
                         }
@@ -1256,6 +1350,22 @@ struct ItemDetailView: View {
             }
         }
     }
+
+    // A cast tile's sizes. A television's are read from across the room: the
+    // phone's 78-point headshot and caption-sized names were specks there.
+    #if os(tvOS)
+    private static let castPhotoSize: CGFloat = 150
+    private static let castPhotoPixels = 400
+    private static let castTileWidth: CGFloat = 190
+    private static let castNameFont: Font = .callout.weight(.medium)
+    private static let castRoleFont: Font = .caption
+    #else
+    private static let castPhotoSize: CGFloat = 78
+    private static let castPhotoPixels = 200
+    private static let castTileWidth: CGFloat = 108
+    private static let castNameFont: Font = .caption.weight(.medium)
+    private static let castRoleFont: Font = .caption2
+    #endif
 
     /// Their own page where the server knows who they are; a name with no id
     /// behind it can still search for itself, as on Linux.
@@ -1402,11 +1512,17 @@ struct ItemDetailView: View {
         #endif
     }
 
+    /// The page's own copy is corrected straight away, and every other screen
+    /// showing the item is told, the way the press-and-hold menu tells them —
+    /// a favourite added here was missing from Favorites, and an episode
+    /// marked watched still unticked on the season page, until something else
+    /// happened to reload them. See `ItemMutations`.
     private func toggleFavourite(_ item: BaseItem) async {
         let next = !item.userData.isFavorite
         do {
             try await client.setFavorite(item.Id, favorite: next)
             updateUserData(of: item.Id) { $0.IsFavorite = next }
+            ItemMutations.shared.changed()
         } catch {
             app.toast("Couldn't update favorites", tone: .error)
         }
@@ -1420,6 +1536,7 @@ struct ItemDetailView: View {
                 $0.Played = next
                 $0.PlaybackPositionTicks = 0
             }
+            ItemMutations.shared.changed()
         } catch {
             app.toast("Couldn't update watched state", tone: .error)
         }
@@ -1543,6 +1660,19 @@ struct EpisodeRow: View {
     }
     #endif
 
+    // The row's sizes. A television's are read from across the room: the
+    // phone's 148 × 83 still and caption-sized overview were too small to
+    // make out there.
+    #if os(tvOS)
+    private static let still = CGSize(width: 320, height: 180)
+    private static let progressHeight: CGFloat = 6
+    private static let detailFont: Font = .callout
+    #else
+    private static let still = CGSize(width: 148, height: 83)
+    private static let progressHeight: CGFloat = 3
+    private static let detailFont: Font = .caption
+    #endif
+
     private var rowContent: some View {
         HStack(alignment: .top, spacing: 14) {
             ZStack(alignment: .bottom) {
@@ -1550,17 +1680,17 @@ struct EpisodeRow: View {
                     url: Artwork.url(episode, type: "Primary", width: 400),
                     blurHash: Artwork.hash(episode)
                 )
-                .frame(width: 148, height: 83)
+                .frame(width: Self.still.width, height: Self.still.height)
                 if let progress = episode.progressFraction {
                     ZStack(alignment: .leading) {
                         Rectangle().fill(.black.opacity(0.45))
                         Rectangle().fill(Theme.accent)
                             .scaleEffect(x: min(1, max(0, progress)), y: 1, anchor: .leading)
                     }
-                    .frame(height: 3)
+                    .frame(height: Self.progressHeight)
                 }
             }
-            .frame(width: 148, height: 83)
+            .frame(width: Self.still.width, height: Self.still.height)
             .cardChrome(radius: 8)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -1581,12 +1711,12 @@ struct EpisodeRow: View {
                 .lineLimit(1)
 
                 Text(Format.ticks(episode.RunTimeTicks))
-                    .font(.caption)
+                    .font(Self.detailFont)
                     .foregroundStyle(Theme.textDim)
 
                 if let overview = episode.Overview, !overview.isEmpty {
                     Text(overview)
-                        .font(.caption)
+                        .font(Self.detailFont)
                         .lineLimit(3)
                         .foregroundStyle(Theme.textBody)
                 }

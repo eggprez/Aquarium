@@ -48,10 +48,9 @@ struct FavoritesView: View {
         #if os(macOS)
         .toolbar { macToolbar }
         .navigationSubtitle(total > 0 ? "\(total) item\(total == 1 ? "" : "s")" : "")
-        // View ▸ Refresh (⌘R), and the app coming back to the front.
-        .onChange(of: MacCommandRequests.shared.refresh) { _, _ in
-            Task { await load() }
-        }
+        // View ▸ Refresh (⌘R), and the app coming back to the front — while
+        // this is the page in front. See `onMacRefresh`.
+        .onMacRefresh { Task { await load() } }
         // Starring something off from the selection empties it of that item;
         // nothing stays selected that isn't on the page.
         .onChange(of: items.map(\.Id)) { _, ids in
@@ -123,7 +122,9 @@ struct FavoritesView: View {
                                     .background(kind == entry.value ? Theme.accentSoft : Theme.raised, in: Capsule())
                                     .foregroundStyle(kind == entry.value ? Theme.accent : Theme.textBody)
                             }
-                            .buttonStyle(.plain)
+                            // `.plain` elsewhere; on a television it showed no
+                            // sign of which pill the selector was on.
+                            .chipButtonStyle()
                         }
                     }
                     .padding(.horizontal, Metrics.gutter)

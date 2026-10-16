@@ -303,16 +303,21 @@ final class WatchLink: NSObject {
         remoteError = nil
         // What the phone will do, drawn now rather than when it says so.
         if var guess = phonePlayback {
+            // Carried forward to now first. `at` moves to now below, and a
+            // guess that kept the old position wound the clock back by
+            // however long the track had played since the phone last said.
+            let now = Date()
+            guess.position = guess.position(now: now)
             switch command {
             case .play: guess.isPlaying = true
             case .pause: guess.isPlaying = false
             case .togglePlayPause: guess.isPlaying.toggle()
             case .seekTo(let seconds): guess.position = seconds
-            case .seekBy(let delta): guess.position = max(0, guess.position(now: Date()) + delta)
+            case .seekBy(let delta): guess.position = max(0, guess.position + delta)
             case .setSpeed(let speed): guess.speed = speed
             case .next, .previous: break
             }
-            guess.at = Date()
+            guess.at = now
             phonePlayback = guess
         }
         WCSession.default.sendMessage(WatchSync.pack(WatchMessage.remote(command)), replyHandler: { _ in

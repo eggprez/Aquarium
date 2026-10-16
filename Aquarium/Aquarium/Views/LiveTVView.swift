@@ -57,6 +57,9 @@ struct LiveTVView: View {
         // frame, so it can be as large as the screen deserves without any of
         // that.
         core.toolbar(.hidden, for: .navigationBar)
+            // Hiding the bar takes the back-swipe with it — see `BackSwipe`,
+            // which only acts where there is a page to go back to.
+            .background { BackSwipe().frame(width: 0, height: 0) }
         #else
         // The Mac's furniture is the window's: the filter in the toolbar's
         // search field, Refresh beside it, and the day and the line-up in the
@@ -74,8 +77,10 @@ struct LiveTVView: View {
                 }
             }
             // View ▸ Refresh, ⌘R. A counter from the menu rather than a
-            // shortcut on the button, so the key is bound in one place.
-            .onChange(of: MacCommandRequests.shared.refresh) { _, _ in refresh() }
+            // shortcut on the button, so the key is bound in one place — and
+            // heard only while the guide is the page in front. See
+            // `onMacRefresh`.
+            .onMacRefresh { refresh() }
         #endif
     }
 
@@ -106,6 +111,10 @@ struct LiveTVView: View {
 
     #if os(iOS)
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    /// Whether this screen was pushed — from More, on a phone whose bar has
+    /// no Live TV tab — rather than being a tab or a sidebar section's own.
+    @Environment(\.isPresented) private var isPushed
+    @Environment(\.dismiss) private var dismiss
 
     /// The screen's name, at the size a large title would have been.
     ///
@@ -118,10 +127,19 @@ struct LiveTVView: View {
     private var header: some View {
         let roomy = verticalSizeClass != .compact
         return AppTopBar(height: Metrics.topBar + (roomy ? 26 : 0)) {
-            Text("Live TV")
-                .font(roomy ? .largeTitle.weight(.bold) : .headline)
-                .foregroundStyle(Theme.text)
-                .lineLimit(1)
+            // The way back, where there is somewhere to go back to. Opened
+            // from More this screen had none, and with the navigation bar
+            // hidden no back-swipe either: re-tapping the More tab was the
+            // only way out.
+            HStack(spacing: 4) {
+                if isPushed {
+                    BarBackButton { dismiss() }
+                }
+                Text("Live TV")
+                    .font(roomy ? .largeTitle.weight(.bold) : .headline)
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+            }
         }
     }
     #endif
@@ -153,6 +171,14 @@ struct LiveTVView: View {
             // is scrolled rather than filtered on both. A Mac keeps its
             // `.searchable` field, which costs the guide no height at all.
             content
+                #if os(iOS)
+                // Everything under the heading, whatever is in it. An error or
+                // an empty line-up is only as tall as its few lines, and the
+                // stack around it was left that height and centred in the
+                // column: the heading, the message and the mini player all
+                // floated in the middle of the screen.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                #endif
         }
         .screenTitle("Live TV")
         .paletteBar()

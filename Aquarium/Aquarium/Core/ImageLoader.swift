@@ -76,6 +76,17 @@ actor ImageLoader {
 
     private var inFlight: [URL: Flight] = [:]
 
+    /// Addresses the host answered with no picture, and when.
+    ///
+    /// A card asks once, but cards come and go: a library scrolled back and
+    /// forth mounts the same tile again and again, and every mount used to
+    /// send the same request for the same 404 — a logo the server can't
+    /// produce, a tag the scan left behind. Remembered for a while instead,
+    /// and only for a while: artwork added on the server later is found on
+    /// the next look after that.
+    private var knownAbsent: [URL: Date] = [:]
+    private static let absentFor: TimeInterval = 10 * 60
+
     /// The widest copy of each server picture held in `cache`, by the same
     /// item-and-type slot the disk copy is filed under. The same poster is asked
     /// for at a different width by every card size that shows it; a narrower
@@ -221,6 +232,10 @@ actor ImageLoader {
 
     func fetch(_ url: URL) async -> Outcome {
         if let hit = cached(url) { return .image(hit) }
+        if let at = knownAbsent[url] {
+            if Date().timeIntervalSince(at) < Self.absentFor { return .absent }
+            knownAbsent[url] = nil
+        }
 
         let flight: Task<Fetched, Never>
         if let running = inFlight[url] {
@@ -254,6 +269,13 @@ actor ImageLoader {
         if case .image(let image, let keep) = fetched {
             remember(image, for: url)
             if let keep { await keepOnDisk(keep, for: url) }
+        } else if case .absent = fetched, !url.isFileURL {
+            // Not a file on this device, which can appear at any moment — a
+            // download's artwork landing — and costs nothing to look for.
+            // Bounded: a long session on a library with many missing logos
+            // would otherwise keep every one of them.
+            if knownAbsent.count >= 2_000 { knownAbsent.removeAll() }
+            knownAbsent[url] = Date()
         }
         return fetched.outcome
     }
@@ -427,6 +449,29 @@ actor ImageLoader {
     /// The copy was deleted.
     func forgetDisk() {
         diskEntries = [:]
+    }
+
+    /// Delete the saved pictures of items the library copy has dropped — see
+    /// `LibraryIndex.sync`. A new tag replaces a file, but an item that is
+    /// gone altogether never asks for its slot again, so without this every
+    /// film ever removed from the server kept its poster, logo and stills on
+    /// disk for as long as the copy was kept.
+    func forgetDiskArtwork(for ids: Set<String>) async {
+        guard !ids.isEmpty else { return }
+        // Slots are filed under the id as `diskKey` cleans it.
+        let wanted = Set(ids.map { String($0.filter { $0.isLetter || $0.isNumber || $0 == "-" }) })
+        var all = await entries()
+        var doomed: [URL] = []
+        for (slot, entry) in all {
+            guard let id = slot.split(separator: "_").first, wanted.contains(String(id)) else { continue }
+            all[slot] = nil
+            doomed.append(Self.artworkDirectory.appending(path: entry.file))
+        }
+        guard !doomed.isEmpty else { return }
+        diskEntries = all
+        await Task.detached(priority: .utility) {
+            for file in doomed { try? FileManager.default.removeItem(at: file) }
+        }.value
     }
 
     /// Which item, image type and tag a server artwork URL is for, and how

@@ -93,6 +93,8 @@ final class WatchPlayer: NSObject {
     private var snapshotTask: Task<Void, Never>?
     private var userPaused = false
     private var startedReport = false
+    /// The item this play has already been counted as heard for — see `note`.
+    private var countedPlay: String?
     /// Whether `position` is where the item really is: false from opening
     /// until the seek to the resume point has landed. Until then nothing is
     /// written down — a pause while the route picker is up would otherwise
@@ -264,6 +266,7 @@ final class WatchPlayer: NSObject {
         let old = stream
         stream = nil
         startedReport = false
+        countedPlay = nil
         positionKnown = false
 
         WatchLog.note("player", "opening \(entry.item.Id) \"\(entry.item.title)\" \(entry.item.isAudiobook ? "book" : "song") at \(Int(startAt ?? 0))s, queue \(queue.count), \(WatchLog.memory)")
@@ -299,6 +302,10 @@ final class WatchPlayer: NSObject {
                         if src.isTranscode { await client.stopTranscode(playSessionId: src.playSessionId) }
                         return
                     }
+                    // A direct file is let in by its header. A transcode has
+                    // none and carries the token in its address instead,
+                    // which a server's logs can see — the deliberate
+                    // trade-off described at `JellyfinClient.authorized`.
                     let asset = AVURLAsset(url: src.url, options: src.headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": src.headers])
                     avItem = AVPlayerItem(asset: asset)
                     avItem.preferredForwardBufferDuration = 20
@@ -504,24 +511,37 @@ final class WatchPlayer: NSObject {
     /// done by the server's own rule — under five minutes left — and the
     /// once-a-minute note is only ever a position: the server makes a
     /// position that close to the end "played" by itself.
+    ///
+    /// Counted once per play. A pause in the closing stretch — the last
+    /// tenth of a song, a book's last five minutes — is already "heard", and
+    /// the end arriving afterwards said so a second time: a played event is
+    /// a play on the server's count, and the queue keeps every one of them,
+    /// so the count went up by two.
     private func note(finished: Bool, periodic: Bool = false) {
         guard let item = current, positionKnown || finished else { return }
         let total = duration > 0 ? duration : item.runtimeSeconds
         let at = finished ? total : position
         let ticks = Int64(max(0, at) * 10_000_000)
+        let counted = countedPlay == item.Id
         if item.isAudiobook {
             let heard = finished || (!periodic && BookProgress.isFinished(position: at, duration: total))
             downloads.noteProgress(itemId: item.Id, positionSeconds: at, played: heard ? true : nil)
-            WatchSyncQueue.shared.add(WatchProgressEvent(
-                itemId: item.Id, positionTicks: heard ? Int64(total * 10_000_000) : ticks,
-                played: heard, isAudiobook: true, streamed: stream != nil
-            ))
+            if !(heard && counted) {
+                WatchSyncQueue.shared.add(WatchProgressEvent(
+                    itemId: item.Id, positionTicks: heard ? Int64(total * 10_000_000) : ticks,
+                    played: heard, isAudiobook: true, streamed: stream != nil
+                ))
+            }
+            if heard { countedPlay = item.Id }
         } else if finished || (total > 0 && at / total > 0.9) {
             downloads.noteProgress(itemId: item.Id, positionSeconds: 0, played: true)
-            WatchSyncQueue.shared.add(WatchProgressEvent(
-                itemId: item.Id, positionTicks: Int64(total * 10_000_000),
-                played: true, isAudiobook: false, streamed: stream != nil
-            ))
+            if !counted {
+                WatchSyncQueue.shared.add(WatchProgressEvent(
+                    itemId: item.Id, positionTicks: Int64(total * 10_000_000),
+                    played: true, isAudiobook: false, streamed: stream != nil
+                ))
+            }
+            countedPlay = item.Id
         }
         lastEventAt = Date()
         writeSnapshot()
@@ -620,7 +640,7 @@ final class WatchPlayer: NSObject {
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: item.title,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: position,
-            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? speed : 0,
+            MPNowPlayingInfoPropertyPlaybackRate: nowPlayingRate,
             MPNowPlayingInfoPropertyDefaultPlaybackRate: speed,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
         ]
@@ -645,10 +665,15 @@ final class WatchPlayer: NSObject {
         }
     }
 
+    /// The rate the system's clock runs at. Nothing during a stall: the
+    /// player still says "playing" while it waits for data, and posted at
+    /// full speed the clock ran on through the stall and then jumped back.
+    private var nowPlayingRate: Double { isPlaying && !isBuffering ? speed : 0 }
+
     private func updateNowPlayingRate() {
         guard var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return updateNowPlaying() }
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = position
-        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? speed : 0
+        info[MPNowPlayingInfoPropertyPlaybackRate] = nowPlayingRate
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
         writeSnapshot()
@@ -702,7 +727,29 @@ final class WatchPlayer: NSObject {
                 snapshot = nil
             }
             ListeningSnapshot.write(snapshot)
+            guard Self.worthRedrawing(snapshot, over: snapshotShown) else { return }
+            snapshotShown = snapshot
             WidgetCenter.shared.reloadAllTimelines()
         }
+    }
+
+    /// The snapshot the Smart Stack was last asked to redraw for.
+    private var snapshotShown: ListeningSnapshot?
+
+    /// Whether a new snapshot changes what the card shows. A book notes its
+    /// place every five seconds, and each note used to be a redraw of every
+    /// widget — a watch's widget budget spent on moving a progress bar by a
+    /// few pixels' worth of nothing. The file is still written each time, so
+    /// whatever redraw comes next reads the latest place.
+    private static func worthRedrawing(_ new: ListeningSnapshot?, over old: ListeningSnapshot?) -> Bool {
+        guard let new, let old else { return new != nil || old != nil }
+        if new.itemId != old.itemId || new.title != old.title || new.subtitle != old.subtitle
+            || new.isPlaying != old.isPlaying || new.isAudiobook != old.isAudiobook {
+            return true
+        }
+        // The bar is all a position moves: a hundredth of the way, or a
+        // minute, whichever is longer.
+        return abs(new.position - old.position) >= max(60, new.duration / 100)
+            || abs(new.duration - old.duration) >= 1
     }
 }

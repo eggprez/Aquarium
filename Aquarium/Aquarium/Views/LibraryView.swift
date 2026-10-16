@@ -51,6 +51,9 @@ struct LibraryView: View {
     /// The tiles or rows selected, shared by the grid and the table so a
     /// selection survives switching between them. The toolbar acts on it.
     @State private var selection: Set<String> = []
+    /// Whether this page is on screen rather than under one pushed over it —
+    /// see where the Item menu's value is published.
+    @State private var isOnScreen = false
     @Environment(PlayerModel.self) private var player
     @Environment(\.openWindow) private var openWindow
     #endif
@@ -224,10 +227,9 @@ struct LibraryView: View {
             }
             activeSearchTerm = searchTerm
         }
-        // View ▸ Refresh (⌘R), and the app coming back to the front.
-        .onChange(of: MacCommandRequests.shared.refresh) { _, _ in
-            Task { await reload() }
-        }
+        // View ▸ Refresh (⌘R), and the app coming back to the front — while
+        // this is the page in front. See `onMacRefresh`.
+        .onMacRefresh { Task { await reload() } }
         // The controls are the library's to remember — see `LibraryFilters`.
         .onChange(of: currentFilters) { _, filters in
             filters.save(for: parentId)
@@ -241,7 +243,15 @@ struct LibraryView: View {
         // The Item menu, for the one title selected. Only a title's own page
         // published it, so with a film picked out in the grid — "1 Selected"
         // in the toolbar — Item ▸ Play, ⌘D and ⌥⌘O were all greyed out.
-        .focusedSceneValue(\.itemMenuActions, selectedItemActions)
+        //
+        // Only while this page is on screen. A title pushed over it publishes
+        // the same value, and with both set the Item menu could act on the
+        // film still selected in the grid underneath instead of the title in
+        // front of you. A pushed page takes this one off screen, which is
+        // what `isOnScreen` follows.
+        .focusedSceneValue(\.itemMenuActions, isOnScreen ? selectedItemActions : nil)
+        .onAppear { isOnScreen = true }
+        .onDisappear { isOnScreen = false }
         #endif
         #if os(iOS)
         // The filter bar is the one place in the app where a tap changes what
@@ -559,35 +569,54 @@ struct LibraryView: View {
             .help("Show as posters or as a list")
         }
         if layout == .grid {
+            // The ends are buttons of our own rather than the slider's value
+            // labels. AppKit makes those into step buttons too, but SwiftUI
+            // named both of them after the first — "Photo" — so VoiceOver
+            // couldn't tell them apart. These say what they do and follow
+            // View ▸ Bigger and Smaller, which they are.
+            //
+            // Three toolbar items rather than one holding the three controls
+            // in a row. As one item the toolbar gave every control in it the
+            // first one's name — the label on the second button was never
+            // read, and both ends were "Smaller" — and a toolbar item's name
+            // comes from a `Label`'s title, not from an accessibility label.
+            // So each control is an item of its own, and each button's name
+            // is the title of its label.
             ToolbarItem(placement: .primaryAction) {
-                // The ends are buttons of our own rather than the slider's
-                // value labels. AppKit makes those into step buttons too, but
-                // SwiftUI named both of them after the first — "Photo", and
-                // then "Smaller" twice — so VoiceOver couldn't tell them
-                // apart. These say what they do and follow View ▸ Bigger and
-                // Smaller, which they are.
-                HStack(spacing: 4) {
-                    Button { MacViewOptions.shared.smaller() } label: {
+                Button { MacViewOptions.shared.smaller() } label: {
+                    Label {
+                        Text("Smaller")
+                    } icon: {
                         Image(systemName: "photo").imageScale(.small)
                     }
-                    .disabled(!MacViewOptions.shared.canShrink)
-                    .help("Smaller (⌘-)")
-                    .accessibilityLabel("Smaller")
-                    Slider(value: thumbnailSize, in: MacViewOptions.range) {
-                        Text("Thumbnail Size")
-                    }
-                    .labelsHidden()
-                    .help("Thumbnail Size")
-                    Button { MacViewOptions.shared.bigger() } label: {
-                        Image(systemName: "photo").imageScale(.large)
-                    }
-                    .disabled(!MacViewOptions.shared.canGrow)
-                    .help("Bigger (⌘=)")
-                    .accessibilityLabel("Bigger")
+                    .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
-                .frame(width: 150)
+                .disabled(!MacViewOptions.shared.canShrink)
+                .help("Smaller (⌘-)")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Slider(value: thumbnailSize, in: MacViewOptions.range) {
+                    Text("Thumbnail Size")
+                }
+                .labelsHidden()
+                .frame(width: 100)
+                .help("Thumbnail Size")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button { MacViewOptions.shared.bigger() } label: {
+                    Label {
+                        Text("Bigger")
+                    } icon: {
+                        Image(systemName: "photo").imageScale(.large)
+                    }
+                    .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .disabled(!MacViewOptions.shared.canGrow)
+                .help("Bigger (⌘=)")
             }
         }
         ToolbarItem(placement: .primaryAction) {

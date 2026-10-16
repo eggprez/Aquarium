@@ -81,7 +81,7 @@ extension JellyfinClient {
         if query.unwatched { q.append(.init(name: "Filters", value: "IsUnplayed")) }
         if query.favorites { q.append(.init(name: "IsFavorite", value: "true")) }
         if let g = query.genre { q.append(.init(name: "Genres", value: g)) }
-        return try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))")
+        return try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))")
     }
 }
 

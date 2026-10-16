@@ -87,6 +87,9 @@ struct NowPlayingWidget: Widget {
 private struct NowPlayingCard: View {
     let entry: NowPlayingEntry
     @Environment(\.widgetFamily) private var family
+    /// Full colour, or the Home Screen's tinted and clear styles, where
+    /// everything but the artwork is drawn in one tint — see `small`.
+    @Environment(\.widgetRenderingMode) private var renderingMode
 
     var body: some View {
         Group {
@@ -108,6 +111,7 @@ private struct NowPlayingCard: View {
             Image(systemName: "play.circle")
                 .font(.title2)
                 .foregroundStyle(ActivityPalette.accentText)
+                .widgetAccentable()
             Text("Nothing playing")
                 .font(.headline)
             Text("Open Aquarium to start something.")
@@ -122,10 +126,16 @@ private struct NowPlayingCard: View {
             artwork(cornerRadius: 0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
-            LinearGradient(
-                colors: [.clear, ActivityPalette.background.opacity(0.9)],
-                startPoint: .center, endPoint: .bottom
-            )
+                // Tinted, the gradient below would be drawn in the tint —
+                // a pale wash under white text — so the picture is dimmed
+                // instead and the system's own dark ground does its work.
+                .opacity(renderingMode == .fullColor ? 1 : 0.4)
+            if renderingMode == .fullColor {
+                LinearGradient(
+                    colors: [.clear, ActivityPalette.background.opacity(0.9)],
+                    startPoint: .center, endPoint: .bottom
+                )
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text(snapshot.title)
                     .font(.footnote.weight(.semibold))
@@ -136,7 +146,7 @@ private struct NowPlayingCard: View {
                             .font(.caption.weight(.bold))
                             .foregroundStyle(.white)
                             .frame(width: 26, height: 26)
-                            .background(ActivityPalette.accent, in: Circle())
+                            .background { Circle().fill(ActivityPalette.accent).widgetAccentable() }
                     }
                     .buttonStyle(.plain)
                     bar(snapshot)
@@ -157,6 +167,7 @@ private struct NowPlayingCard: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(ActivityPalette.accentText)
                     .textCase(.uppercase)
+                    .widgetAccentable()
                 Text(snapshot.title)
                     .font(.headline)
                     .lineLimit(2)
@@ -192,7 +203,7 @@ private struct NowPlayingCard: View {
                 .font(.title3.weight(.bold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
-                .background(ActivityPalette.accent, in: Circle())
+                .background { Circle().fill(ActivityPalette.accent).widgetAccentable() }
         }
         .buttonStyle(.plain)
     }
@@ -224,6 +235,7 @@ private struct NowPlayingCard: View {
         if let image = entry.artwork {
             Image(uiImage: image)
                 .resizable()
+                .widgetArtwork()
                 .aspectRatio(contentMode: .fill)
         } else {
             ZStack {
@@ -231,6 +243,7 @@ private struct NowPlayingCard: View {
                 Image(systemName: entry.snapshot?.isVideo == true ? "film" : "music.note")
                     .font(.largeTitle)
                     .foregroundStyle(ActivityPalette.accentText)
+                    .widgetAccentable()
             }
         }
     }
@@ -241,6 +254,7 @@ private struct NowPlayingCard: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.22))
                 Capsule().fill(ActivityPalette.accent).frame(width: proxy.size.width * fraction)
+                    .widgetAccentable()
             }
         }
         .frame(height: 4)

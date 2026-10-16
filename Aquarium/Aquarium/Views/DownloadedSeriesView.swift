@@ -57,6 +57,7 @@ struct DownloadedSeriesView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .paletteBar()
         .downloadDeletionDialog($pendingDeletion) { ids in
             let n = downloads.delete(ids)
             app.toast("Deleted \(n) episode\(n == 1 ? "" : "s")", tone: .ok)
@@ -95,7 +96,12 @@ struct DownloadedSeriesView: View {
                 Spacer(minLength: 0)
             }
 
-            WrappingRow(spacing: 10, rowSpacing: 10) {
+            // A plain row, not `WrappingRow`, for the reason the detail
+            // page's compact actions give: a `Menu` inside that layout opens
+            // anchored to the row's first button, which would bring Delete's
+            // list of seasons down from Play. Three buttons at most, held to
+            // a line each.
+            HStack(spacing: 10) {
                 if let start = show.resumePoint {
                     Button {
                         player.playLocal(start)
@@ -148,6 +154,8 @@ struct DownloadedSeriesView: View {
                 .buttonStyle(.bordered)
                 .tint(Theme.danger)
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
         }
         .padding(.horizontal, Metrics.gutter)
     }

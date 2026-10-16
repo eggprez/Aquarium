@@ -1013,9 +1013,11 @@ final class JellyfinClient {
     }
 
     /// A user's picture, for the account lists. Served without a token, so it
-    /// can be drawn for an account that is not the one signed in.
+    /// can be drawn for an account that is not the one signed in. `/UserImage`
+    /// (10.9 and later) rather than `/Users/{id}/Images/Primary`, which 12.x has
+    /// dropped from its API description along with the rest of `/Users/{id}/…`.
     static func avatarURL(for account: SavedSession, width: Int = 160) -> URL? {
-        URL(string: "\(account.server)/Users/\(account.userId)/Images/Primary?maxWidth=\(width)&quality=90")
+        URL(string: "\(account.server)/UserImage?userId=\(account.userId)&maxWidth=\(width)&quality=90")
     }
 
     /// Sign out. Returns whether the server confirmed the token was revoked;
@@ -1102,7 +1104,7 @@ final class JellyfinClient {
 
     func views() async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        return try await get(ItemsResponse.self, "/Users/\(s.userId)/Views").items
+        return try await get(ItemsResponse.self, "/UserViews?userId=\(s.userId)").items
     }
 
     /// The home screen the user has already arranged, read from the server.
@@ -1192,7 +1194,7 @@ final class JellyfinClient {
         guard let s = prefs.session else { throw APIError.notConfigured }
         return try await get(
             ItemsResponse.self,
-            "/Users/\(s.userId)/Items/Resume?Limit=16&Fields=\(Self.itemFields)&MediaTypes=Video&EnableImageTypes=Primary,Backdrop,Thumb,Logo"
+            "/UserItems/Resume?userId=\(s.userId)&Limit=16&Fields=\(Self.itemFields)&MediaTypes=Video&EnableImageTypes=Primary,Backdrop,Thumb,Logo"
         ).items
     }
 
@@ -1240,7 +1242,7 @@ final class JellyfinClient {
             URLQueryItem(name: "Fields", value: Self.listFields),
             URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb,Logo"),
         ]
-        let items = try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))").items
+        let items = try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))").items
         return Array(items.filter { Artwork.url($0, type: "Backdrop") != nil }.prefix(limit))
     }
 
@@ -1251,7 +1253,7 @@ final class JellyfinClient {
         guard let s = prefs.session else { throw APIError.notConfigured }
         let items = try await get(
             [BaseItem].self,
-            "/Users/\(s.userId)/Items/Latest?parentId=\(Self.pathId(parentId))&Limit=\(limit)&Fields=\(Self.itemFields)"
+            "/Items/Latest?userId=\(s.userId)&parentId=\(Self.pathId(parentId))&Limit=\(limit)&Fields=\(Self.itemFields)"
         )
         return try await foldEpisodesIntoSeries(items.filter { !$0.isNotVideo })
     }
@@ -1269,7 +1271,7 @@ final class JellyfinClient {
                 URLQueryItem(name: name, value: value),
                 URLQueryItem(name: "Limit", value: "0"),
             ]
-            return try? await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))", countsForOffline: false).total
+            return try? await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))", countsForOffline: false).total
         }
         async let video = count("MediaTypes", "Video")
         async let other = count("IncludeItemTypes", "Audio,AudioBook,Book")
@@ -1349,7 +1351,7 @@ final class JellyfinClient {
         if query.favorites { q.append(.init(name: "IsFavorite", value: "true")) }
         if let g = query.genre { q.append(.init(name: "Genres", value: g)) }
         if let letter = query.nameLessThan { q.append(.init(name: "NameLessThan", value: letter.lowercased())) }
-        return try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))")
+        return try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))")
     }
 
     /// Everything the user has starred, across every library.
@@ -1374,7 +1376,7 @@ final class JellyfinClient {
             URLQueryItem(name: "StartIndex", value: String(startIndex)),
             URLQueryItem(name: "Limit", value: String(limit)),
         ]
-        return try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))")
+        return try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))")
     }
 
     /// Genre names present in one library, for the filter bar. Empty on servers
@@ -1397,7 +1399,7 @@ final class JellyfinClient {
         // Asked of the server whenever it can be, for the cast and studios the
         // copy doesn't keep; the copy answers when it can't.
         do {
-            return try await get(BaseItem.self, "/Users/\(s.userId)/Items/\(Self.pathId(itemId))?Fields=\(Self.detailFields)")
+            return try await get(BaseItem.self, "/Items/\(Self.pathId(itemId))?userId=\(s.userId)&Fields=\(Self.detailFields)")
         } catch APIError.offline(let message) {
             if let local = LibraryIndex.shared.item(itemId) { return local }
             throw APIError.offline(message)
@@ -1418,14 +1420,14 @@ final class JellyfinClient {
             URLQueryItem(name: "Fields", value: Self.listFields),
             URLQueryItem(name: "Limit", value: String(limit)),
         ]
-        return try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))").items
+        return try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))").items
     }
 
     /// The trailer files kept beside a title on the server. Playable like any
     /// other item. Empty on any failure — a trailer is never worth an error.
     func localTrailers(for itemId: String) async -> [BaseItem] {
         guard let s = prefs.session else { return [] }
-        return (try? await get([BaseItem].self, "/Users/\(s.userId)/Items/\(Self.pathId(itemId))/LocalTrailers")) ?? []
+        return (try? await get([BaseItem].self, "/Items/\(Self.pathId(itemId))/LocalTrailers?userId=\(s.userId)")) ?? []
     }
 
     /// "More like this" — the server's own recommendation. Purely additive to
@@ -1470,15 +1472,31 @@ final class JellyfinClient {
             URLQueryItem(name: "StartIndex", value: String(startIndex)),
             URLQueryItem(name: "Limit", value: String(limit)),
         ]
-        return try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))")
+        return try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))")
     }
 
+    /// Every channel, a page at a time. One request capped at 500 used to be
+    /// the whole of it, and a lineup bigger than that — an IPTV source behind
+    /// the server's own tuner list easily is — simply ended at channel 500.
     func channels() async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        return try await get(
-            ItemsResponse.self,
-            "/LiveTv/Channels?userId=\(s.userId)&AddCurrentProgram=true&EnableImageTypes=Primary&Limit=500"
-        ).items
+        let pageSize = 500
+        var all: [BaseItem] = []
+        while true {
+            let page = try await get(
+                ItemsResponse.self,
+                "/LiveTv/Channels?userId=\(s.userId)&AddCurrentProgram=true&EnableImageTypes=Primary"
+                    + "&StartIndex=\(all.count)&Limit=\(pageSize)"
+            )
+            all += page.items
+            // A page short of full is the last, and so is a total reached; a
+            // server that sends no total is read by the first rule alone. The
+            // ceiling is for one that ignores StartIndex and never runs out.
+            guard page.items.count == pageSize, all.count < 10_000,
+                  all.count < page.total || page.TotalRecordCount == nil
+            else { break }
+        }
+        return all
     }
 
     /// The guide: every programme airing on the given channels that overlaps
@@ -1515,7 +1533,7 @@ final class JellyfinClient {
         var out: [BaseItem] = []
         for chunk in stride(from: 0, to: ids.count, by: 50) {
             let slice = ids[chunk..<min(chunk + 50, ids.count)].joined(separator: ",")
-            var path = "/Users/\(s.userId)/Items?Ids=\(slice)"
+            var path = "/Items?userId=\(s.userId)&Ids=\(slice)"
             if !fields.isEmpty { path += "&Fields=\(fields)" }
             out += try await get(ItemsResponse.self, path, countsForOffline: countsForOffline).items
         }
@@ -1534,9 +1552,9 @@ final class JellyfinClient {
     /// only marks the item played.
     func markPlayed(_ itemId: String, played: Bool, at date: Date?) async throws {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        var path = "/Users/\(s.userId)/PlayedItems/\(Self.pathId(itemId))"
+        var path = "/UserPlayedItems/\(Self.pathId(itemId))?userId=\(s.userId)"
         if played, let date {
-            path += "?datePlayed=\(ISO8601DateFormatter().string(from: date))"
+            path += "&datePlayed=\(ISO8601DateFormatter().string(from: date))"
         }
         try await request(path, method: played ? "POST" : "DELETE")
         LibraryIndex.shared.patchUserData(itemId) {
@@ -1556,13 +1574,15 @@ final class JellyfinClient {
     /// data. An older one has no such call and answers 404, and is instead
     /// told the item was stopped at the very start, which it records the
     /// same way — below its minimum resume point, the position is dropped
-    /// and nothing is marked played.
+    /// and nothing is marked played. That fallback keeps the old
+    /// `/Users/{id}/…` spelling on purpose: it is only ever reached by a
+    /// server from before the routes everything else here now uses.
     func clearProgress(_ itemId: String) async throws {
         guard let s = prefs.session else { throw APIError.notConfigured }
         let id = Self.pathId(itemId)
         do {
             try await request(
-                "/Users/\(s.userId)/Items/\(id)/UserData", method: "POST",
+                "/UserItems/\(id)/UserData?userId=\(s.userId)", method: "POST",
                 body: ["PlaybackPositionTicks": 0]
             )
         } catch APIError.server(let status, _) where status == 404 {
@@ -1573,7 +1593,7 @@ final class JellyfinClient {
 
     func setFavorite(_ itemId: String, favorite: Bool) async throws {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        try await request("/Users/\(s.userId)/FavoriteItems/\(Self.pathId(itemId))", method: favorite ? "POST" : "DELETE")
+        try await request("/UserFavoriteItems/\(Self.pathId(itemId))?userId=\(s.userId)", method: favorite ? "POST" : "DELETE")
         LibraryIndex.shared.patchUserData(itemId) { $0.IsFavorite = favorite }
     }
 
@@ -1586,7 +1606,7 @@ final class JellyfinClient {
         guard let s = prefs.session else { return nil }
         guard let env = try? await get(
             TrickplayEnvelope.self,
-            "/Users/\(s.userId)/Items/\(Self.pathId(itemId))?Fields=Trickplay"
+            "/Items/\(Self.pathId(itemId))?userId=\(s.userId)&Fields=Trickplay"
         ) else { return nil }
         return Self.trickplayInfo(env.Trickplay, sourceId: env.MediaSources?.first?.Id, itemId: itemId)
     }
@@ -1983,6 +2003,17 @@ final class JellyfinClient {
     /// stopped report, which is best-effort by design.
     func reportPlaybackStoppedOrThrow(_ report: PlaybackReport) async throws {
         _ = try await request("/Sessions/Playing/Stopped", method: "POST", body: report)
+    }
+
+    /// The throwing forms of the start and progress reports, for a download's
+    /// sitting — see `OfflineProgress.Session` — which only counts as told
+    /// once the server has actually heard it.
+    func reportPlaybackStartOrThrow(_ report: PlaybackReport) async throws {
+        _ = try await request("/Sessions/Playing", method: "POST", body: report)
+    }
+
+    func reportPlaybackProgressOrThrow(_ report: PlaybackReport) async throws {
+        _ = try await request("/Sessions/Playing/Progress", method: "POST", body: report)
     }
 
     /// Tell the server to tear down a transcode job we've walked away from.
