@@ -2,7 +2,6 @@
 //  the media keys on a Mac keyboard — all one API, and the counterpart to
 //  mpris.rs on Linux.
 
-import AVFoundation
 import Foundation
 import MediaPlayer
 

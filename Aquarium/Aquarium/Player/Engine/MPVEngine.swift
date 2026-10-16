@@ -1,4 +1,4 @@
-//  libmpv, wrapped for the Apple TV player.
+//  libmpv, behind `PlaybackEngine`.
 //
 //  The Apple TV plays video through mpv rather than AVPlayer. AVPlayer could
 //  not open Matroska, DTS or TrueHD, so most of a library reached it as a
@@ -11,26 +11,34 @@
 //  This file is only the engine: a handle, the options it is created with,
 //  the properties it reports and the commands it takes. What any of it means
 //  for Jellyfin — which stream to ask for, what to report, what comes next —
-//  is `PlayerModel`'s business (the tvOS one, in `TVPlayerModel.swift`).
+//  is `PlayerModel`'s business.
 //
 //  mpv's API is thread-safe. Its events are drained on a private serial queue,
-//  turned into `MPVEngine.Event` values there, and handed to the main thread
-//  through `onEvent`; commands and property writes are made from the main
-//  thread directly. The handle is only destroyed once the queue has been told
-//  to stop reading it — see `shutdown`.
+//  turned into `EngineEvent` values there, and handed to the model through
+//  `events`; commands and property writes are made from the main thread
+//  directly. The handle is only destroyed once the queue has been told to stop
+//  reading it — see `shutdown`.
 //
 //  The picture is drawn by mpv itself (`vo=gpu-next`, Vulkan through MoltenVK)
 //  into `layer`, a CAMetalLayer, the way MPVKit's own tvOS demo does it.
 //  Decoding is VideoToolbox where the hardware takes the codec and software
 //  where it doesn't.
+//
+//  Compiled wherever MPVKit is linked. The package product is filtered to
+//  tvOS in the Xcode project until phase 4 opens it up, so for now that is
+//  the Apple TV build; the UIKit view at the top is the only part that is
+//  tied to a platform rather than to the library.
 
-#if os(tvOS)
+#if canImport(Libmpv)
 
 import Foundation
 import Libmpv
 import OSLog
 import QuartzCore
+
+#if canImport(UIKit)
 import UIKit
+#endif
 
 /// The surface mpv draws into.
 ///
@@ -49,8 +57,9 @@ final class MPVMetalLayer: CAMetalLayer {
     }
 }
 
+#if canImport(UIKit)
 /// A view whose layer is the one mpv draws into, so it is sized by the view
-/// hierarchy like anything else.
+/// hierarchy like anything else. Phase 4 gives it an `NSView` twin.
 final class MPVVideoView: UIView {
     override class var layerClass: AnyClass { MPVMetalLayer.self }
 
@@ -76,63 +85,26 @@ final class MPVVideoView: UIView {
         }
     }
 }
+#endif
 
 final class MPVEngine: @unchecked Sendable {
     nonisolated static let log = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "Aquarium", category: "mpv")
 
-    /// A track as mpv lists it.
-    struct Track: Hashable, Sendable {
-        enum Kind: String, Sendable { case audio, video, sub }
-        /// mpv's own id for the track: what `aid`, `sid` and `vid` take.
-        var id: Int
-        var kind: Kind
-        var title: String?
-        var language: String?
-        var codec: String?
-        var isDefault: Bool
-        var isForced: Bool
-        var isExternal: Bool
-        var isSelected: Bool
-        var channels: Int?
-        /// The stream's index inside the file — what ffprobe, and so Jellyfin,
-        /// numbers it by. How a Jellyfin stream index is found among mpv's
-        /// tracks. Nil for an external track.
-        var fileIndex: Int?
-        /// For an external subtitle, the URL it was added from.
-        var externalURL: String?
-    }
+    let kind: PlaybackEngineKind = .mpv
 
-    enum EndReason: Sendable { case eof, stop, quit, error, redirect, unknown }
+    let capabilities: EngineCapabilities = [
+        .audioDelayOnAnyStream, .pictureAdjust, .zoom, .externalSubtitles, .nightMode,
+        .playsOnWhileReloading, .restartsAudioOutput, .displaySync,
+    ]
 
-    enum Event: Sendable {
-        case position(Double)
-        case duration(Double)
-        case paused(Bool)
-        /// Waiting on the network with the playhead stopped.
-        case buffering(Bool)
-        case seeking(Bool)
-        /// How far the cache reaches, in stream seconds.
-        case cachedUntil(Double)
-        case tracks([Track])
-        /// The picture's display size, once there is one.
-        case videoSize(CGSize)
-        /// The stream's own frame rate, as the container declares it.
-        case frameRate(Double)
-        /// Which hardware decoder is in use: `videotoolbox`, or `no` for
-        /// software.
-        case decoder(String)
-        case droppedFrames(Int)
-        /// The file has been opened and its tracks are known.
-        case fileLoaded
-        /// Playback (re)started after a load or a seek: the first frame after
-        /// it is on screen.
-        case playbackRestart
-        case endFile(EndReason, error: String?)
-    }
+    let directContainers: Set<String> = [
+        "mkv", "matroska", "webm", "mp4", "m4v", "mov", "avi", "ts", "mpegts", "m2ts", "flv",
+        "ogm", "ogv", "wmv", "asf", "3gp",
+    ]
 
-    /// Where events go, on the main thread.
-    var onEvent: (@MainActor (Event) -> Void)?
+    let events: AsyncStream<EngineEvent>
+    private let continuation: AsyncStream<EngineEvent>.Continuation
 
     private var handle: OpaquePointer?
     private let queue = DispatchQueue(label: "aquarium.mpv.events", qos: .userInitiated)
@@ -141,10 +113,21 @@ final class MPVEngine: @unchecked Sendable {
     private var closed = false
     /// The last position delivered, and when — see `deliverPosition`.
     private var lastPosition: (value: Double, at: CFTimeInterval) = (-1, 0)
+    /// The last track list read, for `tracks`.
+    private var lastTracks: [EngineTrack] = []
+    /// Whether the file now loaded is open, and whether it is a live stream
+    /// — read on `queue` when a file ends, written from the main thread.
+    private var fileIsOpen = false
+    private var sawFirstFrame = false
+    private var loadedLive = false
+    /// mpv's own defaults for the options the battery profile turns off,
+    /// read once so `.quality` can put them back.
+    private var qualityDefaults: [String: String] = [:]
 
     /// Create the handle and point it at `layer`. Returns nil if libmpv
     /// couldn't be started at all.
     init?(layer: MPVMetalLayer) {
+        (events, continuation) = AsyncStream.makeStream(of: EngineEvent.self)
         guard let h = mpv_create() else { return nil }
         handle = h
 
@@ -217,6 +200,10 @@ final class MPVEngine: @unchecked Sendable {
             return nil
         }
 
+        for name in Self.batteryProfile.keys {
+            if let value = getString(name) { qualityDefaults[name] = value }
+        }
+
         observe("time-pos", MPV_FORMAT_DOUBLE)
         observe("duration", MPV_FORMAT_DOUBLE)
         observe("pause", MPV_FORMAT_FLAG)
@@ -248,17 +235,15 @@ final class MPVEngine: @unchecked Sendable {
         queue.sync { closed = true }
         handle = nil
         mpv_terminate_destroy(h)
+        continuation.finish()
     }
 
-    // MARK: - Commands
+    // MARK: - Streams
 
-    /// Open a URL, replacing whatever is playing. `start` is where in the
-    /// stream to begin; `headers` go on every request mpv makes for it.
-    /// `loop` plays it round for ever, for this file only.
-    func load(_ url: URL, start: Double, headers: [String: String], loop: Bool = false) {
+    func load(_ request: EngineLoadRequest) {
         guard handle != nil else { return }
         command(["change-list", "http-header-fields", "clr", ""])
-        for (name, value) in headers.sorted(by: { $0.key < $1.key }) {
+        for (name, value) in request.headers.sorted(by: { $0.key < $1.key }) {
             // `append` takes the whole string as one element, where setting the
             // option would split it on the commas inside Jellyfin's
             // Authorization header.
@@ -266,71 +251,246 @@ final class MPVEngine: @unchecked Sendable {
         }
         // A property rather than a per-file option, because it is simplest to
         // set it every time: `none` for the top.
-        setString("start", start > 0.5 ? String(format: "%.3f", start) : "none")
+        setString("start", request.startAt > 0.5 ? String(format: "%.3f", request.startAt) : "none")
         // `pause` outlives the file: a stream opened over a paused one would
         // start paused, and the model — which begins every stream playing —
         // would never hear otherwise, since the property didn't change.
-        setFlag("pause", false)
+        setFlag("pause", request.paused)
+        queue.sync {
+            fileIsOpen = false
+            sawFirstFrame = false
+            loadedLive = request.live
+        }
         // Per-file options go after the index (-1: not placed in a playlist)
         // and lapse with the file.
-        command(["loadfile", url.absoluteString, "replace", "-1"] + (loop ? ["loop-file=inf"] : []))
+        var args = ["loadfile", request.url.absoluteString, "replace", "-1"]
+        var perFile: [String] = []
+        if request.loop { perFile.append("loop-file=inf") }
+        if let audio = request.audioTrack { perFile.append("aid=\(audio)") }
+        if let subtitle = request.subtitleTrack { perFile.append("sid=\(subtitle)") }
+        if !perFile.isEmpty { args.append(perFile.joined(separator: ",")) }
+        command(args)
     }
 
     func stop() {
         command(["stop"])
     }
 
-    func seek(to seconds: Double) {
+    /// Nothing: a `loadfile … replace` cuts straight from the old file to the
+    /// new, so the old one is left playing — see `.playsOnWhileReloading`.
+    /// The model drops what it reports meanwhile.
+    func quiesce() {}
+
+    func handOver(to request: EngineLoadRequest, at target: Double) async -> Bool { false }
+
+    func prepare(url: URL, headers: [String: String]) -> (any PreparedStream)? { nil }
+
+    // MARK: - Transport
+
+    func play() { setFlag("pause", false) }
+    func pause() { setFlag("pause", true) }
+
+    @discardableResult
+    func seek(to seconds: Double) -> Bool {
+        guard queue.sync(execute: { fileIsOpen }) else { return false }
         command(["seek", String(format: "%.3f", max(0, seconds)), "absolute"])
+        return true
     }
 
-    func seek(by seconds: Double) {
+    @discardableResult
+    func seek(by seconds: Double) -> Bool {
+        guard queue.sync(execute: { fileIsOpen }) else { return false }
         command(["seek", String(format: "%.3f", seconds), "relative"])
+        return true
     }
+
+    var rate: Double {
+        get { getDouble("speed") }
+        set { setDouble("speed", newValue) }
+    }
+
+    /// 0…1 here; mpv's own scale is 0…100.
+    var volume: Double {
+        get { getDouble("volume") / 100 }
+        set { setDouble("volume", min(max(newValue, 0), 1) * 100) }
+    }
+
+    var isMuted: Bool {
+        get { getFlag("mute") }
+        set { setFlag("mute", newValue) }
+    }
+
+    var transport: EngineTransport {
+        if getFlag("pause") { return .paused }
+        if getFlag("paused-for-cache") || !queue.sync(execute: { sawFirstFrame }) { return .waiting }
+        return .playing
+    }
+
+    var clock: Double? {
+        guard queue.sync(execute: { fileIsOpen }) else { return nil }
+        let value = getDouble("time-pos")
+        return value.isFinite ? value : nil
+    }
+
+    func jumpToLiveEdge(margin: Double) -> Bool { false }
+
+    /// Open the audio output afresh against the route that exists now.
+    func rebuildAudio() async {
+        command(["ao-reload"])
+    }
+
+    // MARK: - Tracks
+
+    var tracks: [EngineTrack] { queue.sync { lastTracks } }
+
+    /// The audio track, by mpv id; nil for none.
+    func selectAudio(trackID: Int?) { setString("aid", trackID.map(String.init) ?? "no") }
+    /// The subtitle track, by mpv id; nil for none.
+    func selectSubtitle(trackID: Int?) { setString("sid", trackID.map(String.init) ?? "no") }
 
     /// Add a subtitle file by URL and make it the one shown.
-    func addSubtitle(_ url: URL, title: String?, language: String?) {
+    func addExternalSubtitle(url: URL, language: String?, title: String?) {
         var args = ["sub-add", url.absoluteString, "select"]
         if title != nil || language != nil { args.append(title ?? "") }
         if let language { args.append(language) }
         command(args)
     }
 
-    var isPaused: Bool {
-        get { getFlag("pause") }
-        set { setFlag("pause", newValue) }
-    }
+    // MARK: - The picture and the sound
 
-    /// Seconds; positive plays the sound later than the picture.
+    /// Seconds; positive plays the sound later than the picture. Applied to
+    /// whatever is playing, at once.
     var audioDelay: Double {
         get { getDouble("audio-delay") }
         set { setDouble("audio-delay", newValue) }
     }
 
-    var speed: Double {
-        get { getDouble("speed") }
-        set { setDouble("speed", newValue) }
+    var subtitleStyle = SubtitleStyle() {
+        didSet { applySubtitleStyle() }
     }
 
-    /// 0…100.
-    var volume: Double {
-        get { getDouble("volume") }
-        set { setDouble("volume", newValue) }
+    /// Size and background from Settings, as mpv's subtitle options; the
+    /// position lifts the words clear of a bar while one is up.
+    private func applySubtitleStyle() {
+        let scale = max(0.5, min(2.0, subtitleStyle.size / 100))
+        setString("sub-scale", String(format: "%.2f", scale))
+        setString("sub-font", "Helvetica Neue")
+        setString("sub-color", "#FFFFFFFF")
+        switch subtitleStyle.background {
+        case .outline:
+            setString("sub-border-style", "outline-and-shadow")
+            setString("sub-outline-size", "2.5")
+            setString("sub-outline-color", "#FF000000")
+            setString("sub-shadow-offset", "0")
+        case .shadow:
+            setString("sub-border-style", "outline-and-shadow")
+            setString("sub-outline-size", "0")
+            setString("sub-shadow-offset", "2")
+            setString("sub-shadow-color", "#C0000000")
+        case .box:
+            setString("sub-border-style", "background-box")
+            setString("sub-back-color", "#BF000000")
+            setString("sub-outline-size", "0")
+            setString("sub-shadow-offset", "0")
+        }
+        // Where the bottom of a subtitle sits, as a percentage of the
+        // picture's height: 100 is mpv's own place at the foot of it.
+        setDouble("sub-pos", subtitleStyle.raised ? 70 : 100)
     }
 
-    /// The audio track, by mpv id; nil for none.
-    func selectAudio(_ id: Int?) { setString("aid", id.map(String.init) ?? "no") }
-    /// The subtitle track, by mpv id; nil for none.
-    func selectSubtitle(_ id: Int?) { setString("sid", id.map(String.init) ?? "no") }
+    /// `panscan` at 1 grows a picture whose shape isn't the screen's until it
+    /// covers it, cropping what spills over, and at 0 shows the whole frame.
+    /// A property of the player rather than of a file, so it holds for
+    /// everything opened after.
+    var framing: Framing = .fit {
+        didSet {
+            switch framing {
+            case .fit:
+                setDouble("panscan", 0)
+                setDouble("video-zoom", 0)
+                setString("video-aspect-override", "-1")
+            case .fill:
+                setDouble("panscan", 1)
+                setDouble("video-zoom", 0)
+                setString("video-aspect-override", "-1")
+            case .zoom(let factor):
+                setDouble("panscan", 0)
+                setDouble("video-zoom", log2(max(factor, 0.01)))
+                setString("video-aspect-override", "-1")
+            case .aspect(let ratio):
+                setDouble("panscan", 0)
+                setDouble("video-zoom", 0)
+                setString("video-aspect-override", String(format: "%.6f", ratio))
+            }
+        }
+    }
+
+    var picture = PictureAdjustment.neutral {
+        didSet {
+            setDouble("brightness", picture.brightness)
+            setDouble("contrast", picture.contrast)
+            setDouble("saturation", picture.saturation)
+            setDouble("gamma", picture.gamma)
+        }
+    }
+
+    /// Dynamic range compression on the sound: quiet dialogue up, explosions
+    /// down, for a room where the volume has to stay low.
+    var nightMode = false {
+        didSet {
+            if nightMode {
+                command(["af", "set", "lavfi=[dynaudnorm=f=150:g=15:p=0.9]"])
+            } else {
+                command(["af", "clr", ""])
+            }
+        }
+    }
+
+    /// What `[aquarium-battery]` turns off, and what it is set to: the cheapest
+    /// draw that still looks right, from the Linux app's measured profile.
+    private static let batteryProfile: [String: String] = [
+        "scale": "bilinear",
+        "cscale": "bilinear",
+        "dscale": "bilinear",
+        "dither": "no",
+        "deband": "no",
+        "correct-downscaling": "no",
+        "linear-downscaling": "no",
+        "sigmoid-upscaling": "no",
+        "hdr-compute-peak": "no",
+        "fbo-format": "rgba8",
+        "interpolation": "no",
+    ]
+
+    var powerProfile: PowerProfile = .quality {
+        didSet {
+            guard powerProfile != oldValue else { return }
+            for (name, value) in Self.batteryProfile {
+                switch powerProfile {
+                case .battery:
+                    setString(name, value)
+                case .quality:
+                    if let original = qualityDefaults[name] { setString(name, original) }
+                }
+            }
+        }
+    }
+
+    /// Off, the video track is let go of: decode and draw stop, the sound
+    /// carries on. What keeps the picture from coming back black after the
+    /// background is picking the track up again on the way in.
+    var pictureDecode = true {
+        didSet { setString("vid", pictureDecode ? "auto" : "no") }
+    }
 
     /// How frames are timed. Given the rate the display is known to be
     /// running at, `display-resample` times them to its refreshes and nudges
     /// the audio to keep up — no frame held for an extra refresh or dropped
     /// to catch the sound up. Without one, mpv's default: frames timed to the
     /// audio clock.
-    func setVideoSync(displayRate: Double?) {
-        if let displayRate {
-            setString("display-fps-override", String(format: "%.6f", displayRate))
+    func setDisplayRefreshRate(_ hertz: Double?) {
+        if let hertz {
+            setString("display-fps-override", String(format: "%.6f", hertz))
             setString("video-sync", "display-resample")
         } else {
             setString("video-sync", "audio")
@@ -338,15 +498,19 @@ final class MPVEngine: @unchecked Sendable {
         }
     }
 
-    /// Where the bottom of a subtitle sits, as a percentage of the picture's
-    /// height: 100 is mpv's own place at the foot of it.
-    var subtitlePosition: Double {
-        get { getDouble("sub-pos") }
-        set { setDouble("sub-pos", newValue) }
+    var streamFacts: EngineStreamFacts {
+        var facts = EngineStreamFacts()
+        if let w = getInt("dwidth"), let h = getInt("dheight"), w > 0, h > 0 {
+            facts.width = w
+            facts.height = h
+        }
+        if let bitrate = getInt("video-bitrate"), bitrate > 0 { facts.indicatedBitrate = Double(bitrate) }
+        facts.droppedFrames = getInt("frame-drop-count")
+        facts.decoder = getString("hwdec-current")
+        return facts
     }
 
-    /// Anything else, by name — subtitle styling and the like.
-    func set(_ name: String, _ value: String) { setString(name, value) }
+    /// Anything else, by name — for the debug hook.
     func get(_ name: String) -> String? { getString(name) }
 
     // MARK: - Low-level access
@@ -430,9 +594,12 @@ final class MPVEngine: @unchecked Sendable {
                     property(data.assumingMemoryBound(to: mpv_event_property.self).pointee)
                 }
             case MPV_EVENT_FILE_LOADED:
+                fileIsOpen = true
                 deliver(.fileLoaded)
+                deliver(.chapters(readChapters()))
             case MPV_EVENT_PLAYBACK_RESTART:
-                deliver(.playbackRestart)
+                sawFirstFrame = true
+                deliver(.firstFrame)
             case MPV_EVENT_END_FILE:
                 if let data = event.data {
                     let end = data.assumingMemoryBound(to: mpv_event_end_file.self).pointee
@@ -469,7 +636,9 @@ final class MPVEngine: @unchecked Sendable {
         case ("demuxer-cache-time", MPV_FORMAT_DOUBLE):
             deliver(.cachedUntil(double(p)))
         case ("track-list", _):
-            deliver(.tracks(readTracks()))
+            let list = readTracks()
+            lastTracks = list
+            deliver(.tracks(list))
         case ("dwidth", MPV_FORMAT_INT64), ("dheight", MPV_FORMAT_INT64):
             if let w = getInt("dwidth"), let h = getInt("dheight"), w > 0, h > 0 {
                 deliver(.videoSize(CGSize(width: w, height: h)))
@@ -500,18 +669,27 @@ final class MPVEngine: @unchecked Sendable {
     }
 
     private func endFile(_ end: mpv_event_end_file) {
-        let reason: EndReason
-        switch end.reason {
-        case MPV_END_FILE_REASON_EOF: reason = .eof
-        case MPV_END_FILE_REASON_STOP: reason = .stop
-        case MPV_END_FILE_REASON_QUIT: reason = .quit
-        case MPV_END_FILE_REASON_ERROR: reason = .error
-        case MPV_END_FILE_REASON_REDIRECT: reason = .redirect
-        default: reason = .unknown
-        }
         let error = end.error < 0 ? String(cString: mpv_error_string(end.error)) : nil
         lastPosition = (-1, 0)
-        deliver(.endFile(reason, error: error))
+        let wasOpen = fileIsOpen
+        let hadFrame = sawFirstFrame
+        fileIsOpen = false
+        sawFirstFrame = false
+        switch end.reason {
+        case MPV_END_FILE_REASON_EOF:
+            deliver(.ended(.finished))
+        case MPV_END_FILE_REASON_ERROR:
+            // A channel that fails to open is reopened as it always was on
+            // the Apple TV, where there is no reading of the stream to
+            // explain it; everything else says whether it had been playing.
+            deliver(.failed(EngineFailure(
+                message: error, duringPlayback: loadedLive || (wasOpen && hadFrame), isSessionLoss: false
+            )))
+        default:
+            // A `loadfile … replace` ends the file before it; that is not the
+            // stream ending.
+            deliver(.ended(.stopped))
+        }
     }
 
     private func double(_ p: mpv_event_property) -> Double {
@@ -524,14 +702,19 @@ final class MPVEngine: @unchecked Sendable {
         return data.assumingMemoryBound(to: Int32.self).pointee != 0
     }
 
-    private func readTracks() -> [Track] {
+    private func readTracks() -> [EngineTrack] {
         let count = getInt("track-list/count") ?? 0
         return (0..<count).compactMap { i in
             let base = "track-list/\(i)/"
-            guard let id = getInt(base + "id"),
-                  let kind = getString(base + "type").flatMap(Track.Kind.init(rawValue:))
-            else { return nil }
-            return Track(
+            guard let id = getInt(base + "id"), let type = getString(base + "type") else { return nil }
+            let kind: EngineTrack.Kind
+            switch type {
+            case "audio": kind = .audio
+            case "video": kind = .video
+            case "sub": kind = .subtitle
+            default: return nil
+            }
+            return EngineTrack(
                 id: id,
                 kind: kind,
                 title: getString(base + "title"),
@@ -542,17 +725,28 @@ final class MPVEngine: @unchecked Sendable {
                 isExternal: getFlag(base + "external"),
                 isSelected: getFlag(base + "selected"),
                 channels: getInt(base + "demux-channel-count"),
+                // The stream's index inside the file — what ffprobe, and so
+                // Jellyfin, numbers it by. Nil for an external track.
                 fileIndex: getInt(base + "ff-index"),
                 externalURL: getString(base + "external-filename")
             )
         }
     }
 
-    private func deliver(_ event: Event) {
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated { self?.onEvent?(event) }
+    private func readChapters() -> [EngineChapter] {
+        let count = getInt("chapter-list/count") ?? 0
+        return (0..<count).map { i in
+            let base = "chapter-list/\(i)/"
+            let title = getString(base + "title").flatMap { $0.isEmpty ? nil : $0 }
+            return EngineChapter(id: i, start: getDouble(base + "time"), title: title ?? "Chapter \(i + 1)")
         }
     }
+
+    private func deliver(_ event: EngineEvent) {
+        continuation.yield(event)
+    }
 }
+
+extension MPVEngine: PlaybackEngine {}
 
 #endif

@@ -286,6 +286,45 @@ Before any engine policy is written down as fact. On the physical iPhone
 
 ### Phase 1: the engine seam (L)
 
+> **Shipped 2026-10-16** on `player-overhaul` (uncommitted at the time of
+> writing). `Player/Engine/PlaybackEngine.swift` (protocol, `EngineCapabilities`,
+> `EngineEvent`, `EngineTrack`, `EngineLoadRequest`), `Engine/EnginePolicy.swift`
+> (`EnginePolicy.choose` and the resolver's `StreamPlan.decide`, both pure),
+> `Engine/AVEngine.swift` (the AVPlayer two thirds of the old model: install,
+> observers, hand-over, composition, media selection, failure classification),
+> `Engine/MPVEngine.swift` moved up from `TV/` and conforming, gated on
+> `canImport(Libmpv)` with only `MPVVideoView` behind `canImport(UIKit)`;
+> `Engine/DisplayMatch.swift` moved with it. One `PlayerModel` for all four
+> platforms, split across `PlayerModel.swift` (state, engine wiring, the one
+> event stream, transport, finish) and `+Session`, `+Events`, `+Tracks`,
+> `+Extras`, `+PlaybackApple`, `+PlaybackTV`. `TVPlayerModel.swift` deleted
+> (`DelayedVideoRenderer` turned out to exist only as references inside dead
+> `#if os(tvOS)` blocks of the non-tvOS model; nothing to delete). `Player/
+> TrackPreference.swift` holds `preferredStreams` as a pure function.
+> `AdaptiveQuality.sample` takes engine signals instead of an `AVPlayerItem`.
+> `AquariumTests` added to the project and the shared scheme, hosted by the
+> app, with tests for `EnginePolicy.choose`, `TrackPreference.preferredStreams`,
+> `StreamPlan.decide` and `DeviceProfile.canDirectPlay`.
+>
+> **Left for later phases.** The engine is still chosen by platform (AVEngine
+> everywhere but tvOS, MPVEngine there): `EnginePolicy.choose` is written and
+> tested but not consulted by the model until phase 4 links MPVKit for iOS and
+> Mac, and `JellyfinClient.resolvePlayback` still picks the device profile by
+> `#if os(tvOS)` rather than by engine (it should call `StreamPlan.decide`;
+> Core was out of scope here). The two platforms keep their own `play` paths
+> (`+PlaybackApple`, `+PlaybackTV`) and track-menu shapes (`PlayerTrack` lists
+> vs `EngineTrack`), each lifted from its original so behaviour is unchanged;
+> phases 4 and 5 fold them together. AVPlayer's `player` is reached by the
+> AVKit surfaces and SharePlay as `(engine as? AVEngine)?.player` until phase 2
+> replaces the surfaces. `AVFoundation` is still imported outside `Engine/` by
+> `MusicPlayer`, `DeviceProfile`, `Downloads`, `WatchLink`, `WatchRemote` and
+> `SyncMeasureView`, all pre-existing and out of this phase's scope; within the
+> player it is only `AVAudioSession` (`+Session`, `+PlaybackTV`). The model's
+> state setters are now module-internal rather than `private(set)` so the
+> extension files can write them. The tvOS mpv engine is still reused for the
+> life of the app rather than made per stream. The 2026-10-15 QA script's
+> player section has not been re-run on the result.
+
 No visible change. `Player/Engine/PlaybackEngine.swift`, `AVEngine.swift`
 (the AVPlayer two thirds of `PlayerModel.swift` moved out), `MPVEngine.swift`
 moved up from `TV/` with its `#if os(tvOS)` narrowed to the UIKit view

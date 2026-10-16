@@ -742,7 +742,7 @@ struct VideoSurface: NSViewRepresentable {
 
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
-        view.player = player.player
+        view.player = (player.engine as? AVEngine)?.player
         view.controlsStyle = .floating
         view.showsFullScreenToggleButton = true
         // Off by default on AppKit's player view, unlike UIKit's controller.
@@ -1002,7 +1002,7 @@ struct VideoSurface: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
-        controller.player = player.player
+        controller.player = (player.engine as? AVEngine)?.player
         controller.videoGravity = Preferences.shared.fillScreen ? .resizeAspectFill : .resizeAspect
         controller.delegate = context.coordinator
         context.coordinator.controller = controller
@@ -1353,7 +1353,7 @@ struct VideoSurface: UIViewControllerRepresentable {
                 guard let player else { return true }
                 let allowed = player.systemMayDismiss
                 PlayerModel.log.notice(
-                    "AVKit asked to dismiss: allowed=\(allowed) live=\(player.isLive) item=\(player.player.currentItem == nil ? "none" : "present", privacy: .public)")
+                    "AVKit asked to dismiss: allowed=\(allowed) live=\(player.isLive) item=\((player.engine as? AVEngine)?.player.currentItem == nil ? "none" : "present", privacy: .public)")
                 if allowed { player.handleExit(hidingRibbon: hideRibbon) }
                 return false
             }
