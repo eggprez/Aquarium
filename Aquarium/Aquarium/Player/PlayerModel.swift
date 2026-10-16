@@ -1032,6 +1032,17 @@ final class PlayerModel {
         #endif
     }
 
+    #if os(iOS)
+    /// Where this app's Quality and Extras pills go when the player is
+    /// half-folded: a view in the panel below the fold, handed over by the
+    /// panel while it is on screen. Nil, and the pills are in AVKit's bar.
+    /// See `TransportBarExtras.install`.
+    @ObservationIgnored var extrasHost: (() -> UIView?)?
+    /// Bumped whenever `extrasHost` comes or goes, so the player screen,
+    /// which reads it, redraws and the coordinator moves the pills.
+    var extrasHostGeneration = 0
+    #endif
+
     #if os(tvOS)
     /// The renderer holding the picture back, while the offset is being made
     /// that way rather than by a composition. Nil on a stream that is

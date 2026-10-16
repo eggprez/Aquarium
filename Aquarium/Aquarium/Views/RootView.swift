@@ -219,6 +219,18 @@ struct RootView: View {
         .onChange(of: player.isActive, initial: true) { _, active in
             if active { openWindow(id: PlayerWindow.id) }
         }
+        #elseif os(iOS)
+        .fullScreenCover(isPresented: playerBinding) {
+            if player.isActive {
+                PlayerScreen()
+            } else {
+                TentIdleView()
+            }
+        }
+        // Browse lasts for the pose it was pressed in.
+        .onChange(of: pose) { _, now in
+            if now != .tent { app.tentBrowsing = false }
+        }
         #else
         .fullScreenCover(isPresented: playerBinding) { PlayerScreen() }
         #endif
@@ -312,13 +324,37 @@ struct RootView: View {
                 #if os(tvOS)
                 // The title screen presents its own — see `detailScreen`.
                 player.isActive && app.detailRoot == nil
+                #elseif os(iOS)
+                // The tent's idle screen shares this cover — see `tentShowing`.
+                player.isActive || tentShowing
                 #else
                 player.isActive
                 #endif
             },
-            set: { if !$0 { player.stop(reason: "player cover dismissed") } }
+            set: {
+                guard !$0 else { return }
+                if player.isActive {
+                    player.stop(reason: "player cover dismissed")
+                    return
+                }
+                #if os(iOS)
+                if tentShowing { app.tentBrowsing = true }
+                #endif
+            }
         )
     }
+
+    #if os(iOS)
+    /// A foldable stood up like a tent, with nobody having asked to browse:
+    /// the cover shows `TentIdleView` until something plays, and the player
+    /// after. One cover for both, swapping what is in it, rather than one
+    /// presented over the other: a view presents one thing at a time, and a
+    /// player cover inside a tent cover would be torn down with it when the
+    /// phone is picked up, taking the stream with it.
+    private var tentShowing: Bool {
+        pose == .tent && !app.tentBrowsing && client.isSignedIn
+    }
+    #endif
 
     // MARK: - Platform shells
 
@@ -469,6 +505,7 @@ struct RootView: View {
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.devicePose) private var pose
 
     /// Brings the sidebar back, while it is collapsed — see `showSidebar`.
     private var showSidebarAction: (() -> Void)? {
@@ -489,11 +526,16 @@ struct RootView: View {
     /// the turn, the phone was told to go back to portrait, and the rotation
     /// ended up stuck between the two. See `OrientationLock`.
     ///
-    /// The model is told which it is, because it is what decides where `show`
-    /// sends a section — see `AppModel.usesSidebar`.
+    /// A foldable's inside screen is the exception to "no iPhone shows a
+    /// sidebar": it is the phone idiom at an iPad's size, regular both ways,
+    /// which no phone on its side ever is. So the pose, not the idiom, is
+    /// what lets it through — see `DevicePose`. The model is told which it
+    /// got, because that decides where `show` sends a section — see
+    /// `AppModel.usesSidebar`.
     @ViewBuilder
     private var adaptiveShell: some View {
-        let sidebar = sizeClass == .regular && UIDevice.current.userInterfaceIdiom != .phone
+        let sidebar = sizeClass == .regular
+            && (UIDevice.current.userInterfaceIdiom != .phone || pose.usesInnerDisplay)
         Group {
             if sidebar {
                 sidebarShell

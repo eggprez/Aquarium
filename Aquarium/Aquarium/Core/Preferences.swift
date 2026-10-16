@@ -772,6 +772,13 @@ final class Preferences {
         didSet { defaults.set(watchKeepsBooks, forKey: "watch_keeps_books") }
     }
 
+    /// Settings › Appearance › Layout on a foldable: hold the app in one of
+    /// its poses rather than following the hinge. A fact about this device —
+    /// no other has the hinge — so it does not travel. See `DevicePose`.
+    var layoutOverride: LayoutOverride {
+        didSet { defaults.set(layoutOverride.rawValue, forKey: "layout_override") }
+    }
+
     // ---- iCloud ----
 
     /// Whether this device joins the shared settings.
@@ -868,6 +875,7 @@ final class Preferences {
         lastRoute = d.string(forKey: "last_route") ?? ""
         recentSearches = d.stringArray(forKey: "recent_searches") ?? []
         tabBarOrder = d.stringArray(forKey: "tab_bar_order") ?? []
+        layoutOverride = d.string(forKey: "layout_override").flatMap(LayoutOverride.init(rawValue:)) ?? .automatic
         watchPlaylistIds = d.stringArray(forKey: "watch_playlists") ?? []
         watchKeepsBooks = d.bool(forKey: "watch_keeps_books")
         syncsAcrossDevices = d.object(forKey: "cloud_sync") == nil ? true : d.bool(forKey: "cloud_sync")

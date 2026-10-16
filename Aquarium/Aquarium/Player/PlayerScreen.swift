@@ -81,7 +81,12 @@ struct PlayerScreen: View {
     @State private var info = PlayerInfoStore()
     #endif
 
-    var body: some View {
+    #if os(iOS)
+    @Environment(\.devicePose) private var pose
+    #endif
+
+    /// Everything drawn over the picture, and the picture.
+    private var stage: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
@@ -146,6 +151,34 @@ struct PlayerScreen: View {
             .ignoresSafeArea()
             #endif
         }
+    }
+
+    /// The picture — or, on a foldable half-folded, the picture above the fold
+    /// and `PlayerFoldPanel` below it. The picture is the first child of the
+    /// same stack either way, so that AVKit's controller is never remade by
+    /// the fold: being remade is what restarts Picture in Picture, the
+    /// controls and the scan that puts this app's pills into them.
+    @ViewBuilder
+    private var framed: some View {
+        #if os(iOS)
+        if FoldState.shared.isFoldable {
+            FoldSplit(split: pose == .halfFolded, crease: .black) {
+                stage
+            } lower: {
+                PlayerFoldPanel(skips: $skips)
+            }
+            .background(Color.black)
+            .ignoresSafeArea()
+        } else {
+            stage
+        }
+        #else
+        stage
+        #endif
+    }
+
+    var body: some View {
+        framed
         #if os(tvOS)
         .animation(.easeOut(duration: 0.28), value: showsRibbon)
         // Restarted for each thing that plays, and cancelled with the screen.
@@ -446,7 +479,7 @@ struct PlayerScreen: View {
     }
 
     /// Mac corners are tighter than a phone's cards.
-    private static var overlayCorner: CGFloat {
+    fileprivate static var overlayCorner: CGFloat {
         #if os(macOS)
         10
         #else
@@ -455,7 +488,7 @@ struct PlayerScreen: View {
     }
 
     /// Buttons are Title Case on a Mac and stay as they were elsewhere.
-    private static func label(mac: String, elsewhere: String) -> String {
+    fileprivate static func label(mac: String, elsewhere: String) -> String {
         #if os(macOS)
         mac
         #else
@@ -483,27 +516,16 @@ struct PlayerScreen: View {
         VStack(alignment: .leading, spacing: 12) {
             Spacer()
 
-            if player.shouldShowUpNext, let next = player.upNextTitle {
-                upNextCard(next)
+            // Half-folded, the prompts go below the fold with the rest of the
+            // panel rather than over a picture that is already half-size —
+            // see `PlayerFoldPanel`.
+            #if os(iOS)
+            if pose != .halfFolded {
+                PlayerPrompts(skips: $skips, width: upNextWidth)
             }
-            if player.activeSegment != nil {
-                let isOutro = player.activeSegment?.isOutro == true
-                Button {
-                    skips += 1
-                    player.skipSegment()
-                } label: {
-                    Label(
-                        Self.label(mac: isOutro ? "Skip Credits" : "Skip Intro", elsewhere: isOutro ? "Skip credits" : "Skip intro"),
-                        systemImage: "forward.end.fill"
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .overlayBackdrop(Capsule(), opacity: 0.6)
-                    .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
-                .help(isOutro ? "Skip the credits (S)" : "Skip the intro (S)")
-            }
+            #else
+            PlayerPrompts(skips: $skips, width: upNextWidth)
+            #endif
 
             #if os(macOS)
             // Quality keeps a button of its own showing the rung it is on: it is
@@ -558,38 +580,6 @@ struct PlayerScreen: View {
         #else
         110
         #endif
-    }
-
-    private func upNextCard(_ title: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(player.isStartingNext
-                 ? "Starting…"
-                 : "Up next · in \(Int(player.secondsRemaining.rounded()))s")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.75))
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white)
-                .lineLimit(2)
-            HStack(spacing: 10) {
-                // Return plays, Escape declines: the card is a question, and a
-                // Mac answers questions from the keyboard.
-                Button(Self.label(mac: "Play Now", elsewhere: "Play now")) { Task { await player.playNextNow() } }
-                    .buttonStyle(.borderedProminent)
-                    #if !os(macOS)
-                    .tint(Theme.accentStrong)
-                    #endif
-                    .controlSize(.small)
-                    .playerDefaultAction()
-                Button(Self.label(mac: "Not Now", elsewhere: "Not now")) { player.cancelAutoplay() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .playerCancelAction()
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: upNextWidth, alignment: .leading)
-        .overlayBackdrop(RoundedRectangle(cornerRadius: Self.overlayCorner, style: .continuous), opacity: 0.65)
     }
 
     /// Narrower on a phone held upright. There the card shares its line with
@@ -680,6 +670,75 @@ struct PlayerScreen: View {
     }
     #endif
     #endif
+}
+
+/// The prompts you act on once — Up Next, Skip intro — drawn over the picture
+/// above the transport bar, or, on a foldable half-folded, at the top of the
+/// panel below the fold. One view, so the two places cannot drift apart.
+struct PlayerPrompts: View {
+    @Environment(PlayerModel.self) private var player
+    /// Bumped on a skip, for the haptic — see `PlayerScreen.skips`.
+    @Binding var skips: Int
+    /// The Up Next card's width.
+    var width: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if player.shouldShowUpNext, let next = player.upNextTitle {
+                upNextCard(next)
+            }
+            if player.activeSegment != nil {
+                let isOutro = player.activeSegment?.isOutro == true
+                Button {
+                    skips += 1
+                    player.skipSegment()
+                } label: {
+                    Label(
+                        PlayerScreen.label(mac: isOutro ? "Skip Credits" : "Skip Intro", elsewhere: isOutro ? "Skip credits" : "Skip intro"),
+                        systemImage: "forward.end.fill"
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .overlayBackdrop(Capsule(), opacity: 0.6)
+                    .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+                .help(isOutro ? "Skip the credits (S)" : "Skip the intro (S)")
+            }
+        }
+    }
+
+    private func upNextCard(_ title: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(player.isStartingNext
+                 ? "Starting…"
+                 : "Up next · in \(Int(player.secondsRemaining.rounded()))s")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.75))
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+            HStack(spacing: 10) {
+                // Return plays, Escape declines: the card is a question, and a
+                // Mac answers questions from the keyboard.
+                Button(PlayerScreen.label(mac: "Play Now", elsewhere: "Play now")) { Task { await player.playNextNow() } }
+                    .buttonStyle(.borderedProminent)
+                    #if !os(macOS)
+                    .tint(Theme.accentStrong)
+                    #endif
+                    .controlSize(.small)
+                    .playerDefaultAction()
+                Button(PlayerScreen.label(mac: "Not Now", elsewhere: "Not now")) { player.cancelAutoplay() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .playerCancelAction()
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: width, alignment: .leading)
+        .overlayBackdrop(RoundedRectangle(cornerRadius: PlayerScreen.overlayCorner, style: .continuous), opacity: 0.65)
+    }
 }
 
 #if os(macOS)
@@ -1026,7 +1085,7 @@ struct VideoSurface: UIViewControllerRepresentable {
         controller.canStartPictureInPictureAutomaticallyFromInline = true
         controller.updatesNowPlayingInfoCenter = false
         context.coordinator.bindExtras(to: player)
-        context.coordinator.installExtras()
+        context.coordinator.installExtras(host: player.extrasHost?())
         #else
         controller.showsPlaybackControls = true
         // On a television the extras have to live where the remote can reach
@@ -1053,9 +1112,12 @@ struct VideoSurface: UIViewControllerRepresentable {
         controller.videoGravity = Preferences.shared.fillScreen ? .resizeAspectFill : .resizeAspect
         #if os(iOS)
         // Both no-op once bound and installed; they pick the controls back up if
-        // AVKit has rebuilt them (rotation, Picture in Picture coming back).
+        // AVKit has rebuilt them (rotation, Picture in Picture coming back) and
+        // move them into the panel below the fold when one appears — the
+        // generation is read so that its coming and going is an update here.
+        _ = player.extrasHostGeneration
         context.coordinator.bindExtras(to: player)
-        context.coordinator.installExtras()
+        context.coordinator.installExtras(host: player.extrasHost?())
         #endif
         #if os(tvOS)
         context.coordinator.player = player
@@ -1218,9 +1280,9 @@ struct VideoSurface: UIViewControllerRepresentable {
         /// halves are cheap and idempotent, so this runs on every update: the
         /// install no-ops once it has taken, and re-takes if AVKit has rebuilt
         /// its controls underneath us.
-        func installExtras() {
+        func installExtras(host: UIView? = nil) {
             guard let root = controller?.view else { return }
-            extras.install(into: root)
+            extras.install(into: root, host: host)
             extras.refresh()
         }
         #endif

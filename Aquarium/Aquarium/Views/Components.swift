@@ -24,7 +24,7 @@ enum Metrics {
         #elseif os(macOS)
         return 168
         #else
-        return isPhone ? 112 : 136
+        return phoneLayout ? 112 : 136
         #endif
     }
 
@@ -174,50 +174,41 @@ enum Metrics {
     }
 
     #if os(iOS)
-    /// Worked out once, the first time the guide asks, and a plain number from
-    /// then on.
+    /// A half hour fills a phone's screen; an iPad names a number.
     ///
-    /// A `let` rather than a computed property because this sits in the middle
-    /// of a layout pass. Asking UIKit for the screen on every cell of every row
-    /// puts a reading of live view-hierarchy state inside SwiftUI's own update
-    /// of that hierarchy — a dependency its graph cannot see and has no reason
-    /// to expect to hold still. Answered once and cached, it is the constant
-    /// the rest of the guide's arithmetic takes it for. A phone's screen does
-    /// not change size, so there is nothing to recompute anyway.
-    private static let phoneGuideMinuteWidth: CGFloat = MainActor.assumeIsolated {
-        // An iPad names a number like everything else that isn't a phone.
-        // It was 3.4, on the reasoning above that a half hour across so wide
-        // a screen shows nothing — but at 3.4 a half hour is a hundred points
-        // and a sitcom's 22 minutes is 75, and nearly every cell in the grid
-        // read "F…" or "Bo…". At 5.5 an iPad on its side still shows two hours
-        // and the titles are words.
-        guard UIDevice.current.userInterfaceIdiom == .phone else { return 5.5 }
-        return (portraitWidth - guideChannelColumnWidth) / 30
+    /// This sits in the middle of a layout pass, so it must not ask UIKit for
+    /// the screen: that puts a reading of live view-hierarchy state inside
+    /// SwiftUI's own update of that hierarchy — a dependency its graph cannot
+    /// see and has no reason to expect to hold still. It used to be answered
+    /// once and cached, on the grounds that a phone's screen does not change
+    /// size. A foldable's does: closed it is a phone, opened it is an iPad.
+    /// So the width is read from `FoldState`, which the pose provider writes
+    /// after layout from the display that is on, and reading an observable
+    /// here is a dictionary lookup, not a traversal — the same thing the Mac's
+    /// `thumbnailScale` does with its own options.
+    private static var phoneGuideMinuteWidth: CGFloat {
+        // It was 3.4 on the iPad, on the reasoning that a half hour across so
+        // wide a screen shows nothing — but at 3.4 a half hour is a hundred
+        // points and a sitcom's 22 minutes is 75, and nearly every cell in
+        // the grid read "F…" or "Bo…". At 5.5 an iPad on its side still shows
+        // two hours and the titles are words.
+        guard phoneLayout else { return 5.5 }
+        let width = MainActor.assumeIsolated { FoldState.shared.portraitWidth }
+        return (width - guideChannelColumnWidth) / 30
     }
 
-    /// This screen's width with the device held upright: the smaller of its
-    /// two dimensions, so the answer doesn't depend on which way it is being
-    /// held when the question is asked.
-    ///
-    /// Read from the connected scene rather than `UIScreen.main`, which is the
-    /// deprecated spelling and, on a device that can show two apps at once,
-    /// the wrong answer. The fallback is a small modern phone — reached only
-    /// if there is no window scene at all, in which case nothing is on screen
-    /// to measure against anyway.
-    @MainActor
-    private static var portraitWidth: CGFloat {
-        let scene = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first
-        let size = scene?.screen.bounds.size ?? CGSize(width: 375, height: 812)
-        return min(size.width, size.height)
-    }
-    #endif
-
-    #if os(iOS)
-    /// Asked once, for the same reason as `phoneGuideMinuteWidth`.
+    /// Asked once: the idiom never changes. Layout wants `phoneLayout`, not
+    /// this — a foldable's inside screen is this idiom at an iPad's size.
     static let isPhone: Bool = MainActor.assumeIsolated {
         UIDevice.current.userInterfaceIdiom == .phone
+    }
+
+    /// Whether the screen that is on is a phone's. The idiom, except on a
+    /// foldable opened to its inside screen, which is an iPad's — see
+    /// `DevicePose`. Through the main actor the way `thumbnailScale` is: every
+    /// caller is a view's body, which is already there.
+    static var phoneLayout: Bool {
+        isPhone && !MainActor.assumeIsolated { FoldState.shared.usesInnerDisplay }
     }
     #endif
 
@@ -243,7 +234,7 @@ enum Metrics {
         // that kind of word at the row's own font size, at the cost of a
         // fraction of a point per minute off the timeline the rest of the
         // guide draws against.
-        return isPhone ? 148 : 172
+        return phoneLayout ? 148 : 172
         #endif
     }
 
@@ -1413,7 +1404,7 @@ enum PosterGrid {
         // column, so the sidebar coming and going or the screen turning gets
         // a column more or less rather than the same posters with more page
         // around them. A phone on its side keeps the fixed width it had.
-        if !Metrics.isPhone {
+        if !Metrics.phoneLayout {
             return [GridItem(.adaptive(minimum: columnMinimum(wide: wide), maximum: columnMaximum(wide: wide)),
                              spacing: Metrics.gridSpacing, alignment: .top)]
         }
@@ -1434,7 +1425,7 @@ enum PosterGrid {
         guard phoneColumns(wide: wide, compact: compact) == nil else { return nil }
         #if os(iOS)
         // The iPad's column is a range; the card fills whatever it came to.
-        if !Metrics.isPhone { return nil }
+        if !Metrics.phoneLayout { return nil }
         #endif
         return wide ? Metrics.stillWidth : Metrics.posterWidth
         #endif
@@ -1470,7 +1461,7 @@ enum PosterGrid {
         #elseif os(iOS)
         // Half again on an iPad, the Mac's own proportion: room for the grid
         // to fill its row whatever is left of it after the sidebar.
-        (wide ? Metrics.stillWidth : Metrics.posterWidth) * (Metrics.isPhone ? 1 : 1.5)
+        (wide ? Metrics.stillWidth : Metrics.posterWidth) * (Metrics.phoneLayout ? 1 : 1.5)
         #else
         wide ? Metrics.stillWidth : Metrics.posterWidth
         #endif

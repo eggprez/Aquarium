@@ -1020,7 +1020,7 @@ struct HeroHeader: View {
     /// the picture would take the whole screen.
     static func height(forWidth width: CGFloat) -> CGFloat {
         #if os(iOS)
-        guard !Metrics.isPhone, width > 0 else { return Self.height }
+        guard !Metrics.phoneLayout, width > 0 else { return Self.height }
         return min(560, max(Self.height, (width / 2.4).rounded()))
         #else
         return Self.height

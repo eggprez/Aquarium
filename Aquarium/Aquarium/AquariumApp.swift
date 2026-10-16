@@ -49,6 +49,10 @@ struct AquariumApp: App {
         // And the watch, which may be sending listening to a phone in a
         // pocket — see Core/WatchLink.swift.
         WatchLink.shared.start()
+        #if DEBUG
+        // URLs from a script, past the system's prompt — see Core/DebugLinkHook.swift.
+        DebugLinkHook.start()
+        #endif
         // A film shared over FaceTime can arrive the same way — see
         // Core/SharePlay.swift.
         SharePlayCoordinator.shared.start()
@@ -85,6 +89,8 @@ struct AquariumApp: App {
                 .environment(prefs)
                 .environment(player)
                 .environment(music)
+                // Which way a foldable is being held — see DevicePose.
+                .providesDevicePose()
                 // tvOS has no light mode here — see Theme — so it must not be
                 // told to switch to one.
                 #if !os(tvOS)

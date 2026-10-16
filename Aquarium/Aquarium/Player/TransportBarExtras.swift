@@ -72,8 +72,10 @@ final class TransportBarExtras {
     private var extrasPill = UIVisualEffectView()
 
     /// Where the row ended up. There is only ever one of it, in one of these
-    /// two places.
-    private enum Placement { case none, bar, corner }
+    /// three places: AVKit's bar, the corner of the picture when the bar
+    /// could not be found, or — on a foldable half-folded — the panel below
+    /// the fold.
+    private enum Placement { case none, bar, corner, panel }
     private var placement: Placement = .none
 
     /// The two ways the row can sit in the bar, built together when the row
@@ -152,7 +154,33 @@ final class TransportBarExtras {
     /// Safe to call on every SwiftUI update: it returns immediately once the row
     /// is in a window, and picks the controls back up if AVKit has rebuilt them
     /// — which it does on rotation, and on the way back from Picture in Picture.
-    func install(into root: UIView) {
+    ///
+    /// `host` is the panel below the fold while the player is half-folded —
+    /// see `PlayerFoldPanel`. Given one, the row is pinned into it and stays
+    /// up with the panel rather than following AVKit's bar; the panel going
+    /// away puts the row back through the ordinary scan, as a rotation does.
+    func install(into root: UIView, host: UIView? = nil) {
+        if let host, host.window != nil {
+            guard placement != .panel || row.superview !== host else { return }
+            scans = 0
+            placement = .panel
+            besideConstraints = []
+            belowConstraints = []
+            row.removeFromSuperview()
+            host.addSubview(row)
+            NSLayoutConstraint.activate([
+                row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                row.centerYAnchor.constraint(equalTo: host.centerYAnchor),
+                row.heightAnchor.constraint(equalTo: host.heightAnchor),
+                row.trailingAnchor.constraint(lessThanOrEqualTo: host.trailingAnchor),
+            ])
+            follow(nil)
+            return
+        }
+        if placement == .panel {
+            // The panel has gone: start over as if the bar had been rebuilt.
+            stop()
+        }
         // In the bar, the group we hang off going away is AVKit having rebuilt
         // its controls, and the row has to be put back. Over the corner there is
         // nothing to be torn out from under us: the row is in the player's own

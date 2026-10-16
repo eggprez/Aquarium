@@ -119,6 +119,9 @@ struct NowPlayingView: View {
     @Environment(JellyfinClient.self) private var client
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var sizeClass
+    #if os(iOS)
+    @Environment(\.devicePose) private var pose
+    #endif
 
     @State private var showQueue = false
     @State private var showLyrics = false
@@ -133,33 +136,36 @@ struct NowPlayingView: View {
         ZStack {
             background
             if let song = music.current {
-                VStack(spacing: 0) {
-                    topBar(song)
-                        .padding(.bottom, 8)
-                    switch panel {
-                    case .lyrics:
-                        LyricsView()
-                            .transition(.opacity)
-                    case .art:
-                        Spacer(minLength: 12)
-                        artwork(song)
-                        Spacer(minLength: 16)
+                Group {
+                    #if os(iOS)
+                    // Half-folded on a table: the cover, or the lyrics, stand
+                    // up on the top half and the controls lie flat on the
+                    // bottom — see `DevicePose`.
+                    if pose == .halfFolded {
+                        FoldSplit(split: true) {
+                            VStack(spacing: 0) {
+                                upperColumn(song)
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.top, 18)
+                            .padding(.bottom, 12)
+                            .frame(maxWidth: columnWidth)
+                        } lower: {
+                            VStack(spacing: 0) {
+                                Spacer(minLength: 0)
+                                lowerColumn(song)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 24)
+                            .frame(maxWidth: columnWidth)
+                        }
+                    } else {
+                        column(song)
                     }
-                    titleBlock(song)
-                        .padding(.top, panel == .art ? 0 : 6)
-                    scrubber
-                        .padding(.top, 14)
-                    transport(song)
-                        .padding(.top, 10)
-                    volume
-                        .padding(.top, 16)
-                    bottomBar(song)
-                        .padding(.top, 14)
-                        .padding(.bottom, 20)
+                    #else
+                    column(song)
+                    #endif
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 18)
-                .frame(maxWidth: columnWidth)
                 .animation(.easeInOut(duration: 0.25), value: showLyrics)
                 // The player is still there under the card, just out of reach.
                 .accessibilityHidden(showQueue)
@@ -192,6 +198,49 @@ struct NowPlayingView: View {
                     .preferredColorScheme(.dark)
             }
         }
+    }
+
+    /// The whole screen as one column: the cover above, the controls below.
+    private func column(_ song: BaseItem) -> some View {
+        VStack(spacing: 0) {
+            upperColumn(song)
+            lowerColumn(song)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 18)
+        .frame(maxWidth: columnWidth)
+    }
+
+    /// The top bar and the cover — or the lyrics in its place.
+    @ViewBuilder
+    private func upperColumn(_ song: BaseItem) -> some View {
+        topBar(song)
+            .padding(.bottom, 8)
+        switch panel {
+        case .lyrics:
+            LyricsView()
+                .transition(.opacity)
+        case .art:
+            Spacer(minLength: 12)
+            artwork(song)
+            Spacer(minLength: 16)
+        }
+    }
+
+    /// Everything under the cover: what is playing, and the controls.
+    @ViewBuilder
+    private func lowerColumn(_ song: BaseItem) -> some View {
+        titleBlock(song)
+            .padding(.top, panel == .art ? 0 : 6)
+        scrubber
+            .padding(.top, 14)
+        transport(song)
+            .padding(.top, 10)
+        volume
+            .padding(.top, 16)
+        bottomBar(song)
+            .padding(.top, 14)
+            .padding(.bottom, 20)
     }
 
     /// Where the queue card's top edge sits: just under the top bar, so where
