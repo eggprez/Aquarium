@@ -1,13 +1,15 @@
 //  The panel: a row of tabs, and under it the choices for the tab that is
-//  open. Info · Channels · Audio · Subtitles · Quality · Speed · Sync, with
-//  Picture reserved for the mpv engine. A sheet with medium and large detents
-//  on a phone, a popover off the pill that opened it on an iPad or a Mac; the
-//  Apple TV's swipe-down panel (`TV/TVPlayerPanel.swift`) shows the same tabs
-//  in its own focus-driven cards until phase 5 brings it here.
+//  open. Info · Channels · Audio · Subtitles · Quality · Speed · Sync ·
+//  Picture. A sheet with medium and large detents on a phone, a popover off
+//  the pill that opened it on an iPad or a Mac; the Apple TV's swipe-down
+//  panel (`TV/TVPlayerPanel.swift`) shows its own tabs in focus-driven cards
+//  until phase 5 brings it here.
 //
 //  A row the engine cannot honour says why rather than vanishing: the quality
-//  rungs under a download, the audio offset on a transcode. The one thing a
-//  stream has nothing of (a film has no channels) is left out of the tabs.
+//  rungs under a download, the audio offset on a transcode, the picture
+//  sliders on AVPlayer — the last two with a button that hands the title to
+//  the mpv engine at the same position. The one thing a stream has nothing
+//  of (a film has no channels) is left out of the tabs.
 
 #if !os(tvOS)
 
@@ -599,6 +601,10 @@ private struct SyncTab: View {
                 set(0)
             }
 
+            if reason != nil, player.canDelayAudioBySwitching {
+                EngineSwitchRow(reason: "audio delay")
+            }
+
             if player.canResync || player.canReencodeForSync {
                 PanelHeading(text: "Repairs")
             }
@@ -670,11 +676,106 @@ private struct SyncTab: View {
 
 // MARK: - Picture
 
-/// Reserved: brightness, contrast, saturation, gamma and zoom are the mpv
-/// engine's, which phase 4 of the overhaul brings to iPhone, iPad and Mac.
+/// Brightness, contrast, saturation and gamma, a zoom and an aspect
+/// override, applied to the live picture: the mpv engine's. On AVPlayer every
+/// row says so and the row under them hands the title over. The values are
+/// the Settings ones, so what is set here holds for everything played after,
+/// and Reset puts the file's own picture back.
 private struct PictureTab: View {
+    @Environment(PlayerModel.self) private var player
+    @Environment(Preferences.self) private var prefs
+
     var body: some View {
-        PanelNote(text: "Picture controls need the mpv engine, which comes to iPhone, iPad and Mac in a later update. The Apple TV has them already.")
+        @Bindable var prefs = prefs
+        let reason = player.pictureUnavailableReason
+        let live = reason == nil
+        VStack(alignment: .leading, spacing: 10) {
+            if let reason {
+                PanelNote(text: reason)
+                if player.canSwitchEngine(to: .mpv) {
+                    EngineSwitchRow(reason: "picture controls")
+                }
+            }
+
+            PanelHeading(text: "Picture")
+            slider("Brightness", value: $prefs.pictureBrightness, enabled: live)
+            slider("Contrast", value: $prefs.pictureContrast, enabled: live)
+            slider("Saturation", value: $prefs.pictureSaturation, enabled: live)
+            slider("Gamma", value: $prefs.pictureGamma, enabled: live)
+
+            PanelHeading(text: "Zoom")
+            HStack(spacing: 12) {
+                Text("Zoom")
+                    .font(.subheadline)
+                    .frame(width: 88, alignment: .leading)
+                Slider(value: $prefs.pictureZoom, in: 1...2, step: 0.05)
+                    .tint(Theme.accent)
+                    .disabled(!live)
+                    .accessibilityLabel("Zoom")
+                    .accessibilityValue("\(Int((prefs.pictureZoom * 100).rounded()))%")
+                Text("\(prefs.pictureZoom.formatted(.number.precision(.fractionLength(2))))×")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(Theme.textDim)
+                    .frame(width: 52, alignment: .trailing)
+            }
+            .opacity(live ? 1 : 0.5)
+            .onChange(of: prefs.pictureZoom) { _, _ in player.applyFraming() }
+
+            PanelHeading(text: "Aspect ratio")
+            ForEach(Preferences.aspectChoices, id: \.ratio) { choice in
+                PanelRow(title: choice.label,
+                         isSelected: abs(prefs.aspectOverride - choice.ratio) < 0.001,
+                         disabledReason: live ? nil : "Needs the mpv engine") {
+                    prefs.aspectOverride = choice.ratio
+                    player.applyFraming()
+                }
+            }
+
+            PanelRow(title: "Reset", detail: "The file's own picture: no adjustment, no zoom, its own shape",
+                     disabledReason: prefs.pictureIsAdjusted ? nil : "Nothing is adjusted") {
+                prefs.resetPicture()
+                player.applyPicture()
+                player.applyFraming()
+            }
+
+            if live {
+                PanelNote(text: "Saved for everything you play on this device.")
+            }
+        }
+    }
+
+    /// One of the four adjustments: -100…100, 0 being the file's own.
+    private func slider(_ name: String, value: Binding<Double>, enabled: Bool) -> some View {
+        HStack(spacing: 12) {
+            Text(name)
+                .font(.subheadline)
+                .frame(width: 88, alignment: .leading)
+            Slider(value: value, in: -100...100, step: 1)
+                .tint(Theme.accent)
+                .disabled(!enabled)
+                .accessibilityLabel(name)
+                .accessibilityValue("\(Int(value.wrappedValue))")
+            Text("\(Int(value.wrappedValue))")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(Theme.textDim)
+                .frame(width: 52, alignment: .trailing)
+        }
+        .opacity(enabled ? 1 : 0.5)
+        .onChange(of: value.wrappedValue) { _, _ in player.applyPicture() }
+    }
+}
+
+/// The row that hands the title to the mpv engine at the same position, for
+/// a tab whose controls are mpv's.
+private struct EngineSwitchRow: View {
+    @Environment(PlayerModel.self) private var player
+    let reason: String
+
+    var body: some View {
+        PanelRow(title: "Switch to the mpv engine for this title",
+                 detail: "Reopens where it is now. Apple's engine comes back for the next title, or for Picture in Picture and AirPlay.") {
+            Task { await player.switchEngine(to: .mpv, reason: reason) }
+        }
     }
 }
 

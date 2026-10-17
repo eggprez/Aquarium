@@ -107,20 +107,27 @@ struct PlayerTransport: View {
 
             Spacer(minLength: 8)
 
-            if player.engine?.capabilities.contains(.airPlay) == true {
+            // AirPlay and Picture in Picture are AVPlayer's. On mpv the
+            // buttons stay, and hand the stream to AVPlayer: the picker as it
+            // opens, the picture as soon as the new layer plays.
+            if player.engine?.capabilities.contains(.airPlay) == true || player.canSwitchEngine(to: .apple) {
                 PlayerAirPlayButton()
                     .frame(width: 40, height: 40)
                     .accessibilityLabel("AirPlay")
             }
 
-            if let pip = pictureInPicture, pip.isPossible {
+            if let pip = pictureInPicture, pip.isPossible || pip.isActive || player.canHandOverForPictureInPicture {
                 PlayerGlyphButton(
                     symbol: pip.isActive ? "pip.exit" : "pip.enter",
                     label: pip.isActive ? "Leave Picture in Picture" : "Picture in Picture",
                     size: 18
                 ) {
                     onInteract()
-                    pip.toggle()
+                    if !pip.isActive, player.canHandOverForPictureInPicture {
+                        player.handOverForPictureInPicture(pip)
+                    } else {
+                        pip.toggle()
+                    }
                 }
             }
 
@@ -172,7 +179,7 @@ struct PlayerTransport: View {
                 Label("Stream Info", systemImage: "info.circle")
             }
             if let item = player.item, !player.isLocal, !player.isLive,
-               player.engine?.capabilities.contains(.sharePlay) == true {
+               player.engine?.capabilities.contains(.sharePlay) == true || player.canSwitchEngine(to: .apple) {
                 let shareplay = SharePlayCoordinator.shared
                 if shareplay.isActive {
                     Button {
@@ -181,8 +188,13 @@ struct PlayerTransport: View {
                         Label("Leave SharePlay", systemImage: "shareplay.slash")
                     }
                 } else {
+                    // On mpv the stream is handed to AVPlayer first, whose
+                    // player the session coordinates.
                     Button {
-                        Task { await shareplay.share(item) }
+                        Task {
+                            await player.prepareForSharePlay()
+                            await shareplay.share(item)
+                        }
                     } label: {
                         Label("Watch Together", systemImage: "shareplay")
                     }
@@ -438,14 +450,21 @@ struct PlayerTransport: View {
 
 // MARK: - AirPlay
 
-/// The system's route picker: the only way to offer AirPlay.
+/// The system's route picker: the only way to offer AirPlay. As it opens,
+/// a stream on mpv is handed to AVPlayer, which is the engine that can send
+/// video to the television about to be chosen.
 #if os(iOS)
 struct PlayerAirPlayButton: UIViewRepresentable {
+    @Environment(PlayerModel.self) private var player
+
+    func makeCoordinator() -> PlayerAirPlayDelegate { PlayerAirPlayDelegate() }
+
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
         view.tintColor = .white
         view.activeTintColor = UIColor(Theme.link)
         view.prioritizesVideoDevices = true
+        view.delegate = context.coordinator
         return view
     }
 
@@ -455,16 +474,25 @@ struct PlayerAirPlayButton: UIViewRepresentable {
 struct PlayerAirPlayButton: NSViewRepresentable {
     @Environment(PlayerModel.self) private var player
 
+    func makeCoordinator() -> PlayerAirPlayDelegate { PlayerAirPlayDelegate() }
+
     func makeNSView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
-        view.player = (player.engine as? AVEngine)?.player
+        view.player = player.appleEngine.player
+        view.delegate = context.coordinator
         return view
     }
 
     func updateNSView(_ view: AVRoutePickerView, context: Context) {
-        view.player = (player.engine as? AVEngine)?.player
+        view.player = player.appleEngine.player
     }
 }
 #endif
+
+final class PlayerAirPlayDelegate: NSObject, AVRoutePickerViewDelegate {
+    nonisolated func routePickerViewWillBeginPresentingRoutes(_ routePickerView: AVRoutePickerView) {
+        Task { @MainActor in PlayerModel.shared.handOverForAirPlay() }
+    }
+}
 
 #endif

@@ -50,7 +50,17 @@ struct RootView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
+                #if DEBUG
+                // `-AquariumShowSettings YES`: Settings with no server signed
+                // in, for looking at it on a simulator. Debug builds only.
+                if UserDefaults.standard.bool(forKey: "AquariumShowSettings") {
+                    NavigationStack { SettingsView() }
+                } else {
+                    LoginView()
+                }
+                #else
                 LoginView()
+                #endif
             }
         }
         #if !os(tvOS)

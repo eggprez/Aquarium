@@ -4,21 +4,25 @@
 //  playing something — which stream to ask for, where it resumes, what to
 //  report, which track the viewer wants, what comes next, the queue, the sleep
 //  timer, Now Playing, Live TV recovery — and drives a `PlaybackEngine` for the
-//  decoding. The engine is AVPlayer (`AVEngine`) on battery devices and libmpv
-//  (`MPVEngine`) on the Apple TV; which one is chosen is `EnginePolicy`'s to
-//  decide, and in this phase it is the one the platform compiles, since MPVKit
-//  is linked for tvOS alone until phase 4 opens the package up.
+//  decoding. The engine is AVPlayer (`AVEngine`) or libmpv (`MPVEngine`),
+//  chosen per stream by `EnginePolicy` (`PlayerModel+Engine`): AVPlayer by
+//  default on anything with a battery, mpv when the file or the viewer asks
+//  for something AVPlayer cannot give, mpv always on the Apple TV. The
+//  AVPlayer engine lives for the life of the app, since SharePlay and the
+//  AirPlay picker want its player before anything plays; the mpv handle is
+//  made when a stream needs it and destroyed when the player comes down.
 //
 //  Everything outside the player — the library, the guide, Settings, the Now
 //  Playing card — calls `PlayerModel.shared.play(item:)` and never learns which
-//  engine is underneath. The engine reports through one `AsyncStream` of
+//  engine is underneath. Each engine reports through one `AsyncStream` of
 //  `EngineEvent`s, drained in `handle` below; the Jellyfin orchestration hangs
 //  off that one stream rather than off either engine's own observers.
 //
 //  The file is split: this one holds the state, the engine wiring, the event
 //  handling and the transport; `PlayerModel+Playback` starts and recovers
-//  streams; `PlayerModel+Tracks` the track menus, subtitles and the audio
-//  offset; `PlayerModel+Extras` the queue, Up Next, reporting and the
+//  streams; `PlayerModel+Engine` chooses the engine and hands a stream from
+//  one to the other; `PlayerModel+Tracks` the track menus, subtitles and the
+//  audio offset; `PlayerModel+Extras` the queue, Up Next, reporting and the
 //  per-platform read-outs.
 
 import Foundation
@@ -185,9 +189,10 @@ final class PlayerModel {
     /// the new title's first frame.
     var pictureIsStale = true
 
-    /// The surface the picture is drawn on. One for the life of the app, like
-    /// the engine drawing into it.
+    /// The surface the picture is drawn on. One for the life of the app; the
+    /// mpv handle drawing into it is made per stream.
     let videoView = MPVVideoView(frame: .zero)
+    var mpvLayer: MPVMetalLayer { videoView.metalLayer }
 
     // The Now Playing card asks these of every player; neither exists on a
     // television, which has no downloads to shuffle.
@@ -207,15 +212,42 @@ final class PlayerModel {
     var isMuted = false { didSet { engine?.isMuted = isMuted } }
 
     /// The AVPlayer engine, which exists from init so its `player` is there
-    /// for the AVKit surfaces and the SharePlay coordinator before anything
-    /// plays. Reached as `(engine as? AVEngine)?.player`.
-    private let appleEngine = AVEngine()
+    /// for the AirPlay picker and the SharePlay coordinator before anything
+    /// plays. Reached as `(engine as? AVEngine)?.player` while it is the one
+    /// playing, and as `appleEngine.player` by the AirPlay picker, which
+    /// needs an `AVPlayer` whichever engine is on.
+    let appleEngine = AVEngine()
+
+    #if canImport(Libmpv)
+    /// The surface mpv draws into, hosted by `VideoSurface` while the mpv
+    /// engine is the one playing. One for the life of the app; the handle
+    /// drawing into it is made per stream.
+    let mpvLayer = MPVMetalLayer()
+    #endif
     #endif
 
     // MARK: - Internals
 
     var engine: (any PlaybackEngine)?
-    private var engineEventsTask: Task<Void, Never>?
+    #if canImport(Libmpv)
+    /// The mpv handle, while a stream is on it. Made by `makeEngine(.mpv)`,
+    /// destroyed by `finish` so nothing of mpv runs while the app browses.
+    var mpvEngine: MPVEngine?
+    #endif
+    /// One task per engine, for the engine's life: an `AsyncStream` ends when
+    /// the task reading it is cancelled, so the AVPlayer engine's — which
+    /// lives for the app — is never cancelled, and the mpv engine's ends when
+    /// its handle is destroyed.
+    private var engineEventsTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+    /// An engine the viewer asked for on this title — the Picture tab's
+    /// "switch for this title", Picture in Picture's hand-over — carried
+    /// through its reopens and dropped when the title changes.
+    var engineOverride: PlaybackEngineKind?
+    /// The stream was on mpv until Picture in Picture or AirPlay asked for
+    /// AVPlayer; when that ends it goes back.
+    var returnsToMPV = false
+    /// Software decode was already answered on this stream.
+    var softwareDecodeHandled = false
 
     var source: PlaybackSource?
     var options = StreamOptions()
@@ -299,6 +331,8 @@ final class PlayerModel {
         var audioStreamIndex: Int?
         var subtitleStreamIndex: Int?
         var startTicks: Int64
+        /// The engine the stream was asked for with.
+        var engine: PlaybackEngineKind
     }
     /// The series being shuffled over downloaded episodes.
     var shuffleSeries: DownloadShuffleState?
@@ -384,61 +418,114 @@ final class PlayerModel {
         volume = prefs.volume
         #if !os(tvOS)
         engine = appleEngine
-        wireEngineEvents()
-        appleEngine.volume = volume
-        refreshSubtitleStyling()
-        applyFraming()
-        configureAudioSession(activate: false)
-        observeAudioRoute()
+        wireEngineEvents(for: appleEngine)
+        configure(appleEngine)
         observeForeground()
         observePower()
         NowPlaying.shared.attach(to: self)
-        #else
+        #endif
         configureAudioSession(activate: false)
         observeAudioRoute()
         observeLifecycle()
-        #endif
     }
 
-    /// Make the engine the first time it is needed and point the event stream
-    /// at `handle`. On non-tvOS the AVPlayer engine exists from init so its
-    /// `player` is always there for SharePlay; here it only wires events once.
+    /// The engine of `kind`, made if it isn't there, with the event stream
+    /// pointed at `handle`. The AVPlayer engine exists from init; the mpv
+    /// handle is made here and kept for the session, so a title reopened for
+    /// a track or a quality plays on until the new file is in. Asking for the
+    /// other kind shuts the mpv handle down. Nil when the kind cannot be made
+    /// on this build.
     @discardableResult
-    func makeEngine() -> (any PlaybackEngine)? {
-        if let engine { return engine }
-        #if os(tvOS)
-        guard let made = MPVEngine(layer: videoView.metalLayer) else {
-            Self.log.error("mpv could not be created")
+    func makeEngine(_ kind: PlaybackEngineKind) -> (any PlaybackEngine)? {
+        switch kind {
+        case .apple:
+            #if os(tvOS)
+            Self.log.error("AVPlayer is not an engine on the Apple TV")
             return nil
+            #else
+            tearDownMPV()
+            if engine !== appleEngine {
+                engine = appleEngine
+                configure(appleEngine)
+            }
+            return appleEngine
+            #endif
+        case .mpv:
+            #if canImport(Libmpv)
+            if let mpvEngine { return mpvEngine }
+            guard let made = MPVEngine(layer: mpvLayer, tuning: mpvTuning) else {
+                Self.log.error("mpv could not be created")
+                return nil
+            }
+            #if !os(tvOS)
+            appleEngine.stop()
+            #endif
+            mpvEngine = made
+            engine = made
+            wireEngineEvents(for: made)
+            configure(made)
+            Self.log.info("mpv engine made (\(self.mpvTuning.demuxerMaxBytes, privacy: .public) cache)")
+            return made
+            #else
+            Self.log.error("mpv is not in this build")
+            return nil
+            #endif
         }
-        engine = made
-        wireEngineEvents()
-        #else
-        let made = appleEngine
+    }
+
+    /// What every engine is told as it becomes the one playing.
+    private func configure(_ engine: any PlaybackEngine) {
+        engine.volume = volume
+        #if !os(tvOS)
+        engine.isMuted = isMuted
         #endif
-        made.volume = volume
+        engine.rate = speed
         refreshSubtitleStyling()
         applyFraming()
+        applyPicture()
+        refreshPowerProfile()
         NowPlaying.shared.attach(to: self)
-        return made
     }
 
-    private func wireEngineEvents() {
-        guard let engine else { return }
-        engineEventsTask?.cancel()
+    /// Destroy the mpv handle, if there is one. On an iPhone, iPad or Mac the
+    /// AVPlayer engine is the one left in `engine`, so the AirPlay picker and
+    /// SharePlay have their player; on the Apple TV nothing is.
+    func tearDownMPV() {
+        #if canImport(Libmpv)
+        guard let mpvEngine else { return }
+        #if os(iOS)
+        mpvEngine.hintContentFrameRate(nil)
+        #endif
+        mpvEngine.shutdown()
+        engineEventsTasks[ObjectIdentifier(mpvEngine)] = nil
+        self.mpvEngine = nil
+        Self.log.info("mpv engine destroyed")
+        #if os(tvOS)
+        engine = nil
+        #else
+        engine = appleEngine
+        #endif
+        #endif
+    }
+
+    private func wireEngineEvents(for engine: any PlaybackEngine) {
+        let id = ObjectIdentifier(engine)
+        engineEventsTasks[id]?.cancel()
         let events = engine.events
-        engineEventsTask = Task { [weak self] in
+        engineEventsTasks[id] = Task { [weak self, weak engine] in
             for await event in events {
-                guard let self else { return }
-                self.handle(event)
+                guard let self, let engine else { return }
+                self.handle(event, from: engine)
             }
         }
     }
 
     // MARK: - Engine events
 
-    private func handle(_ event: EngineEvent) {
-        guard isActive, !awaitingLoad else { return }
+    private func handle(_ event: EngineEvent, from source: any PlaybackEngine) {
+        // Only the engine playing is listened to: the AVPlayer engine is
+        // still wired while mpv has the stream, and says nothing of interest.
+        guard source === engine, isActive, !awaitingLoad else { return }
         switch event {
         case .position(let seconds):
             #if os(tvOS)
@@ -490,7 +577,11 @@ final class PlayerModel {
             onFrameRate(rate)
 
         case .decoder(let name):
+            if name != decoder {
+                Self.log.info("decoder: \(name, privacy: .public) (\(self.engine?.kind.title ?? "no engine", privacy: .public))")
+            }
             decoder = name
+            onDecoder(name)
 
         case .droppedFrames(let count):
             droppedFrames = count
@@ -558,6 +649,7 @@ final class PlayerModel {
         frameRate = nil
         decoder = nil
         droppedFrames = 0
+        softwareDecodeHandled = false
         #if os(tvOS)
         syncTest = nil
         displayRequested = false
@@ -673,6 +765,10 @@ final class PlayerModel {
         externalStream = nil
         seekWatch?.cancel(); seekWatch = nil
         #endif
+        // Nothing of mpv runs while the app browses.
+        tearDownMPV()
+        engineOverride = nil
+        returnsToMPV = false
         cancelSleepTimer()
         resetLiveRecovery()
         NowPlaying.shared.clear()

@@ -1688,34 +1688,38 @@ final class JellyfinClient {
         fullEncode: Bool = false,
         audioStreamIndex: Int? = nil,
         subtitleStreamIndex: Int? = nil,
-        audio: Bool = false
+        audio: Bool = false,
+        engine: PlaybackEngineKind = .platformDefault
     ) async throws -> PlaybackSource {
         guard let s = prefs.session else { throw APIError.notConfigured }
         // A song is asked about with the music profile — a different set of
         // containers, no subtitles, an audio-only transcode — and answered
         // from the audio route. See `DeviceProfile.buildMusic`.
         //
-        // Video on Apple TV plays through mpv, which opens what AVFoundation
-        // can't — see `DeviceProfile.buildMPV`.
-        #if os(tvOS)
-        let profile = audio
-            ? DeviceProfile.buildMusic(maxBitrate: maxBitrate)
-            : DeviceProfile.buildMPV(
-                forceTranscode: forceTranscode,
-                maxBitrate: maxBitrate,
-                stereoOnly: prefs.stereoDownmix
-            )
-        #else
-        let profile = audio
-            ? DeviceProfile.buildMusic(maxBitrate: maxBitrate)
-            : DeviceProfile.build(
-                forceTranscode: forceTranscode,
-                maxBitrate: maxBitrate,
-                stereoOnly: prefs.stereoDownmix,
-                decodeAudioLocally: prefs.decodeAudioLocally,
-                subtitlesInManifest: (subtitleStreamIndex ?? -1) >= 0
-            )
-        #endif
+        // Video is asked about with the profile of the engine that will play
+        // it, which `EnginePolicy` chose before this call: mpv opens what
+        // AVFoundation can't — see `DeviceProfile.buildMPV`.
+        let profile: DeviceProfile
+        if audio {
+            profile = DeviceProfile.buildMusic(maxBitrate: maxBitrate)
+        } else {
+            switch engine {
+            case .mpv:
+                profile = DeviceProfile.buildMPV(
+                    forceTranscode: forceTranscode,
+                    maxBitrate: maxBitrate,
+                    stereoOnly: prefs.stereoDownmix
+                )
+            case .apple:
+                profile = DeviceProfile.build(
+                    forceTranscode: forceTranscode,
+                    maxBitrate: maxBitrate,
+                    stereoOnly: prefs.stereoDownmix,
+                    decodeAudioLocally: prefs.decodeAudioLocally,
+                    subtitlesInManifest: (subtitleStreamIndex ?? -1) >= 0
+                )
+            }
+        }
         let body = PlaybackInfoBody(
             UserId: s.userId,
             StartTimeTicks: startTicks,
@@ -1762,8 +1766,20 @@ final class JellyfinClient {
         // timestamps, and the client-side seek then lands somewhere other than
         // where it was asked to. It is a plausible-looking fix for a desync and
         // it makes the resume position wrong instead.
-        if let transcodingUrl = ms.TranscodingUrl,
-           forceTranscode || (ms.SupportsDirectPlay != true && ms.SupportsDirectStream != true) {
+        //
+        // The rule itself is `StreamPlan.decide`, written down once so it can
+        // be tested: mpv opens whatever the server offers untouched, so only
+        // a song, and video on AVPlayer, still go through `DeviceProfile`'s
+        // check of what this client can open.
+        let engineCanOpen: Bool = {
+            if audio { return DeviceProfile.canDirectPlayAudio(ms) }
+            switch engine {
+            case .mpv: return true
+            case .apple: return DeviceProfile.canDirectPlay(ms)
+            }
+        }()
+        let plan = StreamPlan.decide(source: ms, forceTranscode: forceTranscode, live: live, engineCanOpen: engineCanOpen)
+        if plan == .transcode, let transcodingUrl = ms.TranscodingUrl {
             // A path, and one that still leads to this server once joined to
             // its address: "@elsewhere/…" parses as a different host with the
             // server's own name as the user part, and the auth header would
@@ -1817,15 +1833,7 @@ final class JellyfinClient {
         // built as `stream.mp4`, `static=true` would send the transport stream
         // underneath it unchanged, and AVFoundation would open a file it cannot
         // read. A live source that won't say what it is gets transcoded.
-        #if os(tvOS)
-        // mpv opens whatever the server offers untouched; only a song still
-        // goes through AVFoundation's check.
-        let playable = audio ? DeviceProfile.canDirectPlayAudio(ms) : true
-        #else
-        let playable = audio ? DeviceProfile.canDirectPlayAudio(ms) : DeviceProfile.canDirectPlay(ms)
-        #endif
-        if !forceTranscode,
-           !playable || (live && (ms.Container ?? "").isEmpty) {
+        if plan == .escalate {
             if let escalated = try? await resolvePlayback(
                 itemId: itemId,
                 maxBitrate: maxBitrate,
@@ -1835,7 +1843,8 @@ final class JellyfinClient {
                 fullEncode: fullEncode,
                 audioStreamIndex: audioStreamIndex,
                 subtitleStreamIndex: subtitleStreamIndex,
-                audio: audio
+                audio: audio,
+                engine: engine
             ), escalated.isTranscode {
                 return escalated
             }

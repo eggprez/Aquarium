@@ -30,10 +30,31 @@ enum EnginePolicy {
         }
     }
 
-    /// Settings → Playback → Playback engine. Automatic is the default and the
-    /// only one that exists until phase 4 adds the setting.
-    enum Preference: String, Sendable, Hashable {
+    /// Settings → Video → Playback engine. Automatic is the default.
+    enum Preference: String, Sendable, Hashable, CaseIterable {
         case automatic, apple, mpv
+
+        var title: String {
+            switch self {
+            case .automatic: "Automatic"
+            case .apple: "Apple"
+            case .mpv: "mpv"
+            }
+        }
+    }
+
+    /// Settings → Video → Battery saver: whether the mpv engine draws
+    /// cheaply. Automatic reads the device.
+    enum BatterySaver: String, Sendable, Hashable, CaseIterable {
+        case automatic, always, never
+
+        var title: String {
+            switch self {
+            case .automatic: "Automatic"
+            case .always: "Always"
+            case .never: "Never"
+            }
+        }
     }
 
     /// Everything the choice is made from. Built by the model from the item,
@@ -42,10 +63,12 @@ enum EnginePolicy {
     struct Request: Sendable {
         var platform: Platform
         var preference: Preference = .automatic
-        /// Whether libmpv is compiled into this build at all. MPVKit is
-        /// linked for tvOS only until phase 4 opens the package's platform
-        /// filter, and no rule below can be honoured without it.
+        /// Whether libmpv is compiled into this build at all; no rule below
+        /// can be honoured without it.
         var mpvAvailable: Bool
+        /// Picture in Picture, AirPlay or SharePlay is wanted on this stream,
+        /// and only AVPlayer has them: the hand-over case.
+        var requiresApple = false
         /// The server's description of the file, when there is one.
         var source: MediaSource?
         /// The tracks the stream is being asked for, in the server's
@@ -57,9 +80,13 @@ enum EnginePolicy {
         /// The stream will reach the engine as HLS — a transcode, a channel
         /// — rather than as the file itself.
         var isHLS = false
-        /// A download played from disk, and the container it was saved in.
+        /// A download played from disk, or an address with no Jellyfin
+        /// server behind it (a playlist channel, a debug URL): nothing to
+        /// remux the file, so its container decides.
         var isDownload = false
-        var downloadContainer: String?
+        var isExternalFile = false
+        /// The container of such a file, as its extension or as it was saved.
+        var fileContainer: String?
         var picture: PictureAdjustment = .neutral
         var framing: Framing = .fit
         var audioDelay: Double = 0
@@ -96,6 +123,11 @@ enum EnginePolicy {
         // 1. Apple TV: mpv. On mains, with a GPU to spare and a soundbar to
         //    keep in step, every argument for AVPlayer is the battery's.
         if request.platform == .appleTV { return .mpv }
+
+        // 4, taken first: Picture in Picture, AirPlay and SharePlay are
+        //    AVPlayer's alone, so asking for one is asking for the engine,
+        //    whatever the setting says.
+        if request.requiresApple { return .apple }
 
         // 2. A preference is a decision already made.
         switch request.preference {
@@ -134,9 +166,12 @@ enum EnginePolicy {
         }
         if request.isHLS, abs(request.audioDelay) > 0.0005 { return .mpv }
 
-        // A download in a container AVFoundation won't open from disk: the
-        // one case with no server to remux it.
-        if request.isDownload, let container = request.downloadContainer?.lowercased(),
+        // A download, or an address with no server behind it, in a container
+        // AVFoundation won't open: the one case with nothing to remux it. A
+        // playlist is a stream, not a file, and AVPlayer's; a bare MPEG-TS
+        // address, which AVFoundation never opens on its own, is mpv's.
+        if request.isDownload || request.isExternalFile, !request.isHLS,
+           let container = request.fileContainer?.lowercased(),
            !container.isEmpty, !fileContainersAVFoundationOpens.contains(container) {
             return .mpv
         }
@@ -147,6 +182,33 @@ enum EnginePolicy {
         return .apple
     }
 
+    /// How much of mpv's rendering budget to spend, from the setting and the
+    /// device's state. Thermal pressure wins over everything: a phone at its
+    /// limit is throttling its clocks whatever the viewer asked for.
+    static func powerProfile(
+        platform: Platform, saver: BatterySaver, onBattery: Bool, lowPower: Bool,
+        thermal: ProcessInfo.ThermalState
+    ) -> PowerProfile {
+        if thermal == .serious || thermal == .critical { return .battery }
+        switch saver {
+        case .always: return .battery
+        case .never: return .quality
+        case .automatic: break
+        }
+        switch platform {
+        case .iPhone, .iPad: return .battery
+        case .mac: return onBattery || lowPower ? .battery : .quality
+        case .appleTV: return .quality
+        }
+    }
+
+    /// Whether the file at `url`, played with nothing to remux it, is one
+    /// AVFoundation opens; the policy's `fileContainer` for it.
+    static func fileContainer(of url: URL) -> String? {
+        let ext = url.pathExtension.lowercased()
+        return ext.isEmpty ? nil : ext
+    }
+
     /// Whether VideoToolbox would decode this picture on this device. An
     /// undescribed stream is given the benefit of the doubt, as
     /// `DeviceProfile.canDirectPlay` gives it.
@@ -155,6 +217,25 @@ enum EnginePolicy {
         if hardwareVideoCodecs.contains(codec) { return true }
         if codec == "av1", decodesAV1 { return true }
         return false
+    }
+}
+
+extension PlaybackEngineKind {
+    /// The engine a platform plays through when nothing has been decided:
+    /// mpv on the Apple TV, AVPlayer elsewhere.
+    static var platformDefault: PlaybackEngineKind {
+        #if os(tvOS)
+        .mpv
+        #else
+        .apple
+        #endif
+    }
+
+    var title: String {
+        switch self {
+        case .apple: "AVFoundation"
+        case .mpv: "mpv"
+        }
     }
 }
 

@@ -44,6 +44,8 @@ enum CloudSync {
         "audio_lang", "sub_lang", "subs_forced_only",
         "sub_font_size", "sub_bg",
         "fill_screen",
+        "picture_brightness", "picture_contrast", "picture_saturation", "picture_gamma", "picture_zoom", "picture_aspect",
+        "player_engine", "player_battery_saver",
         "player_skip_interval", "player_edge_gestures", "player_hold_2x", "player_hide_after", "player_show_remaining",
         "livetv_source", "iptv_playlist_url", "iptv_guide_url", "iptv_refresh_minutes", "iptv_user_agent",
         "download_quality", "downloads_wifi_only",

@@ -256,7 +256,7 @@ struct PlaybackCommands: Commands {
                 state.togglePictureInPicture()
             }
             .keyboardShortcut(bare("p"))
-            .disabled(!(state.pictureInPicture?.isPossible == true || state.pictureInPicture?.isActive == true))
+            .disabled(!state.canPictureInPicture)
             Button(state.isFullScreen ? "Exit Full Screen" : "Enter Full Screen") { state.toggleFullScreen() }
                 .keyboardShortcut(bare("f"))
                 .disabled(!player.isActive)

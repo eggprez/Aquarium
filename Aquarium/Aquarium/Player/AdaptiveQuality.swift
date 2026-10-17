@@ -402,3 +402,45 @@ final class AdaptiveQuality {
         return nil
     }
 }
+
+// MARK: - The power source
+
+#if os(macOS)
+import IOKit.ps
+#endif
+
+/// Whether the machine is running on its battery — a Mac's question; a phone
+/// always is and an Apple TV never. `changed` is posted on the main queue
+/// when a Mac is plugged in or unplugged, for the mpv engine's render profile.
+enum PowerSource {
+    static let changed = Notification.Name("aquarium.powerSource.changed")
+
+    static var onBattery: Bool {
+        #if os(macOS)
+        guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let type = IOPSGetProvidingPowerSourceType(snapshot)?.takeUnretainedValue() as String?
+        else { return false }
+        return type == kIOPSBatteryPowerValue
+        #elseif os(tvOS)
+        return false
+        #else
+        return true
+        #endif
+    }
+
+    #if os(macOS)
+    private nonisolated(unsafe) static var source: CFRunLoopSource?
+
+    /// Start posting `changed`. Idempotent.
+    @MainActor
+    static func startObserving() {
+        guard source == nil else { return }
+        let callback: IOPowerSourceCallbackType = { _ in
+            DispatchQueue.main.async { NotificationCenter.default.post(name: PowerSource.changed, object: nil) }
+        }
+        guard let made = IOPSNotificationCreateRunLoopSource(callback, nil)?.takeRetainedValue() else { return }
+        CFRunLoopAddSource(CFRunLoopGetMain(), made, .commonModes)
+        source = made
+    }
+    #endif
+}

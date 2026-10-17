@@ -49,9 +49,19 @@ extension PlayerModel {
             size: prefs.subtitleSize, background: prefs.subtitleBackground, raised: subtitlesRaised)
     }
 
-    /// Fit or Fill, from Settings.
-    func applyFraming() {
-        engine?.framing = prefs.fillScreen ? .fill : .fit
+    /// Fit, Fill, a zoom or an aspect override, from Settings. A zoom or an
+    /// aspect override is mpv's: on AVPlayer, which has Fit and Fill alone,
+    /// `switchingIfNeeded` reopens the title on mpv.
+    func applyFraming(switchingIfNeeded: Bool = false) {
+        let framing = preferredFraming
+        engine?.framing = framing
+        guard switchingIfNeeded, isActive, engine?.capabilities.contains(.zoom) == false else { return }
+        switch framing {
+        case .zoom, .aspect:
+            if canSwitchEngine(to: .mpv) { Task { await switchEngine(to: .mpv, reason: "zoom or aspect override") } }
+        case .fit, .fill:
+            break
+        }
     }
 
     /// Lift subtitles clear of the bar while it is up, and put them back at
@@ -404,13 +414,26 @@ extension PlayerModel {
         guard isActive else { return }
         let seconds = Double(milliseconds) / 1000
         guard abs(seconds - prefs.audioDelay) > 0.0005 else { return }
-        guard streamCarriesDelay else { return }
+        if !streamCarriesDelay {
+            // An HLS stream on AVPlayer: the offset reaches it only through
+            // mpv, which moves the sound on anything. Reopened there.
+            guard canSwitchEngine(to: .mpv) else { return }
+            prefs.audioDelay = seconds
+            Task { await switchEngine(to: .mpv, reason: "audio delay on an HLS stream") }
+            return
+        }
         prefs.audioDelay = seconds
         if engine?.capabilities.contains(.audioDelayOnAnyStream) == true {
             engine?.audioDelay = seconds
         } else {
             rebuildForAudioDelay()
         }
+    }
+
+    /// Whether the Sync tab can be used at all on this stream: directly, or
+    /// by handing the stream to mpv first.
+    var canDelayAudioBySwitching: Bool {
+        isActive && !isOpening && !streamCarriesDelay && canSwitchEngine(to: .mpv)
     }
 
     /// Open the current stream again at whatever offset now applies, holding

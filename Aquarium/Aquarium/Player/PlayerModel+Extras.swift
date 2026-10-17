@@ -363,31 +363,37 @@ extension PlayerModel {
         }
         let startTicks = Int64(startSeconds(for: next, options: opts) * 10_000_000)
         let forced = opts.forceTranscode || opts.forceFullEncode || opts.maxBitrate != nil
+        // The next title may call for the other engine (a PGS track where
+        // this one had none); the stream is asked for with that engine's
+        // profile, and only taken if it is still the engine wanted.
+        let kind = chooseEngine(for: next, options: opts)
         guard let src = try? await client.resolvePlayback(
             itemId: next.Id, maxBitrate: opts.maxBitrate, forceTranscode: forced, live: false,
             startTicks: startTicks, fullEncode: opts.forceFullEncode,
-            audioStreamIndex: opts.audioStreamIndex, subtitleStreamIndex: opts.subtitleStreamIndex
+            audioStreamIndex: opts.audioStreamIndex, subtitleStreamIndex: opts.subtitleStreamIndex,
+            engine: kind
         ) else { return }
         guard generation == mine, item?.Id == current.Id, prefetched == nil, isActive else {
             await release(src)
             return
         }
-        let prepared = engine?.prepare(url: src.url, headers: client.authHeaders(for: src.url))
+        let prepared = kind == engine?.kind ? engine?.prepare(url: src.url, headers: client.authHeaders(for: src.url)) : nil
         prefetched = PrefetchedNext(
             itemId: next.Id, source: src, prepared: prepared,
             maxBitrate: opts.maxBitrate, forceTranscode: forced,
             audioStreamIndex: opts.audioStreamIndex, subtitleStreamIndex: opts.subtitleStreamIndex,
-            startTicks: startTicks)
-        Self.log.info("prefetched next \(next.Id, privacy: .public) transcode=\(src.isTranscode)")
+            startTicks: startTicks, engine: kind)
+        Self.log.info("prefetched next \(next.Id, privacy: .public) transcode=\(src.isTranscode) engine=\(kind.title, privacy: .public)")
     }
 
     func takePrefetched(
-        for item: BaseItem, options opts: StreamOptions, startTicks: Int64, inherited: Bool
+        for item: BaseItem, options opts: StreamOptions, startTicks: Int64, inherited: Bool,
+        engine kind: PlaybackEngineKind
     ) -> PrefetchedNext? {
         guard let ready = prefetched else { return nil }
         prefetched = nil
         let forced = opts.forceTranscode || opts.forceFullEncode || opts.maxBitrate != nil
-        guard inherited, !opts.live, ready.itemId == item.Id,
+        guard inherited, !opts.live, ready.itemId == item.Id, ready.engine == kind,
               ready.maxBitrate == opts.maxBitrate, ready.forceTranscode == forced,
               ready.audioStreamIndex == opts.audioStreamIndex,
               ready.subtitleStreamIndex == opts.subtitleStreamIndex,

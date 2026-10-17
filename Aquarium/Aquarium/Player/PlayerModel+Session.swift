@@ -150,19 +150,27 @@ extension PlayerModel {
         })
     }
 
-    #if os(tvOS)
     /// Going to the background takes the drawable away from mpv; the video
     /// track is let go of on the way out and picked up on the way back, which
-    /// keeps the picture from coming back black.
+    /// keeps the picture from coming back black. On an iPhone or iPad the
+    /// sound carries on meanwhile through the audio session — what
+    /// AVPlayer's `continuesIfPossible` policy does for free — and only the
+    /// Apple TV, which has no background audio to speak of, pauses.
     func observeLifecycle() {
+        #if canImport(UIKit)
         let centre = NotificationCenter.default
         routeObservers.append(centre.addObserver(
             forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.isActive else { return }
+                #if os(tvOS)
                 self.pause()
-                self.engine?.pictureDecode = false
+                #endif
+                if self.engine?.kind == .mpv {
+                    Self.log.info("background: mpv picture decode off")
+                    self.engine?.pictureDecode = false
+                }
             }
         })
         routeObservers.append(centre.addObserver(
@@ -170,14 +178,20 @@ extension PlayerModel {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.isActive else { return }
-                self.engine?.pictureDecode = true
-                self.recoverAudio()
+                if self.engine?.kind == .mpv {
+                    self.engine?.pictureDecode = true
+                    #if os(tvOS)
+                    self.recoverAudio()
+                    #endif
+                }
                 self.checkSleepDeadline()
                 self.holdScreenAwake(reassert: true)
             }
         })
+        #endif
     }
 
+    #if os(tvOS)
     /// Keeps the screensaver off while something is playing. AVPlayer did this
     /// itself; mpv draws into a layer tvOS knows nothing about, so the idle
     /// timer ran on through a film.
@@ -202,10 +216,14 @@ extension PlayerModel {
     #endif
 
     #if !os(tvOS)
-    /// The device's thermal state and Low Power Mode. Both arrive off the
-    /// main thread.
+    /// The device's thermal state and Low Power Mode, and on a Mac whether
+    /// it is on its battery. All arrive off the main thread.
     func observePower() {
-        let names = [ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange]
+        var names = [ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange]
+        #if os(macOS)
+        PowerSource.startObserving()
+        names.append(PowerSource.changed)
+        #endif
         for name in names {
             routeObservers.append(NotificationCenter.default.addObserver(
                 forName: name, object: nil, queue: .main
@@ -216,6 +234,7 @@ extension PlayerModel {
     }
 
     func powerStateChanged() {
+        refreshPowerProfile()
         guard prefs.adaptiveQuality, prefs.powerAwareQuality, isActive, !isLocal, !isExternal else { return }
         let info = ProcessInfo.processInfo
         if adaptive.notePower(thermal: info.thermalState, lowPower: info.isLowPowerModeEnabled, currentBitrate: currentBitrate) {

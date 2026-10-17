@@ -145,8 +145,22 @@ final class PlayerMacState {
         panelRequest = tab
     }
 
+    /// Picture in Picture, or on mpv the hand-over to AVPlayer that gets it.
     func togglePictureInPicture() {
-        pictureInPicture?.toggle()
+        guard let pictureInPicture else { return }
+        let player = PlayerModel.shared
+        if !pictureInPicture.isActive, player.canHandOverForPictureInPicture {
+            player.handOverForPictureInPicture(pictureInPicture)
+            return
+        }
+        pictureInPicture.toggle()
+    }
+
+    /// Whether the Picture in Picture item has anything to do.
+    var canPictureInPicture: Bool {
+        guard let pictureInPicture else { return false }
+        return pictureInPicture.isPossible || pictureInPicture.isActive
+            || PlayerModel.shared.canHandOverForPictureInPicture
     }
 
     // MARK: Keys
@@ -351,8 +365,15 @@ struct PlayerMenuItems: View {
         if SharePlayCoordinator.shared.isActive {
             Button("Leave SharePlay") { SharePlayCoordinator.shared.leave() }
         } else if let item = player.item, !player.isLocal, !player.isLive,
-                  player.engine?.capabilities.contains(.sharePlay) == true {
-            Button("Watch Together with SharePlay") { Task { await SharePlayCoordinator.shared.share(item) } }
+                  player.engine?.capabilities.contains(.sharePlay) == true || player.canSwitchEngine(to: .apple) {
+            // On mpv the stream is handed to AVPlayer first, whose player
+            // the session coordinates.
+            Button("Watch Together with SharePlay") {
+                Task {
+                    await player.prepareForSharePlay()
+                    await SharePlayCoordinator.shared.share(item)
+                }
+            }
         }
 
         Menu("Sleep") {
@@ -466,8 +487,8 @@ struct PlayerContextMenu: View {
             set: { state.showsStreamInfo = $0 }
         ))
         .keyboardShortcut("i", modifiers: .command)
-        if let pip = state.pictureInPicture, pip.isPossible || pip.isActive {
-            Button(pip.isActive ? "Leave Picture in Picture" : "Picture in Picture") { pip.toggle() }
+        if let pip = state.pictureInPicture, state.canPictureInPicture {
+            Button(pip.isActive ? "Leave Picture in Picture" : "Picture in Picture") { state.togglePictureInPicture() }
                 .keyboardShortcut("p", modifiers: [])
         }
         Button(state.isFullScreen ? "Exit Full Screen" : "Enter Full Screen") { state.toggleFullScreen() }

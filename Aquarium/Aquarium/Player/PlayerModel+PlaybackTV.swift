@@ -15,7 +15,7 @@ extension PlayerModel {
 
     func play(item: BaseItem, options: StreamOptions = .init(), meta: StartMeta = .init()) async {
         MusicPlayer.shared.yield()
-        guard let engine = makeEngine() else {
+        guard let engine = makeEngine(.mpv) else {
             errorMessage = "The player couldn't start."
             isActive = true
             return
@@ -76,7 +76,8 @@ extension PlayerModel {
                 itemId: item.Id, maxBitrate: opts.maxBitrate,
                 forceTranscode: opts.forceTranscode || opts.maxBitrate != nil,
                 live: opts.live, startTicks: Int64(startSeconds * 10_000_000),
-                audioStreamIndex: opts.audioStreamIndex, subtitleStreamIndex: opts.subtitleStreamIndex)
+                audioStreamIndex: opts.audioStreamIndex, subtitleStreamIndex: opts.subtitleStreamIndex,
+                engine: .mpv)
             guard generation == mine else { await release(src); return }
             source = src
             isTranscoding = src.isTranscode
@@ -124,7 +125,7 @@ extension PlayerModel {
         channel: BaseItem? = nil, reopening: Bool = false
     ) {
         MusicPlayer.shared.yield()
-        guard let engine = makeEngine() else {
+        guard let engine = makeEngine(.mpv) else {
             errorMessage = "The player couldn't start."
             isActive = true
             return
@@ -170,7 +171,7 @@ extension PlayerModel {
             return
         }
         MusicPlayer.shared.yield()
-        guard let engine = makeEngine() else {
+        guard let engine = makeEngine(.mpv) else {
             errorMessage = "The player couldn't start."
             isActive = true
             return

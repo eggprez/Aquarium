@@ -616,6 +616,76 @@ final class Preferences {
         didSet { write(fillScreen, forKey: "fill_screen") }
     }
 
+    /// Brightness, contrast, saturation and gamma, each -100…100 with 0 as
+    /// the file's own. The mpv engine's; setting any of them on an iPhone,
+    /// iPad or Mac is one of the things that switches the engine to it for
+    /// the title (see `EnginePolicy`).
+    var pictureBrightness: Double {
+        didSet { write(pictureBrightness, forKey: "picture_brightness") }
+    }
+    var pictureContrast: Double {
+        didSet { write(pictureContrast, forKey: "picture_contrast") }
+    }
+    var pictureSaturation: Double {
+        didSet { write(pictureSaturation, forKey: "picture_saturation") }
+    }
+    var pictureGamma: Double {
+        didSet { write(pictureGamma, forKey: "picture_gamma") }
+    }
+    /// Zoom into the picture by this factor; 1 is none. mpv's too.
+    var pictureZoom: Double {
+        didSet { write(pictureZoom, forKey: "picture_zoom") }
+    }
+    /// Stretch or crop the picture to this width:height; 0 is the file's own.
+    var aspectOverride: Double {
+        didSet { write(aspectOverride, forKey: "picture_aspect") }
+    }
+
+    var picture: PictureAdjustment {
+        get {
+            PictureAdjustment(brightness: pictureBrightness, contrast: pictureContrast,
+                              saturation: pictureSaturation, gamma: pictureGamma)
+        }
+        set {
+            if pictureBrightness != newValue.brightness { pictureBrightness = newValue.brightness }
+            if pictureContrast != newValue.contrast { pictureContrast = newValue.contrast }
+            if pictureSaturation != newValue.saturation { pictureSaturation = newValue.saturation }
+            if pictureGamma != newValue.gamma { pictureGamma = newValue.gamma }
+        }
+    }
+
+    /// Whether any picture adjustment, zoom or aspect override is in force.
+    var pictureIsAdjusted: Bool {
+        !picture.isNeutral || abs(pictureZoom - 1) > 0.001 || aspectOverride > 0
+    }
+
+    /// Everything back to the file's own picture.
+    func resetPicture() {
+        picture = .neutral
+        pictureZoom = 1
+        aspectOverride = 0
+    }
+
+    /// The aspect overrides on offer, as width:height with 0 for none.
+    static let aspectChoices: [(label: String, ratio: Double)] = [
+        ("File's own", 0), ("16:9", 16.0 / 9), ("4:3", 4.0 / 3), ("1.85:1", 1.85), ("2.35:1", 2.35), ("2.39:1", 2.39),
+    ]
+
+    // ---- The engine ----
+
+    /// Which engine plays video on an iPhone, iPad or Mac: Apple's, mpv, or
+    /// whichever the file and the controls in use call for. The Apple TV
+    /// always plays through mpv.
+    var playbackEngine: EnginePolicy.Preference {
+        didSet { write(playbackEngine.rawValue, forKey: "player_engine") }
+    }
+
+    /// Whether the mpv engine draws cheaply: always, never, or when the
+    /// device is on a battery, in Low Power Mode or running hot.
+    var batterySaver: EnginePolicy.BatterySaver {
+        didSet { write(batterySaver.rawValue, forKey: "player_battery_saver") }
+    }
+
     // ---- The player's controls ----
 
     /// How far the skip buttons and a double-tap on the picture jump, in
@@ -650,6 +720,12 @@ final class Preferences {
 
     static let skipIntervals = [10, 15, 30]
     static let hideControlsChoices: [Double] = [2, 4, 6, 10]
+
+    /// The ranges the picture values are kept to, whatever a defaults file
+    /// or another device sends.
+    static func pictureValue(_ v: Double) -> Double { v.isFinite ? min(max(v.rounded(), -100), 100) : 0 }
+    static func zoomValue(_ v: Double) -> Double { v.isFinite && v > 0 ? min(max(v, 1), 2) : 1 }
+    static func aspectValue(_ v: Double) -> Double { v.isFinite && v > 0 ? min(max(v, 0.5), 4) : 0 }
 
     // ---- Live TV source ----
 
@@ -890,6 +966,14 @@ final class Preferences {
         subtitleSize = d.object(forKey: "sub_font_size") == nil ? 100 : d.double(forKey: "sub_font_size")
         subtitleBackground = SubtitleBackground(rawValue: d.string(forKey: "sub_bg") ?? "") ?? .outline
         fillScreen = d.bool(forKey: "fill_screen")
+        pictureBrightness = Self.pictureValue(d.double(forKey: "picture_brightness"))
+        pictureContrast = Self.pictureValue(d.double(forKey: "picture_contrast"))
+        pictureSaturation = Self.pictureValue(d.double(forKey: "picture_saturation"))
+        pictureGamma = Self.pictureValue(d.double(forKey: "picture_gamma"))
+        pictureZoom = Self.zoomValue(d.object(forKey: "picture_zoom") == nil ? 1 : d.double(forKey: "picture_zoom"))
+        aspectOverride = Self.aspectValue(d.double(forKey: "picture_aspect"))
+        playbackEngine = EnginePolicy.Preference(rawValue: d.string(forKey: "player_engine") ?? "") ?? .automatic
+        batterySaver = EnginePolicy.BatterySaver(rawValue: d.string(forKey: "player_battery_saver") ?? "") ?? .automatic
         skipInterval = Self.skipIntervals.contains(d.integer(forKey: "player_skip_interval")) ? d.integer(forKey: "player_skip_interval") : 10
         edgeGestures = d.bool(forKey: "player_edge_gestures")
         holdForDoubleSpeed = d.object(forKey: "player_hold_2x") == nil ? true : d.bool(forKey: "player_hold_2x")
@@ -981,6 +1065,14 @@ final class Preferences {
         CloudSync.set(audiobookSpeed, forKey: "audiobook_speed")
         CloudSync.set(defaults.data(forKey: "smart_playlists"), forKey: "smart_playlists")
         CloudSync.set(fillScreen, forKey: "fill_screen")
+        CloudSync.set(pictureBrightness, forKey: "picture_brightness")
+        CloudSync.set(pictureContrast, forKey: "picture_contrast")
+        CloudSync.set(pictureSaturation, forKey: "picture_saturation")
+        CloudSync.set(pictureGamma, forKey: "picture_gamma")
+        CloudSync.set(pictureZoom, forKey: "picture_zoom")
+        CloudSync.set(aspectOverride, forKey: "picture_aspect")
+        CloudSync.set(playbackEngine.rawValue, forKey: "player_engine")
+        CloudSync.set(batterySaver.rawValue, forKey: "player_battery_saver")
         CloudSync.set(skipInterval, forKey: "player_skip_interval")
         CloudSync.set(edgeGestures, forKey: "player_edge_gestures")
         CloudSync.set(holdForDoubleSpeed, forKey: "player_hold_2x")
@@ -1060,6 +1152,22 @@ final class Preferences {
         if let v = CloudSync.object(forKey: "sub_bg") as? String,
            let b = SubtitleBackground(rawValue: v), b != subtitleBackground { subtitleBackground = b }
         if let v = CloudSync.object(forKey: "fill_screen") as? Bool, v != fillScreen { fillScreen = v }
+        if let v = (CloudSync.object(forKey: "picture_brightness") as? NSNumber)?.doubleValue,
+           Self.pictureValue(v) != pictureBrightness { pictureBrightness = Self.pictureValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_contrast") as? NSNumber)?.doubleValue,
+           Self.pictureValue(v) != pictureContrast { pictureContrast = Self.pictureValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_saturation") as? NSNumber)?.doubleValue,
+           Self.pictureValue(v) != pictureSaturation { pictureSaturation = Self.pictureValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_gamma") as? NSNumber)?.doubleValue,
+           Self.pictureValue(v) != pictureGamma { pictureGamma = Self.pictureValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_zoom") as? NSNumber)?.doubleValue,
+           abs(Self.zoomValue(v) - pictureZoom) > 0.001 { pictureZoom = Self.zoomValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_aspect") as? NSNumber)?.doubleValue,
+           abs(Self.aspectValue(v) - aspectOverride) > 0.001 { aspectOverride = Self.aspectValue(v) }
+        if let v = CloudSync.object(forKey: "player_engine") as? String,
+           let e = EnginePolicy.Preference(rawValue: v), e != playbackEngine { playbackEngine = e }
+        if let v = CloudSync.object(forKey: "player_battery_saver") as? String,
+           let b = EnginePolicy.BatterySaver(rawValue: v), b != batterySaver { batterySaver = b }
         if let v = (CloudSync.object(forKey: "player_skip_interval") as? NSNumber)?.intValue,
            Self.skipIntervals.contains(v), v != skipInterval { skipInterval = v }
         if let v = CloudSync.object(forKey: "player_edge_gestures") as? Bool, v != edgeGestures { edgeGestures = v }

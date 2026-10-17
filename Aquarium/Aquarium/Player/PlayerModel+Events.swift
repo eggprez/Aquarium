@@ -53,6 +53,11 @@ extension PlayerModel {
     }
 
     func onFrameRate(_ rate: Double) {
+        #if os(iOS)
+        // A ProMotion panel is asked to run at the film's rate while mpv
+        // draws it; AVPlayer's layer arranges that for itself.
+        if let mpv = engine as? MPVEngine { mpv.hintContentFrameRate(rate > 0 ? rate : nil) }
+        #endif
         #if os(tvOS)
         guard rate > 0 else { return }
         engine?.audioDelay = audioDelay

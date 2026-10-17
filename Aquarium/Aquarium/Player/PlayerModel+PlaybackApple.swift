@@ -62,26 +62,12 @@ extension PlayerModel {
             playLocal(record, startAt: start)
             return
         }
-        guard let engine = makeEngine() else {
-            errorMessage = "The player couldn't start."
-            isActive = true
-            return
+
+        // An engine the viewer asked for was asked for on the title before.
+        if self.item?.Id != item.Id {
+            engineOverride = nil
+            returnsToMPV = false
         }
-
-        // Whether there is a picture on screen right now, of this very title,
-        // worth leaving there while its replacement is built.
-        let streamIsPlaying = isActive && !isOpening && !isBuffering
-            && errorMessage == nil && !isLocal && !isExternal && !isLive
-            && engine.transport == .playing
-            && self.item?.Id == item.Id && !options.live
-
-        MusicPlayer.shared.yield()
-        shuffleSeries = nil
-        errorMessage = nil
-        noVideoTrack = false
-        noVideoDetail = nil
-        bitrateNoticeDismissal?.cancel()
-        bitrateNotice = nil
 
         var opts = options
         if opts.maxBitrate == nil, !opts.bitrateIsChosen, !opts.live, prefs.defaultBitrate != nil,
@@ -99,6 +85,33 @@ extension PlayerModel {
             opts.audioStreamIndex = wanted.audio
             opts.subtitleStreamIndex = wanted.subtitle
         }
+
+        // Which engine, before the server is asked: the device profile is the
+        // engine's. A change of engine is a plain reopen — the old picture
+        // cannot be left up while the other engine's stream is built.
+        let kind = chooseEngine(for: item, options: opts)
+        let sameEngine = engine?.kind == kind
+
+        // Whether there is a picture on screen right now, of this very title,
+        // worth leaving there while its replacement is built.
+        let streamIsPlaying = sameEngine && isActive && !isOpening && !isBuffering
+            && errorMessage == nil && !isLocal && !isExternal && !isLive
+            && engine?.transport == .playing
+            && self.item?.Id == item.Id && !options.live
+
+        guard let engine = makeEngine(kind) else {
+            errorMessage = "The player couldn't start."
+            isActive = true
+            return
+        }
+
+        MusicPlayer.shared.yield()
+        shuffleSeries = nil
+        errorMessage = nil
+        noVideoTrack = false
+        noVideoDetail = nil
+        bitrateNoticeDismissal?.cancel()
+        bitrateNotice = nil
 
         let startSeconds = startSeconds(for: item, options: opts)
 
@@ -162,7 +175,7 @@ extension PlayerModel {
         do {
             let src: PlaybackSource
             var prepared: (any PreparedStream)?
-            if let ready = takePrefetched(for: item, options: opts, startTicks: requestedTicks, inherited: meta.inherited) {
+            if let ready = takePrefetched(for: item, options: opts, startTicks: requestedTicks, inherited: meta.inherited, engine: kind) {
                 src = ready.source
                 prepared = ready.prepared
             } else {
@@ -170,7 +183,8 @@ extension PlayerModel {
                     itemId: item.Id, maxBitrate: opts.maxBitrate,
                     forceTranscode: opts.forceTranscode || opts.forceFullEncode || opts.maxBitrate != nil,
                     live: opts.live, startTicks: requestedTicks, fullEncode: opts.forceFullEncode,
-                    audioStreamIndex: opts.audioStreamIndex, subtitleStreamIndex: opts.subtitleStreamIndex
+                    audioStreamIndex: opts.audioStreamIndex, subtitleStreamIndex: opts.subtitleStreamIndex,
+                    engine: kind
                 )
             }
             guard generation == mine else {
@@ -212,7 +226,7 @@ extension PlayerModel {
             self.isBuffering = true
             self.source = src
             self.isTranscoding = src.isTranscode
-            Self.log.info("opening \(item.Id, privacy: .public): \(src.isTranscode ? "transcode" : "original", privacy: .public), container \(src.mediaSource.Container ?? "none", privacy: .public)")
+            Self.log.info("opening \(item.Id, privacy: .public) on \(kind.title, privacy: .public): \(src.isTranscode ? "transcode" : "original", privacy: .public), container \(src.mediaSource.Container ?? "none", privacy: .public)")
 
             let resumeAt = canHandOver ? max(startSeconds, position) : startSeconds
             engineLoad(
@@ -265,7 +279,7 @@ extension PlayerModel {
         return record
     }
 
-    func playLocal(_ record: DownloadRecord, keepShuffle: Bool = false, startAt: Double? = nil) {
+    func playLocal(_ record: DownloadRecord, keepShuffle: Bool = false, startAt: Double? = nil, paused: Bool = false) {
         guard let url = DownloadManager.shared.mediaURL(for: record) else {
             DownloadManager.shared.markMissing(record.itemId)
             AppModel.shared.toast(
@@ -273,7 +287,13 @@ extension PlayerModel {
                 tone: .error)
             return
         }
-        guard makeEngine() != nil else { return }
+        if localRecordId != record.itemId {
+            engineOverride = nil
+            returnsToMPV = false
+        }
+        let kind = chooseEngine(forLocal: record)
+        guard makeEngine(kind) != nil else { return }
+        Self.log.info("opening download \(record.itemId, privacy: .public) on \(kind.title, privacy: .public): \(record.fileName, privacy: .public)")
         MusicPlayer.shared.yield()
         quiesceOutgoingStream()
         generation &+= 1
@@ -317,7 +337,8 @@ extension PlayerModel {
         fullItem = nil
         isActive = true
         isBuffering = true
-        engineLoad(url: url, startAt: startAt ?? record.resumeSeconds, headers: [:])
+        engineLoad(url: url, startAt: startAt ?? record.resumeSeconds, headers: [:], paused: paused)
+        if paused { isPaused = true }
         Task { await refreshLocalUpNext(after: record) }
     }
 
@@ -331,9 +352,15 @@ extension PlayerModel {
 
     func playExternal(
         title: String, subtitle: String, artworkURL: URL?, streamURL: URL,
-        channel: BaseItem? = nil, reopening: Bool = false
+        channel: BaseItem? = nil, reopening: Bool = false, startAt: Double = 0, paused: Bool = false
     ) {
-        guard makeEngine() != nil else { return }
+        if externalChannel?.streamURL != streamURL {
+            engineOverride = nil
+            returnsToMPV = false
+        }
+        let kind = chooseEngine(forExternal: streamURL)
+        guard makeEngine(kind) != nil else { return }
+        Self.log.info("opening external stream on \(kind.title, privacy: .public): \(streamURL.lastPathComponent, privacy: .public)")
         MusicPlayer.shared.yield()
         quiesceOutgoingStream()
         releaseOutgoingServerStream()
@@ -381,7 +408,16 @@ extension PlayerModel {
         let mine = generation
         externalResolve?.cancel(); externalResolve = nil
         if let known = carriedResolution {
-            engineLoad(url: known, startAt: 0, headers: Self.externalHeaders(), live: true)
+            engineLoad(url: known, startAt: startAt, headers: Self.externalHeaders(), paused: paused, live: true)
+            if paused { isPaused = true }
+            return
+        }
+        // A file by its extension — the debug URL, a playlist entry that is a
+        // file — is opened as it is: the resolver walks HLS redirects, and
+        // mpv reads anything it is handed.
+        if kind == .mpv {
+            engineLoad(url: streamURL, startAt: startAt, headers: Self.externalHeaders(), paused: paused, live: true)
+            if paused { isPaused = true }
             return
         }
         externalResolve = Task { [weak self] in
@@ -394,7 +430,8 @@ extension PlayerModel {
                 return
             }
             self.externalChannel?.resolvedURL = resolved.url
-            self.engineLoad(url: resolved.url, startAt: 0, headers: Self.externalHeaders(), live: true)
+            self.engineLoad(url: resolved.url, startAt: startAt, headers: Self.externalHeaders(), paused: paused, live: true)
+            if paused { self.isPaused = true }
         }
     }
 

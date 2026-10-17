@@ -102,9 +102,9 @@ final class EnginePolicyTests: XCTestCase {
     func testDownloadsInContainersAVFoundationWontOpen() {
         var r = request()
         r.isDownload = true
-        r.downloadContainer = "mkv"
+        r.fileContainer = "mkv"
         XCTAssertEqual(EnginePolicy.choose(r), .mpv)
-        r.downloadContainer = "mp4"
+        r.fileContainer = "mp4"
         XCTAssertEqual(EnginePolicy.choose(r), .apple)
     }
 
@@ -113,5 +113,69 @@ final class EnginePolicyTests: XCTestCase {
         r.isLive = true
         r.isHLS = true
         XCTAssertEqual(EnginePolicy.choose(r), .apple)
+    }
+
+    func testExternalFileByItsExtension() {
+        var r = request(source: nil)
+        r.isExternalFile = true
+        r.isLive = true
+        r.fileContainer = EnginePolicy.fileContainer(of: URL(string: "https://example.net/film.MKV")!)
+        XCTAssertEqual(EnginePolicy.choose(r), .mpv, "nothing remuxes a bare address")
+        r.fileContainer = EnginePolicy.fileContainer(of: URL(string: "https://example.net/film.mp4")!)
+        XCTAssertEqual(EnginePolicy.choose(r), .apple)
+        r.fileContainer = EnginePolicy.fileContainer(of: URL(string: "https://example.net/live/stream.m3u8?x=1")!)
+        r.isHLS = true
+        XCTAssertEqual(EnginePolicy.choose(r), .apple, "a playlist channel is AVPlayer's")
+        XCTAssertNil(EnginePolicy.fileContainer(of: URL(string: "https://example.net/stream")!))
+    }
+
+    func testPictureInPictureAirPlayAndSharePlayNeedApple() {
+        var r = request(source: source(audio: "dts", subtitles: ["pgssub"]))
+        r.subtitleStreamIndex = 2
+        XCTAssertEqual(EnginePolicy.choose(r), .mpv)
+        r.requiresApple = true
+        XCTAssertEqual(EnginePolicy.choose(r), .apple, "the hand-over case")
+        r.preference = .mpv
+        XCTAssertEqual(EnginePolicy.choose(r), .apple, "even over the setting: nothing else can do it")
+        r.platform = .appleTV
+        XCTAssertEqual(EnginePolicy.choose(r), .mpv, "the Apple TV has no AVPlayer engine to hand to")
+    }
+
+    func testMacIsAppleByDefaultToo() {
+        XCTAssertEqual(EnginePolicy.choose(request(platform: .mac, source: source())), .apple)
+        XCTAssertEqual(EnginePolicy.choose(request(platform: .mac, source: source(audio: "truehd"))), .mpv)
+    }
+
+    // MARK: The render profile
+
+    private func profile(
+        _ platform: EnginePolicy.Platform, saver: EnginePolicy.BatterySaver = .automatic,
+        onBattery: Bool = false, lowPower: Bool = false, thermal: ProcessInfo.ThermalState = .nominal
+    ) -> PowerProfile {
+        EnginePolicy.powerProfile(platform: platform, saver: saver, onBattery: onBattery, lowPower: lowPower, thermal: thermal)
+    }
+
+    func testHandheldsDrawCheaplyByDefault() {
+        XCTAssertEqual(profile(.iPhone), .battery)
+        XCTAssertEqual(profile(.iPad), .battery)
+        XCTAssertEqual(profile(.appleTV), .quality)
+    }
+
+    func testMacFollowsItsPowerSource() {
+        XCTAssertEqual(profile(.mac), .quality)
+        XCTAssertEqual(profile(.mac, onBattery: true), .battery)
+        XCTAssertEqual(profile(.mac, lowPower: true), .battery)
+    }
+
+    func testBatterySaverSettingWins() {
+        XCTAssertEqual(profile(.iPhone, saver: .never), .quality)
+        XCTAssertEqual(profile(.mac, saver: .always), .battery)
+        XCTAssertEqual(profile(.appleTV, saver: .always), .battery)
+    }
+
+    func testThermalPressureWinsOverEverything() {
+        XCTAssertEqual(profile(.appleTV, saver: .never, thermal: .serious), .battery)
+        XCTAssertEqual(profile(.mac, saver: .never, thermal: .critical), .battery)
+        XCTAssertEqual(profile(.mac, saver: .never, thermal: .fair), .quality, "a warning is adaptive quality's, not the renderer's")
     }
 }

@@ -12,9 +12,10 @@
 //  AppKit has had the controller over an `AVPlayerLayer` since 10.15; this
 //  is the behaviour `AVPlayerView`'s delegate used to carry.
 //
-//  Only an `AVPlayerLayer` can be put in the window; when the mpv engine
-//  arrives (phase 4) a stream on it hands over to AVPlayer first, as the plan
-//  says.
+//  Only an `AVPlayerLayer` can be put in the window: a stream on the mpv
+//  engine is handed to AVPlayer first (`PlayerModel.handOverForPictureInPicture`),
+//  with `startWhenPossible` starting the picture as soon as the new layer
+//  plays, and goes back to mpv when the picture returns.
 
 #if os(iOS) || os(macOS)
 
@@ -31,6 +32,11 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
 
     @ObservationIgnored private var controller: AVPictureInPictureController?
     @ObservationIgnored private var observers: [NSKeyValueObservation] = []
+    /// Start as soon as the system allows: set while a stream is being
+    /// handed from mpv to AVPlayer for the picture, and given up after a
+    /// while if the layer never plays.
+    @ObservationIgnored private var wantsStart = false
+    @ObservationIgnored private var wantsStartExpiry: Task<Void, Never>?
 
     #if os(macOS)
     /// Whether the player window was put away for the floating picture and
@@ -53,7 +59,15 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
         observers = [
             made.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] controller, _ in
                 let possible = controller.isPictureInPicturePossible
-                Task { @MainActor in self?.isPossible = possible }
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.isPossible = possible
+                    if possible, self.wantsStart {
+                        self.wantsStart = false
+                        self.wantsStartExpiry?.cancel()
+                        controller.startPictureInPicture()
+                    }
+                }
             },
             made.observe(\.isPictureInPictureActive, options: [.initial, .new]) { [weak self] controller, _ in
                 let active = controller.isPictureInPictureActive
@@ -78,6 +92,22 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
         }
     }
 
+    /// Start the moment the system would allow it — once the AVPlayer layer
+    /// a hand-over is building has a picture — or give up after a while.
+    func startWhenPossible() {
+        if let controller, controller.isPictureInPicturePossible {
+            controller.startPictureInPicture()
+            return
+        }
+        wantsStart = true
+        wantsStartExpiry?.cancel()
+        wantsStartExpiry = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard !Task.isCancelled else { return }
+            self?.wantsStart = false
+        }
+    }
+
     // MARK: Delegate
 
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
@@ -95,6 +125,8 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
             #if os(macOS)
             self.restoreWindow()
             #endif
+            // A stream handed over for the picture goes back to mpv.
+            PlayerModel.shared.pictureInPictureEnded()
         }
     }
 

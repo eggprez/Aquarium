@@ -65,6 +65,7 @@ extension PlayerModel {
         if !isExternal, !isLive, !isLocal { out.append(.quality) }
         if !isLive { out.append(.speed) }
         out.append(.sync)
+        out.append(.picture)
         return out
     }
 
@@ -73,9 +74,21 @@ extension PlayerModel {
     var audioDelayUnavailableReason: String? {
         if !isActive || isOpening { return "Once the stream has opened." }
         if streamCarriesDelay { return nil }
-        if isExternal { return "This channel comes straight from its playlist as a live stream, and the sound of a live stream can't be shifted on this engine." }
-        if isLive { return "A live channel's sound can't be shifted on this engine." }
-        return "The sound can only be shifted on a file the server sends untouched. This stream is being transcoded, so the picture and sound arrive already mixed."
+        let fix = canDelayAudioBySwitching
+            ? " The mpv engine moves the sound on any stream — switch for this title?"
+            : ""
+        if isExternal { return "This channel comes straight from its playlist as a live stream, and the sound of a live stream can't be shifted on Apple's engine." + fix }
+        if isLive { return "A live channel's sound can't be shifted on Apple's engine." + fix }
+        return "Apple's engine can only shift the sound of a file the server sends untouched. This stream is being transcoded, so the picture and sound arrive already mixed." + fix
+    }
+
+    /// Why the picture controls are not live on this stream, or nil when
+    /// they are. The row under it offers the switch.
+    var pictureUnavailableReason: String? {
+        if engine?.capabilities.contains(.pictureAdjust) == true { return nil }
+        if !isActive || isOpening { return "Once the stream has opened." }
+        if canSwitchEngine(to: .mpv) { return "Picture controls need the mpv engine — switch for this title?" }
+        return "Picture controls need the mpv engine. " + (engineSwitchUnavailableReason(to: .mpv) ?? "")
     }
 
     /// How many titles wait behind this one: the hand-made queue, or the one

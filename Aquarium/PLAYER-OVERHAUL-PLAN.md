@@ -504,6 +504,123 @@ through `AVPictureInPictureController`; the Stream Info inspector stays.
 
 ### Phase 4: mpv on iPhone, iPad and Mac (L)
 
+> **Shipped 2026-10-16** on `player-overhaul` (uncommitted at the time of
+> writing). The MPVKit product's `platformFilters` is `(ios, macos, tvos)` and
+> `OTHER_LDFLAGS` links AVKit on every platform; the stub-stripping script
+> phase is unchanged and runs on all three. `Engine/MPVEngine.swift` compiles
+> everywhere: `MPVMetalLayer` sets `framebufferOnly`, `maximumDrawableCount = 2`
+> and `presentsWithTransaction = false` itself, `MPVVideoView` has its
+> `NSView` twin (layer-backed, the Metal layer as its backing layer, scale
+> from the window), and on an iPhone or iPad the model's own `mpvLayer` is
+> hosted by `VideoSurface`'s host view in the `AVPlayerLayer`'s slot (given
+> the trait collection's scale on iOS). The handle is made per session by
+> `PlayerModel.makeEngine(.mpv)` and destroyed in `finish` (`tearDownMPV`) on
+> every platform, tvOS included; it is reused across the reopens of one
+> session so a title reopened for a track or a quality still plays on until
+> the new file is in. One event task per engine, since an `AsyncStream` ends
+> with the task reading it, and `handle` ignores an engine that isn't the
+> one playing. The battery profile is a real mpv profile: `[aquarium-battery]`
+> (the plan's list, `profile-restore=copy`) and `[aquarium-quality]`
+> (`video-sync=display-resample`) are written to Caches/mpv at launch and
+> handed to the handle with `include`; `powerProfile` restores the one on
+> and applies the other with `apply-profile`. `EnginePolicy.powerProfile`
+> (tested) picks it: thermal `.serious`/`.critical` → battery everywhere,
+> then the Battery saver setting, then Automatic = battery on iPhone and
+> iPad, on a Mac on battery (IOKit `PowerSource`, with a run-loop source
+> posting `PowerSource.changed`) or in Low Power Mode, quality on a Mac on
+> mains and on Apple TV; `refreshPowerProfile` runs when an engine is made
+> and on every power notification. `vid=no` on `didEnterBackground` and
+> `vid=auto` on return on iOS (the sound carries on; only tvOS still pauses).
+> `hwdec-current` is watched in `onDecoder`: `no` on an iPhone or iPad with a
+> server item behind the stream reopens on AVEngine with `forceTranscode`,
+> once per stream, logged; a download or a bare URL just logs it. Demuxer
+> cache 64 MiB / 60 s on iPhone and iPad (`MPVEngine.Tuning.handheld`),
+> 150 MiB / 20 s on Mac and Apple TV. ProMotion: `hintContentFrameRate` keeps
+> a `CADisplayLink` with `preferredFrameRateRange` at the content's rate
+> while mpv draws, invalidated at shutdown. `EnginePolicy.choose` is live:
+> `PlayerModel+Engine.swift` builds the request (preference, picture,
+> framing, audio delay, AV1, SharePlay, `engineOverride`) for an item, a
+> download (`fileContainer` from the file name) or a bare URL (`isExternalFile`
+> with the extension, so `.mkv` and `.ts` addresses go to mpv and `.m3u8`
+> stays on AVPlayer), and `requiresApple` (PiP, AirPlay, SharePlay) beats the
+> setting. `JellyfinClient.resolvePlayback` takes `engine:` and asks
+> `StreamPlan.decide` with the engine's profile and `engineCanOpen`; the
+> `#if os(tvOS)` there is gone. Prefetch resolves the next title with its own
+> engine choice and is only taken if the choice still matches. Settings →
+> Video gained Playback engine, Battery saver (Player group) and the Picture
+> sliders, zoom, aspect and Reset (`PictureAdjustRows`, Picture group) on
+> iPhone and Mac, in `Preferences` (`picture_*`, `player_engine`,
+> `player_battery_saver`) and `CloudSync.syncedKeys`; the About row and the
+> Mac About panel say which engine is playing (`engineDescription`). The
+> Picture tab is in `panelTabs` everywhere the shared panel runs: sliders
+> over the live picture on mpv, on AVEngine the note *Picture controls need
+> the mpv engine — switch for this title?* with the `EngineSwitchRow`, which
+> `switchEngine(to:reason:)` answers by reopening at the same position with
+> the pause state kept and `engineOverride = .mpv` for the title. The Sync
+> tab offers the same row on an HLS stream under AVEngine, and
+> `setAudioDelay` switches instead of refusing. Subtitle styling on mpv is the
+> existing `applySubtitleStyle` (`sub-scale`, `sub-color`, `sub-outline-*`,
+> `sub-back-color`), applied to every engine as it becomes the one playing.
+> Hand-over: the PiP button stays on mpv and calls
+> `handOverForPictureInPicture`, which reopens on AVEngine and starts the
+> picture through `PictureInPicture.startWhenPossible` as soon as the new
+> layer plays; the AirPlay picker stays and its delegate hands over as the
+> picker opens (`PlayerAirPlayDelegate`, both platforms; on a Mac the picker
+> always has `appleEngine.player`); Watch Together calls `prepareForSharePlay`
+> first, and `SharePlayCoordinator.adopt` does the same for a session joined
+> from elsewhere. The reverse hand-over is in: `pictureInPictureEnded` reopens
+> on mpv when the stream was handed over for the picture. The Info tab's
+> "Playing" rows gained an Engine row with the decoder. README: *The mpv
+> engine* replaces *The Apple TV player*, the four rows moved up to the
+> features list, and the *What did not carry over* table keeps only the
+> system and television rows. Tests: `EnginePolicyTests` covers the external
+> file rule, `requiresApple`, the Mac default and `powerProfile`
+> (38 tests pass). iOS, macOS and tvOS build. Seen on the iPhone 18 Pro
+> simulator with `-AquariumPlayURL`: an MKV opens on mpv (`hwdec-current`
+> reports `no` — the simulator has no VideoToolbox, and the log says *mpv is
+> decoding in software and there is no server to ask for a transcode*), the
+> same clip as MP4 opens on AVFoundation, the Picture tab's saturation slider
+> changes the live picture under mpv, and the switch row reopens the MP4 on
+> mpv at 3.4 s. Screenshots in `qa-2026-10-16/player-phase-4/`. Size, in
+> the shape of the `app-size-levers` note (Release `build` for
+> `generic/platform=iOS` and `macOS`, unsigned, so unstripped; the stripped
+> column is `strip -x` on a copy and is what an archive ships): the iOS
+> executable went from 33.5 MB to 67.2 MB raw and 11.6 MB to 40.8 MB
+> stripped, +29 MB for one device slice; the Mac executable (universal,
+> arm64 + x86_64) from 47.2 MB to 124.1 MB raw and 17.2 MB to 84.5 MB
+> stripped, +67 MB, about +34 MB per architecture. Nothing else in either
+> bundle changed (Assets.car is still 394 MB on iOS, the stub-stripping
+> phase removed 27 empty frameworks on each), so the whole cost of mpv on a
+> phone is the ~29 MB of static FFmpeg, libplacebo, MoltenVK, libass and
+> mpv the linker kept; it is the same LGPL set tvOS already shipped.
+>
+> **Left for later phases.** The Mac's screen was locked for the whole
+> session: the Mac run was checked from its log only and no Mac screenshots
+> were taken. Not seen running: the PiP hand-over and its return (the iPhone
+> simulator reports PiP as not possible, so the button on mpv would reopen on
+> AVEngine and then wait), AirPlay's hand-over from the picker, Watch
+> Together, background `vid=no`, the thermal and Mac-on-battery paths, the
+> software-decode fallback on a server item, and the ProMotion hint — all
+> compile-checked and unit-tested where pure, none on hardware. Phase 0's
+> energy measurement has still not been run, so the thresholds are the plan's
+> defaults. The Apple TV's own panel (`TVPlayerPanel`) has no Picture tab:
+> the shared panel reaches tvOS in phase 5, and the tvOS Settings page has
+> no engine or picture rows (Apple TV is always mpv). mpv logs `osc=no` and
+> `ytdl=no` as unknown options on iOS and Mac (MPVKit builds without them
+> there); harmless. A bare MPEG-TS address now opens on mpv rather than
+> failing with the "raw MPEG-TS" card, which is a change of behaviour for
+> IPTV not in the plan. The `[aquarium-quality]` profile only sets
+> `video-sync`; the Linux app's cursor and OSD lines have no meaning here.
+> Night mode has no control yet (the engine knob exists; no row calls it).
+> Debug builds also take `-AquariumShowSettings YES` (Settings with no
+> server, `RootView`), added for the Settings screenshots before it turned
+> out that a signed Debug build reads the simulator's keychain session and
+> an unsigned one (`CODE_SIGNING_ALLOWED=NO`) shows the login screen. Once,
+> on the first open of Settings → Video after that install, the app went
+> away with no crash report and nothing in its log; the second open and
+> everything after worked, and it was not seen again — worth a look if it
+> recurs.
+
 The package product's platform filter opens up; `MPVVideoView` gets an
 `NSView` twin; `EnginePolicy` goes live with the Phase 0 thresholds; the
 battery profile, background `vid=no`, `hwdec-current` fallback and cache

@@ -1,8 +1,9 @@
 //  Where the picture is drawn on an iPhone, iPad or Mac: a plain view hosting
 //  a `CALayer` the engine renders into. For AVPlayer that is an
-//  `AVPlayerLayer`; the mpv engine's `CAMetalLayer` (phase 4) goes in the same
-//  slot. The view takes no touches or clicks of its own — the gesture layer
-//  above it does — and the layer takes the view's bounds on every layout.
+//  `AVPlayerLayer`; for mpv the model's `MPVMetalLayer`, which goes in the
+//  same slot and is given the screen's scale so it draws at Retina size. The
+//  view takes no touches or clicks of its own — the gesture layer above it
+//  does — and the layer takes the view's bounds on every layout.
 //
 //  This replaces `AVPlayerViewController` on iOS and `AVPlayerView` on the
 //  Mac, which drew the picture and a transport this app could not change.
@@ -43,6 +44,7 @@ final class VideoLayerHostView: UIView {
         videoLayer?.removeFromSuperlayer()
         videoLayer = layer
         layer.frame = bounds
+        layer.contentsScale = traitCollection.displayScale
         self.layer.addSublayer(layer)
         setNeedsLayout()
     }
@@ -50,6 +52,11 @@ final class VideoLayerHostView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         fitVideoLayer()
+    }
+
+    override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+        super.traitCollectionDidChange(previous)
+        videoLayer?.contentsScale = traitCollection.displayScale
     }
 
     private func fitVideoLayer() {
@@ -117,11 +124,23 @@ final class VideoLayerHostView: NSView {
 }
 #endif
 
-/// The engine's layer in the host view, made for AVPlayer if the view has
-/// none or the engine has changed under it, and kept at Fit or Fill.
+/// The engine's layer in the host view: the model's Metal layer while mpv is
+/// playing, else an `AVPlayerLayer` made for AVPlayer if the view has none
+/// or the engine has changed under it, and kept at Fit or Fill.
 @MainActor
 private enum VideoSurfaceWiring {
     static func attach(_ player: PlayerModel, to view: VideoLayerHostView, pictureInPicture: PictureInPicture?) {
+        #if canImport(Libmpv)
+        if player.engine?.kind == .mpv {
+            let layer = player.mpvLayer
+            guard view.videoLayer !== layer else { return }
+            // Picture in Picture is AVPlayer's; the button on mpv hands the
+            // stream over rather than lifting this layer out.
+            pictureInPicture?.detach()
+            view.host(layer)
+            return
+        }
+        #endif
         guard let engine = player.engine as? AVEngine else { return }
         if let existing = view.videoLayer as? AVPlayerLayer, existing.player === engine.player {
             applyGravity(to: existing)

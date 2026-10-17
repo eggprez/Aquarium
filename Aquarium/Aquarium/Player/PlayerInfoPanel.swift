@@ -104,6 +104,13 @@ struct PlayerStreamRows {
 
     var now: [Row] {
         var rows: [Row] = []
+        if let engine = player.engineKind {
+            var value = engine.title
+            if let decoder = player.decoder, engine == .mpv {
+                value += decoder == "no" ? " · software decoding" : " · hardware decoding (\(decoder))"
+            }
+            rows.append(("Engine", value))
+        }
         if player.isLive {
             rows.append(("Position", "Live"))
         } else if player.duration > 0 {

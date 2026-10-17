@@ -24,10 +24,17 @@
 //  Decoding is VideoToolbox where the hardware takes the codec and software
 //  where it doesn't.
 //
-//  Compiled wherever MPVKit is linked. The package product is filtered to
-//  tvOS in the Xcode project until phase 4 opens it up, so for now that is
-//  the Apple TV build; the UIKit view at the top is the only part that is
-//  tied to a platform rather than to the library.
+//  Compiled wherever MPVKit is linked: iPhone, iPad, Mac and Apple TV since
+//  phase 4 of the overhaul opened the package's platform filter. The two view
+//  classes at the top are the only parts tied to a platform rather than to the
+//  library; the engine itself only ever sees a `CAMetalLayer`.
+//
+//  On a battery the engine is told to draw cheaply (`powerProfile`): the
+//  `[aquarium-battery]` profile below is the Linux app's, applied with
+//  `apply-profile` and taken off again with `profile-restore=copy`, so mpv
+//  itself puts every option back as it was. The handle is made for a stream
+//  and destroyed when the player comes down, so nothing of mpv runs while
+//  the app browses.
 
 #if canImport(Libmpv)
 
@@ -39,6 +46,9 @@ import QuartzCore
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(AppKit)
+import AppKit
+#endif
 
 /// The surface mpv draws into.
 ///
@@ -46,7 +56,33 @@ import UIKit
 /// which flickers and can leave the drawable stuck at that size; refusing any
 /// drawable that small is the workaround mpv itself uses.
 /// https://github.com/mpv-player/mpv/pull/13651
+///
+/// Two drawables rather than the default three: mpv presents one frame at a
+/// time and a third buffer is memory held for nothing. Presentation is not
+/// tied to a Core Animation transaction, which would make every frame wait
+/// on the main thread's layout.
 final class MPVMetalLayer: CAMetalLayer {
+    override init() {
+        super.init()
+        configure()
+    }
+
+    override init(layer: Any) {
+        super.init(layer: layer)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    private func configure() {
+        framebufferOnly = true
+        maximumDrawableCount = 2
+        presentsWithTransaction = false
+        backgroundColor = CGColor(gray: 0, alpha: 1)
+    }
+
     override var drawableSize: CGSize {
         get { super.drawableSize }
         set {
@@ -59,7 +95,9 @@ final class MPVMetalLayer: CAMetalLayer {
 
 #if canImport(UIKit)
 /// A view whose layer is the one mpv draws into, so it is sized by the view
-/// hierarchy like anything else. Phase 4 gives it an `NSView` twin.
+/// hierarchy like anything else. The Apple TV's player holds one for the life
+/// of the app; on an iPhone or iPad the layer is hosted by `VideoSurface`
+/// instead, and this view goes unused.
 final class MPVVideoView: UIView {
     override class var layerClass: AnyClass { MPVMetalLayer.self }
 
@@ -72,8 +110,6 @@ final class MPVVideoView: UIView {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         backgroundColor = .black
-        metalLayer.framebufferOnly = true
-        metalLayer.backgroundColor = UIColor.black.cgColor
     }
 
     required init?(coder: NSCoder) { nil }
@@ -83,6 +119,34 @@ final class MPVVideoView: UIView {
         if let screen = window?.windowScene?.screen {
             metalLayer.contentsScale = screen.nativeScale
         }
+    }
+}
+#elseif canImport(AppKit)
+/// The AppKit twin: a layer-backed view whose backing layer is the Metal
+/// layer mpv draws into, given the window's backing scale so it draws at
+/// Retina size. Takes no clicks of its own; the chrome above it does.
+final class MPVVideoView: NSView {
+    let metalLayer = MPVMetalLayer()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer = metalLayer
+        layerContentsRedrawPolicy = .never
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        metalLayer.contentsScale = window?.backingScaleFactor ?? 2
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        metalLayer.contentsScale = window?.backingScaleFactor ?? 2
     }
 }
 #endif
@@ -120,19 +184,40 @@ final class MPVEngine: @unchecked Sendable {
     private var fileIsOpen = false
     private var sawFirstFrame = false
     private var loadedLive = false
-    /// mpv's own defaults for the options the battery profile turns off,
-    /// read once so `.quality` can put them back.
-    private var qualityDefaults: [String: String] = [:]
+    /// The profile applied last, so the next can restore it first.
+    private var appliedProfile: PowerProfile?
+
+    /// What differs between a phone and a box on mains: how much of a stream
+    /// is read ahead. Bigger, less frequent reads let a phone's radio sleep
+    /// between bursts; the ceiling is the phone's memory.
+    struct Tuning: Sendable, Hashable {
+        var demuxerMaxBytes: String
+        var readaheadSeconds: Int
+
+        /// iPhone and iPad.
+        static let handheld = Tuning(demuxerMaxBytes: "64MiB", readaheadSeconds: 60)
+        /// Mac and Apple TV.
+        static let plugged = Tuning(demuxerMaxBytes: "150MiB", readaheadSeconds: 20)
+    }
 
     /// Create the handle and point it at `layer`. Returns nil if libmpv
     /// couldn't be started at all.
-    init?(layer: MPVMetalLayer) {
+    init?(layer: MPVMetalLayer, tuning: Tuning = .plugged) {
         (events, continuation) = AsyncStream.makeStream(of: EngineEvent.self)
         guard let h = mpv_create() else { return nil }
         handle = h
 
         var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
         mpv_set_option(h, "wid", MPV_FORMAT_INT64, &wid)
+
+        // The two profiles, from a file of this app's own, so they can be put
+        // on and taken off with `apply-profile` exactly as the Linux app does.
+        if let profiles = Self.profilesFile() {
+            let status = mpv_set_option_string(h, "include", profiles.path)
+            if status < 0 {
+                Self.log.error("mpv profiles could not be read: \(String(cString: mpv_error_string(status)), privacy: .public)")
+            }
+        }
 
         let options: [(String, String)] = [
             ("vo", "gpu-next"),
@@ -159,9 +244,9 @@ final class MPVEngine: @unchecked Sendable {
             // before: a ten-second skip that goes back four is not a skip.
             ("hr-seek", "yes"),
             ("cache", "yes"),
-            ("demuxer-max-bytes", "150MiB"),
+            ("demuxer-max-bytes", tuning.demuxerMaxBytes),
             ("demuxer-max-back-bytes", "50MiB"),
-            ("demuxer-readahead-secs", "20"),
+            ("demuxer-readahead-secs", String(tuning.readaheadSeconds)),
             // As many channels as the route takes. mpv decodes Dolby and DTS
             // itself and sends PCM, so a soundbar gets 5.1 or 7.1 PCM rather
             // than a bitstream to decode on its own time.
@@ -200,10 +285,6 @@ final class MPVEngine: @unchecked Sendable {
             return nil
         }
 
-        for name in Self.batteryProfile.keys {
-            if let value = getString(name) { qualityDefaults[name] = value }
-        }
-
         observe("time-pos", MPV_FORMAT_DOUBLE)
         observe("duration", MPV_FORMAT_DOUBLE)
         observe("pause", MPV_FORMAT_FLAG)
@@ -231,11 +312,73 @@ final class MPVEngine: @unchecked Sendable {
     /// Stop reading events and destroy the handle. Safe to call twice.
     func shutdown() {
         guard let h = handle else { return }
+        #if os(iOS)
+        pacing?.invalidate()
+        pacing = nil
+        #endif
         mpv_set_wakeup_callback(h, nil, nil)
         queue.sync { closed = true }
         handle = nil
         mpv_terminate_destroy(h)
         continuation.finish()
+    }
+
+    // MARK: - The profiles
+
+    /// What `[aquarium-battery]` turns off, and what it is set to: the cheapest
+    /// draw that still looks right, from the Linux app's measured profile
+    /// (`Linux/src-tauri/mpv-config/mpv.conf`), plus no interpolation and
+    /// frames timed to the audio clock rather than resampled to the display.
+    static let batteryProfile: [(String, String)] = [
+        ("scale", "bilinear"),
+        ("cscale", "bilinear"),
+        ("dscale", "bilinear"),
+        ("dither", "no"),
+        ("deband", "no"),
+        ("correct-downscaling", "no"),
+        ("linear-downscaling", "no"),
+        ("sigmoid-upscaling", "no"),
+        ("hdr-compute-peak", "no"),
+        ("fbo-format", "rgba8"),
+        ("interpolation", "no"),
+        ("video-sync", "audio"),
+    ]
+
+    /// `[aquarium-quality]`: mpv's own defaults, with frames resampled to the
+    /// display's refresh — a Mac on mains and the Apple TV, where the display
+    /// has already been matched to the film.
+    static let qualityProfile: [(String, String)] = [
+        ("video-sync", "display-resample"),
+    ]
+
+    /// The two profiles as an mpv config file, written once per launch into
+    /// the caches and handed to the handle with `include`. `profile-restore=copy`
+    /// is what makes `apply-profile <name> restore` put the options back.
+    nonisolated static func profilesFile() -> URL? {
+        let text = """
+        # Written by Aquarium at launch; not read by anything else.
+        [aquarium-battery]
+        profile-restore=copy
+        \(batteryProfile.map { "\($0.0)=\($0.1)" }.joined(separator: "\n"))
+
+        [aquarium-quality]
+        profile-restore=copy
+        \(qualityProfile.map { "\($0.0)=\($0.1)" }.joined(separator: "\n"))
+
+        """
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        let folder = caches.appendingPathComponent("mpv", isDirectory: true)
+        let file = folder.appendingPathComponent("aquarium-profiles.conf")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            if (try? String(contentsOf: file, encoding: .utf8)) != text {
+                try text.write(to: file, atomically: true, encoding: .utf8)
+            }
+            return file
+        } catch {
+            log.error("mpv profiles file: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     // MARK: - Streams
@@ -446,33 +589,27 @@ final class MPVEngine: @unchecked Sendable {
         }
     }
 
-    /// What `[aquarium-battery]` turns off, and what it is set to: the cheapest
-    /// draw that still looks right, from the Linux app's measured profile.
-    private static let batteryProfile: [String: String] = [
-        "scale": "bilinear",
-        "cscale": "bilinear",
-        "dscale": "bilinear",
-        "dither": "no",
-        "deband": "no",
-        "correct-downscaling": "no",
-        "linear-downscaling": "no",
-        "sigmoid-upscaling": "no",
-        "hdr-compute-peak": "no",
-        "fbo-format": "rgba8",
-        "interpolation": "no",
-    ]
-
+    /// Which profile is on. Applied on every set, not only on a change: a
+    /// fresh handle has neither on, and the model's first set is what puts
+    /// one there. The profile on is restored before the other goes on, so
+    /// every option ends up as mpv's own default plus the one profile.
     var powerProfile: PowerProfile = .quality {
-        didSet {
-            guard powerProfile != oldValue else { return }
-            for (name, value) in Self.batteryProfile {
-                switch powerProfile {
-                case .battery:
-                    setString(name, value)
-                case .quality:
-                    if let original = qualityDefaults[name] { setString(name, original) }
-                }
-            }
+        didSet { applyPowerProfile() }
+    }
+
+    private func applyPowerProfile() {
+        guard appliedProfile != powerProfile else { return }
+        if let appliedProfile {
+            command(["apply-profile", Self.profileName(appliedProfile), "restore"])
+        }
+        command(["apply-profile", Self.profileName(powerProfile)])
+        appliedProfile = powerProfile
+    }
+
+    private static func profileName(_ profile: PowerProfile) -> String {
+        switch profile {
+        case .battery: "aquarium-battery"
+        case .quality: "aquarium-quality"
         }
     }
 
@@ -486,17 +623,42 @@ final class MPVEngine: @unchecked Sendable {
     /// How frames are timed. Given the rate the display is known to be
     /// running at, `display-resample` times them to its refreshes and nudges
     /// the audio to keep up — no frame held for an extra refresh or dropped
-    /// to catch the sound up. Without one, mpv's default: frames timed to the
-    /// audio clock.
+    /// to catch the sound up. Without one, whatever the profile on says:
+    /// `display-resample` against the display mpv detects under
+    /// `[aquarium-quality]`, the audio clock under `[aquarium-battery]`.
     func setDisplayRefreshRate(_ hertz: Double?) {
         if let hertz {
             setString("display-fps-override", String(format: "%.6f", hertz))
             setString("video-sync", "display-resample")
         } else {
-            setString("video-sync", "audio")
             setString("display-fps-override", "0")
+            setString("video-sync", powerProfile == .battery ? "audio" : "display-resample")
         }
     }
+
+    #if os(iOS)
+    /// A display link that draws nothing, kept only for its frame-rate
+    /// preference: on a ProMotion panel it is how an app says what refresh
+    /// it would like, and a 24 fps film has no use for 120 Hz.
+    private var pacing: CADisplayLink?
+
+    /// Ask the display to run at the content's frame rate while this handle
+    /// draws; nil lets it go. Does nothing on a panel that is fixed at 60.
+    @MainActor
+    func hintContentFrameRate(_ fps: Double?) {
+        pacing?.invalidate()
+        pacing = nil
+        guard let fps, fps > 0, UIScreen.main.maximumFramesPerSecond > 60 else { return }
+        let wanted = Float(min(max(fps.rounded(), 10), Double(UIScreen.main.maximumFramesPerSecond)))
+        let link = CADisplayLink(target: self, selector: #selector(pacingTick))
+        link.preferredFrameRateRange = CAFrameRateRange(
+            minimum: wanted, maximum: Float(UIScreen.main.maximumFramesPerSecond), preferred: wanted)
+        link.add(to: .main, forMode: .common)
+        pacing = link
+    }
+
+    @objc private func pacingTick() {}
+    #endif
 
     var streamFacts: EngineStreamFacts {
         var facts = EngineStreamFacts()

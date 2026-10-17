@@ -161,10 +161,22 @@ final class SharePlayCoordinator: NSObject {
         // The player's transport follows the group from here on.
         // The coordinator lives on AVPlayer, which is the Apple engine's; a
         // Watch Together session forces that engine for its length (see the
-        // plan's "SharePlay stays an AVPlayer-only feature").
-        guard let avPlayer = (PlayerModel.shared.engine as? AVEngine)?.player else { return }
-        avPlayer.playbackCoordinator.delegate = self
-        avPlayer.playbackCoordinator.coordinateWithSession(session)
+        // plan's "SharePlay stays an AVPlayer-only feature"), so a stream on
+        // mpv is handed over first.
+        let player = PlayerModel.shared
+        if player.isActive, player.engine?.kind == .mpv {
+            Task {
+                await player.prepareForSharePlay()
+                guard self.session?.id == session.id else { return }
+                let avPlayer = player.appleEngine.player
+                avPlayer.playbackCoordinator.delegate = self
+                avPlayer.playbackCoordinator.coordinateWithSession(session)
+            }
+        } else {
+            let avPlayer = player.appleEngine.player
+            avPlayer.playbackCoordinator.delegate = self
+            avPlayer.playbackCoordinator.coordinateWithSession(session)
+        }
 
         sessionTasks.append(Task { [weak self] in
             for await state in session.$state.values {

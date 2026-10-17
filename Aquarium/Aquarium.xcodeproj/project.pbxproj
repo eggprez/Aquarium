@@ -27,7 +27,7 @@
 		FE11A5D00000000000000224 /* AquariumWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000201 /* AquariumWatch.app */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FE11A5D00000000000000225 /* WatchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000301 /* WatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FE11A5D00000000000000226 /* WatchWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000302 /* WatchWidgets.swift */; };
-		FE11A5D00000000000000401 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; platformFilters = (tvos, ); productRef = FE11A5D00000000000000402 /* MPVKit */; };
+		FE11A5D00000000000000401 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; platformFilters = (ios, macos, tvos, ); productRef = FE11A5D00000000000000402 /* MPVKit */; };
 		FE11A5D00000000000000611 /* FollowTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000601 /* FollowTypes.swift */; };
 		FE11A5D00000000000000612 /* FollowTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000601 /* FollowTypes.swift */; };
 		FE11A5D00000000000000613 /* FollowWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000602 /* FollowWidget.swift */; };
@@ -833,7 +833,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.4;
-				"OTHER_LDFLAGS[sdk=appletv*]" = (
+				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
 					AVKit,
@@ -903,7 +903,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.4;
-				"OTHER_LDFLAGS[sdk=appletv*]" = (
+				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
 					AVKit,
