@@ -7,9 +7,8 @@ import Foundation
 
 enum PlayerTab: String, Hashable, CaseIterable, Identifiable {
     case info, channels, audio, subtitles, quality, speed, sync
-    /// Brightness, contrast, saturation, gamma and zoom: the mpv engine's.
-    /// Reserved here so the panels are ready; offered once phase 4 of the
-    /// player overhaul brings that engine to iPhone, iPad and Mac.
+    /// Brightness, contrast, saturation, gamma, zoom and aspect: the mpv
+    /// engine's, over the live picture.
     case picture
 
     var id: String { rawValue }

@@ -164,6 +164,7 @@ extension PlayerModel {
             playLocal(record, keepShuffle: true, startAt: resume, paused: wasPaused)
             return
         }
+        #endif
         if let channel = externalChannel {
             let wasLive = isLive
             playExternal(
@@ -173,7 +174,6 @@ extension PlayerModel {
             if !wasLive { isLive = false; options.live = false }
             return
         }
-        #endif
         guard let item else { return }
         var opts = options
         opts.startSeconds = isLive ? nil : resume
@@ -183,8 +183,10 @@ extension PlayerModel {
         if wasPaused, generation == mine, isActive, errorMessage == nil { pause() }
     }
 
-    #if !os(tvOS)
     // MARK: - Hand-over for Picture in Picture, AirPlay and Watch Together
+    //
+    // Never on the Apple TV, where `canSwitchEngine(to: .apple)` is false and
+    // each of these is a no-op.
 
     /// Whether the Picture in Picture button has anything to do on mpv:
     /// hand the stream to AVPlayer, whose layer the system can lift out.
@@ -223,7 +225,6 @@ extension PlayerModel {
         engineOverride = nil
         Task { await switchEngine(to: .mpv, reason: "Picture in Picture ended") }
     }
-    #endif
 
     // MARK: - The picture
 

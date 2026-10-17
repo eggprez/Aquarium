@@ -1,13 +1,18 @@
-//  Starting, reopening and recovering streams on iPhone, iPad and Mac, where
-//  the engine is AVPlayer. Lifted from the old AVPlayer `PlayerModel` with the
-//  AVFoundation mechanics moved behind the engine: where it used to install an
+//  Starting, reopening and recovering streams, on every platform and either
+//  engine. Lifted from the old AVPlayer `PlayerModel` with the AVFoundation
+//  mechanics moved behind the engine — where it used to install an
 //  `AVPlayerItem` and hang observers off it, it now builds an
-//  `EngineLoadRequest` and lets `AVEngine` do that and report back.
-
-#if !os(tvOS)
+//  `EngineLoadRequest` and lets the engine do that and report back — and with
+//  what the old Apple TV model did on top folded in: the display asked to
+//  match the film's frame rate before the file opens, the opening and seek
+//  watchdogs that restart a stalled audio output, the sync clips, and the
+//  black cover over the last title's final frame while the next one opens.
+//  What differs by engine is asked of `capabilities`; what differs by
+//  platform is the display, which only the Apple TV can switch.
 
 import Foundation
 import OSLog
+import QuartzCore
 
 extension PlayerModel {
     /// How far ahead of the playhead a replacement stream is opened, and how
@@ -37,22 +42,61 @@ extension PlayerModel {
 
     private func engineLoad(
         url: URL, startAt: Double, headers: [String: String], paused: Bool = false,
-        live: Bool = false, hints: [EngineTrackHint] = [], prepared: (any PreparedStream)? = nil
+        live: Bool = false, loop: Bool = false, hints: [EngineTrackHint] = [], prepared: (any PreparedStream)? = nil
     ) {
         currentStreamURL = url
         lastVariantBitrate = nil
         engine?.audioDelay = appliedAudioDelay
+        #if os(tvOS)
+        engine?.setDisplayRefreshRate(DisplayMatch.matchedRate)
+        #endif
         var request = EngineLoadRequest(url: url, headers: headers, startAt: startAt, paused: paused, live: live)
+        request.loop = loop
         request.hints = hints
         request.prepared = prepared
+        awaitingLoad = false
         engine?.load(request)
-        isOpening = startAt > 1
+        // Every stream begins the way it was asked for. The engine only
+        // reports a change of its pause flag, and mpv's doesn't change when
+        // a file replaces one that was playing — while the model's did, when
+        // the outgoing stream was quiesced.
+        isPaused = paused
+        isOpening = true
         if live { armLiveWatchdog() }
+        watchOpening(generation)
+    }
+
+    /// The last title's final frame is still on the layer: covered until
+    /// this one's first frame, and the engine told to stop rather than left
+    /// playing it (with its sound) while the server builds the replacement.
+    /// Only for a different title — the same one reopened for a track or a
+    /// quality plays on until the new file is in — and only on an engine
+    /// that would otherwise play on; AVPlayer is quiesced with its last
+    /// frame left under the loading card, as it always was.
+    private func coverOutgoingPicture(forNewTitle newTitle: Bool) {
+        guard newTitle, engine?.capabilities.contains(.playsOnWhileReloading) == true else { return }
+        engine?.stop()
+        pictureIsStale = true
+    }
+
+    /// Ask the television to switch to the film's frame rate before the file
+    /// opens: a switch blanks the set for a second or two, better spent
+    /// before the first frame than over it. Nothing off the Apple TV.
+    private func matchDisplay(to source: MediaSource?) async {
+        #if os(tvOS)
+        guard let video = source?.streams.first(where: { $0.type == "Video" }),
+              let rate = video.RealFrameRate ?? video.AverageFrameRate else { return }
+        displayRequested = true
+        await DisplayMatch.request(
+            rate: rate, codec: video.Codec,
+            size: CGSize(width: video.Width ?? 0, height: video.Height ?? 0))
+        #endif
     }
 
     // MARK: - Starting playback
 
     func play(item: BaseItem, options: StreamOptions = .init(), meta: StartMeta = .init()) async {
+        #if !os(tvOS)
         // A copy on this device is played in preference to the server.
         if let record = downloadToPlay(for: item, options: options, meta: meta) {
             let start: Double = {
@@ -62,6 +106,7 @@ extension PlayerModel {
             playLocal(record, startAt: start)
             return
         }
+        #endif
 
         // An engine the viewer asked for was asked for on the title before.
         if self.item?.Id != item.Id {
@@ -119,7 +164,13 @@ extension PlayerModel {
             && startSeconds > 1 && duration > 0
             && startSeconds + Self.handoverLead < duration - 30
 
-        if !canHandOver { quiesceOutgoingStream() }
+        if !canHandOver {
+            quiesceOutgoingStream()
+            coverOutgoingPicture(forNewTitle: self.item?.Id != item.Id)
+            // Whatever the engine says between now and the load is about the
+            // file before, and would be taken for the new one's first frame.
+            awaitingLoad = true
+        }
 
         if self.item?.SeriesId != item.SeriesId { episodeQueue = nil }
 
@@ -153,11 +204,13 @@ extension PlayerModel {
         self.artworkURL = Artwork.url(item, type: "Primary", width: 600)
         self.currentBitrate = opts.maxBitrate
         self.isActive = true
+        #if !os(tvOS)
         if opts.live {
             PlaybackHandoff.shared.end()
         } else {
             PlaybackHandoff.shared.begin(item: item, position: startSeconds)
         }
+        #endif
         self.isBuffering = !canHandOver
         if !meta.recovering && !meta.reopening {
             streamRecoveries = 0
@@ -170,7 +223,9 @@ extension PlayerModel {
         let handoverTarget = startSeconds + Self.handoverLead
         let requestedStart = canHandOver ? handoverTarget : startSeconds
         let requestedTicks = Int64(requestedStart * 10_000_000)
+        #if !os(tvOS)
         SharePlayCoordinator.shared.playerStarted(item)
+        #endif
 
         do {
             let src: PlaybackSource
@@ -223,6 +278,14 @@ extension PlayerModel {
                 await release(src)
                 return
             }
+            if !canHandOver {
+                await matchDisplay(to: src.mediaSource)
+                guard generation == mine else {
+                    prepared?.cancel()
+                    await release(src)
+                    return
+                }
+            }
             self.isBuffering = true
             self.source = src
             self.isTranscoding = src.isTranscode
@@ -247,6 +310,7 @@ extension PlayerModel {
         } catch {
             guard generation == mine else { return }
             resolvingGeneration = nil
+            awaitingLoad = false
             if canHandOver { quiesceOutgoingStream() }
             if !canHandOver, let stale = source {
                 source = nil
@@ -268,6 +332,7 @@ extension PlayerModel {
 
     // MARK: - Downloads
 
+    #if !os(tvOS)
     private func downloadToPlay(for item: BaseItem, options: StreamOptions, meta: StartMeta) -> DownloadRecord? {
         guard !options.live, !meta.recovering, !meta.reopening else { return nil }
         if isActive, !isLocal, self.item?.Id == item.Id { return nil }
@@ -296,6 +361,7 @@ extension PlayerModel {
         Self.log.info("opening download \(record.itemId, privacy: .public) on \(kind.title, privacy: .public): \(record.fileName, privacy: .public)")
         MusicPlayer.shared.yield()
         quiesceOutgoingStream()
+        coverOutgoingPicture(forNewTitle: localRecordId != record.itemId)
         generation &+= 1
         externalResolve?.cancel(); externalResolve = nil
         externalChannel = nil
@@ -347,6 +413,9 @@ extension PlayerModel {
         localSession = nil
         Task { await OfflineProgress.end(session) }
     }
+    #else
+    func endLocalSession() {}
+    #endif
 
     // MARK: - IPTV channels
 
@@ -363,6 +432,7 @@ extension PlayerModel {
         Self.log.info("opening external stream on \(kind.title, privacy: .public): \(streamURL.lastPathComponent, privacy: .public)")
         MusicPlayer.shared.yield()
         quiesceOutgoingStream()
+        coverOutgoingPicture(forNewTitle: externalChannel?.streamURL != streamURL)
         releaseOutgoingServerStream()
         endLocalSession()
         shuffleSeries = nil
@@ -437,6 +507,144 @@ extension PlayerModel {
 
     static func externalHeaders() -> [String: String] {
         ["User-Agent": Preferences.shared.iptvUserAgentHeader]
+    }
+
+    // MARK: - The sync test
+
+    /// One of the sync tests from Settings → Audio: a clip in the app, looped,
+    /// opened the way a video is. The clip's rate picks the delay the Sync tab
+    /// over it sets. The clips ship with the Apple TV build; elsewhere this
+    /// only logs that they are missing.
+    func playSyncTest(_ test: DelayRate) async {
+        guard let url = Bundle.main.url(forResource: test.resource, withExtension: "mov") else {
+            Self.log.error("\(test.resource, privacy: .public).mov is missing from the bundle")
+            return
+        }
+        guard let engine = makeEngine(.mpv) else {
+            errorMessage = "The player couldn't start."
+            isActive = true
+            return
+        }
+        MusicPlayer.shared.yield()
+        quiesceOutgoingStream()
+        releaseOutgoingServerStream()
+        endLocalSession()
+        shuffleSeries = nil
+        engine.stop()
+        pictureIsStale = true
+        errorMessage = nil
+        noVideoTrack = false
+        noVideoDetail = nil
+        bitrateNoticeDismissal?.cancel(); bitrateNotice = nil
+        item = nil
+        fullItem = nil
+        source = nil
+        options = StreamOptions()
+        externalChannel = nil
+        resetLiveRecovery()
+        isLocal = false
+        localRecordId = nil
+        isExternal = true
+        isLive = false
+        isTranscoding = false
+        syncTest = test
+        autoplayCancelled = true
+        tracksApplied = false
+        wantedTracks = (nil, nil)
+        setSelectedAudioTrack(nil)
+        setSelectedSubtitleTrack(nil)
+        pendingTrackChoice = nil
+        transcodingForSubtitle = false
+        upNext = nil
+        setUpNextLocalId(nil)
+        upNextChecked = true
+        upNextSettled = true
+        title = "Audio Sync · \(test.name) delay"
+        subtitle = "The beep should land on the flash"
+        artworkURL = nil
+        currentBitrate = nil
+        setChapters([])
+        segments = []
+        trickplay = nil
+        speed = 1
+        isActive = true
+        isBuffering = true
+        generation &+= 1
+        let mine = generation
+        awaitingLoad = true
+        #if os(tvOS)
+        displayRequested = true
+        await DisplayMatch.request(rate: test.clipRate, codec: "h264", size: CGSize(width: 1920, height: 1080))
+        guard generation == mine else { return }
+        #endif
+        await awaitSurface()
+        guard generation == mine else { return }
+        // Read before the load: `audioDelay` follows the clip's rate.
+        engineLoad(url: url, startAt: 0, headers: [:], loop: true)
+    }
+
+    /// mpv wants a drawable before its first file: the player screen is
+    /// presented by `isActive`, and the layer is in it a frame or two later.
+    private func awaitSurface() async {
+        #if canImport(Libmpv)
+        let deadline = ContinuousClock.now + .milliseconds(1500)
+        while (mpvLayer.superlayer == nil || mpvLayer.bounds.width < 2 || mpvLayer.bounds.height < 2),
+              ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(16))
+        }
+        #endif
+    }
+
+    // MARK: - Opening and seek watchdogs
+
+    /// The television renegotiating HDMI for a frame-rate switch can leave the
+    /// engine's audio output stalled with the file read and waiting: an
+    /// opening or a seek that shows no frame with seconds of data in hand
+    /// gets the output restarted once, on an engine that offers it
+    /// (`.restartsAudioOutput`). Past `openingPatience` with still no frame,
+    /// the stream is given up on.
+    private static let openingPatience: Duration = .seconds(45)
+    private static let recoveryPoint: Duration = .seconds(15)
+    private static let seekPatience: Duration = .seconds(8)
+
+    func watchOpening(_ mine: Int) {
+        guard engine?.capabilities.contains(.restartsAudioOutput) == true else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.recoveryPoint)
+            if let self, self.generation == mine, self.isActive, self.isOpening, self.errorMessage == nil,
+               self.buffered - self.position > 3 {
+                Self.log.notice("stalled with \(self.buffered - self.position, format: .fixed(precision: 1))s buffered; restarting audio output")
+                self.reactivateAudioSession()
+                await self.engine?.rebuildAudio()
+                self.engine?.seek(to: self.position)
+            }
+            try? await Task.sleep(for: Self.openingPatience - Self.recoveryPoint)
+            guard let self, self.generation == mine, self.isActive, self.isOpening,
+                  self.errorMessage == nil else { return }
+            Self.log.error("no first frame after \(Self.openingPatience, privacy: .public): \(self.title, privacy: .public)")
+            if self.isLive { self.reopenCurrentLive(); return }
+            self.generation &+= 1
+            self.engine?.stop()
+            self.errorMessage = "This is taking too long to start. The server may be struggling to prepare it."
+            self.isBuffering = false
+            self.isOpening = false
+        }
+    }
+
+    func watchSeek(to target: Double) {
+        seekWatch?.cancel(); seekWatch = nil
+        guard engine?.capabilities.contains(.restartsAudioOutput) == true else { return }
+        let mine = generation
+        seekWatch = Task { [weak self] in
+            try? await Task.sleep(for: Self.seekPatience)
+            guard !Task.isCancelled, let self, self.generation == mine, self.isActive,
+                  !self.isOpening, self.errorMessage == nil, self.buffered - target > 3 else { return }
+            self.seekWatch = nil
+            Self.log.notice("seek to \(target, format: .fixed(precision: 1)) stalled with \(self.buffered - target, format: .fixed(precision: 1))s buffered; restarting audio output")
+            self.reactivateAudioSession()
+            await self.engine?.rebuildAudio()
+            self.engine?.seek(to: target)
+        }
     }
 
     // MARK: - Quiescing
@@ -657,5 +865,3 @@ extension PlayerModel {
         return f > 0.92 ? 0 : Double(ticks) / 10_000_000
     }
 }
-
-#endif

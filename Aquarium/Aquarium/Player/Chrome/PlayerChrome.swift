@@ -7,15 +7,16 @@
 //  holding 2×. The transport, the timeline, the gesture layer and the panel
 //  all read and write it rather than talking to each other.
 //
-//  Shared by iPhone, iPad and the Mac window. Nothing here is about fingers
-//  or pointers — that is `PlayerGestureLayer`, and on a Mac `PlayerPointer`
-//  — and the numbers that differ by platform are `PlayerMetrics`. The one
-//  thing a pointer changes about the chrome itself is who keeps the clock on
-//  the controls: a finger's tap starts `PlayerChromeState`'s, a pointer's
-//  movement starts `PlayerMacState`'s, and `showsControls` reads whichever
-//  the platform has.
-
-#if !os(tvOS)
+//  Shared by iPhone, iPad, the Mac window and the Apple TV. Nothing here is
+//  about fingers, pointers or the remote — that is `PlayerGestureLayer`, on a
+//  Mac `PlayerPointer`, on a television `PlayerRemoteDriver` — and the
+//  numbers that differ by platform are `PlayerMetrics`. The one thing a
+//  pointer changes about the chrome itself is who keeps the clock on the
+//  controls: a finger's tap or a remote's click starts `PlayerChromeState`'s,
+//  a pointer's movement starts `PlayerMacState`'s, and `showsControls` reads
+//  whichever the platform has. The panel is a sheet on a phone, a popover
+//  off its pill on an iPad or a Mac, and on a television a card that comes
+//  down from the top of the picture.
 
 import SwiftUI
 
@@ -30,8 +31,15 @@ final class PlayerChromeState {
     var panel: PlayerTab?
     /// Which pill the panel hangs off, where it is a popover.
     var panelAnchor: PanelAnchor = .audio
-    /// Where the scrubber is, while a finger is on the timeline.
+    /// Where the scrubber is, while a finger is on the timeline — or, on a
+    /// television, where a swipe has left it, waiting for a click.
     var scrub: Double?
+    /// Where the playhead was before the last scrub jumped it: Menu goes back
+    /// there while the controls are up. The remote's; nothing else sets it.
+    var returnPoint: Double?
+    /// Whether focus is on the panel's row of tabs, for the swipe up that
+    /// closes the panel from there. The television panel writes it.
+    var panelTabsFocused = false
     /// The skips in the current run, in seconds, signed.
     var skipTotal = 0
     /// The ripple a double-tap leaves; nil once it has faded.
@@ -166,6 +174,7 @@ final class PlayerChromeState {
     /// Everything that belongs to one stream.
     func resetForNewStream() {
         scrub = nil
+        returnPoint = nil
         skipTotal = 0
         ripple = nil
         holdingDoubleSpeed = false
@@ -181,7 +190,7 @@ struct PlayerChrome: View {
     @Environment(Preferences.self) private var prefs
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    #if !os(macOS)
+    #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
 
@@ -207,20 +216,22 @@ struct PlayerChrome: View {
 
     /// A phone, or an iPad narrowed to one: the sheet rather than the
     /// popover, the smaller glyphs. A Mac window takes the smaller glyphs
-    /// while it is narrow and never the sheet.
+    /// while it is narrow and never the sheet. A television is never compact.
     private var compact: Bool {
         #if os(macOS)
         size.width > 0 && size.width < PlayerMetrics.narrowWindow
-        #else
+        #elseif os(iOS)
         sizeClass == .compact
+        #else
+        false
         #endif
     }
 
     private var usesSheet: Bool {
-        #if os(macOS)
-        false
-        #else
+        #if os(iOS)
         sizeClass == .compact
+        #else
+        false
         #endif
     }
 
@@ -275,12 +286,17 @@ struct PlayerChrome: View {
 
     var body: some View {
         ZStack {
+            #if !os(tvOS)
             PlayerGestureLayer(chrome: chrome, compact: compact, onTap: tapPicture, onSkip: skip)
+            #endif
 
-            // The scrims and the transport come and go together.
+            // The scrims and the transport come and go together. With the
+            // television's panel down, the band keeps only its timeline: the
+            // panel covers where the title goes, and says everything it would.
             if showsControls {
                 PlayerTransport(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork,
                                 pictureInPicture: pictureInPicture, compact: compact, usesSheet: usesSheet,
+                                timelineOnly: PlayerMetrics.television && chrome.panelOpen,
                                 onInteract: interact, onDismiss: onDismiss)
                     .transition(.opacity)
             }
@@ -290,7 +306,7 @@ struct PlayerChrome: View {
             if chrome.skipTotal != 0 {
                 SkipBadge(seconds: chrome.skipTotal, compact: compact)
                     .frame(maxWidth: .infinity, alignment: chrome.skipTotal > 0 ? .trailing : .leading)
-                    .padding(.horizontal, compact ? 36 : 72)
+                    .padding(.horizontal, PlayerMetrics.skipBadgeInset(compact: compact))
                     .transition(reduceMotion ? .opacity : .scale(scale: 0.8).combined(with: .opacity))
                     .allowsHitTesting(false)
             }
@@ -319,10 +335,16 @@ struct PlayerChrome: View {
         }
         .playerChromeScheme()
         .animation(.easeOut(duration: reduceMotion ? 0.15 : 0.25), value: showsControls)
-        .animation(.spring(duration: 0.25), value: chrome.skipTotal)
+        .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(duration: 0.25), value: chrome.skipTotal)
         .animation(.easeOut(duration: 0.2), value: chrome.holdingDoubleSpeed)
         .animation(.easeOut(duration: 0.2), value: chrome.edgeLevel)
-        .panelPresentation(chrome: chrome, usesSheet: usesSheet, schedule: schedule, artwork: artwork)
+        .panelPresentation(chrome: chrome, usesSheet: usesSheet, schedule: schedule, artwork: artwork,
+                           reduceMotion: reduceMotion)
+        #if os(tvOS)
+        // The Siri Remote: clicks, edge clicks, swipes and Menu, read by
+        // `RemoteInput` while nothing focusable is up.
+        .modifier(PlayerRemoteDriver(chrome: chrome, onInteract: interact, onHide: { chrome.hide() }))
+        #endif
         #if os(iOS)
         .sensoryFeedback(.impact(weight: .medium), trigger: skips)
         .sensoryFeedback(.impact(weight: .light), trigger: chrome.skipTotal) { _, now in now != 0 }
@@ -363,7 +385,11 @@ struct PlayerChrome: View {
             if open == nil { interact() } else { chrome.holdControls() }
         }
         .onChange(of: chrome.scrub) { _, scrub in if scrub == nil { chrome.scheduleHide(hideContext) } }
-        .onChange(of: showsControls, initial: true) { _, raised in player.raiseSubtitles(raised) }
+        .onChange(of: showsControls, initial: true) { _, raised in
+            player.raiseSubtitles(raised)
+            // A jump can be undone for as long as the controls are up.
+            if !raised { chrome.returnPoint = nil }
+        }
         .onChange(of: player.item?.Id) { _, _ in
             chrome.resetForNewStream()
             dismissedNoVideoNotice = false
@@ -397,11 +423,28 @@ struct PlayerChrome: View {
     /// they come and go with their moment, not with the controls. Skip intro
     /// and Up Next sit above the bottom band when it is up and at the foot of
     /// the picture when it isn't.
+    /// On a television the prompts step aside for the panel and for a scrub
+    /// waiting on its click, since a click is what they answer to.
+    private var promptsMayShow: Bool {
+        !(PlayerMetrics.television && (chrome.panelOpen || chrome.scrub != nil))
+    }
+
     @ViewBuilder
     private var momentOverlays: some View {
         let edge = PlayerMetrics.edge(compact: compact)
 
-        if player.isBuffering, player.position < 1 || player.isOpening, player.errorMessage == nil {
+        if PlayerMetrics.television {
+            // No centre cluster to carry the spinner: it sits in the middle of
+            // the picture on its own, as the Apple TV player always drew it.
+            if player.isBuffering || player.isOpening, player.errorMessage == nil, chrome.scrub == nil {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
+                    .padding(34)
+                    .playerGlass(cornerRadius: 30)
+                    .allowsHitTesting(false)
+            }
+        } else if player.isBuffering, player.position < 1 || player.isOpening, player.errorMessage == nil {
             PlayerLoadingCard()
                 .frame(maxHeight: .infinity, alignment: .top)
                 .padding(.top, compact ? 64 : 88)
@@ -417,21 +460,20 @@ struct PlayerChrome: View {
                 .padding(.top, showsControls ? 60 : 16)
         }
 
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: PlayerMetrics.television ? .trailing : .leading, spacing: 12) {
             Spacer()
-            if player.shouldShowUpNext, let next = player.upNextTitle, player.errorMessage == nil {
-                PlayerUpNextCard(title: next, compact: compact)
-            }
-            if player.activeSegment != nil, player.errorMessage == nil {
+            if player.shouldShowUpNext, let next = player.upNextTitle, player.errorMessage == nil, promptsMayShow {
+                PlayerUpNextCard(title: next, next: player.upNextItem, compact: compact)
+            } else if player.activeSegment != nil, player.errorMessage == nil, promptsMayShow {
                 PlayerSkipSegmentButton(isOutro: player.activeSegment?.isOutro == true) {
                     skips += 1
                     player.skipSegment()
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: PlayerMetrics.television ? .trailing : .leading)
         .padding(.horizontal, edge)
-        .padding(.bottom, showsControls ? (player.isLive ? 110 : 148) : 24)
+        .padding(.bottom, PlayerMetrics.overlayLift(controlsUp: showsControls, live: player.isLive))
         .animation(.easeOut(duration: 0.2), value: player.activeSegment)
         .animation(.easeOut(duration: 0.2), value: player.shouldShowUpNext)
         .animation(.easeOut(duration: 0.25), value: showsControls)
@@ -471,10 +513,25 @@ extension PlayerChromeState.PanelAnchor {
 
 private extension View {
     /// A sheet with medium and large detents on a phone; a popover hung off
-    /// the pill that opened it on an iPad or a Mac.
+    /// the pill that opened it on an iPad or a Mac; on a television a card
+    /// down from the top of the picture, placed against the screen's edges
+    /// rather than the safe area's so its glass stays inside the overscan
+    /// margin — see `PlayerPanel`.
     @ViewBuilder
     func panelPresentation(chrome: PlayerChromeState, usesSheet: Bool, schedule: ChannelSchedule,
-                           artwork: InfoArtwork) -> some View {
+                           artwork: InfoArtwork, reduceMotion: Bool) -> some View {
+        #if os(tvOS)
+        self.overlay(alignment: .top) {
+            if chrome.panelOpen {
+                PlayerPanel(tab: Binding(get: { chrome.panel ?? .info }, set: { chrome.panel = $0 }),
+                            schedule: schedule, artwork: artwork, close: { chrome.panel = nil },
+                            tabsFocused: { chrome.panelTabsFocused = $0 })
+                    .ignoresSafeArea()
+                    .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: reduceMotion ? 0.15 : 0.3), value: chrome.panelOpen)
+        #else
         if usesSheet {
             self.sheet(isPresented: Binding(
                 get: { chrome.panel != nil },
@@ -495,7 +552,6 @@ private extension View {
             // The popover is attached by the pill row — see `PlayerTransport`.
             self
         }
+        #endif
     }
 }
-
-#endif

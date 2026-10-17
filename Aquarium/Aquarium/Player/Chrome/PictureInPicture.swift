@@ -17,7 +17,7 @@
 //  with `startWhenPossible` starting the picture as soon as the new layer
 //  plays, and goes back to mpv when the picture returns.
 
-#if os(iOS) || os(macOS)
+#if canImport(UIKit) || canImport(AppKit)
 
 import AVKit
 import Observation

@@ -4,10 +4,11 @@
 //  error card, the banner for a stream with no picture, the ripple a
 //  double-tap leaves, the 2× badge and the edge-drag level.
 //
-//  Shared by the iPhone, iPad and Mac chrome. The Mac keeps its Title Case
-//  and tighter corners here, by `#if`; nothing else differs.
-
-#if !os(tvOS)
+//  Shared by every platform's chrome. The Mac keeps its Title Case and
+//  tighter corners here, by `#if`. On a television the prompts answer to a
+//  click rather than a tap, so the Up Next card says so instead of carrying
+//  buttons the remote could never reach while `RemoteInput` holds focus, and
+//  the skip pill is drawn as the focused thing it stands for.
 
 import SwiftUI
 
@@ -84,7 +85,22 @@ struct PlayerErrorCard: View {
     @Environment(PlayerModel.self) private var player
     let message: String
 
+    private enum Choice { case retry, smaller, close }
+    /// Taken on appearing on a television: focus was with `RemoteInput`,
+    /// which lets go of it when the card comes up but can't say where it
+    /// should go.
+    @FocusState private var focused: Choice?
+
     var body: some View {
+        card
+            #if os(tvOS)
+            .focusSection()
+            .onAppear { focused = player.canRetry ? .retry : player.item != nil ? .smaller : .close }
+            .onExitCommand { player.stop(reason: "error card") }
+            #endif
+    }
+
+    private var card: some View {
         VStack(spacing: 14) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 34))
@@ -98,7 +114,7 @@ struct PlayerErrorCard: View {
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white.opacity(0.8))
-                .frame(maxWidth: 420)
+                .frame(maxWidth: PlayerMetrics.television ? 900 : 420)
             HStack(spacing: 12) {
                 if player.canRetry {
                     Button(PlayerOverlayText.label(mac: "Try Again", elsewhere: "Try again")) {
@@ -106,6 +122,7 @@ struct PlayerErrorCard: View {
                     }
                     .appButtonStyle(prominent: true)
                     .playerDefaultAction()
+                    .focused($focused, equals: .retry)
                 }
                 // Only for a stream the server is choosing a bitrate for.
                 if player.item != nil {
@@ -113,13 +130,15 @@ struct PlayerErrorCard: View {
                         Task { await player.switchQuality(to: Quality.smallerStream(than: player.currentBitrate)) }
                     }
                     .appButtonStyle(prominent: !player.canRetry)
+                    .focused($focused, equals: .smaller)
                 }
                 Button("Close") { player.stop(reason: "error card closed") }
                     .appButtonStyle()
                     .playerCancelAction()
+                    .focused($focused, equals: .close)
             }
         }
-        .padding(28)
+        .padding(PlayerMetrics.television ? 60 : 28)
         // Fully opaque, unlike the other cards: it sits where the play glyph
         // is, and at a lesser opacity the glyph showed through as a ghost.
         .overlayBackdrop(RoundedRectangle(cornerRadius: PlayerOverlayText.corner, style: .continuous), opacity: 1)
@@ -175,9 +194,54 @@ struct PlayerNoVideoBanner: View {
 struct PlayerUpNextCard: View {
     @Environment(PlayerModel.self) private var player
     let title: String
+    /// The item behind the title, for its still on a television; nil for a
+    /// download.
+    var next: BaseItem?
     var compact = false
 
     var body: some View {
+        if PlayerMetrics.television { television } else { handheld }
+    }
+
+    /// The next episode, counting down to itself: its still beside the
+    /// words, and what the remote does about it.
+    private var television: some View {
+        HStack(spacing: 26) {
+            if let next {
+                RemoteImage(url: Artwork.still(for: next, width: 480))
+                    .frame(width: 280, height: 158)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(player.isStartingNext ? "STARTING…" : "UP NEXT IN \(Int(player.secondsRemaining.rounded(.up)))")
+                    .font(.caption.weight(.heavy))
+                    .foregroundStyle(Theme.link)
+                Text(next?.title ?? title)
+                    .font(.headline)
+                    .lineLimit(2)
+                if let label = next?.episodeLabel {
+                    Text(label)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textDim)
+                }
+                Text("Click to play now · Menu to stop here")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textBody)
+                    .padding(.top, 4)
+            }
+            .frame(width: 420, alignment: .leading)
+        }
+        .padding(26)
+        .playerGlass(cornerRadius: 30)
+        .overlay(
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .strokeBorder(Theme.accent, lineWidth: 3)
+        )
+        .playerOverlayScheme()
+        .accessibilityElement(children: .combine)
+    }
+
+    private var handheld: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(player.isStartingNext
                  ? "Starting…"
@@ -212,6 +276,27 @@ struct PlayerSkipSegmentButton: View {
     let action: () -> Void
 
     var body: some View {
+        if PlayerMetrics.television {
+            // Drawn focused, because a click is what it answers to; the
+            // remote driver does the skipping.
+            HStack(spacing: 14) {
+                Image(systemName: "forward.end.fill")
+                Text(isOutro ? "Skip Credits" : "Skip Intro")
+            }
+            .font(.headline)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 34)
+            .padding(.vertical, 20)
+            .background(Capsule().fill(Theme.accent))
+            .shadow(color: Theme.accent.opacity(0.5), radius: 20, y: 8)
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Click to skip")
+        } else {
+            button
+        }
+    }
+
+    private var button: some View {
         Button(action: action) {
             Label(
                 PlayerOverlayText.label(mac: isOutro ? "Skip Credits" : "Skip Intro",
@@ -376,5 +461,3 @@ enum PlayerOverlayText {
         #endif
     }
 }
-
-#endif

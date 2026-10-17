@@ -7,8 +7,12 @@
 //  touched: taps on the picture, double-taps and pinches are
 //  `PlayerGestureLayer`'s, and this view's buttons are ordinary SwiftUI
 //  buttons that work from a finger, a pointer or VoiceOver alike.
-
-#if !os(tvOS)
+//
+//  On a television the same transport is one band along the bottom of the
+//  picture — the heading above the timeline, the times under it, and a line
+//  saying what the remote does — inside the 90-point gutters: the remote's
+//  clicks are the cluster and the swipe-down panel is the pill row, so neither
+//  is drawn. The band keeps only its timeline while the panel is down.
 
 import AVKit
 import SwiftUI
@@ -27,6 +31,9 @@ struct PlayerTransport: View {
     /// The panel is a sheet of the chrome's rather than a popover off a pill
     /// here: a phone.
     var usesSheet = false
+    /// Only the timeline and the times: the television's panel is down over
+    /// where the heading goes.
+    var timelineOnly = false
     /// A touch on any control: keeps the controls up a while longer.
     let onInteract: () -> Void
     let onDismiss: () -> Void
@@ -40,21 +47,108 @@ struct PlayerTransport: View {
     private var edge: CGFloat { PlayerMetrics.edge(compact: compact) }
 
     var body: some View {
+        if PlayerMetrics.television {
+            band
+        } else {
+            handheld
+        }
+    }
+
+    // MARK: - The television's band
+
+    private var band: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            // Faded rather than removed while scrubbing: the thumbnail and its
+            // time ride up over where the title is, and were drawn across
+            // it. Kept in the layout so the band doesn't jump down.
+            if !timelineOnly {
+                heading
+                    .opacity(chrome.scrub == nil ? 1 : 0)
+                    .animation(.easeOut(duration: 0.2), value: chrome.scrub == nil)
+            }
+            if player.isLive {
+                LivePlayerTimeline(programme: schedule.now)
+            } else {
+                PlayerTimeline(chrome: chrome, trickplay: trickplay, compact: compact, onInteract: onInteract)
+                times
+            }
+            if !timelineOnly, let remoteHint {
+                HStack(spacing: 10) {
+                    Image(systemName: "chevron.down")
+                    Text(remoteHint)
+                }
+                .font(.caption)
+                .foregroundStyle(Theme.textDim)
+            }
+        }
+        .padding(.horizontal, edge)
+        .padding(.top, PlayerMetrics.bandTop)
+        .padding(.bottom, PlayerMetrics.bandBottom)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(alignment: .bottom) {
+            LinearGradient(stops: PlayerMetrics.scrimStops, startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+                .accessibilityHidden(true)
+        }
+        .frame(maxHeight: .infinity, alignment: .bottom)
+        .ignoresSafeArea()
+    }
+
+    /// Above the band's timeline: the show, the title, and that it is paused.
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 14) {
+                if player.isLive { liveBadge }
+                if let kicker, !kicker.isEmpty {
+                    Text(kicker)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(Theme.link)
+                }
+                if player.isPaused {
+                    Label("Paused", systemImage: "pause.fill")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(Theme.textBody)
+                }
+            }
+            Text(mainTitle)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// What the remote does from here, in a line. The remote's alone.
+    private var remoteHint: String? {
+        #if os(tvOS)
+        if chrome.scrub != nil { return "Click to jump here · Menu to go back" }
+        if let point = chrome.returnPoint { return "Menu to go back to \(PlayerTime.format(point))" }
+        return player.isLive
+            ? "Swipe down for Info, Audio, Subtitles and Channels · Click up or down to change channel"
+            : "Swipe down for Info, Audio, Subtitles, Quality, Speed, Sync and Picture"
+        #else
+        return nil
+        #endif
+    }
+
+    // MARK: - iPhone, iPad and Mac
+
+    private var handheld: some View {
         ZStack {
             scrims
             VStack(spacing: 0) {
                 titleRow
-                    .onHover { hoverTitle = $0 }
+                    .pointerHover { hoverTitle = $0 }
                 Spacer(minLength: 0)
                 bottom
-                    .onHover { hoverBottom = $0 }
+                    .pointerHover { hoverBottom = $0 }
             }
             .padding(.horizontal, edge)
             // The cluster steps aside while a finger is on the timeline, so
             // the thumbnail has the middle of the picture to itself.
             if chrome.scrub == nil, player.errorMessage == nil {
                 centreCluster
-                    .onHover { hoverCluster = $0 }
+                    .pointerHover { hoverCluster = $0 }
             }
         }
         .onChange(of: hoverTitle || hoverCluster || hoverBottom, initial: true) { _, on in
@@ -132,7 +226,7 @@ struct PlayerTransport: View {
             }
 
             moreMenu
-                .popover(isPresented: popover(for: .more), arrowEdge: .top) { panelPopover }
+                .panelPopover(isPresented: popover(for: .more), arrowEdge: .top) { panelPopover }
         }
         .padding(.top, compact ? 2 : 8)
         // Clear of the window's close, minimise and zoom buttons, which sit
@@ -142,9 +236,9 @@ struct PlayerTransport: View {
 
     private var liveBadge: some View {
         Text("LIVE")
-            .font(.caption2.weight(.heavy))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
+            .font(PlayerMetrics.television ? .caption.weight(.heavy) : .caption2.weight(.heavy))
+            .padding(.horizontal, PlayerMetrics.television ? 12 : 7)
+            .padding(.vertical, PlayerMetrics.television ? 4 : 3)
             .background(Capsule().fill(Theme.danger))
             .foregroundStyle(.white)
             .accessibilityLabel("Live")
@@ -178,6 +272,7 @@ struct PlayerTransport: View {
             } label: {
                 Label("Stream Info", systemImage: "info.circle")
             }
+            #if !os(tvOS)
             if let item = player.item, !player.isLocal, !player.isLive,
                player.engine?.capabilities.contains(.sharePlay) == true || player.canSwitchEngine(to: .apple) {
                 let shareplay = SharePlayCoordinator.shared
@@ -200,6 +295,7 @@ struct PlayerTransport: View {
                     }
                 }
             }
+            #endif
             Button {
                 open(.sync, anchor: .more)
             } label: {
@@ -329,7 +425,7 @@ struct PlayerTransport: View {
                 : "Remaining \(PlayerTime.spoken(remaining))")
             .accessibilityHint("Switches between time remaining and total length")
         }
-        .font(.caption.monospacedDigit())
+        .font(PlayerMetrics.television ? .callout.monospacedDigit() : .caption.monospacedDigit())
         .foregroundStyle(.white.opacity(0.9))
         .padding(.horizontal, 2)
     }
@@ -389,7 +485,7 @@ struct PlayerTransport: View {
         .buttonStyle(PlayerPillStyle())
         .accessibilityLabel(label)
         .accessibilityHint("Opens the \(tab.title) panel")
-        .popover(isPresented: popover(for: anchor), arrowEdge: .bottom) { panelPopover }
+        .panelPopover(isPresented: popover(for: anchor), arrowEdge: .bottom) { panelPopover }
     }
 
     /// What is queued by hand, then the next the series offers. A row plays
@@ -443,8 +539,33 @@ struct PlayerTransport: View {
         PlayerPanel(tab: Binding(get: { chrome.panel ?? .info }, set: { chrome.panel = $0 }),
                     schedule: schedule, artwork: artwork)
             .frame(minWidth: 400, idealWidth: 440, maxWidth: 520, minHeight: 360, idealHeight: 460, maxHeight: 560)
-            .presentationCompactAdaptation(.sheet)
             .playerChromeScheme()
+    }
+}
+
+private extension View {
+    /// Where the pointer is, on the platforms that have one.
+    @ViewBuilder
+    func pointerHover(_ perform: @escaping (Bool) -> Void) -> some View {
+        #if os(tvOS)
+        self
+        #else
+        onHover(perform: perform)
+        #endif
+    }
+
+    /// The panel as a popover off a pill, where the platform has popovers;
+    /// a television's panel is the chrome's overlay and this is nothing.
+    @ViewBuilder
+    func panelPopover<Panel: View>(isPresented: Binding<Bool>, arrowEdge: Edge,
+                                   @ViewBuilder content: @escaping () -> Panel) -> some View {
+        #if os(tvOS)
+        self
+        #else
+        popover(isPresented: isPresented, arrowEdge: arrowEdge) {
+            content().presentationCompactAdaptation(.sheet)
+        }
+        #endif
     }
 }
 
@@ -453,7 +574,7 @@ struct PlayerTransport: View {
 /// The system's route picker: the only way to offer AirPlay. As it opens,
 /// a stream on mpv is handed to AVPlayer, which is the engine that can send
 /// video to the television about to be chosen.
-#if os(iOS)
+#if canImport(UIKit)
 struct PlayerAirPlayButton: UIViewRepresentable {
     @Environment(PlayerModel.self) private var player
 
@@ -494,5 +615,3 @@ final class PlayerAirPlayDelegate: NSObject, AVRoutePickerViewDelegate {
         Task { @MainActor in PlayerModel.shared.handOverForAirPlay() }
     }
 }
-
-#endif

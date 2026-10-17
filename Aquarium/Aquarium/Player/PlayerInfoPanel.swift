@@ -1,9 +1,6 @@
-//  The stream facts the Mac's inspector and the iPhone's Info tab list: the
+//  The stream facts the Mac's inspector and the player's Info tab list: the
 //  file the server holds, what is actually coming down the wire, and where
-//  playback is. See `StreamInfoInspector` and `PlayerPanel`. The Apple TV
-//  draws its own in the player's Info tab.
-
-#if !os(tvOS)
+//  playback is. See `StreamInfoInspector` and `PlayerPanel`.
 
 import Foundation
 
@@ -111,6 +108,11 @@ struct PlayerStreamRows {
             }
             rows.append(("Engine", value))
         }
+        #if os(tvOS)
+        if let matched = DisplayMatch.matchedRate {
+            rows.append(("Display", PlayerModel.frameRateName(matched, unit: "Hz")))
+        }
+        #endif
         if player.isLive {
             rows.append(("Position", "Live"))
         } else if player.duration > 0 {
@@ -156,5 +158,3 @@ struct PlayerStreamRows {
             : String(format: "%.1f Mbps", mbps)
     }
 }
-
-#endif

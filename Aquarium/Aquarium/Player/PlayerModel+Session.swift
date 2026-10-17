@@ -51,7 +51,6 @@ extension PlayerModel {
         #if os(iOS) || os(tvOS)
         guard isActive else { return }
         try? AVAudioSession.sharedInstance().setActive(true)
-        #if !os(tvOS)
         audioWasInterrupted = false
         // A composition has no audible selection group to re-select in, so
         // the only way to repair a dead audio tap on one is to build the
@@ -60,7 +59,6 @@ extension PlayerModel {
             rebuildForAudioDelay()
             return
         }
-        #endif
         Task { await engine?.rebuildAudio() }
         #endif
     }
@@ -79,9 +77,7 @@ extension PlayerModel {
                 guard let raw, let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
                 switch type {
                 case .began:
-                    #if !os(tvOS)
                     self.audioWasInterrupted = true
-                    #endif
                 case .ended:
                     self.recoverAudio(rebuildingComposition: true)
                 @unknown default:
@@ -215,9 +211,10 @@ extension PlayerModel {
     func holdScreenAwake(reassert: Bool = false) {}
     #endif
 
-    #if !os(tvOS)
     /// The device's thermal state and Low Power Mode, and on a Mac whether
-    /// it is on its battery. All arrive off the main thread.
+    /// it is on its battery. All arrive off the main thread. The Apple TV is
+    /// on mains and never throttles a stream for power, but the thermal state
+    /// still picks mpv's render profile.
     func observePower() {
         var names = [ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange]
         #if os(macOS)
@@ -248,5 +245,4 @@ extension PlayerModel {
         let info = ProcessInfo.processInfo
         return AdaptiveQuality.powerRung(thermal: info.thermalState, lowPower: info.isLowPowerModeEnabled)
     }
-    #endif
 }

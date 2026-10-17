@@ -6,6 +6,13 @@
 //  Transparency gets a solid `Theme.raised` at 85 %. The player is dark
 //  whatever the app's theme, so every piece of chrome is drawn in the dark
 //  scheme — see `playerChromeScheme`.
+//
+//  Focus: on a television every control the remote can land on is lifted and
+//  painted from the app's palette — the accent behind it, a shadow of the
+//  accent under it — rather than the system's light focus platter, which put
+//  white text on a white card. `PlayerFocusStyle` is that lift; the labels
+//  read `isFocused` from the environment for their colours. Off a television
+//  the same style is the press of a pill.
 
 import SwiftUI
 
@@ -63,8 +70,21 @@ extension View {
 /// phone (compact width) or a Mac window narrower than `narrowWindow`;
 /// everything else is an iPad, a Mac window with room, or a television. A
 /// Mac's glyphs are a step smaller than an iPad's at either size: a pointer
-/// needs no finger-sized target, and the window can be 480×270.
+/// needs no finger-sized target, and the window can be 480×270. A television
+/// is read from ten feet: its band sits inside the 90-point overscan gutters,
+/// its timeline is three times as thick, and its thumbnail twice as wide.
 enum PlayerMetrics {
+    /// An Apple TV: the band carries the title, there is no centre cluster
+    /// and no pill row (the remote's clicks and the swipe-down panel are the
+    /// controls), the panel comes down from the top and its rows are cards.
+    static let television: Bool = {
+        #if os(tvOS)
+        true
+        #else
+        false
+        #endif
+    }()
+
     /// A Mac window narrower than this takes the compact metrics.
     static let narrowWindow: CGFloat = 640
 
@@ -122,6 +142,11 @@ enum PlayerMetrics {
         #endif
     }
 
+    /// The thumbnail's corners, and how far above the timeline's band it
+    /// rides.
+    static let previewCorner: CGFloat = television ? 16 : 10
+    static let previewLift: CGFloat = television ? 30 : 18
+
     /// How far the title row starts in from the leading edge on a Mac, so
     /// it clears the window's close, minimise and zoom buttons; nothing in
     /// full screen, where they are gone, and nothing anywhere else.
@@ -142,11 +167,45 @@ enum PlayerMetrics {
         #endif
     }
 
-    /// The timeline's bar, at rest and while scrubbing.
-    static let barHeight: CGFloat = 4
-    static let barHeightScrubbing: CGFloat = 8
-    static let thumbSize: CGFloat = 14
-    static let thumbSizeScrubbing: CGFloat = 20
+    /// The timeline's bar, at rest and while scrubbing. A television's is a
+    /// 12-point bar with no thumb until a scrub puts the knob on it.
+    static func barHeight(scrubbing: Bool) -> CGFloat {
+        television ? 12 : scrubbing ? 8 : 4
+    }
+
+    static func thumbSize(scrubbing: Bool) -> CGFloat {
+        television ? (scrubbing ? 30 : 0) : scrubbing ? 20 : 14
+    }
+
+    /// The accent ring round the knob while scrubbing on a television.
+    static let thumbRing: CGFloat = television ? 5 : 0
+
+    /// The whole band a finger can land in; the bar sits in its middle.
+    static let timelineBand: CGFloat = television ? 30 : 44
+
+    /// The television band's reach above its heading (the gradient's
+    /// extent) and below its hint.
+    static let bandTop: CGFloat = 180
+    static let bandBottom: CGFloat = 56
+
+    /// How far above the foot of the picture the moment overlays (Skip
+    /// intro, Up Next) sit, with the controls up and with them away.
+    static func overlayLift(controlsUp: Bool, live: Bool) -> CGFloat {
+        if television { return controlsUp ? 330 : 90 }
+        return controlsUp ? (live ? 110 : 148) : 24
+    }
+
+    /// The skip badge's inset from the edge it went towards.
+    static func skipBadgeInset(compact: Bool) -> CGFloat {
+        television ? 160 : compact ? 36 : 72
+    }
+
+    /// The television's panel: its corner, and how far it keeps from the
+    /// screen's edges — clear of the 60 points a set may crop, glass and
+    /// all; 62 across puts its insides on the timeline's 90.
+    static let panelCorner: CGFloat = 28
+    static let panelGutter: CGFloat = 62
+    static let panelTop: CGFloat = 60
 
     /// The bottom scrim's stops: the television bar's, reused.
     static let scrimStops: [Gradient.Stop] = [
@@ -210,5 +269,42 @@ struct PlayerPillStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
             .opacity(configuration.isPressed ? 0.85 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Focus
+
+/// The lift a focused control gets on a television, without the system's own
+/// white platter: a little larger, with the accent's shadow under it. The
+/// label draws its own focused colours (the accent behind it, white text)
+/// by reading `isFocused`. Off a television nothing has focus and this is
+/// the press of a button. Reduce Motion drops the lift and keeps the colour.
+struct PlayerFocusStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        PlayerFocusBody(configuration: configuration)
+    }
+
+    private struct PlayerFocusBody: View {
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        let configuration: ButtonStyleConfiguration
+
+        var body: some View {
+            configuration.label
+                .scaleEffect(reduceMotion ? 1 : configuration.isPressed ? 0.97 : isFocused ? 1.06 : 1)
+                .shadow(color: isFocused ? Theme.accent.opacity(0.45) : .clear,
+                        radius: isFocused ? 18 : 0, y: isFocused ? 8 : 0)
+                .opacity(configuration.isPressed && !isFocused ? 0.85 : 1)
+                .animation(.easeOut(duration: reduceMotion ? 0 : 0.18), value: isFocused)
+                .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+        }
+    }
+}
+
+/// A focusable label's fill: the accent while it has focus, otherwise
+/// `rest`.
+extension ShapeStyle where Self == Color {
+    static func playerFill(focused: Bool, rest: Color) -> Color {
+        focused ? Theme.accent : rest
     }
 }

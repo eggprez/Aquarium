@@ -632,6 +632,116 @@ the features list, with the note that they switch the engine).
 
 ### Phase 5: Apple TV on the shared chrome (M)
 
+> **Shipped 2026-10-17** on `player-overhaul` (uncommitted at the time of
+> writing). The model has one shape: `isLocal` (always false on the Apple
+> TV, which has no downloads), `queue`, `chapters`, `bitrateNotice`,
+> `externalChannel`, the live stall watchdog, the stream recoveries and the
+> `PlayerTrack` lists exist on every platform, and `pictureIsStale` (the
+> black cover over the last title's final frame) does too, cleared by the
+> first frame or the first tick of playing. `PlayerModel+PlaybackApple` and
+> `+PlaybackTV` are one `PlayerModel+Playback`: the Apple path as the base,
+> with the Apple TV's pieces folded in — the display asked to match the
+> film's frame rate before the file opens (`matchDisplay`, the one
+> `#if os(tvOS)` of the play path, since only a television can switch), the
+> opening and seek watchdogs that restart a stalled audio output (gated on
+> `.restartsAudioOutput` rather than on the platform), `playSyncTest` (shared,
+> waiting on the mpv layer being hosted rather than on a view of its own),
+> the engine told to stop and the picture covered when a different title
+> opens on an engine that would play on (`coverOutgoingPicture`), and the
+> ended episode reported finished before the next starts. `awaitingLoad`
+> now covers every non-hand-over open, and `isOpening` is true for every
+> load (it was only for a resume), with `isPaused` set to what the load
+> asked for, since mpv's pause flag doesn't change across a replace. The
+> tvOS model's `videoView` is gone: `mpvLayer` is one `MPVMetalLayer` on
+> every platform, hosted by `VideoSurface`'s `UIView` on tvOS as on iOS. One
+> track shape (`+Tracks`): `PlayerTrack` lists from `EngineTrack` on either
+> engine, `applyWantedTracks` putting on the server indices the stream was
+> asked for by `fileIndex` (trusted on a transcode only from AVPlayer, whose
+> numbering is the hints') before the language fallbacks, sidecar subtitles
+> matched by URL and fetched through `addExternalSubtitle` on an engine with
+> `.externalSubtitles`, and the audio offset per frame rate on tvOS
+> (`audioDelayScope` says which) and one for everything elsewhere, with
+> `audioDelayReach` from the engine. `DelayRate` is shared. The chrome files
+> compile everywhere: `PlayerMetrics.television` picks the layout, and the
+> `#if os(tvOS)` left are the finger drag and pointer hover (absent), the
+> popover (absent), the menu pickers for the preferred language (no menu
+> picker on tvOS; the rows are in Settings), the remote's hint line, the
+> focus-driven tab strip and the error card's focus. `PlayerTransport` on a
+> television is the old band: heading (kicker, LIVE, Paused, title) above
+> the 12-point timeline inside the 90-point gutters, the gradient reaching
+> 180 points above it, the hint line under; no centre cluster and no pill
+> row — the remote's clicks and the swipe-down panel are those — and only
+> the timeline while the panel is down. `PlayerTimeline` draws the ringed
+> knob while scrubbing, the return-point mark, and the 400-point preview.
+> `PlayerPanel` on a television is the swipe-down card (`TelevisionPanelBody`:
+> the focus logic of the old `TVPlayerPanel`, Menu from a card back to its
+> tab, from the tabs away, the swipe up from the tabs via
+> `PlayerChromeState.panelTabsFocused`), its rows cards in `PanelRows`
+> (sideways, or sharing the width for Quality and Speed), the Info tab in
+> columns with the stream in one line and the sleep timer as cards, the
+> Picture tab's sliders as steppers (`PanelSlider`, since tvOS has no slider
+> a remote can drive) in two columns with the aspect ratios as a row of
+> cards. Every card, tab, step and overlay button has `PlayerFocusStyle`:
+> the accent behind it and its shadow under it, lifted 6 % unless Reduce
+> Motion, never the system's platter; the labels read `isFocused`.
+> `PlayerOverlays` on a television: the Up Next card with the still and
+> "Click to play now · Menu to stop here", the skip pill drawn as the
+> focused thing it stands for, the error card taking focus on its buttons.
+> `TV/TVPlayerScreen.swift` is `PlayerRemoteDriver`, a modifier the chrome
+> applies on tvOS: `RemoteInput` behind the chrome, the exit and play/pause
+> commands on it, and the old state machine (edge clicks counting into
+> `chrome.countSkip`, the paused swipe scrub into `chrome.scrub`, the return
+> point into `chrome.returnPoint`, Menu stepping back, the channel edges,
+> the swipe-down panel). `TVTransportBar`, `TVPlayerPanel` and
+> `TVPlayerParts` are deleted; `RemoteInput`, `RemoteDebugHook`,
+> `SyncCodeOverlay` (drawn by the shared `PlayerScreen` on tvOS), the sync
+> clips and `DisplayMatch` are as they were. The Info tab's "Playing" rows
+> gained a Display row on tvOS. Settings → Video on the Apple TV gained
+> Brightness, Contrast, Saturation, Gamma (−100…100 in tens, plus the value
+> set), Zoom (1…2 in tenths), Aspect ratio and Reset picture, applied live;
+> no engine row and no Battery saver there. `NowPlaying` lost its tvOS
+> branch. iOS, macOS and tvOS build; `AquariumTests` (38) pass. Driven on the
+> Apple TV 4K simulator with `-AquariumPlayURL` on the bipbop HLS stream,
+> through the remote debug hook and a UI-test runner pressing real buttons
+> (`XCUIRemote`, the memory note's probe): bar up on an edge click with the
+> running "+30 s" total, the bar hiding after the interval, paused swipe
+> scrub with the knob and time pill, click to jump with the return-point
+> mark and "Menu to go back to 0:58", Menu going back there (position
+> 58.8 in the log), swipe down opening Info with the Info tab focused,
+> Right moving the focus and the tab to Audio, Down into the cards and Up
+> back to the tab, Menu from a card back to its tab and from the tabs away,
+> the Picture tab's "+" on gamma lifting the live picture to +20 (and
+> Settings → Video then reading Gamma +20), the Sync tab's −5 stepping, the
+> 24 fps sync clip playing through the shared screen with its QR code and a
+> press down opening the panel on Sync with "24 fps delay · 23.976 fps".
+> Screenshots in `qa-2026-10-17/player-phase-5/`.
+>
+> **Left for later phases.** The scrub thumbnail was not seen: a bare URL
+> has no trickplay, and the simulator is signed in to no server, so only
+> the time pill rode above the knob; the trickplay code is the shared
+> `TrickplayStore` phase 2 lifted from tvOS, unchanged. The display match
+> did nothing on the simulator (no `AVDisplayManager` criteria matching
+> there), so Match Frame Rate is compile-checked and its call sites moved,
+> not seen switching. Live TV on the Apple TV — the channel edge clicks, the
+> Channels tab, the live timeline — was not driven (no server); the paths
+> are the shared ones iOS ran in phase 2. Not seen: an episode's Up Next
+> card and Skip intro on tvOS (no server item), the Audio and Subtitles
+> cards actually reopening a stream, a sidecar subtitle. The remote reaches
+> the panel's rows and tabs only; there is no pill row or title-row button
+> on a television by design, so "focus order across the title row and the
+> pills" is the panel's tabs and cards. From the Picture tab, Down lands on
+> whichever stepper the focus engine finds nearest the tab (Gamma's −, under
+> the Picture tab), not Brightness. The hide interval on tvOS is now the
+> Settings value (4 s default; it was 5 s), and the skip is the Settings skip
+> interval (10 s default; it was fixed at 10). The tvOS panel has no
+> language pickers (Settings has the rows). `isOpening` being true for every
+> load is a change for iOS too: the loading card and `maybeReport` now wait
+> for the first frame on a from-the-top open as they did for a resume.
+> `adaptiveQuality` is now consulted on the Apple TV as on iOS (it defaults
+> on; the tvOS Settings page has no toggle for it, and mpv's variant events
+> only come on HLS). The QR code of a sync clip sits under the panel's
+> right end while the panel is down, as the old panel also covered it.
+
 `TVPlayerScreen` keeps its input layer; `TVTransportBar`, `TVPlayerPanel`
 and `TVPlayerParts` are replaced by the shared components with tvOS
 metrics. The sync test clips and `DisplayMatch` are untouched.

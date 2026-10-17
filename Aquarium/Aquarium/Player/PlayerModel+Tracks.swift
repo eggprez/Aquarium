@@ -3,13 +3,13 @@
 //  remembering the choice for the series, and moving the sound against the
 //  picture.
 //
-//  Two shapes remain, one per platform, because the menus they feed were built
-//  around them: the iPhone, iPad and Mac menus are built on `PlayerTrack`
-//  lists indexed by the engine's track id, the Apple TV panel on the engine's
-//  own `EngineTrack` list. Both line a server stream up with an engine track by
-//  `EngineTrack.fileIndex`, which the engine fills in — mpv from the file's own
-//  numbering, AVPlayer from the hints the model hands it. Phase 5 folds the
-//  two into one when the panel is shared.
+//  One shape on every platform and either engine: the menus are built on
+//  `PlayerTrack` lists made from the engine's own `EngineTrack` list, indexed
+//  by the engine's track id, and a server stream is lined up with an engine
+//  track by `EngineTrack.fileIndex`, which the engine fills in — mpv from the
+//  file's own numbering, AVPlayer from the hints the model hands it. A
+//  sidecar subtitle the server lists is matched by the URL it was added from
+//  on an engine that takes external subtitles, and fetched when chosen.
 
 import Foundation
 import OSLog
@@ -32,12 +32,8 @@ extension PlayerModel {
     /// What the server said this file contains, when there is a server and
     /// the file is its.
     var serverStreams: MediaSource? {
-        #if os(tvOS)
-        return isExternal ? nil : source?.mediaSource
-        #else
         guard !isLocal, !isExternal else { return nil }
         return source?.mediaSource
-        #endif
     }
 
     // MARK: - Appearance
@@ -77,7 +73,8 @@ extension PlayerModel {
     /// In milliseconds: fifty at a time either side of zero. Positive means
     /// the sound plays later than the picture.
     static let audioDelays: [Int] = Array(stride(from: -500, through: 500, by: 50))
-    /// The furthest the Apple TV's Sync tab goes either way.
+    /// The furthest the Sync tab goes either way on an engine that moves
+    /// the sound live; a rebuilt stream is kept to half of it.
     static let audioDelayReach = 1000
 
     static func audioDelayName(_ milliseconds: Int) -> String {
@@ -106,9 +103,7 @@ extension PlayerModel {
     }
 }
 
-#if !os(tvOS)
-
-// MARK: - iPhone, iPad and Mac
+// MARK: - The engine's list
 
 extension PlayerModel {
     func onTracks(_ list: [EngineTrack]) {
@@ -120,7 +115,10 @@ extension PlayerModel {
         })
         setSelectedAudioTrack(list.first { $0.kind == .audio && $0.isSelected }?.id)
         setSelectedSubtitleTrack(list.first { $0.kind == .subtitle && $0.isSelected }?.id)
-        if !tracksApplied {
+        // The first list of a file is the engine's own choice, and the only
+        // one worth overriding rather than recording. mpv lists the video
+        // track first and the rest a moment later; wait for a sound track.
+        if !tracksApplied, list.contains(where: { $0.kind == .audio || $0.kind == .video }) {
             tracksApplied = true
             applyPreferredTracks()
         }
@@ -171,10 +169,11 @@ extension PlayerModel {
         rememberTrackChoiceFromSelection()
     }
 
-    /// The first track list of a file is the engine's own choice, and it is
-    /// the only one worth overriding rather than recording.
+    /// Put on the tracks this stream was opened for, then whatever the
+    /// series or Settings prefer where the stream has them.
     private func applyPreferredTracks() {
         if applyChosenTracks() { return }
+        if applyWantedTracks() { return }
 
         if let seriesId = item?.SeriesId, let saved = prefs.trackChoice(seriesId: seriesId) {
             if let wantAudio = saved.audio,
@@ -218,6 +217,38 @@ extension PlayerModel {
         }
     }
 
+    /// The tracks the stream was asked for, in the server's numbering — the
+    /// ones `preferredStreams` resolved from the saved choice and Settings —
+    /// put on where the stream carries them. Lifted from the Apple TV model.
+    /// True when the stream had something to say about it.
+    private func applyWantedTracks() -> Bool {
+        guard let engine, let streams = serverStreams else { return false }
+        var applied = false
+        let audioIndex = wantedTracks.audio ?? streams.DefaultAudioStreamIndex
+        if let index = audioIndex, let stream = streams.audioStreams.first(where: { $0.Index == index }),
+           let id = engineTrack(for: stream, kind: .audio) {
+            if id != selectedAudioTrack { engine.selectAudio(trackID: id) }
+            setSelectedAudioTrack(id)
+            applied = true
+        }
+        let subtitleIndex = wantedTracks.subtitle
+            ?? streams.DefaultSubtitleStreamIndex.flatMap { $0 >= 0 ? $0 : nil }
+        guard let subtitleIndex else { return applied }
+        guard subtitleIndex >= 0 else {
+            if selectedSubtitleTrack != nil { engine.selectSubtitle(trackID: nil) }
+            setSelectedSubtitleTrack(nil)
+            return true
+        }
+        guard let stream = streams.subtitleStreams.first(where: { $0.Index == subtitleIndex }) else { return applied }
+        if let id = engineTrack(for: stream, kind: .subtitle) {
+            if id != selectedSubtitleTrack { engine.selectSubtitle(trackID: id) }
+            setSelectedSubtitleTrack(id)
+            return true
+        }
+        if stream.isSidecar, addExternalSubtitle(stream) { return true }
+        return applied
+    }
+
     /// Record what is selected now against the series.
     private func rememberTrackChoiceFromSelection() {
         guard let seriesId = item?.SeriesId else { return }
@@ -239,10 +270,25 @@ extension PlayerModel {
 
     // MARK: The menus
 
-    /// The engine's id for the server's track, when it is in the stream.
+    /// Whether the engine's `fileIndex` is the file's own numbering for this
+    /// stream. mpv reads it off whatever it opens, so on a transcode it
+    /// numbers the server's HLS rendition, not the file; AVPlayer takes it
+    /// from the hints the model hands it, which are the file's whichever
+    /// stream is playing.
+    private var fileIndexIsTheFiles: Bool {
+        !isTranscoding || engine?.kind == .apple
+    }
+
+    /// The engine's id for the server's track, when it is in the stream:
+    /// embedded ones by their index in the file, sidecars by the URL they
+    /// were added from.
     private func engineTrack(for stream: MediaStream, kind: EngineTrack.Kind) -> Int? {
-        guard let index = stream.Index else { return nil }
-        return tracks.first { $0.kind == kind && $0.fileIndex == index }?.id
+        if kind == .subtitle, stream.isSidecar {
+            guard let url = externalSubtitleURL(for: stream)?.absoluteString else { return nil }
+            return tracks.first { $0.kind == .subtitle && $0.isExternal && $0.externalURL == url }?.id
+        }
+        guard fileIndexIsTheFiles, let index = stream.Index else { return nil }
+        return tracks.first { $0.kind == kind && !$0.isExternal && $0.fileIndex == index }?.id
     }
 
     var audioOptions: [TrackOption] {
@@ -267,7 +313,7 @@ extension PlayerModel {
         return streams.map { stream in
             TrackOption(
                 serverIndex: stream.Index,
-                avIndex: stream.isImageSubtitle ? nil : engineTrack(for: stream, kind: .subtitle),
+                avIndex: engineTrack(for: stream, kind: .subtitle),
                 label: stream.menuLabel, language: stream.Language, isForced: stream.isForced)
         }
     }
@@ -305,6 +351,8 @@ extension PlayerModel {
         guard option.id != selectedAudioOption else { return }
         if let av = option.avIndex {
             selectAudioTrack(av)
+            // So the progress reports carry the track that is playing.
+            if let index = option.serverIndex { options.audioStreamIndex = index }
             return
         }
         guard let index = option.serverIndex else { return }
@@ -318,14 +366,24 @@ extension PlayerModel {
                 Task { await reopen(audio: audioRequest, subtitle: -1) }
             } else {
                 selectSubtitleTrack(nil)
+                if options.subtitleStreamIndex != nil { options.subtitleStreamIndex = -1 }
             }
             return
         }
         if let av = option.avIndex {
             selectSubtitleTrack(av)
+            if let index = option.serverIndex { options.subtitleStreamIndex = index }
             return
         }
         guard let index = option.serverIndex else { return }
+        // A sidecar file the engine can take is fetched and shown, with no
+        // new stream.
+        if let stream = serverStreams?.subtitleStreams.first(where: { $0.Index == index }), stream.isSidecar,
+           addExternalSubtitle(stream) {
+            options.subtitleStreamIndex = index
+            rememberTrackChoice(subtitleLanguage: option.language ?? "und")
+            return
+        }
         Task { await reopen(audio: audioRequest, subtitle: index, forSubtitleTheServerMustRender: true) }
     }
 
@@ -382,16 +440,61 @@ extension PlayerModel {
         return true
     }
 
+    // MARK: Sidecar subtitles
+
+    /// Where the server serves one of its sidecar subtitle files from, when
+    /// it is the server this session is signed in to.
+    private func externalSubtitleURL(for stream: MediaStream) -> URL? {
+        guard let path = stream.DeliveryUrl, !path.isEmpty, let server = prefs.session?.server else { return nil }
+        if path.hasPrefix("http"), let url = URL(string: path), client.isSessionOrigin(url) { return url }
+        guard path.hasPrefix("/"), let url = URL(string: server + path), client.isSessionOrigin(url) else { return nil }
+        return url
+    }
+
+    /// Show a sidecar subtitle on an engine that takes one: selected if it
+    /// is already in, fetched and added if not. False when the engine
+    /// cannot, or the file has no address.
+    @discardableResult
+    private func addExternalSubtitle(_ stream: MediaStream) -> Bool {
+        guard let engine, engine.capabilities.contains(.externalSubtitles) else { return false }
+        if let id = engineTrack(for: stream, kind: .subtitle) {
+            engine.selectSubtitle(trackID: id)
+            setSelectedSubtitleTrack(id)
+            return true
+        }
+        guard let url = externalSubtitleURL(for: stream) else { return false }
+        engine.addExternalSubtitle(url: url, language: stream.Language, title: stream.menuLabel)
+        return true
+    }
+
     // MARK: The audio offset
 
-    /// The offset in force, from Settings. On an iPhone or iPad it used to be
-    /// pinned at zero on the grounds that nothing between the device and its
-    /// own speaker lags; Bluetooth headphones and AirPlay speakers do, and the
-    /// player's Sync tab is where it is set now.
-    var audioDelay: Double { prefs.audioDelay }
+    /// The offset in force, from Settings: one for everything on an iPhone,
+    /// iPad or Mac; on the Apple TV one per frame rate of what is playing,
+    /// because a television's HDMI chain converts a 24 fps film differently
+    /// from a 60 fps show — see `delayRate`.
+    var audioDelay: Double {
+        #if os(tvOS)
+        prefs.audioDelay(forRate: delayRate.fps)
+        #else
+        prefs.audioDelay
+        #endif
+    }
 
     var appliedAudioDelay: Double { audioDelay }
     var appliedAudioDelayMilliseconds: Int { Int((appliedAudioDelay * 1000).rounded()) }
+
+    /// What the Sync tab says the offset it is moving is for, where there is
+    /// one offset per frame rate; nil where there is one for everything.
+    var audioDelayScope: String? {
+        #if os(tvOS)
+        var parts = ["\(delayRate.name) delay"]
+        if let rate = videoFrameRate { parts.append(Self.frameRateName(rate)) }
+        return parts.joined(separator: " · ")
+        #else
+        return nil
+        #endif
+    }
 
     /// Whether the stream being set up is one an offset can be built into: a
     /// file, which the engine will hand over whole. Everything HLS is refused.
@@ -410,24 +513,41 @@ extension PlayerModel {
 
     var canDelayAudioLater: Bool { isActive && streamCarriesDelay }
 
+    /// How far the Sync tab reaches either way on this engine.
+    var audioDelayReach: Int {
+        engine?.capabilities.contains(.audioDelayOnAnyStream) == true ? Self.audioDelayReach : Self.audioDelayReach / 2
+    }
+
     func setAudioDelay(milliseconds: Int) {
         guard isActive else { return }
-        let seconds = Double(milliseconds) / 1000
-        guard abs(seconds - prefs.audioDelay) > 0.0005 else { return }
+        let seconds = Double(min(max(milliseconds, -audioDelayReach), audioDelayReach)) / 1000
+        guard abs(seconds - audioDelay) > 0.0005 else { return }
         if !streamCarriesDelay {
             // An HLS stream on AVPlayer: the offset reaches it only through
             // mpv, which moves the sound on anything. Reopened there.
             guard canSwitchEngine(to: .mpv) else { return }
-            prefs.audioDelay = seconds
+            storeAudioDelay(seconds)
             Task { await switchEngine(to: .mpv, reason: "audio delay on an HLS stream") }
             return
         }
-        prefs.audioDelay = seconds
+        storeAudioDelay(seconds)
         if engine?.capabilities.contains(.audioDelayOnAnyStream) == true {
             engine?.audioDelay = seconds
         } else {
             rebuildForAudioDelay()
         }
+    }
+
+    func nudgeAudioDelay(by delta: Int) {
+        setAudioDelay(milliseconds: audioDelayMilliseconds + delta)
+    }
+
+    private func storeAudioDelay(_ seconds: Double) {
+        #if os(tvOS)
+        prefs.setAudioDelay(seconds, forRate: delayRate.fps)
+        #else
+        prefs.audioDelay = seconds
+        #endif
     }
 
     /// Whether the Sync tab can be used at all on this stream: directly, or
@@ -466,182 +586,13 @@ extension PlayerModel {
                 isForced: stream.isForced, isExternal: stream.IsExternal ?? false, isImage: stream.isImageSubtitle)
         }
     }
-}
-
-#else
-
-// MARK: - Apple TV
-
-extension PlayerModel {
-    func onTracks(_ list: [EngineTrack]) {
-        if !tracksApplied, list.contains(where: { $0.kind == .audio || $0.kind == .video }) {
-            tracksApplied = true
-            applyWantedTracks()
-        }
-    }
-
-    func onChapters(_ list: [EngineChapter]) {}
-
-    var audioOptions: [TrackOption] {
-        let playing = tracks.filter { $0.kind == .audio }
-        guard let streams = serverStreams?.audioStreams, !streams.isEmpty else {
-            return playing.map {
-                TrackOption(serverIndex: nil, avIndex: $0.id, label: $0.label, language: $0.language, isForced: false)
-            }
-        }
-        return streams.map { stream in
-            TrackOption(
-                serverIndex: stream.Index,
-                avIndex: isTranscoding ? nil : playing.first { $0.fileIndex == stream.Index }?.id,
-                label: stream.menuLabel, language: stream.Language, isForced: false)
-        }
-    }
-
-    var subtitleOptions: [TrackOption] {
-        let playing = tracks.filter { $0.kind == .subtitle }
-        guard let streams = serverStreams?.subtitleStreams, !streams.isEmpty else {
-            return playing.map {
-                TrackOption(serverIndex: nil, avIndex: $0.id, label: $0.label, language: $0.language, isForced: $0.isForced)
-            }
-        }
-        return streams.map { stream in
-            TrackOption(
-                serverIndex: stream.Index, avIndex: engineTrack(forSubtitle: stream)?.id,
-                label: stream.menuLabel, language: stream.Language, isForced: stream.isForced)
-        }
-    }
-
-    var selectedAudioOption: TrackOption.ID? {
-        let choices = audioOptions
-        if let playing = tracks.first(where: { $0.kind == .audio && $0.isSelected }),
-           let match = choices.first(where: { $0.avIndex == playing.id }) {
-            return match.id
-        }
-        let asked = options.audioStreamIndex ?? serverStreams?.DefaultAudioStreamIndex
-        if let asked, let match = choices.first(where: { $0.serverIndex == asked }) { return match.id }
-        return choices.first?.id
-    }
-
-    var selectedSubtitleOption: TrackOption.ID? {
-        let choices = subtitleOptions
-        if let playing = tracks.first(where: { $0.kind == .subtitle && $0.isSelected }),
-           let match = choices.first(where: { $0.avIndex == playing.id }) {
-            return match.id
-        }
-        if isTranscoding, let asked = options.subtitleStreamIndex, asked >= 0,
-           let match = choices.first(where: { $0.serverIndex == asked }) {
-            return match.id
-        }
-        return nil
-    }
-
-    func selectAudio(_ option: TrackOption) {
-        guard option.id != selectedAudioOption else { return }
-        if let id = option.avIndex {
-            engine?.selectAudio(trackID: id)
-            options.audioStreamIndex = option.serverIndex
-            rememberTrackChoice(audioLanguage: option.language)
-            return
-        }
-        guard let index = option.serverIndex else { return }
-        rememberTrackChoice(audioLanguage: option.language)
-        Task { await reopen(audio: index, subtitle: options.subtitleStreamIndex) }
-    }
-
-    func selectSubtitles(_ option: TrackOption?) {
-        guard let option else {
-            engine?.selectSubtitle(trackID: nil)
-            let wasBurnedIn = isTranscoding && (options.subtitleStreamIndex ?? -1) >= 0
-                && subtitleOptions.first(where: { $0.serverIndex == options.subtitleStreamIndex })?.avIndex == nil
-            options.subtitleStreamIndex = -1
-            rememberTrackChoice(subtitleOff: true)
-            if wasBurnedIn { Task { await reopen(audio: options.audioStreamIndex, subtitle: -1) } }
-            return
-        }
-        rememberTrackChoice(subtitleLanguage: option.language ?? "und")
-        if let id = option.avIndex {
-            engine?.selectSubtitle(trackID: id)
-            options.subtitleStreamIndex = option.serverIndex
-            return
-        }
-        if let index = option.serverIndex,
-           let stream = serverStreams?.subtitleStreams.first(where: { $0.Index == index }),
-           addExternalSubtitle(stream) {
-            options.subtitleStreamIndex = index
-            return
-        }
-        guard let index = option.serverIndex else { return }
-        Task { await reopen(audio: options.audioStreamIndex, subtitle: index) }
-    }
-
-    private func reopen(audio: Int?, subtitle: Int?) async {
-        guard let item else { return }
-        var opts = options
-        opts.audioStreamIndex = audio
-        opts.subtitleStreamIndex = subtitle
-        opts.startSeconds = position
-        await play(item: item, options: opts, meta: StartMeta(inherited: true))
-    }
-
-    /// The engine's track for one of the server's subtitle streams: embedded
-    /// ones by their index in the file, sidecars by the URL they were added from.
-    private func engineTrack(forSubtitle stream: MediaStream) -> EngineTrack? {
-        let playing = tracks.filter { $0.kind == .subtitle }
-        if stream.IsExternal == true || stream.DeliveryMethod == "External" {
-            guard let url = externalURL(for: stream)?.absoluteString else { return nil }
-            return playing.first { $0.isExternal && $0.externalURL == url }
-        }
-        guard !isTranscoding else { return nil }
-        return playing.first { !$0.isExternal && $0.fileIndex == stream.Index }
-    }
-
-    private func externalURL(for stream: MediaStream) -> URL? {
-        guard let path = stream.DeliveryUrl, !path.isEmpty, let server = prefs.session?.server else { return nil }
-        if path.hasPrefix("http"), let url = URL(string: path), client.isSessionOrigin(url) { return url }
-        guard path.hasPrefix("/"), let url = URL(string: server + path), client.isSessionOrigin(url) else { return nil }
-        return url
-    }
-
-    @discardableResult
-    private func addExternalSubtitle(_ stream: MediaStream) -> Bool {
-        if let existing = engineTrack(forSubtitle: stream) {
-            engine?.selectSubtitle(trackID: existing.id)
-            return true
-        }
-        guard let url = externalURL(for: stream) else { return false }
-        engine?.addExternalSubtitle(url: url, language: stream.Language, title: stream.menuLabel)
-        return true
-    }
-
-    /// Put on the tracks this stream was opened for, once the engine has
-    /// listed them.
-    private func applyWantedTracks() {
-        guard let engine else { return }
-        let streams = serverStreams
-        let audioIndex = wantedTracks.audio ?? streams?.DefaultAudioStreamIndex
-        if !isTranscoding, let index = audioIndex,
-           let track = tracks.first(where: { $0.kind == .audio && $0.fileIndex == index }) {
-            engine.selectAudio(trackID: track.id)
-        }
-        let subtitleIndex = wantedTracks.subtitle
-            ?? streams?.DefaultSubtitleStreamIndex.flatMap { $0 >= 0 ? $0 : nil }
-        guard let subtitleIndex, subtitleIndex >= 0 else { return }
-        if let stream = streams?.subtitleStreams.first(where: { $0.Index == subtitleIndex }) {
-            if let track = engineTrack(forSubtitle: stream) {
-                engine.selectSubtitle(trackID: track.id)
-            } else if stream.IsExternal == true || stream.DeliveryMethod == "External" {
-                addExternalSubtitle(stream)
-            }
-        } else if streams == nil, let track = tracks.first(where: { $0.kind == .subtitle && $0.isDefault }) {
-            engine.selectSubtitle(trackID: track.id)
-        }
-    }
 
     // MARK: The audio offset, per frame rate
 
-    /// A frame rate the app keeps a delay for: any rate, rounded to a whole
-    /// number. Five are presets with a sync clip in Settings; any other is
-    /// learned the first time the Sync tab is used over a video at it.
+    /// A frame rate the app keeps a delay for on the Apple TV: any rate,
+    /// rounded to a whole number. Five are presets with a sync clip in
+    /// Settings; any other is learned the first time the Sync tab is used
+    /// over a video at it.
     struct DelayRate: Hashable, Comparable, Identifiable {
         let fps: Int
 
@@ -680,22 +631,19 @@ extension PlayerModel {
 
     var delayRate: DelayRate { DelayRate(frameRate: videoFrameRate) }
 
-    var audioDelay: Double { prefs.audioDelay(forRate: delayRate.fps) }
-
-    func setAudioDelay(milliseconds: Int) {
-        let clamped = min(max(milliseconds, -Self.audioDelayReach), Self.audioDelayReach)
-        prefs.setAudioDelay(Double(clamped) / 1000, forRate: delayRate.fps)
-        engine?.audioDelay = audioDelay
-    }
-
-    func nudgeAudioDelay(by delta: Int) {
-        setAudioDelay(milliseconds: audioDelayMilliseconds + delta)
-    }
-
     #if DEBUG
     var debugEngineAudioDelay: Double { engine?.audioDelay ?? .nan }
-    var debugAVSync: String { (engine as? MPVEngine)?.get("avsync") ?? "none" }
+    var debugAVSync: String {
+        #if canImport(Libmpv)
+        (engine as? MPVEngine)?.get("avsync") ?? "none"
+        #else
+        "none"
+        #endif
+    }
     #endif
 }
 
-#endif
+private extension MediaStream {
+    /// A subtitle file beside the video rather than a track inside it.
+    var isSidecar: Bool { IsExternal == true || DeliveryMethod == "External" }
+}

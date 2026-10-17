@@ -12,10 +12,8 @@ extension PlayerModel {
     func loadExtras(for item: BaseItem) async {
         segments = []
         trickplay = nil
-        #if !os(tvOS)
         setChapters([])
         fullItem = nil
-        #endif
         let itemId = item.Id
         let needsDetail = item.Overview?.isEmpty != false
             || item.People?.isEmpty != false
@@ -27,11 +25,7 @@ extension PlayerModel {
         guard self.item?.Id == itemId else { return }
         segments = loadedSegments
         trickplay = JellyfinClient.trickplayInfo(for: loadedDetail ?? item)
-        #if os(tvOS)
-        fullItem = loadedDetail ?? item
-        #else
         fullItem = loadedDetail
-        #endif
         await refreshUpNext()
     }
 
@@ -42,18 +36,12 @@ extension PlayerModel {
 
     func upNextIsDue() -> Bool {
         guard !autoplayCancelled, prefs.autoplayNext, duration > 0 else { return false }
-        #if os(tvOS)
-        let hasNext = upNext != nil
-        #else
         let hasNext = upNext != nil || upNextLocalId != nil || !queue.isEmpty
-        #endif
         return hasNext && secondsRemaining <= 25 && secondsRemaining > 0
     }
 
     var upNextTitle: String? {
-        #if !os(tvOS)
         if let queued = queue.first { return Self.displayTitle(queued) }
-        #endif
         if let upNext { return Self.displayTitle(upNext) }
         #if !os(tvOS)
         if let upNextLocalId, let record = DownloadManager.shared.record(for: upNextLocalId) {
@@ -102,9 +90,11 @@ extension PlayerModel {
 
     /// Returns true when something next was found and started.
     func advanceToNext() async -> Bool {
-        #if !os(tvOS)
         if !queue.isEmpty {
+            #if !os(tvOS)
             if isLocal, let current = localRecordId { await reportLocalFinished(current) }
+            #endif
+            await reportFinishedBeforeNext()
             var q = queue
             let next = q.removeFirst()
             setQueue(q)
@@ -116,6 +106,7 @@ extension PlayerModel {
                 carriesSubtitleTranscode: transcodingForSubtitle && opts.forceTranscode))
             return true
         }
+        #if !os(tvOS)
         if isLocal, let current = localRecordId {
             if isShuffling, let next = nextShuffled(after: current) {
                 await reportLocalFinished(current)
@@ -135,23 +126,22 @@ extension PlayerModel {
             candidate = await lookUpNextEpisode(after: item, seriesId: seriesId).next
         }
         guard let next = candidate else { return false }
-        #if os(tvOS)
-        // The episode that ended is reported finished before the next starts.
-        if item != nil, !isExternal {
-            await client.reportPlaybackStopped(report(paused: true, position: duration))
-        }
-        #endif
+        await reportFinishedBeforeNext()
         var opts = options
         opts.startSeconds = nil
         opts.resume = true
-        #if os(tvOS)
-        opts.audioStreamIndex = nil
-        opts.subtitleStreamIndex = nil
-        #endif
         await play(item: next, options: opts, meta: StartMeta(
             inherited: true, quiet: true,
             carriesSubtitleTranscode: transcodingForSubtitle && opts.forceTranscode))
         return true
+    }
+
+    /// The episode that ended is reported finished before the next starts,
+    /// so the server marks it played rather than left at its last tick.
+    /// Lifted from the Apple TV model.
+    private func reportFinishedBeforeNext() async {
+        guard item != nil, !isExternal, !isLocal, source != nil, duration > 0 else { return }
+        await client.reportPlaybackStopped(report(paused: true, position: duration))
     }
 
     // MARK: - Sleep timer
@@ -214,8 +204,8 @@ extension PlayerModel {
             }
             return
         }
-        guard !isLocal else { return }
         #endif
+        guard !isLocal else { return }
         guard isActive, !isExternal, !isOpening,
               Date().timeIntervalSince(lastReportAt) >= Self.reportInterval else { return }
         lastReportAt = Date()
@@ -236,13 +226,8 @@ extension PlayerModel {
     }
 
     func report(paused: Bool, position override: Double? = nil) -> PlaybackReport {
-        #if os(tvOS)
-        let itemId = item?.Id ?? ""
-        let volumeLevel = volume
-        #else
         let itemId = item?.Id ?? localRecordId ?? ""
         let volumeLevel = isMuted ? 0 : volume
-        #endif
         var report = PlaybackReport(
             itemId: itemId,
             mediaSourceId: source?.mediaSourceId,
@@ -257,7 +242,6 @@ extension PlayerModel {
         return report
     }
 
-    #if !os(tvOS)
     /// Tell Now Playing about a pause or a resume straight away.
     func postNowPlayingRate() {
         guard isActive else { return }
@@ -352,10 +336,12 @@ extension PlayerModel {
         var opts = options
         opts.startSeconds = nil
         opts.resume = true
+        #if !os(tvOS)
         if DownloadManager.shared.record(for: next.Id).map({ !$0.isAudio && DownloadManager.shared.mediaURL(for: $0) != nil }) == true,
            !(opts.maxBitrate != nil || opts.bitrateIsChosen || opts.forceTranscode || opts.forceFullEncode) {
             return
         }
+        #endif
         if let source = next.MediaSources?.first, !source.streams.isEmpty {
             let wanted = preferredStreams(in: source, seriesId: next.SeriesId)
             opts.audioStreamIndex = wanted.audio
@@ -415,6 +401,9 @@ extension PlayerModel {
 
     // MARK: - Downloads: shuffle and local Up Next
 
+    var isShuffling: Bool { shuffleSeries != nil }
+
+    #if !os(tvOS)
     func refreshLocalUpNext(after record: DownloadRecord) async {
         guard record.isEpisode else { return }
         let siblings = DownloadManager.shared.episodes(ofSeries: record.seriesId, seriesName: record.series)
@@ -434,8 +423,6 @@ extension PlayerModel {
         shuffleSeries = DownloadShuffleState(seriesId: first.seriesId, seriesName: first.series, seen: [first.itemId])
         playLocal(first, keepShuffle: true)
     }
-
-    var isShuffling: Bool { shuffleSeries != nil }
 
     private func nextShuffled(after current: String) -> DownloadRecord? {
         guard var state = shuffleSeries else { return nil }
@@ -461,6 +448,7 @@ extension PlayerModel {
             Task { await OfflineProgress.sync() }
         }
     }
+    #endif
 
     // MARK: - Putting the sound back on the picture's clock
 
@@ -512,7 +500,6 @@ extension PlayerModel {
             indicatedBitrate: facts.indicatedBitrate, observedBitrate: facts.observedBitrate,
             stalls: facts.stalls, droppedFrames: facts.droppedFrames, host: currentStreamURL?.host)
     }
-    #endif
 
     #if DEBUG
     /// Launched with `-AquariumPlayURL <url>` (and, optionally,
@@ -526,10 +513,8 @@ extension PlayerModel {
         let title = UserDefaults.standard.string(forKey: "AquariumPlayTitle") ?? url.lastPathComponent
         playExternal(title: title, subtitle: url.host ?? "", artworkURL: nil, streamURL: url)
         isLive = false
-        #if !os(tvOS)
         options.live = false
         autoplayCancelled = false
-        #endif
         // `-AquariumPlayPaused YES` pauses once the stream has opened, which
         // keeps the controls on screen for a screenshot.
         if UserDefaults.standard.bool(forKey: "AquariumPlayPaused") {

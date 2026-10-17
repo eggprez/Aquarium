@@ -1,4 +1,4 @@
-//  Where the picture is drawn on an iPhone, iPad or Mac: a plain view hosting
+//  Where the picture is drawn, on every platform: a plain view hosting
 //  a `CALayer` the engine renders into. For AVPlayer that is an
 //  `AVPlayerLayer`; for mpv the model's `MPVMetalLayer`, which goes in the
 //  same slot and is given the screen's scale so it draws at Retina size. The
@@ -12,8 +12,6 @@
 //  attached to a layer carries on as sound when the app goes behind another —
 //  which is what the controller did.
 
-#if os(iOS) || os(macOS)
-
 import AVFoundation
 import SwiftUI
 #if canImport(UIKit)
@@ -22,7 +20,7 @@ import UIKit
 import AppKit
 #endif
 
-#if os(iOS)
+#if canImport(UIKit)
 /// A view that gives its bounds to one video layer.
 final class VideoLayerHostView: UIView {
     private(set) var videoLayer: CALayer?
@@ -159,7 +157,7 @@ private enum VideoSurfaceWiring {
     }
 }
 
-#if os(iOS)
+#if canImport(UIKit)
 struct VideoSurface: UIViewRepresentable {
     @Environment(PlayerModel.self) private var player
     let pictureInPicture: PictureInPicture
@@ -194,6 +192,4 @@ struct VideoSurface: NSViewRepresentable {
         VideoSurfaceWiring.attach(player, to: view, pictureInPicture: pictureInPicture)
     }
 }
-#endif
-
 #endif

@@ -6,9 +6,10 @@
 //  the scrub — the Music app's fine scrub — so the last few seconds can be
 //  found without a hand's width of travel meaning a minute. A tap on the bar
 //  jumps there. VoiceOver gets the bar as an adjustable element that moves
-//  by the Settings skip interval.
-
-#if !os(tvOS)
+//  by the Settings skip interval. On a television the scrub is the remote's
+//  (`PlayerRemoteDriver`): the bar is thicker, has no thumb until a scrub
+//  puts the ringed knob on it, and marks where Menu would take the playhead
+//  back to after a jump.
 
 import SwiftUI
 
@@ -25,17 +26,14 @@ struct PlayerTimeline: View {
     /// adds.
     @State private var lastX: CGFloat = 0
 
-    /// The whole band the finger can land in; the bar sits in its middle.
-    private static let hitHeight: CGFloat = 44
-
     private var canScrub: Bool { !player.isLive && player.duration > 0 && !player.isOpening }
 
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
             let scrubbing = chrome.scrub != nil
-            let barHeight = scrubbing ? PlayerMetrics.barHeightScrubbing : PlayerMetrics.barHeight
-            let thumb = scrubbing ? PlayerMetrics.thumbSizeScrubbing : PlayerMetrics.thumbSize
+            let barHeight = PlayerMetrics.barHeight(scrubbing: scrubbing)
+            let thumb = PlayerMetrics.thumbSize(scrubbing: scrubbing)
             let shown = chrome.scrub ?? player.position
 
             ZStack(alignment: .leading) {
@@ -59,15 +57,30 @@ struct PlayerTimeline: View {
                             .offset(x: width * fraction(start) - 0.75)
                     }
                 }
-                Circle()
-                    .fill(.white)
-                    .frame(width: thumb, height: thumb)
-                    .shadow(color: .black.opacity(0.4), radius: 4, y: 1)
-                    .offset(x: min(max(width * fraction(shown) - thumb / 2, 0), max(0, width - thumb)))
+                // Where the playhead was before the last jump: Menu goes back
+                // there.
+                if let returnPoint = chrome.returnPoint, !scrubbing {
+                    Capsule()
+                        .fill(.white.opacity(0.8))
+                        .frame(width: 4, height: barHeight + 18)
+                        .offset(x: width * fraction(returnPoint) - 2)
+                }
+                if thumb > 0 {
+                    Circle()
+                        .fill(.white)
+                        .frame(width: thumb, height: thumb)
+                        .overlay(Circle().strokeBorder(Theme.accent, lineWidth: PlayerMetrics.thumbRing))
+                        .shadow(color: .black.opacity(0.4), radius: PlayerMetrics.television ? 8 : 4, y: 1)
+                        .offset(x: min(max(width * fraction(shown) - thumb / 2, 0), max(0, width - thumb)))
+                }
             }
             .frame(maxHeight: .infinity, alignment: .center)
             .contentShape(Rectangle())
+            #if !os(tvOS)
+            // The finger's drag; a television's touch surface is read by the
+            // remote driver instead.
             .gesture(drag(width: width, height: geo.size.height))
+            #endif
             .overlay(alignment: .bottomLeading) {
                 if let scrub = chrome.scrub {
                     let previewWidth = PlayerMetrics.previewWidth(compact: compact)
@@ -75,14 +88,14 @@ struct PlayerTimeline: View {
                                  width: previewWidth)
                         .offset(
                             x: min(max(width * fraction(scrub) - previewWidth / 2, 0), max(0, width - previewWidth)),
-                            y: -(geo.size.height / 2 + 18)
+                            y: -(geo.size.height / 2 + PlayerMetrics.previewLift)
                         )
                         .transition(.opacity)
                 }
             }
             .animation(.easeOut(duration: 0.15), value: scrubbing)
         }
-        .frame(height: Self.hitHeight)
+        .frame(height: PlayerMetrics.timelineBand)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Timeline")
         .accessibilityValue("\(PlayerTime.spoken(player.position)) of \(PlayerTime.spoken(player.duration))")
@@ -100,6 +113,7 @@ struct PlayerTimeline: View {
         return CGFloat(min(max(seconds / player.duration, 0), 1))
     }
 
+    #if !os(tvOS)
     /// A drag from anywhere in the band: the first touch puts the scrubber
     /// under the finger, and every move after adds its distance along the
     /// bar, scaled down the further the finger is from it.
@@ -129,6 +143,7 @@ struct PlayerTimeline: View {
                 chrome.scrub = nil
             }
     }
+    #endif
 }
 
 // MARK: - The thumbnail above the thumb
@@ -143,20 +158,21 @@ private struct ScrubPreview: View {
     let width: CGFloat
 
     var body: some View {
-        VStack(spacing: 6) {
+        let tv = PlayerMetrics.television
+        VStack(spacing: tv ? 10 : 6) {
             thumbnail
             HStack(spacing: 6) {
                 Text(PlayerTime.format(seconds))
-                    .font(.footnote.weight(.semibold).monospacedDigit())
+                    .font(tv ? .headline.monospacedDigit() : .footnote.weight(.semibold).monospacedDigit())
                 if let chapter, !chapter.isEmpty {
                     Text(chapter)
-                        .font(.footnote)
+                        .font(tv ? .headline : .footnote)
                         .lineLimit(1)
                 }
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
+            .padding(.horizontal, tv ? 16 : 10)
+            .padding(.vertical, tv ? 6 : 4)
             .background(Capsule().fill(Theme.accent))
         }
         .frame(width: width)
@@ -181,12 +197,12 @@ private struct ScrubPreview: View {
                 }
             }
             .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: PlayerMetrics.previewCorner, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(.white.opacity(0.9), lineWidth: 2)
+                RoundedRectangle(cornerRadius: PlayerMetrics.previewCorner, style: .continuous)
+                    .strokeBorder(.white.opacity(0.9), lineWidth: PlayerMetrics.television ? 3 : 2)
             )
-            .shadow(color: .black.opacity(0.5), radius: 12, y: 6)
+            .shadow(color: .black.opacity(0.5), radius: PlayerMetrics.television ? 20 : 12, y: PlayerMetrics.television ? 10 : 6)
         }
     }
 }
@@ -207,7 +223,7 @@ struct LivePlayerTimeline: View {
                             .frame(width: geo.size.width * progress(at: context.date))
                     }
                 }
-                .frame(height: PlayerMetrics.barHeight)
+                .frame(height: PlayerMetrics.barHeight(scrubbing: false))
                 HStack {
                     Text(programme?.programStart.map { $0.formatted(date: .omitted, time: .shortened) } ?? "")
                     Spacer()
@@ -216,13 +232,13 @@ struct LivePlayerTimeline: View {
                         Text("\(minutes) min left · ends \(end.formatted(date: .omitted, time: .shortened))")
                     }
                 }
-                .font(.caption.monospacedDigit())
+                .font(PlayerMetrics.television ? .callout.monospacedDigit() : .caption.monospacedDigit())
                 .foregroundStyle(.white.opacity(0.9))
             }
             .opacity(programme == nil ? 0.4 : 1)
             .accessibilityElement(children: .combine)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, PlayerMetrics.television ? 0 : 8)
     }
 
     private func progress(at date: Date) -> CGFloat {
@@ -230,5 +246,3 @@ struct LivePlayerTimeline: View {
         return CGFloat(min(max(date.timeIntervalSince(start) / end.timeIntervalSince(start), 0), 1))
     }
 }
-
-#endif

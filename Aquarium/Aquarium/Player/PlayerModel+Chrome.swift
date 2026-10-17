@@ -1,10 +1,7 @@
-//  What the shared chrome asks of the model on iPhone, iPad and Mac, where
-//  the Apple TV player already had an answer: the channel being watched and
-//  the lineup around it, which tabs a stream has something to show in, and
-//  the chapter marks for the timeline. The Apple TV's versions are in
-//  `PlayerModel+PlaybackTV.swift`; phase 5 of the overhaul folds the two.
-
-#if !os(tvOS)
+//  What the shared chrome asks of the model, on every platform: the channel
+//  being watched and the lineup around it, which tabs a stream has something
+//  to show in, why a tab's controls are quiet, and the chapter marks for the
+//  timeline.
 
 import Foundation
 
@@ -91,6 +88,10 @@ extension PlayerModel {
         return "Picture controls need the mpv engine. " + (engineSwitchUnavailableReason(to: .mpv) ?? "")
     }
 
+    /// The title behind the Up Next card, where it is a server item: what is
+    /// queued by hand first, then the one the series offers.
+    var upNextItem: BaseItem? { queue.first ?? upNext }
+
     /// How many titles wait behind this one: the hand-made queue, or the one
     /// Up Next the series offers.
     var upNextCount: Int {
@@ -98,5 +99,3 @@ extension PlayerModel {
         return upNext != nil || upNextLocalId != nil ? 1 : 0
     }
 }
-
-#endif

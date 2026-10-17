@@ -2385,15 +2385,16 @@ enum SettingsCopy {
         text: "Downloads the channels and the guide again straight away, instead of waiting for the next scheduled refresh."
     )
     #if os(tvOS)
-    // The Apple TV plays through mpv, not Apple's player: its framing is only
-    // set here (the player has no control for it), and the picture controls
-    // missing are a choice rather than something the player can't do.
+    // The Apple TV plays through mpv alone, so every picture control is
+    // live there; the engine row and Battery saver (it is on mains) are not
+    // offered.
     static let framing = SettingNote(
         name: "Framing",
         text: "Fill is how you put a 2.35:1 film on a 16:9 screen without watching it between black bars. It does cut the edges of the frame off."
     )
     static let pictureControls = SettingNote(
-        text: "There are no brightness, contrast or colour controls here: the television's own picture settings are the place for them, and they apply to everything on screen."
+        name: "Picture",
+        text: "Brightness, contrast, saturation and gamma, each from −100 to 100 with 0 as the file's own, applied by the player as it draws. The television's own picture settings still apply over them to everything on screen; the player's Picture tab has the same controls over the live picture, which is the better place to judge them."
     )
     #else
     static let framing = SettingNote(
@@ -2404,6 +2405,15 @@ enum SettingsCopy {
         name: "Picture",
         text: "Brightness, contrast, saturation and gamma, each from −100 to 100 with 0 as the file's own. They are the mpv engine's: setting any of them switches a title playing on Apple's engine over to mpv, and the player's Picture tab has the same sliders over the live picture."
     )
+    #endif
+    static let pictureBrightness = SettingNote(name: "Brightness", text: pictureControls.text)
+    static let pictureContrast = SettingNote(name: "Contrast", text: pictureControls.text)
+    static let pictureSaturation = SettingNote(name: "Saturation", text: pictureControls.text)
+    static let pictureGamma = SettingNote(name: "Gamma", text: pictureControls.text)
+    static let resetPicture = SettingNote(
+        name: "Reset picture",
+        text: "Puts the file's own picture back: no adjustment, no zoom, its own shape."
+    )
     static let pictureZoom = SettingNote(
         name: "Zoom",
         text: "Enlarges the picture about its centre, up to 2×, cropping what spills over the edges. The mpv engine's, like the sliders above."
@@ -2412,6 +2422,7 @@ enum SettingsCopy {
         name: "Aspect ratio",
         text: "Stretches or crops the picture to a shape other than the file's own, for a film letterboxed inside its own frame. The mpv engine's too."
     )
+    #if !os(tvOS)
     static let playbackEngineChoice = SettingNote(
         name: "Playback engine",
         text: "Automatic plays through Apple's engine and switches a title to mpv only when it needs something Apple's cannot do — picture subtitles, DTS or TrueHD, the picture controls, an audio delay on a transcode, a Matroska download. Apple: hardware decode straight to the screen, Picture in Picture, AirPlay and Watch Together, and the least battery; Matroska and DTS go to the server to convert, and picture subtitles are burned in there. mpv: opens the original file whatever it is and has every control, at a shader pass per frame that costs more battery; Picture in Picture, AirPlay and Watch Together hand the title back to Apple's engine while they run."

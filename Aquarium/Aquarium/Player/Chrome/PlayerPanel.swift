@@ -1,17 +1,24 @@
 //  The panel: a row of tabs, and under it the choices for the tab that is
 //  open. Info · Channels · Audio · Subtitles · Quality · Speed · Sync ·
 //  Picture. A sheet with medium and large detents on a phone, a popover off
-//  the pill that opened it on an iPad or a Mac; the Apple TV's swipe-down
-//  panel (`TV/TVPlayerPanel.swift`) shows its own tabs in focus-driven cards
-//  until phase 5 brings it here.
+//  the pill that opened it on an iPad or a Mac, and on the Apple TV the card
+//  that comes down from the top of the picture on a swipe down: wide and
+//  shallow, its tabs focusable, its rows cards in a row that scrolls
+//  sideways, so as much of the picture as possible stays in view — most of
+//  all on Sync and Picture, where the picture is what's being judged.
 //
 //  A row the engine cannot honour says why rather than vanishing: the quality
 //  rungs under a download, the audio offset on a transcode, the picture
 //  sliders on AVPlayer — the last two with a button that hands the title to
 //  the mpv engine at the same position. The one thing a stream has nothing
 //  of (a film has no channels) is left out of the tabs.
-
-#if !os(tvOS)
+//
+//  Focus, on a television: focusing a tab opens it, the way the system's own
+//  tab bars work; moving down reaches its choices. Up, a swipe up or Menu
+//  from a choice goes back to the tab it belongs to — never to whichever tab
+//  happens to be above it — and from the tabs, Menu or a swipe up puts the
+//  panel away (see `PlayerRemoteDriver` for the swipe). Every card is lifted
+//  and painted from the app's palette (`PlayerFocusStyle`).
 
 import SwiftUI
 
@@ -20,8 +27,32 @@ struct PlayerPanel: View {
     @Binding var tab: PlayerTab
     let schedule: ChannelSchedule
     let artwork: InfoArtwork
+    /// Puts the panel away, where the panel is the thing that decides: Menu
+    /// from the row of tabs on a television.
+    var close: (() -> Void)? = nil
+    /// Told whether focus is on the row of tabs, for the swipe up that
+    /// closes the panel from there on a television.
+    var tabsFocused: ((Bool) -> Void)? = nil
 
     var body: some View {
+        Group {
+            #if os(tvOS)
+            television
+            #else
+            stacked
+            #endif
+        }
+        .foregroundStyle(Theme.text)
+        // A tab the stream has nothing to show in — Channels after a channel
+        // became a film — falls back to Info.
+        .onChange(of: player.panelTabs, initial: true) { _, tabs in
+            if !tabs.contains(tab) { tab = .info }
+        }
+    }
+
+    // MARK: - A phone, an iPad, a Mac
+
+    private var stacked: some View {
         VStack(spacing: 0) {
             tabStrip
             Divider().overlay(Theme.border)
@@ -31,12 +62,6 @@ struct PlayerPanel: View {
                     .padding(.vertical, 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-        .foregroundStyle(Theme.text)
-        // A tab the stream has nothing to show in — Channels after a channel
-        // became a film — falls back to Info.
-        .onChange(of: player.panelTabs, initial: true) { _, tabs in
-            if !tabs.contains(tab) { tab = .info }
         }
     }
 
@@ -48,16 +73,9 @@ struct PlayerPanel: View {
                         Button {
                             tab = item
                         } label: {
-                            Label(item.title, systemImage: item.symbol)
-                                .labelStyle(.titleOnly)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(item == tab ? .white : Theme.textDim)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(Capsule().fill(item == tab ? Theme.accent : .clear))
-                                .contentShape(Capsule())
+                            PanelTabLabel(title: item.title, isCurrent: item == tab)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PlayerFocusStyle())
                         .id(item)
                         .accessibilityAddTraits(item == tab ? [.isSelected] : [])
                     }
@@ -72,6 +90,26 @@ struct PlayerPanel: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Panel tabs")
     }
+
+    // MARK: - A television
+
+    #if os(tvOS)
+    private var television: some View {
+        TelevisionPanelBody(tab: $tab, close: close, tabsFocused: tabsFocused) {
+            content
+        }
+        .padding(.horizontal, 28)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .playerGlass(cornerRadius: PlayerMetrics.panelCorner)
+        // A row longer than the panel scrolls inside it rather than running
+        // off its edge.
+        .clipShape(RoundedRectangle(cornerRadius: PlayerMetrics.panelCorner, style: .continuous))
+        .padding(.horizontal, PlayerMetrics.panelGutter)
+        .padding(.top, PlayerMetrics.panelTop)
+    }
+    #endif
 
     @ViewBuilder
     private var content: some View {
@@ -88,58 +126,373 @@ struct PlayerPanel: View {
     }
 }
 
+/// A tab along the top of the panel: text, with the accent capsule behind
+/// the open one — or, on a television, behind the focused one and an accent
+/// underline under the open one.
+private struct PanelTabLabel: View {
+    @Environment(\.isFocused) private var isFocused
+    let title: String
+    let isCurrent: Bool
+
+    var body: some View {
+        let tv = PlayerMetrics.television
+        let lit = tv ? isFocused : isCurrent
+        Text(title)
+            .font(tv ? .headline : .subheadline.weight(.semibold))
+            .foregroundStyle(lit ? .white : isCurrent ? Theme.text : Theme.textDim)
+            .padding(.horizontal, tv ? 22 : 14)
+            .padding(.vertical, 8)
+            .background(Capsule().fill(lit ? Theme.accent : .clear))
+            .overlay(alignment: .bottom) {
+                if tv, isCurrent, !isFocused {
+                    Capsule().fill(Theme.accent).frame(height: 4).padding(.horizontal, 22).offset(y: 4)
+                }
+            }
+            .contentShape(Capsule())
+    }
+}
+
+#if os(tvOS)
+/// The television's panel: its row of tabs, driven by the focus engine, and
+/// under it the open tab's cards. Menu from a card goes back up to its tab,
+/// and from the tabs puts the panel away.
+private struct TelevisionPanelBody<Content: View>: View {
+    @Environment(PlayerModel.self) private var player
+    @Binding var tab: PlayerTab
+    let close: (() -> Void)?
+    let tabsFocused: ((Bool) -> Void)?
+    @ViewBuilder let content: () -> Content
+
+    @FocusState private var focusedTab: PlayerTab?
+    /// Whether focus has reached the row of tabs since the panel opened —
+    /// see the retry in `body`.
+    @State private var tabWasFocused = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            tabs
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .focusSection()
+        }
+        .onChange(of: focusedTab) { was, focused in
+            // Belt to the braces in `tabs`: should focus reach another tab
+            // from a choice anyway, back to the one it belongs to.
+            if was == nil, let focused, focused != tab {
+                focusedTab = tab
+                return
+            }
+            if let focused {
+                tab = focused
+                tabWasFocused = true
+            }
+            tabsFocused?(focused != nil)
+        }
+        .defaultFocus($focusedTab, tab)
+        // Claimed on appearing, and again a moment later if nothing has it:
+        // the first claim can land while `RemoteInput` still holds focus and
+        // be refused, which leaves focus nowhere — and Menu, with nothing
+        // focused to take it, closing the player instead of the panel. Only
+        // until a tab has had it once: after that, nothing focused on the
+        // row means a press down into the choices, which a retry would undo.
+        .onAppear { focusedTab = tab }
+        .task {
+            for _ in 0..<5 {
+                try? await Task.sleep(for: .milliseconds(100))
+                if focusedTab != nil || tabWasFocused { return }
+                focusedTab = tab
+            }
+        }
+        .onDisappear { tabsFocused?(false) }
+        // Menu: from a choice, back up to its tab; from the tabs, away.
+        .onExitCommand {
+            if focusedTab == nil {
+                focusedTab = tab
+            } else {
+                close?()
+            }
+        }
+    }
+
+    private var tabs: some View {
+        HStack(spacing: 8) {
+            ForEach(player.panelTabs) { item in
+                Button { tab = item } label: {
+                    PanelTabLabel(title: item.title, isCurrent: item == tab)
+                }
+                .buttonStyle(PlayerFocusStyle())
+                .focused($focusedTab, equals: item)
+                // From the choices, Up can only reach the open tab: the
+                // others can't take focus until it is on the row. Left to
+                // the focus engine, Up takes the nearest tab above, which
+                // lights up for a moment even when put right.
+                .disabled(focusedTab == nil && item != tab)
+                .accessibilityAddTraits(item == tab ? [.isSelected] : [])
+            }
+        }
+        // The full width of the panel, so that Up finds the tabs from a
+        // choice at the far right too, where no tab is directly above.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .focusSection()
+    }
+}
+#endif
+
 // MARK: - Rows
+
+/// The width a card in a row takes on a television; nil shares the row with
+/// the other cards in it.
+private struct PanelCardWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = 460
+}
+
+private extension EnvironmentValues {
+    var panelCardWidth: CGFloat? {
+        get { self[PanelCardWidthKey.self] }
+        set { self[PanelCardWidthKey.self] = newValue }
+    }
+}
+
+/// The rows of a tab: a column on a phone, an iPad or a Mac; on a television
+/// a row of cards that scrolls sideways, or (`fills`) one that shares the
+/// panel's width between them — every quality rung at once, every speed.
+struct PanelRows<Content: View>: View {
+    var fills = false
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        if PlayerMetrics.television {
+            if fills {
+                HStack(spacing: 20) { content() }
+                    .padding(.vertical, 10)
+                    .environment(\.panelCardWidth, nil)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 22) { content() }
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 6)
+                }
+                .scrollClipDisabled()
+                // As tall as its cards: a sideways scroll view otherwise
+                // takes all the height it is offered, and the panel with it.
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 6) { content() }
+        }
+    }
+}
 
 /// One choice in a tab: a title, an optional line under it, a tick when it is
 /// the current one. A row that cannot be chosen keeps its place and says why.
-struct PanelRow: View {
+/// On a television it is a card: the accent behind it while it has focus, a
+/// tick in the accent when it is the current choice, lifted by
+/// `PlayerFocusStyle`.
+struct PanelRow<Leading: View>: View {
     let title: String
     var detail: String? = nil
     var isSelected = false
     var disabledReason: String? = nil
+    /// A television card's width; nil shares the row. Ignored elsewhere.
+    var width: CGFloat? = nil
+    /// A television card's height; nil is as tall as the text needs.
+    var height: CGFloat? = nil
+    /// The title in the middle of the card, for short labels — `+5`,
+    /// `Reset`, `1.5×` — that look adrift at its leading edge.
+    var centered = false
     let action: () -> Void
+    /// A channel's logo: above the title on a television, beside it
+    /// elsewhere.
+    @ViewBuilder var leading: () -> Leading
+
+    @Environment(\.panelCardWidth) private var rowWidth
 
     var body: some View {
         Button(action: action) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.body)
-                        .foregroundStyle(Theme.text)
-                        .multilineTextAlignment(.leading)
-                    if let detail, !detail.isEmpty {
-                        Text(detail)
-                            .font(.caption)
-                            .foregroundStyle(Theme.textDim)
-                            .multilineTextAlignment(.leading)
-                    }
-                    if let disabledReason {
-                        Text(disabledReason)
-                            .font(.caption)
-                            .foregroundStyle(Theme.warn)
-                            .multilineTextAlignment(.leading)
-                    }
-                }
-                Spacer(minLength: 0)
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Theme.link)
-                }
+            if PlayerMetrics.television {
+                PanelCardLabel(title: title, detail: detail, isSelected: isSelected, disabledReason: disabledReason,
+                               width: width ?? rowWidth, height: height, centered: centered, leading: leading)
+            } else {
+                PanelRowLabel(title: title, detail: detail, isSelected: isSelected, disabledReason: disabledReason,
+                              leading: leading)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isSelected ? Theme.accentSoft : Color.white.opacity(0.06))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PlayerFocusStyle())
         .disabled(disabledReason != nil)
         .opacity(disabledReason != nil ? 0.75 : 1)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .accessibilityHint(disabledReason ?? "")
+    }
+}
+
+extension PanelRow where Leading == EmptyView {
+    init(title: String, detail: String? = nil, isSelected: Bool = false, disabledReason: String? = nil,
+         width: CGFloat? = nil, height: CGFloat? = nil, centered: Bool = false, action: @escaping () -> Void) {
+        self.init(title: title, detail: detail, isSelected: isSelected, disabledReason: disabledReason,
+                  width: width, height: height, centered: centered, action: action) { EmptyView() }
+    }
+}
+
+private struct PanelRowLabel<Leading: View>: View {
+    @Environment(\.isFocused) private var isFocused
+    let title: String
+    let detail: String?
+    let isSelected: Bool
+    let disabledReason: String?
+    @ViewBuilder var leading: () -> Leading
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            leading()
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(isFocused ? .white : Theme.text)
+                    .multilineTextAlignment(.leading)
+                if let detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(isFocused ? .white.opacity(0.85) : Theme.textDim)
+                        .multilineTextAlignment(.leading)
+                }
+                if let disabledReason {
+                    Text(disabledReason)
+                        .font(.caption)
+                        .foregroundStyle(Theme.warn)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            Spacer(minLength: 0)
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(isFocused ? .white : Theme.link)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.playerFill(focused: isFocused, rest: isSelected ? Theme.accentSoft : Color.white.opacity(0.06)))
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+/// The television's card. Lifted from the Apple TV player's `ChoiceCard`.
+private struct PanelCardLabel<Leading: View>: View {
+    @Environment(\.isFocused) private var isFocused
+    let title: String
+    let detail: String?
+    let isSelected: Bool
+    let disabledReason: String?
+    let width: CGFloat?
+    let height: CGFloat?
+    let centered: Bool
+    @ViewBuilder var leading: () -> Leading
+
+    /// Where the tick goes: in the corner when the card is too narrow to
+    /// spare the title the room, or when the title is centred and a tick
+    /// beside it would push it off the middle.
+    private var tickInCorner: Bool { width == nil || centered }
+
+    var body: some View {
+        VStack(alignment: centered ? .center : .leading, spacing: 10) {
+            leading()
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                if centered { Spacer(minLength: 0) }
+                // Only a card sharing its row's width shrinks its title to
+                // fit. One of its own width — a long track name, with the
+                // tick beside it — takes a third line instead: shrunk, the
+                // chosen track read smaller than the ones beside it and was
+                // cut off all the same.
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(width == nil ? 2 : 3)
+                    .minimumScaleFactor(width == nil ? 0.75 : 1)
+                    .multilineTextAlignment(centered ? .center : .leading)
+                Spacer(minLength: 0)
+                if isSelected, !tickInCorner { checkmark }
+            }
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(isFocused ? .white.opacity(0.85) : Theme.textDim)
+                    .lineLimit(2)
+            }
+            if let disabledReason, !disabledReason.isEmpty {
+                Text(disabledReason)
+                    .font(.caption)
+                    .foregroundStyle(Theme.warn)
+                    .lineLimit(2)
+            }
+        }
+        .foregroundStyle(isFocused ? .white : Theme.text)
+        .padding(.horizontal, centered ? 12 : 24)
+        .padding(.vertical, 10)
+        .frame(width: width, alignment: centered ? .center : .leading)
+        .frame(maxWidth: width == nil ? .infinity : nil, alignment: centered ? .center : .leading)
+        .frame(minHeight: height ?? 72)
+        .frame(height: height)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(.playerFill(focused: isFocused, rest: Color.white.opacity(0.08)))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(isSelected && !isFocused ? Theme.accent.opacity(0.7) : .clear, lineWidth: 2)
+        )
+        // A card sharing a row is too narrow to give the title's width to
+        // the tick, so there it sits in the corner instead.
+        .overlay(alignment: .topTrailing) {
+            if isSelected, tickInCorner { checkmark.padding(12) }
+        }
+    }
+
+    private var checkmark: some View {
+        Image(systemName: "checkmark")
+            .font(.headline.weight(.bold))
+            .foregroundStyle(isFocused ? .white : Theme.link)
+    }
+}
+
+/// A short button in a row of them: a sync step, a picture step, a sleep
+/// timer's minutes. A small card on a television, a square elsewhere.
+struct PanelStepButton: View {
+    let title: String
+    var width: CGFloat? = nil
+    var isDisabled = false
+    let action: () -> Void
+
+    var body: some View {
+        if PlayerMetrics.television {
+            PanelRow(title: title, width: width ?? 130, height: 64, centered: true, action: action)
+                .disabled(isDisabled)
+                .opacity(isDisabled ? 0.4 : 1)
+        } else {
+            Button(action: action) {
+                PanelStepLabel(title: title)
+            }
+            .buttonStyle(PlayerFocusStyle())
+            .disabled(isDisabled)
+            .opacity(isDisabled ? 0.4 : 1)
+        }
+    }
+}
+
+private struct PanelStepLabel: View {
+    @Environment(\.isFocused) private var isFocused
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold).monospacedDigit())
+            .foregroundStyle(isFocused ? .white : Theme.text)
+            .frame(minWidth: 44)
+            .padding(.vertical, 12)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.playerFill(focused: isFocused, rest: Color.white.opacity(0.06))))
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -171,6 +524,76 @@ private struct PanelNote: View {
     }
 }
 
+/// A value from a range: a slider where there is a finger or a pointer to
+/// drag one; on a television, which has no slider a remote can drive, a
+/// step down and a step up either side of the value and a bar showing where
+/// in the range it is.
+private struct PanelSlider: View {
+    let name: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    var enabled = true
+    let format: (Double) -> String
+
+    var body: some View {
+        #if os(tvOS)
+        HStack(spacing: 12) {
+            Text(name)
+                .font(.headline)
+                .lineLimit(1)
+                .frame(width: 230, alignment: .leading)
+            PanelStepButton(title: "−", width: 84, isDisabled: !enabled || value <= range.lowerBound) {
+                value = max(range.lowerBound, value - step)
+            }
+            VStack(spacing: 6) {
+                Text(format(value))
+                    .font(.headline.monospacedDigit())
+                    .foregroundStyle(Theme.text)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.white.opacity(0.15))
+                        Capsule().fill(Theme.accent)
+                            .frame(width: geo.size.width * fraction)
+                    }
+                }
+                .frame(height: 6)
+            }
+            .frame(width: 150)
+            PanelStepButton(title: "+", width: 84, isDisabled: !enabled || value >= range.upperBound) {
+                value = min(range.upperBound, value + step)
+            }
+        }
+        .opacity(enabled ? 1 : 0.5)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(name)
+        .accessibilityValue(format(value))
+        #else
+        HStack(spacing: 12) {
+            Text(name)
+                .font(.subheadline)
+                .frame(width: 88, alignment: .leading)
+            Slider(value: $value, in: range, step: step)
+                .tint(Theme.accent)
+                .disabled(!enabled)
+                .accessibilityLabel(name)
+                .accessibilityValue(format(value))
+            Text(format(value))
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(Theme.textDim)
+                .frame(width: 52, alignment: .trailing)
+        }
+        .opacity(enabled ? 1 : 0.5)
+        #endif
+    }
+
+    private var fraction: CGFloat {
+        let span = range.upperBound - range.lowerBound
+        guard span > 0 else { return 0 }
+        return CGFloat(min(max((value - range.lowerBound) / span, 0), 1))
+    }
+}
+
 // MARK: - Info
 
 private struct InfoTab: View {
@@ -179,11 +602,82 @@ private struct InfoTab: View {
     let artwork: InfoArtwork
 
     var body: some View {
+        if PlayerMetrics.television { wide } else { tall }
+    }
+
+    /// Across the top of the picture: the poster, the words, what can be
+    /// changed, and the stream in a line.
+    private var wide: some View {
+        let rows = PlayerStreamRows(player: player)
+        let _ = player.position
+        return HStack(alignment: .center, spacing: 32) {
+            if let url = InfoArtwork.url(for: player) {
+                poster(url)
+                    .frame(width: player.isLive ? 150 : 104, height: player.isLive ? 96 : 156)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                if player.isLive { live } else { onDemand }
+                Text(Self.summary(rows))
+                    .font(.caption)
+                    .foregroundStyle(Theme.textDim)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            actions
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// What the stream is, in a line: delivery, size, rate, engine, display.
+    private static func summary(_ rows: PlayerStreamRows) -> String {
+        var parts: [String] = []
+        for row in rows.stream where ["Delivery", "Arriving at", "Variant"].contains(row.label) {
+            parts.append(row.value)
+        }
+        for row in rows.now where ["Engine", "Display"].contains(row.label) {
+            parts.append(row.label == "Display" ? "Display \(row.value)" : row.value)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// What the Info tab can change, on a television: whether the next
+    /// episode starts by itself, and the sleep timer.
+    @ViewBuilder
+    private var actions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !player.isLive, player.item?.isEpisode == true {
+                let on = !player.autoplayCancelled
+                PanelRow(title: on ? "Autoplay: On" : "Autoplay: Off", isSelected: on, width: 340) {
+                    on ? player.cancelAutoplay() : player.resumeAutoplay()
+                }
+            }
+            if let left = player.sleepMinutesRemaining {
+                PanelRow(title: "Sleep: \(left) min left", detail: "Click to cancel", isSelected: true, width: 340) {
+                    player.cancelSleepTimer()
+                }
+            } else {
+                HStack(spacing: 10) {
+                    Text("Sleep")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(Theme.link)
+                    ForEach([15, 30, 60, 90], id: \.self) { minutes in
+                        PanelRow(title: "\(minutes)m", width: 130, height: 64, centered: true) {
+                            player.setSleepTimer(minutes: minutes)
+                        }
+                        .accessibilityLabel("Stop in \(minutes) minutes")
+                    }
+                }
+            }
+        }
+    }
+
+    private var tall: some View {
         let rows = PlayerStreamRows(player: player)
         // Read here so the stream figures, which nothing writes, redraw on the
         // player's clock.
         let _ = player.position
-        VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 14) {
                 if let url = InfoArtwork.url(for: player) {
                     poster(url)
@@ -226,6 +720,8 @@ private struct InfoTab: View {
         }
     }
 
+    /// The one fetched beforehand when there is one — see `InfoArtwork` — and
+    /// fetched now only if the panel beat it.
     @ViewBuilder
     private func poster(_ url: URL) -> some View {
         let mode: ContentMode = player.isLive ? .fit : .fill
@@ -246,52 +742,69 @@ private struct InfoTab: View {
     @ViewBuilder
     private var onDemand: some View {
         let item = player.infoItem
+        let tv = PlayerMetrics.television
         Text(item?.title ?? player.title)
-            .font(.headline)
+            .font(tv ? .title3.weight(.bold) : .headline)
         if let facts = Self.facts(item), !facts.isEmpty {
             Text(facts)
-                .font(.subheadline)
+                .font(tv ? .callout : .subheadline)
                 .foregroundStyle(Theme.textBody)
+                .lineLimit(tv ? 1 : nil)
         }
         if let overview = item?.Overview, !overview.isEmpty {
             Text(overview)
-                .font(.subheadline)
+                .font(tv ? .callout : .subheadline)
                 .foregroundStyle(Theme.textBody)
-                .lineLimit(4)
+                .lineLimit(tv ? 2 : 4)
         }
     }
 
     @ViewBuilder
     private var live: some View {
+        let tv = PlayerMetrics.television
         if let now = schedule.now {
             Text(now.title)
-                .font(.headline)
+                .font(tv ? .title3.weight(.bold) : .headline)
             if let start = now.programStart, let end = now.programEnd {
                 Text("\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))")
-                    .font(.subheadline)
+                    .font(tv ? .callout : .subheadline)
                     .foregroundStyle(Theme.textBody)
             }
             if let overview = now.Overview, !overview.isEmpty {
                 Text(overview)
-                    .font(.subheadline)
+                    .font(tv ? .callout : .subheadline)
                     .foregroundStyle(Theme.textBody)
-                    .lineLimit(3)
+                    .lineLimit(tv ? 2 : 3)
             }
         } else {
             Text(player.title)
-                .font(.headline)
+                .font(tv ? .title3.weight(.bold) : .headline)
         }
         if !schedule.upcoming.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("COMING UP")
-                    .font(.caption.weight(.heavy))
-                    .foregroundStyle(Theme.link)
-                    .padding(.top, 4)
-                ForEach(schedule.upcoming.prefix(3), id: \.Id) { programme in
-                    Text("\(programme.programStart?.formatted(date: .omitted, time: .shortened) ?? "") \(programme.title)")
-                        .font(.caption)
-                        .foregroundStyle(Theme.textBody)
-                        .lineLimit(1)
+            if tv {
+                HStack(spacing: 30) {
+                    Text("COMING UP")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(Theme.link)
+                    ForEach(schedule.upcoming.prefix(3), id: \.Id) { programme in
+                        Text("\(programme.programStart?.formatted(date: .omitted, time: .shortened) ?? "") \(programme.title)")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textBody)
+                            .lineLimit(1)
+                    }
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("COMING UP")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(Theme.link)
+                        .padding(.top, 4)
+                    ForEach(schedule.upcoming.prefix(3), id: \.Id) { programme in
+                        Text("\(programme.programStart?.formatted(date: .omitted, time: .shortened) ?? "") \(programme.title)")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textBody)
+                            .lineLimit(1)
+                    }
                 }
             }
         }
@@ -306,17 +819,10 @@ private struct InfoTab: View {
         } else {
             HStack(spacing: 8) {
                 ForEach([15, 30, 60, 90], id: \.self) { minutes in
-                    Button {
+                    PanelStepButton(title: "\(minutes) min") {
                         player.setSleepTimer(minutes: minutes)
-                    } label: {
-                        Text("\(minutes) min")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Theme.text)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.06)))
                     }
-                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
                     .accessibilityLabel("Stop in \(minutes) minutes")
                 }
             }
@@ -364,47 +870,29 @@ private struct InfoTab: View {
 
 private struct ChannelsTab: View {
     @Environment(PlayerModel.self) private var player
+    @FocusState private var focused: String?
 
     var body: some View {
         let current = player.currentChannel?.Id
-        VStack(spacing: 6) {
+        let tv = PlayerMetrics.television
+        PanelRows {
             ForEach(player.channelLineup, id: \.Id) { channel in
-                Button {
+                PanelRow(
+                    title: channel.title,
+                    detail: channel.ChannelNumber.map { "Channel \($0)" },
+                    isSelected: channel.Id == current,
+                    width: 300
+                ) {
                     player.playChannel(channel)
-                } label: {
-                    HStack(spacing: 12) {
-                        RemoteImage(url: Artwork.channelLogo(channel, width: 160), contentMode: .fit)
-                            .frame(width: 56, height: 32)
-                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(channel.title)
-                                .font(.body)
-                                .foregroundStyle(Theme.text)
-                            if let number = channel.ChannelNumber {
-                                Text("Channel \(number)")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.textDim)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                        if channel.Id == current {
-                            Image(systemName: "checkmark")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(Theme.link)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(channel.Id == current ? Theme.accentSoft : Color.white.opacity(0.06))
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                } leading: {
+                    RemoteImage(url: Artwork.channelLogo(channel, width: tv ? 240 : 160), contentMode: .fit)
+                        .frame(width: tv ? 252 : 56, height: tv ? 90 : 32)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(channel.Id == current ? [.isSelected] : [])
+                .focused($focused, equals: channel.Id)
             }
         }
+        .defaultFocus($focused, current)
     }
 }
 
@@ -422,15 +910,20 @@ private struct AudioTab: View {
             if options.isEmpty {
                 PanelNote(text: player.isOpening ? "The stream is still opening." : "This stream lists no audio tracks.")
             } else {
-                ForEach(options) { option in
-                    PanelRow(title: option.label,
-                             detail: option.needsNewStream ? "Reopens the stream with this track" : nil,
-                             isSelected: option.id == selected) {
-                        player.selectAudio(option)
+                PanelRows {
+                    ForEach(options) { option in
+                        PanelRow(title: option.label,
+                                 detail: option.needsNewStream ? "Reopens the stream with this track" : nil,
+                                 isSelected: option.id == selected) {
+                            player.selectAudio(option)
+                        }
                     }
                 }
             }
 
+            #if !os(tvOS)
+            // A menu picker, which a television has no control for; its
+            // language rows are in Settings.
             PanelHeading(text: "Preferred language")
             Picker(selection: $prefs.audioLanguage) {
                 ForEach(Languages.audioChoices, id: \.code) { Text($0.name).tag($0.code) }
@@ -446,6 +939,7 @@ private struct AudioTab: View {
                       option.id != player.selectedAudioOption else { return }
                 player.selectAudio(option)
             }
+            #endif
         }
     }
 }
@@ -459,22 +953,25 @@ private struct SubtitlesTab: View {
         let options = player.subtitleOptions
         let selected = player.selectedSubtitleOption
         VStack(alignment: .leading, spacing: 6) {
-            PanelRow(title: "Off", isSelected: selected == nil) {
-                player.selectSubtitles(nil)
+            PanelRows {
+                PanelRow(title: "Off", isSelected: selected == nil, width: 200) {
+                    player.selectSubtitles(nil)
+                }
+                ForEach(options) { option in
+                    PanelRow(title: option.label,
+                             detail: [option.isForced ? "Forced" : nil,
+                                      option.needsNewStream ? "Drawn by the server · reopens the stream" : nil]
+                                .compactMap { $0 }.joined(separator: " · "),
+                             isSelected: option.id == selected) {
+                        player.selectSubtitles(option)
+                    }
+                }
             }
             if options.isEmpty {
                 PanelNote(text: "This stream has no subtitle tracks.")
             }
-            ForEach(options) { option in
-                PanelRow(title: option.label,
-                         detail: [option.isForced ? "Forced" : nil,
-                                  option.needsNewStream ? "Drawn by the server · reopens the stream" : nil]
-                            .compactMap { $0 }.joined(separator: " · "),
-                         isSelected: option.id == selected) {
-                    player.selectSubtitles(option)
-                }
-            }
 
+            #if !os(tvOS)
             PanelHeading(text: "Preferred language")
             Picker(selection: $prefs.subtitleLanguage) {
                 ForEach(Languages.subtitleChoices, id: \.code) { Text($0.name).tag($0.code) }
@@ -493,12 +990,15 @@ private struct SubtitlesTab: View {
                       option.id != player.selectedSubtitleOption else { return }
                 player.selectSubtitles(option)
             }
+            #endif
         }
     }
 }
 
 // MARK: - Quality
 
+/// Every rung: a column of rows, or on a television every card at once
+/// across the panel, each the same size.
 private struct QualityTab: View {
     @Environment(PlayerModel.self) private var player
     @Environment(Preferences.self) private var prefs
@@ -508,20 +1008,33 @@ private struct QualityTab: View {
             if let reason = player.qualityUnavailableReason {
                 PanelNote(text: reason)
             }
-            ForEach(Quality.choices) { choice in
-                let current = player.currentBitrate == choice.maxBitrate
-                PanelRow(title: choice.label,
-                         detail: current && player.isTranscoding ? "Playing now · transcoding" : current ? "Playing now" : nil,
-                         isSelected: current,
-                         disabledReason: player.qualityUnavailableReason == nil ? nil : "Not for this stream") {
-                    guard !current else { return }
-                    Task { await player.switchQuality(to: choice.maxBitrate) }
+            PanelRows(fills: true) {
+                ForEach(Quality.choices) { choice in
+                    let current = player.currentBitrate == choice.maxBitrate
+                    PanelRow(title: Self.title(choice),
+                             detail: PlayerMetrics.television ? nil
+                                : current && player.isTranscoding ? "Playing now · transcoding" : current ? "Playing now" : nil,
+                             isSelected: current,
+                             disabledReason: player.qualityUnavailableReason == nil ? nil : "Not for this stream",
+                             height: PlayerMetrics.television ? 96 : nil) {
+                        guard !current else { return }
+                        Task { await player.switchQuality(to: choice.maxBitrate) }
+                    }
                 }
             }
-            if prefs.adaptiveQuality, player.offersQuality {
+            if prefs.adaptiveQuality, player.offersQuality, !PlayerMetrics.television {
                 PanelNote(text: "The stream steps down on its own when the connection struggles, and back up once it is steady. Settings → Video turns that off.")
             }
         }
+    }
+
+    /// "4K" over "36 Mbps" on a television: seven cards to a row leaves no
+    /// room for the two side by side.
+    private static func title(_ choice: QualityChoice) -> String {
+        guard PlayerMetrics.television, choice.maxBitrate != nil else {
+            return choice.maxBitrate == nil && PlayerMetrics.television ? "Original" : choice.label
+        }
+        return choice.label.components(separatedBy: " · ").reversed().joined(separator: "\n")
     }
 }
 
@@ -535,11 +1048,15 @@ private struct SpeedTab: View {
             if player.isLive {
                 PanelNote(text: "A live channel plays at its own pace.")
             }
-            ForEach(PlayerModel.speeds, id: \.self) { rate in
-                PanelRow(title: PlayerModel.speedName(rate),
-                         isSelected: abs(player.speed - rate) < 0.001,
-                         disabledReason: player.isLive ? "Not on a live channel" : nil) {
-                    player.speed = rate
+            PanelRows(fills: true) {
+                ForEach(PlayerModel.speeds, id: \.self) { rate in
+                    PanelRow(title: PlayerModel.speedName(rate),
+                             isSelected: abs(player.speed - rate) < 0.001,
+                             disabledReason: player.isLive ? "Not on a live channel" : nil,
+                             height: PlayerMetrics.television ? 64 : nil,
+                             centered: PlayerMetrics.television) {
+                        player.speed = rate
+                    }
                 }
             }
         }
@@ -554,7 +1071,9 @@ private struct SpeedTab: View {
 /// plus brings it forward — which is the opposite of the stored value
 /// (`Preferences.audioDelay`, positive for later), so the tab shows and steps
 /// its negation. Lifted from the Apple TV's tab; on AVPlayer a change rebuilds
-/// the stream, so a run of taps is settled first and applied once.
+/// the stream, so a run of taps is settled first and applied once. On the
+/// Apple TV the offset moved is the one for the frame rate of what is
+/// playing — `PlayerModel.audioDelayScope` says which.
 private struct SyncTab: View {
     @Environment(PlayerModel.self) private var player
 
@@ -564,63 +1083,65 @@ private struct SyncTab: View {
 
     private static let settle: Duration = .milliseconds(350)
 
-    private var reach: Int {
-        player.engine?.capabilities.contains(.audioDelayOnAnyStream) == true ? PlayerModel.audioDelayReach : 500
-    }
+    private var reach: Int { player.audioDelayReach }
 
     var body: some View {
         let current = pending ?? player.audioDelayMilliseconds
         let shown = -current
         let reason = player.audioDelayUnavailableReason
+        let tv = PlayerMetrics.television
         VStack(alignment: .leading, spacing: 10) {
             if let reason {
                 PanelNote(text: reason)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: tv ? 20 : 8) {
                 step(-50, current: current, reason: reason)
                 step(-5, current: current, reason: reason)
                 VStack(spacing: 2) {
                     Text(shown == 0 ? "In step" : "\(shown > 0 ? "+" : "−")\(abs(shown)) ms")
                         .font(.title3.weight(.bold).monospacedDigit())
                         .contentTransition(.numericText(value: Double(shown)))
-                    Text(current == 0 ? "Picture and sound together"
-                         : current < 0 ? "Sound earlier" : "Sound later")
+                    Text(caption(current))
                         .font(.caption)
                         .foregroundStyle(Theme.textDim)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: tv ? 380 : .infinity)
                 .accessibilityElement(children: .combine)
                 step(5, current: current, reason: reason)
                 step(50, current: current, reason: reason)
+                if tv {
+                    Spacer(minLength: 0)
+                    reset(current: current, reason: reason)
+                }
             }
             .animation(.easeOut(duration: 0.15), value: shown)
 
-            PanelRow(title: "Reset", detail: "Put the sound back in step with the picture",
-                     disabledReason: reason == nil || current == 0 ? nil : "Not on this stream") {
-                set(0)
-            }
+            if !tv { reset(current: current, reason: reason) }
 
             if reason != nil, player.canDelayAudioBySwitching {
                 EngineSwitchRow(reason: "audio delay")
             }
 
             if player.canResync || player.canReencodeForSync {
-                PanelHeading(text: "Repairs")
-            }
-            if player.canResync {
-                PanelRow(title: "Resync audio",
-                         detail: "Flushes picture and sound and starts them together again. A visible hiccup, so it is never done unasked.") {
-                    player.resyncAudio()
+                if !tv { PanelHeading(text: "Repairs") }
+                PanelRows {
+                    if player.canResync {
+                        PanelRow(title: "Resync audio",
+                                 detail: "Flushes picture and sound and starts them together again. A visible hiccup, so it is never done unasked.") {
+                            player.resyncAudio()
+                        }
+                    }
+                    if player.canReencodeForSync {
+                        PanelRow(title: "Re-encode for sync",
+                                 detail: "Asks the server to encode picture and sound together rather than copying either through — for a transcode that drifts.") {
+                            Task { await player.reencodeForSync() }
+                        }
+                    }
                 }
             }
-            if player.canReencodeForSync {
-                PanelRow(title: "Re-encode for sync",
-                         detail: "Asks the server to encode picture and sound together rather than copying either through — for a transcode that drifts.") {
-                    Task { await player.reencodeForSync() }
-                }
-            }
-            if !player.isLive {
+            if !player.isLive, !tv {
                 PanelNote(text: "Saved for everything you play on this device.")
             }
         }
@@ -634,23 +1155,31 @@ private struct SyncTab: View {
         .onDisappear { flush() }
     }
 
+    /// Which way the sound is moved and, where there is one offset per frame
+    /// rate, which one this is.
+    private func caption(_ current: Int) -> String {
+        let direction = current == 0 ? "Picture and sound together" : current < 0 ? "Sound earlier" : "Sound later"
+        guard let scope = player.audioDelayScope else { return direction }
+        return [current == 0 ? "Together" : direction, scope].joined(separator: " · ")
+    }
+
     /// `delta` as the tab signs it: negative holds the sound back.
     private func step(_ delta: Int, current: Int, reason: String?) -> some View {
         let target = current - delta
-        return Button {
+        return PanelStepButton(title: delta > 0 ? "+\(delta)" : "−\(-delta)",
+                               isDisabled: reason != nil || abs(target) > reach) {
             set(target)
-        } label: {
-            Text(delta > 0 ? "+\(delta)" : "−\(-delta)")
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-                .foregroundStyle(Theme.text)
-                .frame(minWidth: 44)
-                .padding(.vertical, 12)
-                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.06)))
         }
-        .buttonStyle(.plain)
-        .disabled(reason != nil || abs(target) > reach)
-        .opacity(reason != nil || abs(target) > reach ? 0.4 : 1)
         .accessibilityLabel(delta > 0 ? "Sound \(delta) milliseconds earlier" : "Sound \(-delta) milliseconds later")
+    }
+
+    private func reset(current: Int, reason: String?) -> some View {
+        PanelRow(title: "Reset",
+                 detail: PlayerMetrics.television ? nil : "Put the sound back in step with the picture",
+                 disabledReason: reason == nil || current == 0 ? nil : "Not on this stream",
+                 width: 180, height: PlayerMetrics.television ? 64 : nil, centered: PlayerMetrics.television) {
+            set(0)
+        }
     }
 
     private func set(_ value: Int) {
@@ -680,7 +1209,9 @@ private struct SyncTab: View {
 /// override, applied to the live picture: the mpv engine's. On AVPlayer every
 /// row says so and the row under them hands the title over. The values are
 /// the Settings ones, so what is set here holds for everything played after,
-/// and Reset puts the file's own picture back.
+/// and Reset puts the file's own picture back. On a television the sliders
+/// are steppers in two columns and the aspect ratios a row of cards, so the
+/// picture being judged stays mostly in view.
 private struct PictureTab: View {
     @Environment(PlayerModel.self) private var player
     @Environment(Preferences.self) private var prefs
@@ -697,71 +1228,78 @@ private struct PictureTab: View {
                 }
             }
 
-            PanelHeading(text: "Picture")
-            slider("Brightness", value: $prefs.pictureBrightness, enabled: live)
-            slider("Contrast", value: $prefs.pictureContrast, enabled: live)
-            slider("Saturation", value: $prefs.pictureSaturation, enabled: live)
-            slider("Gamma", value: $prefs.pictureGamma, enabled: live)
-
-            PanelHeading(text: "Zoom")
-            HStack(spacing: 12) {
-                Text("Zoom")
-                    .font(.subheadline)
-                    .frame(width: 88, alignment: .leading)
-                Slider(value: $prefs.pictureZoom, in: 1...2, step: 0.05)
-                    .tint(Theme.accent)
-                    .disabled(!live)
-                    .accessibilityLabel("Zoom")
-                    .accessibilityValue("\(Int((prefs.pictureZoom * 100).rounded()))%")
-                Text("\(prefs.pictureZoom.formatted(.number.precision(.fractionLength(2))))×")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(Theme.textDim)
-                    .frame(width: 52, alignment: .trailing)
+            if PlayerMetrics.television {
+                HStack(alignment: .top, spacing: 40) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        adjustment("Brightness", value: $prefs.pictureBrightness, enabled: live)
+                        adjustment("Contrast", value: $prefs.pictureContrast, enabled: live)
+                        adjustment("Saturation", value: $prefs.pictureSaturation, enabled: live)
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        adjustment("Gamma", value: $prefs.pictureGamma, enabled: live)
+                        zoom(enabled: live)
+                        reset
+                    }
+                }
+            } else {
+                PanelHeading(text: "Picture")
+                adjustment("Brightness", value: $prefs.pictureBrightness, enabled: live)
+                adjustment("Contrast", value: $prefs.pictureContrast, enabled: live)
+                adjustment("Saturation", value: $prefs.pictureSaturation, enabled: live)
+                adjustment("Gamma", value: $prefs.pictureGamma, enabled: live)
+                PanelHeading(text: "Zoom")
+                zoom(enabled: live)
             }
-            .opacity(live ? 1 : 0.5)
-            .onChange(of: prefs.pictureZoom) { _, _ in player.applyFraming() }
 
-            PanelHeading(text: "Aspect ratio")
-            ForEach(Preferences.aspectChoices, id: \.ratio) { choice in
-                PanelRow(title: choice.label,
-                         isSelected: abs(prefs.aspectOverride - choice.ratio) < 0.001,
-                         disabledReason: live ? nil : "Needs the mpv engine") {
-                    prefs.aspectOverride = choice.ratio
-                    player.applyFraming()
+            if !PlayerMetrics.television { PanelHeading(text: "Aspect ratio") }
+            PanelRows(fills: PlayerMetrics.television) {
+                ForEach(Preferences.aspectChoices, id: \.ratio) { choice in
+                    PanelRow(title: choice.label,
+                             isSelected: abs(prefs.aspectOverride - choice.ratio) < 0.001,
+                             disabledReason: live ? nil : "Needs the mpv engine",
+                             height: PlayerMetrics.television ? 64 : nil,
+                             centered: PlayerMetrics.television) {
+                        prefs.aspectOverride = choice.ratio
+                        player.applyFraming()
+                    }
                 }
             }
 
-            PanelRow(title: "Reset", detail: "The file's own picture: no adjustment, no zoom, its own shape",
-                     disabledReason: prefs.pictureIsAdjusted ? nil : "Nothing is adjusted") {
-                prefs.resetPicture()
-                player.applyPicture()
-                player.applyFraming()
-            }
-
-            if live {
-                PanelNote(text: "Saved for everything you play on this device.")
+            if !PlayerMetrics.television {
+                reset
+                if live {
+                    PanelNote(text: "Saved for everything you play on this device.")
+                }
             }
         }
     }
 
     /// One of the four adjustments: -100…100, 0 being the file's own.
-    private func slider(_ name: String, value: Binding<Double>, enabled: Bool) -> some View {
-        HStack(spacing: 12) {
-            Text(name)
-                .font(.subheadline)
-                .frame(width: 88, alignment: .leading)
-            Slider(value: value, in: -100...100, step: 1)
-                .tint(Theme.accent)
-                .disabled(!enabled)
-                .accessibilityLabel(name)
-                .accessibilityValue("\(Int(value.wrappedValue))")
-            Text("\(Int(value.wrappedValue))")
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(Theme.textDim)
-                .frame(width: 52, alignment: .trailing)
+    private func adjustment(_ name: String, value: Binding<Double>, enabled: Bool) -> some View {
+        PanelSlider(name: name, value: value, range: -100...100, step: PlayerMetrics.television ? 5 : 1,
+                    enabled: enabled) { "\(Int($0))" }
+            .onChange(of: value.wrappedValue) { _, _ in player.applyPicture() }
+    }
+
+    private func zoom(enabled: Bool) -> some View {
+        @Bindable var prefs = prefs
+        return PanelSlider(name: "Zoom", value: $prefs.pictureZoom, range: 1...2,
+                           step: PlayerMetrics.television ? 0.1 : 0.05, enabled: enabled) {
+            "\($0.formatted(.number.precision(.fractionLength(2))))×"
         }
-        .opacity(enabled ? 1 : 0.5)
-        .onChange(of: value.wrappedValue) { _, _ in player.applyPicture() }
+        .onChange(of: prefs.pictureZoom) { _, _ in player.applyFraming() }
+    }
+
+    private var reset: some View {
+        let tv = PlayerMetrics.television
+        return PanelRow(title: tv ? "Reset picture" : "Reset",
+                        detail: tv ? nil : "The file's own picture: no adjustment, no zoom, its own shape",
+                        disabledReason: prefs.pictureIsAdjusted ? nil : tv ? "" : "Nothing is adjusted",
+                        width: 460, height: tv ? 64 : nil, centered: tv) {
+            prefs.resetPicture()
+            player.applyPicture()
+            player.applyFraming()
+        }
     }
 }
 
@@ -778,5 +1316,3 @@ private struct EngineSwitchRow: View {
         }
     }
 }
-
-#endif

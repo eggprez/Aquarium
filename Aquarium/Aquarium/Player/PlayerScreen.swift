@@ -1,24 +1,23 @@
-//  The player screen on iPhone, iPad and Mac.
+//  The player screen, on every platform.
 //
-//  The picture is an `AVPlayerLayer` in a plain view (`VideoSurface`) and
+//  The picture is the engine's layer in a plain view (`VideoSurface`) and
 //  everything over it is this app's own: `PlayerChrome` draws the scrims, the
-//  title row with AirPlay and Picture in Picture, the centre cluster, the
-//  timeline with trickplay, the pills and the panel, and the moment overlays
-//  — Skip intro, Up Next, the bitrate notice, the error card. On an iPhone or
-//  iPad it used to be `AVPlayerViewController`, whose transport could not be
-//  changed, with this app's controls planted inside AVKit's view tree by
-//  `TransportBarExtras`; on a Mac `AVPlayerView` with its floating panel and
-//  a row of this app's buttons guessing where the panel was. All of that is
-//  gone. See `PLAYER-OVERHAUL-PLAN.md`, phases 2 and 3.
+//  title, the centre cluster, the timeline with trickplay, the pills and the
+//  panel, and the moment overlays — Skip intro, Up Next, the bitrate notice,
+//  the error card. On an iPhone or iPad it used to be `AVPlayerViewController`,
+//  whose transport could not be changed; on a Mac `AVPlayerView` with its
+//  floating panel; on the Apple TV a bar, a panel and a set of cards of its
+//  own under `Player/TV/`. All of that is gone. See `PLAYER-OVERHAUL-PLAN.md`,
+//  phases 2, 3 and 5.
 //
 //  What differs by platform is input and the frame around the picture: a
 //  finger taps the chrome up and the status bar follows it on a phone; a
 //  pointer brings it up by moving and the window carries the title, full
 //  screen and the right-click menu on a Mac (`PlayerPointer`, `PlayerWindow`,
-//  `PlayerMacMenus`).
+//  `PlayerMacMenus`); the Siri Remote is read by `PlayerRemoteDriver`
+//  (`TV/TVPlayerScreen.swift`) on a television, which also draws the code in
+//  the corner of a sync clip.
 
-// The Apple TV has its own PlayerScreen, on mpv — see TV/TVPlayerScreen.swift.
-#if !os(tvOS)
 import Observation
 import OSLog
 import SwiftUI
@@ -38,6 +37,18 @@ struct PlayerScreen: View {
             Color.black.ignoresSafeArea()
             VideoSurface(pictureInPicture: pictureInPicture)
                 .ignoresSafeArea()
+            // The last title's final frame, still on the layer: covered until
+            // this one's first frame replaces it.
+            if player.pictureIsStale {
+                Color.black.ignoresSafeArea()
+            }
+            #if os(tvOS)
+            // The code the iPhone app reads during a sync clip: which rate
+            // this is and the delay in force. See `SyncCodeOverlay`.
+            if player.isSyncTest, player.errorMessage == nil {
+                SyncCodeOverlay()
+            }
+            #endif
             PlayerChrome(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork,
                          pictureInPicture: pictureInPicture) {
                 player.stop(reason: "player dismissed")
@@ -100,5 +111,3 @@ private struct PlayerScreenLifecycle: ViewModifier {
             }
     }
 }
-
-#endif

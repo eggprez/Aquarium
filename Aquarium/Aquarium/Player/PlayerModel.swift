@@ -20,10 +20,14 @@
 //
 //  The file is split: this one holds the state, the engine wiring, the event
 //  handling and the transport; `PlayerModel+Playback` starts and recovers
-//  streams; `PlayerModel+Engine` chooses the engine and hands a stream from
-//  one to the other; `PlayerModel+Tracks` the track menus, subtitles and the
-//  audio offset; `PlayerModel+Extras` the queue, Up Next, reporting and the
-//  per-platform read-outs.
+//  streams on every platform; `PlayerModel+Engine` chooses the engine and
+//  hands a stream from one to the other; `PlayerModel+Tracks` the track menus,
+//  subtitles and the audio offset; `PlayerModel+Extras` the queue, Up Next,
+//  reporting and the read-outs; `PlayerModel+Chrome` what the shared chrome
+//  asks. One shape on every platform: the Apple TV has a queue like the rest,
+//  no downloads (so `isLocal` is simply false there), and the few things that
+//  are its alone — the display's frame rate, the screensaver, the sync clips'
+//  code — sit behind the one `#if os(tvOS)` each needs.
 
 import Foundation
 import OSLog
@@ -93,8 +97,8 @@ struct TrackOption: Identifiable, Hashable, Sendable {
     var id: Int { serverIndex ?? -(( avIndex ?? 0) + 1) }
 }
 
-/// One selectable track as the engine lists it, for the non-tvOS menus that
-/// were built around this shape.
+/// One selectable track as the engine lists it, the shape the menus are
+/// built on, made from `EngineTrack` on every engine.
 struct PlayerTrack: Identifiable, Hashable, Sendable {
     var id: Int
     var label: String
@@ -182,23 +186,15 @@ final class PlayerModel {
         rate == 1 ? "Normal" : "\(rate.formatted())×"
     }
 
-    #if os(tvOS)
-    /// Whether what the video view shows belongs to something else. mpv
-    /// leaves its last frame on the view when a file stops, so a new title
+    /// Whether what the surface shows belongs to something else. An engine
+    /// leaves its last frame on the layer when a file stops, so a new title
     /// would open over the last one's final frame without this. Cleared by
-    /// the new title's first frame.
+    /// the new title's first frame; the screen covers the picture while it
+    /// is set.
     var pictureIsStale = true
 
-    /// The surface the picture is drawn on. One for the life of the app; the
-    /// mpv handle drawing into it is made per stream.
-    let videoView = MPVVideoView(frame: .zero)
-    var mpvLayer: MPVMetalLayer { videoView.metalLayer }
-
-    // The Now Playing card asks these of every player; neither exists on a
-    // television, which has no downloads to shuffle.
-    var isShuffling: Bool { false }
-    var upNextLocalId: String? { nil }
-    #else
+    /// A download playing from this device. Never on the Apple TV, which has
+    /// no downloads; the chrome reads it all the same.
     var isLocal = false
     /// The asset turned out to have no video track once it was ready — an
     /// IPTV channel carrying a codec no Apple platform decodes.
@@ -215,7 +211,8 @@ final class PlayerModel {
     /// for the AirPlay picker and the SharePlay coordinator before anything
     /// plays. Reached as `(engine as? AVEngine)?.player` while it is the one
     /// playing, and as `appleEngine.player` by the AirPlay picker, which
-    /// needs an `AVPlayer` whichever engine is on.
+    /// needs an `AVPlayer` whichever engine is on. On the Apple TV it is
+    /// never the one playing.
     let appleEngine = AVEngine()
 
     #if canImport(Libmpv)
@@ -223,7 +220,6 @@ final class PlayerModel {
     /// engine is the one playing. One for the life of the app; the handle
     /// drawing into it is made per stream.
     let mpvLayer = MPVMetalLayer()
-    #endif
     #endif
 
     // MARK: - Internals
@@ -287,7 +283,6 @@ final class PlayerModel {
     var client: JellyfinClient { .shared }
     var prefs: Preferences { .shared }
 
-    #if !os(tvOS)
     let adaptive = AdaptiveQuality()
     /// What Now Playing was last told, so its clock is only re-anchored when
     /// it would otherwise be wrong.
@@ -303,8 +298,10 @@ final class PlayerModel {
     var bitrateNotice: BitrateNotice?
     @ObservationIgnored var bitrateNoticeDismissal: Task<Void, Never>?
 
+    #if !os(tvOS)
     /// The download playing now, as the server hears about it.
     @ObservationIgnored var localSession: OfflineProgress.Session?
+    #endif
     var localRecordId: String?
     var episodeQueue: [BaseItem]?
     /// Titles queued by hand, played ahead of what the series would offer.
@@ -395,35 +392,31 @@ final class PlayerModel {
     func setSelectedAudioTrack(_ i: Int?) { selectedAudioTrack = i }
     func setSelectedSubtitleTrack(_ i: Int?) { selectedSubtitleTrack = i }
     func setChapters(_ c: [Chapter]) { chapters = c }
-    #endif
 
-    #if os(tvOS)
     /// Which of the sync clips is playing, by the rate it sets the delay for.
     var syncTest: DelayRate?
     var isSyncTest: Bool { syncTest != nil }
-    /// The M3U channel being played, for reopening it.
-    var externalStream: (url: URL, channel: BaseItem?)?
-    /// Reopens of a live channel that ended, and when the count started.
-    var liveReopens = 0
-    var liveReopensSince = Date.distantPast
-    /// Whether this stream has already been retried as a transcode.
-    var escalated = false
+    /// The opening or the seek being watched for a stalled audio output —
+    /// see `watchOpening` and `watchSeek`.
+    var seekWatch: Task<Void, Never>?
+    #if os(tvOS)
     /// Whether the display has been asked to match this stream's frame rate.
     var displayRequested = false
-    var seekWatch: Task<Void, Never>?
     var lastAwakeAssert: CFTimeInterval = 0
     #endif
 
     private init() {
         volume = prefs.volume
         #if !os(tvOS)
+        // The Apple TV's engine is made per stream; the others have AVPlayer
+        // standing by for the AirPlay picker and SharePlay.
         engine = appleEngine
         wireEngineEvents(for: appleEngine)
         configure(appleEngine)
+        #endif
         observeForeground()
         observePower()
         NowPlaying.shared.attach(to: self)
-        #endif
         configureAudioSession(activate: false)
         observeAudioRoute()
         observeLifecycle()
@@ -457,9 +450,7 @@ final class PlayerModel {
                 Self.log.error("mpv could not be created")
                 return nil
             }
-            #if !os(tvOS)
             appleEngine.stop()
-            #endif
             mpvEngine = made
             engine = made
             wireEngineEvents(for: made)
@@ -476,9 +467,7 @@ final class PlayerModel {
     /// What every engine is told as it becomes the one playing.
     private func configure(_ engine: any PlaybackEngine) {
         engine.volume = volume
-        #if !os(tvOS)
         engine.isMuted = isMuted
-        #endif
         engine.rate = speed
         refreshSubtitleStyling()
         applyFraming()
@@ -532,6 +521,10 @@ final class PlayerModel {
             keepScreenAwake()
             #endif
             position = seconds
+            // The first frame is the usual way the cover comes off; a stream
+            // whose engine says nothing of one comes out from under it on
+            // its first tick of playing.
+            if pictureIsStale, !isOpening, !isBuffering, seconds > 0 { pictureIsStale = false }
             refreshCues()
             maybeReport()
             checkSleepDeadline()
@@ -567,10 +560,8 @@ final class PlayerModel {
 
         case .videoSize(let size):
             videoSize = size
-            #if !os(tvOS)
             if pictureSize != size { pictureSize = size }
             noVideoTrack = false
-            #endif
 
         case .frameRate(let rate):
             frameRate = rate > 0 ? rate : nil
@@ -615,16 +606,13 @@ final class PlayerModel {
     private func onFirstFrame() {
         if isOpening {
             isOpening = false
-            #if !os(tvOS)
             adaptive.noteOpened()
-            #endif
             NowPlaying.shared.update(from: self)
         }
         isBuffering = false
-        #if os(tvOS)
         pictureIsStale = false
+        seekWatch?.cancel(); seekWatch = nil
         holdScreenAwake(reassert: true)
-        #endif
     }
 
     // MARK: - Starting and stopping state
@@ -650,10 +638,11 @@ final class PlayerModel {
         decoder = nil
         droppedFrames = 0
         softwareDecodeHandled = false
-        #if os(tvOS)
         syncTest = nil
+        seekWatch?.cancel(); seekWatch = nil
+        #if os(tvOS)
         displayRequested = false
-        #else
+        #endif
         noVideoTrack = false
         noVideoDetail = nil
         audioTracks = []
@@ -663,7 +652,6 @@ final class PlayerModel {
         chapters = []
         bitrateNoticeDismissal?.cancel()
         bitrateNotice = nil
-        #endif
     }
 
     /// Give back what a source holds on the server: its encode, and the tuner
@@ -681,38 +669,27 @@ final class PlayerModel {
 
     func pause() {
         engine?.pause()
-        #if !os(tvOS)
         isPaused = true
         postNowPlayingRate()
         Task { await reportNow() }
-        #endif
     }
 
     func resume() {
         reactivateAudioSession()
         engine?.play()
-        #if !os(tvOS)
         isPaused = false
         postNowPlayingRate()
         Task { await reportNow() }
-        #endif
     }
 
     func seek(to seconds: Double) {
         guard isActive else { return }
-        #if os(tvOS)
-        guard !isOpening else { return }
-        #endif
         let target = duration > 0 ? min(max(0, seconds), duration - 0.5) : max(0, seconds)
-        #if !os(tvOS)
         adaptive.noteSeek()
-        #endif
         position = target
         engine?.seek(to: target)
         refreshCues()
-        #if os(tvOS)
         watchSeek(to: target)
-        #endif
     }
 
     func seek(by delta: Double) { seek(to: position + delta) }
@@ -746,24 +723,20 @@ final class PlayerModel {
         generation &+= 1
 
         let finalPosition = position
-        #if os(tvOS)
-        let closingReport = isExternal ? nil : report(paused: true, position: finalPosition)
-        #else
         let closingReport = isExternal || isLocal ? nil : report(paused: true, position: finalPosition)
         let closingLocalId = localRecordId
+        #if !os(tvOS)
         let closingLocalSession = localSession
         localSession = nil
-        dropPrefetched()
         #endif
+        dropPrefetched()
         let closingSource = source
 
         engine?.stop()
-        #if os(tvOS)
         pictureIsStale = true
+        #if os(tvOS)
         engine?.setDisplayRefreshRate(nil)
         DisplayMatch.reset()
-        externalStream = nil
-        seekWatch?.cancel(); seekWatch = nil
         #endif
         // Nothing of mpv runs while the app browses.
         tearDownMPV()
@@ -773,13 +746,15 @@ final class PlayerModel {
         resetLiveRecovery()
         NowPlaying.shared.clear()
         resetStreamState()
-        #if !os(tvOS)
         adaptive.reset()
+        #if !os(tvOS)
         PlaybackHandoff.shared.end()
+        #endif
         episodeQueue = nil
         localRecordId = nil
+        externalChannel = nil
+        externalResolve?.cancel(); externalResolve = nil
         if userRequested { shuffleSeries = nil }
-        #endif
         isActive = false
         isBuffering = false
         isOpening = false
@@ -803,6 +778,8 @@ final class PlayerModel {
                 Task { await OfflineProgress.sync() }
             }
         }
+        #else
+        _ = closingLocalId
         #endif
 
         let liveStreamId = closingSource?.mediaSource.LiveStreamId
@@ -830,23 +807,13 @@ final class PlayerModel {
     func retry() async {
         resetLiveRecovery()
         errorMessage = nil
-        #if !os(tvOS)
         noVideoTrack = false
         noVideoDetail = nil
-        #endif
-        #if os(tvOS)
-        if let external = externalStream {
-            playExternal(title: title, subtitle: subtitle, artworkURL: artworkURL,
-                         streamURL: external.url, channel: external.channel)
-            return
-        }
-        #else
         if let channel = externalChannel {
             playExternal(title: channel.title, subtitle: channel.subtitle,
                          artworkURL: channel.artworkURL, streamURL: channel.streamURL, channel: channel.item)
             return
         }
-        #endif
         if let item {
             var opts = options
             opts.startSeconds = position > 1 ? position : nil
@@ -854,13 +821,7 @@ final class PlayerModel {
         }
     }
 
-    var canRetry: Bool {
-        #if os(tvOS)
-        return item != nil || externalStream != nil
-        #else
-        return externalChannel != nil || item != nil
-        #endif
-    }
+    var canRetry: Bool { externalChannel != nil || item != nil }
 
     // MARK: - Helpers
 
@@ -909,11 +870,5 @@ final class PlayerModel {
     }
 
     /// The item behind what is on screen, wherever it came from.
-    var infoItem: BaseItem? {
-        #if os(tvOS)
-        fullItem ?? item ?? externalStream?.channel
-        #else
-        fullItem ?? item ?? externalChannel?.item
-        #endif
-    }
+    var infoItem: BaseItem? { fullItem ?? item ?? externalChannel?.item }
 }

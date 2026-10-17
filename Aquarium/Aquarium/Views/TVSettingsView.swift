@@ -214,12 +214,34 @@ private struct VideoSettingsPage: View {
                 // would do nothing. Quality is changed by hand from the
                 // player's Quality tab instead.
             }
+            // The picture controls are mpv's, and the Apple TV is always on
+            // mpv, so every row here is live; the player's Picture tab has
+            // the same over the live picture. No engine row and no Battery
+            // saver: the box plays through mpv alone, on mains.
             SettingGroup("Picture", page: .video) {
                 SettingChoice(Copy.framing, selection: $prefs.fillScreen,
-                              options: [(false, "Fit — show the whole frame"), (true, "Fill — crop to the screen")],
-                              also: [Copy.pictureControls])
+                              options: [(false, "Fit — show the whole frame"), (true, "Fill — crop to the screen")])
+                SettingChoice(Copy.pictureBrightness, selection: $prefs.pictureBrightness,
+                              options: Self.adjustmentOptions(prefs.pictureBrightness))
+                SettingChoice(Copy.pictureContrast, selection: $prefs.pictureContrast,
+                              options: Self.adjustmentOptions(prefs.pictureContrast))
+                SettingChoice(Copy.pictureSaturation, selection: $prefs.pictureSaturation,
+                              options: Self.adjustmentOptions(prefs.pictureSaturation))
+                SettingChoice(Copy.pictureGamma, selection: $prefs.pictureGamma,
+                              options: Self.adjustmentOptions(prefs.pictureGamma))
+                SettingChoice(Copy.pictureZoom, selection: $prefs.pictureZoom,
+                              options: Self.zoomOptions(prefs.pictureZoom))
+                SettingChoice(Copy.aspectOverride, selection: $prefs.aspectOverride,
+                              options: Preferences.aspectChoices.map { ($0.ratio, $0.label) })
+                SettingButton(Copy.resetPicture.name ?? "", notes: [Copy.resetPicture]) {
+                    prefs.resetPicture()
+                }
+                .disabled(!prefs.pictureIsAdjusted)
             }
             .onChange(of: prefs.fillScreen) { _, _ in player.applyFraming() }
+            .onChange(of: prefs.picture) { _, _ in player.applyPicture() }
+            .onChange(of: prefs.pictureZoom) { _, _ in player.applyFraming() }
+            .onChange(of: prefs.aspectOverride) { _, _ in player.applyFraming() }
             SettingGroup("Playing", page: .video) {
                 SettingToggle(Copy.resume, isOn: $prefs.resumePlayback)
                 SettingToggle(Copy.autoplayNext, isOn: $prefs.autoplayNext)
@@ -229,6 +251,24 @@ private struct VideoSettingsPage: View {
                               options: SettingsView.audioLanguageOptions)
             }
         }
+    }
+}
+
+extension VideoSettingsPage {
+    /// −100…100 in tens, plus whatever is set if it isn't one of them — the
+    /// player's tab moves in fives and a phone's slider in ones, and the
+    /// value syncs over, so without it the row would read blank.
+    static func adjustmentOptions(_ current: Double) -> [(Double, String)] {
+        var values = stride(from: -100.0, through: 100, by: 10).map { $0 }
+        if !values.contains(current) { values.append(current); values.sort() }
+        return values.map { ($0, $0 == 0 ? "0 — the file's own" : $0 > 0 ? "+\(Int($0))" : "\(Int($0))") }
+    }
+
+    /// 1× to 2× in tenths, plus the value set elsewhere if it is between.
+    static func zoomOptions(_ current: Double) -> [(Double, String)] {
+        var values = stride(from: 0, through: 10, by: 1).map { 1 + Double($0) / 10 }
+        if !values.contains(where: { abs($0 - current) < 0.001 }) { values.append(current); values.sort() }
+        return values.map { ($0, abs($0 - 1) < 0.001 ? "None" : "\($0.formatted(.number.precision(.fractionLength(1...2))))×") }
     }
 }
 
