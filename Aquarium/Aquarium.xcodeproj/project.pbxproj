@@ -27,7 +27,7 @@
 		FE11A5D00000000000000224 /* AquariumWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000201 /* AquariumWatch.app */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FE11A5D00000000000000225 /* WatchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000301 /* WatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FE11A5D00000000000000226 /* WatchWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000302 /* WatchWidgets.swift */; };
-		FE11A5D00000000000000401 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; platformFilters = (tvos, ); productRef = FE11A5D00000000000000402 /* MPVKit */; };
+		FE11A5D00000000000000401 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; platformFilters = (ios, macos, tvos, ); productRef = FE11A5D00000000000000402 /* MPVKit */; };
 		FE11A5D00000000000000611 /* FollowTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000601 /* FollowTypes.swift */; };
 		FE11A5D00000000000000612 /* FollowTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000601 /* FollowTypes.swift */; };
 		FE11A5D00000000000000613 /* FollowWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000602 /* FollowWidget.swift */; };
@@ -61,6 +61,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = FE11A5D00000000000000340;
 			remoteInfo = WatchWidgets;
+		};
+		FE11A5D00000000000000745 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D296FAAF302815340097E3E7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D296FAB6302815340097E3E7;
+			remoteInfo = Aquarium;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -128,6 +135,7 @@
 		FE11A5D00000000000000304 /* WatchWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WatchWidgets.entitlements; sourceTree = "<group>"; };
 		FE11A5D00000000000000601 /* FollowTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowTypes.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000602 /* FollowWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowWidget.swift; sourceTree = "<group>"; };
+		FE11A5D00000000000000701 /* AquariumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AquariumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -163,6 +171,11 @@
 				FE11A5D00000000000000251 /* Exceptions for "Watch" folder in "AquariumWatch" target */,
 			);
 			path = Watch;
+			sourceTree = "<group>";
+		};
+		FE11A5D00000000000000710 /* AquariumTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AquariumTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -204,6 +217,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FE11A5D00000000000000731 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -215,6 +235,7 @@
 				FE11A5D00000000000000010 /* TopShelf */,
 				FE11A5D00000000000000110 /* LiveActivities */,
 				FE11A5D00000000000000210 /* Watch */,
+				FE11A5D00000000000000710 /* AquariumTests */,
 				FE11A5D00000000000000310 /* WatchWidgets */,
 				FE11A5D00000000000000006 /* Aquarium-tvOS.entitlements */,
 				FE11A5D00000000000000007 /* Aquarium-iOS.entitlements */,
@@ -229,6 +250,7 @@
 				FE11A5D00000000000000001 /* TopShelf.appex */,
 				FE11A5D00000000000000101 /* LiveActivities.appex */,
 				FE11A5D00000000000000201 /* AquariumWatch.app */,
+				FE11A5D00000000000000701 /* AquariumTests.xctest */,
 				FE11A5D00000000000000301 /* WatchWidgets.appex */,
 			);
 			name = Products;
@@ -394,6 +416,29 @@
 			productReference = FE11A5D00000000000000301 /* WatchWidgets.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		FE11A5D00000000000000740 /* AquariumTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FE11A5D00000000000000741 /* Build configuration list for PBXNativeTarget "AquariumTests" */;
+			buildPhases = (
+				FE11A5D00000000000000730 /* Sources */,
+				FE11A5D00000000000000731 /* Frameworks */,
+				FE11A5D00000000000000732 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FE11A5D00000000000000744 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				FE11A5D00000000000000710 /* AquariumTests */,
+			);
+			name = AquariumTests;
+			packageProductDependencies = (
+			);
+			productName = AquariumTests;
+			productReference = FE11A5D00000000000000701 /* AquariumTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -419,6 +464,10 @@
 					FE11A5D00000000000000340 = {
 						CreatedOnToolsVersion = 27.0;
 					};
+					FE11A5D00000000000000740 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = D296FAB6302815340097E3E7;
+					};
 				};
 			};
 			buildConfigurationList = D296FAB2302815340097E3E7 /* Build configuration list for PBXProject "Aquarium" */;
@@ -442,6 +491,7 @@
 				FE11A5D00000000000000040 /* TopShelf */,
 				FE11A5D00000000000000140 /* LiveActivities */,
 				FE11A5D00000000000000240 /* AquariumWatch */,
+				FE11A5D00000000000000740 /* AquariumTests */,
 				FE11A5D00000000000000340 /* WatchWidgets */,
 			);
 		};
@@ -477,6 +527,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		FE11A5D00000000000000332 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FE11A5D00000000000000732 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -562,6 +619,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FE11A5D00000000000000730 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -589,6 +653,11 @@
 			isa = PBXTargetDependency;
 			target = FE11A5D00000000000000340 /* WatchWidgets */;
 			targetProxy = FE11A5D00000000000000345 /* PBXContainerItemProxy */;
+		};
+		FE11A5D00000000000000744 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D296FAB6302815340097E3E7 /* Aquarium */;
+			targetProxy = FE11A5D00000000000000745 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -764,7 +833,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.4;
-				"OTHER_LDFLAGS[sdk=appletv*]" = (
+				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
 					AVKit,
@@ -834,7 +903,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.4;
-				"OTHER_LDFLAGS[sdk=appletv*]" = (
+				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
 					AVKit,
@@ -1109,6 +1178,56 @@
 			};
 			name = Release;
 		};
+		FE11A5D00000000000000742 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 70;
+				DEVELOPMENT_TEAM = 6S26L64S3C;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.4;
+				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.AquariumTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator appletvos appletvsimulator macosx";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,3";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Aquarium.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Aquarium";
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+			};
+			name = Debug;
+		};
+		FE11A5D00000000000000743 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 70;
+				DEVELOPMENT_TEAM = 6S26L64S3C;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.4;
+				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.AquariumTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator appletvos appletvsimulator macosx";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,3";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Aquarium.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Aquarium";
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1162,6 +1281,15 @@
 			buildConfigurations = (
 				FE11A5D00000000000000342 /* Debug */,
 				FE11A5D00000000000000343 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FE11A5D00000000000000741 /* Build configuration list for PBXNativeTarget "AquariumTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FE11A5D00000000000000742 /* Debug */,
+				FE11A5D00000000000000743 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

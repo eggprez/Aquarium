@@ -56,17 +56,25 @@ struct PlayerWindow: View {
         }
         .onChange(of: player.isActive) { _, active in
             if !active {
-                state.showsAudioDelay = false
+                state.panelRequest = nil
                 dismissWindow(id: Self.id)
             }
         }
         .onChange(of: window) { _, window in
             window?.backgroundColor = .black
-            // Full Screen (F) and Picture in Picture act on the window from
-            // the menu bar and from AVKit's delegate, neither of which has a
-            // view to ask — see `PlayerMacState`.
+            // Full Screen (F) acts on the window from the menu bar and
+            // Picture in Picture puts it away, neither of which has a view
+            // to ask — see `PlayerMacState`.
             state.window = window
             fit(to: player.pictureSize)
+            #if DEBUG
+            // `-AquariumPlayFullScreen YES`: straight into full screen, for a
+            // screenshot — see `PlayerModel.playDebugStreamIfAsked`.
+            if UserDefaults.standard.bool(forKey: "AquariumPlayFullScreen"), let window,
+               !window.styleMask.contains(.fullScreen) {
+                window.toggleFullScreen(nil)
+            }
+            #endif
         }
         .onChange(of: player.pictureSize) { _, size in fit(to: size) }
         // The inspector adds a column beside the picture, and a window held
@@ -176,8 +184,8 @@ private struct PlayerKeysYieldedKey: FocusedValueKey {
 
 /// The Playback menu.
 ///
-/// The keys with no modifier — Space, [ and ], the arrows, M, F, S and C — are
-/// only bound while the player window is in front. A menu's key equivalents
+/// The keys with no modifier — Space, [ and ], the arrows, M, F, S, C and P —
+/// are only bound while the player window is in front. A menu's key equivalents
 /// are looked at before the view that has focus, so bound everywhere they took
 /// the space bar from every text field in the app: typing "star wars" into
 /// Search paused the film instead. The same goes for ⌥[ and ⌥], which type
@@ -187,9 +195,9 @@ private struct PlayerKeysYieldedKey: FocusedValueKey {
 /// guide, which uses the same two keys. Stopping carries ⌘ and works from any
 /// window while something is playing.
 ///
-/// The settings — Quality, Audio, Subtitles, Audio Sync, Audio Delay, Sleep,
-/// Fill Screen — are `PlayerMenuItems`, shared with the picture's context menu
-/// and with AVKit's action button.
+/// The settings — Quality, Audio, Subtitles, Speed, Audio Sync, Audio Delay,
+/// Sleep, Fill Screen — are `PlayerMenuItems`, shared with the picture's
+/// context menu.
 struct PlaybackCommands: Commands {
     let player: PlayerModel
     @FocusedValue(\.playerWindowFocused) private var inPlayer
@@ -239,7 +247,17 @@ struct PlaybackCommands: Commands {
             ))
             .keyboardShortcut("i", modifiers: .command)
             .disabled(!player.isActive)
-            Button("Full Screen") { state.toggleFullScreen() }
+            // The panel over the picture, for a keyboard that has no pill
+            // to click: Info, and the tabs from there.
+            Button("Show Panel") { state.togglePanelRequest += 1 }
+                .keyboardShortcut(gated("k", .command))
+                .disabled(!player.isActive)
+            Button(state.pictureInPicture?.isActive == true ? "Leave Picture in Picture" : "Picture in Picture") {
+                state.togglePictureInPicture()
+            }
+            .keyboardShortcut(bare("p"))
+            .disabled(!state.canPictureInPicture)
+            Button(state.isFullScreen ? "Exit Full Screen" : "Enter Full Screen") { state.toggleFullScreen() }
                 .keyboardShortcut(bare("f"))
                 .disabled(!player.isActive)
             Divider()

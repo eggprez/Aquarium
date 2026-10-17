@@ -1,8 +1,6 @@
-//  The stream facts the Mac's inspector lists: the file the server holds, what
-//  is actually coming down the wire, and where playback is. See
-//  `StreamInfoInspector`. The Apple TV draws its own in the player's Info tab.
-
-#if os(macOS)
+//  The stream facts the Mac's inspector and the player's Info tab list: the
+//  file the server holds, what is actually coming down the wire, and where
+//  playback is. See `StreamInfoInspector` and `PlayerPanel`.
 
 import Foundation
 
@@ -103,6 +101,18 @@ struct PlayerStreamRows {
 
     var now: [Row] {
         var rows: [Row] = []
+        if let engine = player.engineKind {
+            var value = engine.title
+            if let decoder = player.decoder, engine == .mpv {
+                value += decoder == "no" ? " · software decoding" : " · hardware decoding (\(decoder))"
+            }
+            rows.append(("Engine", value))
+        }
+        #if os(tvOS)
+        if let matched = DisplayMatch.matchedRate {
+            rows.append(("Display", PlayerModel.frameRateName(matched, unit: "Hz")))
+        }
+        #endif
         if player.isLive {
             rows.append(("Position", "Live"))
         } else if player.duration > 0 {
@@ -121,11 +131,11 @@ struct PlayerStreamRows {
             let ms = player.appliedAudioDelayMilliseconds
             rows.append(("Audio delay", "\(ms > 0 ? "+" : "")\(ms) ms"))
         }
-        if let index = player.selectedAudioTrack, index < player.audioTracks.count {
-            rows.append(("Audio track", player.audioTracks[index].label))
+        if let id = player.selectedAudioTrack, let track = player.audioTracks.first(where: { $0.id == id }) {
+            rows.append(("Audio track", track.label))
         }
-        if let index = player.selectedSubtitleTrack, index < player.subtitleTracks.count {
-            rows.append(("Subtitles", player.subtitleTracks[index].label))
+        if let id = player.selectedSubtitleTrack, let track = player.subtitleTracks.first(where: { $0.id == id }) {
+            rows.append(("Subtitles", track.label))
         } else if !player.subtitleTracks.isEmpty {
             rows.append(("Subtitles", "Off"))
         }
@@ -148,5 +158,3 @@ struct PlayerStreamRows {
             : String(format: "%.1f Mbps", mbps)
     }
 }
-
-#endif

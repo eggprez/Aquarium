@@ -616,6 +616,137 @@ final class Preferences {
         didSet { write(fillScreen, forKey: "fill_screen") }
     }
 
+    /// Brightness, contrast, saturation and gamma, each -100…100 with 0 as
+    /// the file's own. The mpv engine's; setting any of them on an iPhone,
+    /// iPad or Mac is one of the things that switches the engine to it for
+    /// the title (see `EnginePolicy`).
+    var pictureBrightness: Double {
+        didSet { write(pictureBrightness, forKey: "picture_brightness") }
+    }
+    var pictureContrast: Double {
+        didSet { write(pictureContrast, forKey: "picture_contrast") }
+    }
+    var pictureSaturation: Double {
+        didSet { write(pictureSaturation, forKey: "picture_saturation") }
+    }
+    var pictureGamma: Double {
+        didSet { write(pictureGamma, forKey: "picture_gamma") }
+    }
+    /// Zoom into the picture by this factor; 1 is none. mpv's too.
+    var pictureZoom: Double {
+        didSet { write(pictureZoom, forKey: "picture_zoom") }
+    }
+    /// Stretch or crop the picture to this width:height; 0 is the file's own.
+    var aspectOverride: Double {
+        didSet { write(aspectOverride, forKey: "picture_aspect") }
+    }
+
+    var picture: PictureAdjustment {
+        get {
+            PictureAdjustment(brightness: pictureBrightness, contrast: pictureContrast,
+                              saturation: pictureSaturation, gamma: pictureGamma)
+        }
+        set {
+            if pictureBrightness != newValue.brightness { pictureBrightness = newValue.brightness }
+            if pictureContrast != newValue.contrast { pictureContrast = newValue.contrast }
+            if pictureSaturation != newValue.saturation { pictureSaturation = newValue.saturation }
+            if pictureGamma != newValue.gamma { pictureGamma = newValue.gamma }
+        }
+    }
+
+    /// Whether any picture adjustment, zoom or aspect override is in force.
+    var pictureIsAdjusted: Bool {
+        !picture.isNeutral || abs(pictureZoom - 1) > 0.001 || aspectOverride > 0
+    }
+
+    /// Everything back to the file's own picture.
+    func resetPicture() {
+        picture = .neutral
+        pictureZoom = 1
+        aspectOverride = 0
+    }
+
+    /// The aspect overrides on offer, as width:height with 0 for none.
+    static let aspectChoices: [(label: String, ratio: Double)] = [
+        ("File's own", 0), ("16:9", 16.0 / 9), ("4:3", 4.0 / 3), ("1.85:1", 1.85), ("2.35:1", 2.35), ("2.39:1", 2.39),
+    ]
+
+    /// Night mode: dynamic range compression on the sound, so quiet dialogue
+    /// comes up and loud passages come down for a room where the volume has
+    /// to stay low. The mpv engine's (`dynaudnorm`); Apple's engine leaves
+    /// the sound as it is. Not synced: like the volume, it describes the
+    /// room rather than the account.
+    var nightMode: Bool {
+        didSet { write(nightMode, forKey: "player_night_mode") }
+    }
+
+    // ---- The engine ----
+
+    /// Which engine plays video on an iPhone, iPad or Mac: Apple's, mpv, or
+    /// whichever the file and the controls in use call for. The Apple TV
+    /// always plays through mpv.
+    var playbackEngine: EnginePolicy.Preference {
+        didSet { write(playbackEngine.rawValue, forKey: "player_engine") }
+    }
+
+    /// Whether the mpv engine draws cheaply: always, never, or when the
+    /// device is on a battery, in Low Power Mode or running hot.
+    var batterySaver: EnginePolicy.BatterySaver {
+        didSet { write(batterySaver.rawValue, forKey: "player_battery_saver") }
+    }
+
+    // ---- The player's controls ----
+
+    /// How far the skip buttons and a double-tap on the picture jump, in
+    /// seconds: 10, 15 or 30.
+    var skipInterval: Int {
+        didSet { write(skipInterval, forKey: "player_skip_interval") }
+    }
+
+    /// A vertical drag on the left edge of the picture for brightness and on
+    /// the right for volume. Off unless asked for: on some devices the drags
+    /// fight the system's own edge gestures.
+    var edgeGestures: Bool {
+        didSet { write(edgeGestures, forKey: "player_edge_gestures") }
+    }
+
+    /// Holding a finger on the picture plays at 2× until it lifts.
+    var holdForDoubleSpeed: Bool {
+        didSet { write(holdForDoubleSpeed, forKey: "player_hold_2x") }
+    }
+
+    /// Seconds the controls stay up after the last touch while playing. They
+    /// never hide while paused or with a panel open.
+    var hideControlsAfter: Double {
+        didSet { write(hideControlsAfter, forKey: "player_hide_after") }
+    }
+
+    /// What the right-hand time under the timeline shows: the time left, or
+    /// the whole length. Tapping it in the player flips this.
+    var showsRemainingTime: Bool {
+        didSet { write(showsRemainingTime, forKey: "player_show_remaining") }
+    }
+
+    static let skipIntervals = [10, 15, 30]
+    static let hideControlsChoices: [Double] = [2, 4, 6, 10]
+
+    /// Until it is set: 2 s on a Mac, where a pointer brings the controls
+    /// back with a nudge and QuickTime and the TV app hide theirs about as
+    /// fast; 4 s where a finger or a remote has to find them again.
+    static let defaultHideControlsAfter: Double = {
+        #if os(macOS)
+        2
+        #else
+        4
+        #endif
+    }()
+
+    /// The ranges the picture values are kept to, whatever a defaults file
+    /// or another device sends.
+    static func pictureValue(_ v: Double) -> Double { v.isFinite ? min(max(v.rounded(), -100), 100) : 0 }
+    static func zoomValue(_ v: Double) -> Double { v.isFinite && v > 0 ? min(max(v, 1), 2) : 1 }
+    static func aspectValue(_ v: Double) -> Double { v.isFinite && v > 0 ? min(max(v, 0.5), 4) : 0 }
+
     // ---- Live TV source ----
 
     var liveTVSource: LiveTVSource {
@@ -855,6 +986,20 @@ final class Preferences {
         subtitleSize = d.object(forKey: "sub_font_size") == nil ? 100 : d.double(forKey: "sub_font_size")
         subtitleBackground = SubtitleBackground(rawValue: d.string(forKey: "sub_bg") ?? "") ?? .outline
         fillScreen = d.bool(forKey: "fill_screen")
+        pictureBrightness = Self.pictureValue(d.double(forKey: "picture_brightness"))
+        pictureContrast = Self.pictureValue(d.double(forKey: "picture_contrast"))
+        pictureSaturation = Self.pictureValue(d.double(forKey: "picture_saturation"))
+        pictureGamma = Self.pictureValue(d.double(forKey: "picture_gamma"))
+        pictureZoom = Self.zoomValue(d.object(forKey: "picture_zoom") == nil ? 1 : d.double(forKey: "picture_zoom"))
+        aspectOverride = Self.aspectValue(d.double(forKey: "picture_aspect"))
+        nightMode = d.bool(forKey: "player_night_mode")
+        playbackEngine = EnginePolicy.Preference(rawValue: d.string(forKey: "player_engine") ?? "") ?? .automatic
+        batterySaver = EnginePolicy.BatterySaver(rawValue: d.string(forKey: "player_battery_saver") ?? "") ?? .automatic
+        skipInterval = Self.skipIntervals.contains(d.integer(forKey: "player_skip_interval")) ? d.integer(forKey: "player_skip_interval") : 10
+        edgeGestures = d.bool(forKey: "player_edge_gestures")
+        holdForDoubleSpeed = d.object(forKey: "player_hold_2x") == nil ? true : d.bool(forKey: "player_hold_2x")
+        hideControlsAfter = Self.hideControlsChoices.contains(d.double(forKey: "player_hide_after")) ? d.double(forKey: "player_hide_after") : Self.defaultHideControlsAfter
+        showsRemainingTime = d.object(forKey: "player_show_remaining") == nil ? true : d.bool(forKey: "player_show_remaining")
         liveTVSource = LiveTVSource(rawValue: d.string(forKey: "livetv_source") ?? "") ?? .jellyfin
         iptvPlaylistURL = d.string(forKey: "iptv_playlist_url") ?? ""
         iptvGuideURL = d.string(forKey: "iptv_guide_url") ?? ""
@@ -941,6 +1086,19 @@ final class Preferences {
         CloudSync.set(audiobookSpeed, forKey: "audiobook_speed")
         CloudSync.set(defaults.data(forKey: "smart_playlists"), forKey: "smart_playlists")
         CloudSync.set(fillScreen, forKey: "fill_screen")
+        CloudSync.set(pictureBrightness, forKey: "picture_brightness")
+        CloudSync.set(pictureContrast, forKey: "picture_contrast")
+        CloudSync.set(pictureSaturation, forKey: "picture_saturation")
+        CloudSync.set(pictureGamma, forKey: "picture_gamma")
+        CloudSync.set(pictureZoom, forKey: "picture_zoom")
+        CloudSync.set(aspectOverride, forKey: "picture_aspect")
+        CloudSync.set(playbackEngine.rawValue, forKey: "player_engine")
+        CloudSync.set(batterySaver.rawValue, forKey: "player_battery_saver")
+        CloudSync.set(skipInterval, forKey: "player_skip_interval")
+        CloudSync.set(edgeGestures, forKey: "player_edge_gestures")
+        CloudSync.set(holdForDoubleSpeed, forKey: "player_hold_2x")
+        CloudSync.set(hideControlsAfter, forKey: "player_hide_after")
+        CloudSync.set(showsRemainingTime, forKey: "player_show_remaining")
         CloudSync.set(liveTVSource.rawValue, forKey: "livetv_source")
         CloudSync.set(iptvPlaylistURL, forKey: "iptv_playlist_url")
         CloudSync.set(iptvGuideURL, forKey: "iptv_guide_url")
@@ -1015,6 +1173,29 @@ final class Preferences {
         if let v = CloudSync.object(forKey: "sub_bg") as? String,
            let b = SubtitleBackground(rawValue: v), b != subtitleBackground { subtitleBackground = b }
         if let v = CloudSync.object(forKey: "fill_screen") as? Bool, v != fillScreen { fillScreen = v }
+        if let v = (CloudSync.object(forKey: "picture_brightness") as? NSNumber)?.doubleValue,
+           Self.pictureValue(v) != pictureBrightness { pictureBrightness = Self.pictureValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_contrast") as? NSNumber)?.doubleValue,
+           Self.pictureValue(v) != pictureContrast { pictureContrast = Self.pictureValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_saturation") as? NSNumber)?.doubleValue,
+           Self.pictureValue(v) != pictureSaturation { pictureSaturation = Self.pictureValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_gamma") as? NSNumber)?.doubleValue,
+           Self.pictureValue(v) != pictureGamma { pictureGamma = Self.pictureValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_zoom") as? NSNumber)?.doubleValue,
+           abs(Self.zoomValue(v) - pictureZoom) > 0.001 { pictureZoom = Self.zoomValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_aspect") as? NSNumber)?.doubleValue,
+           abs(Self.aspectValue(v) - aspectOverride) > 0.001 { aspectOverride = Self.aspectValue(v) }
+        if let v = CloudSync.object(forKey: "player_engine") as? String,
+           let e = EnginePolicy.Preference(rawValue: v), e != playbackEngine { playbackEngine = e }
+        if let v = CloudSync.object(forKey: "player_battery_saver") as? String,
+           let b = EnginePolicy.BatterySaver(rawValue: v), b != batterySaver { batterySaver = b }
+        if let v = (CloudSync.object(forKey: "player_skip_interval") as? NSNumber)?.intValue,
+           Self.skipIntervals.contains(v), v != skipInterval { skipInterval = v }
+        if let v = CloudSync.object(forKey: "player_edge_gestures") as? Bool, v != edgeGestures { edgeGestures = v }
+        if let v = CloudSync.object(forKey: "player_hold_2x") as? Bool, v != holdForDoubleSpeed { holdForDoubleSpeed = v }
+        if let v = (CloudSync.object(forKey: "player_hide_after") as? NSNumber)?.doubleValue,
+           Self.hideControlsChoices.contains(v), v != hideControlsAfter { hideControlsAfter = v }
+        if let v = CloudSync.object(forKey: "player_show_remaining") as? Bool, v != showsRemainingTime { showsRemainingTime = v }
         if let v = CloudSync.object(forKey: "livetv_source") as? String,
            let s = LiveTVSource(rawValue: v), s != liveTVSource { liveTVSource = s }
         if let v = CloudSync.object(forKey: "iptv_playlist_url") as? String, v != iptvPlaylistURL {

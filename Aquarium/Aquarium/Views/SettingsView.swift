@@ -176,6 +176,7 @@ struct SettingsView: View {
             if shows(.video) {
                 qualitySection
                 pictureSection
+                playerSection
                 playingSection
                 audioLanguageSection
             }
@@ -391,14 +392,65 @@ struct SettingsView: View {
                 Text("Fit — show the whole frame").tag(false)
                 Text("Fill — crop to the screen").tag(true)
             } label: {
-                MacSettingLabel(Copy.framing, Copy.pictureControls)
+                MacSettingLabel(Copy.framing)
             }
             .pickerStyle(.radioGroup)
-            .note(Copy.framing, Copy.pictureControls)
+            .note(Copy.framing)
+            .onChange(of: prefs.fillScreen) { _, _ in player.applyFraming(switchingIfNeeded: true) }
+
+            PictureAdjustRows()
+                .note(Copy.pictureControls)
+
+            Toggle(isOn: $prefs.nightMode) { MacSettingLabel(Copy.nightMode) }
+                .note(Copy.nightMode)
+                .onChange(of: prefs.nightMode) { _, _ in player.applyNightMode() }
         } header: {
             Text("Picture")
         } footer: {
-            MacSettingFooter(Copy.framing, Copy.pictureControls)
+            MacSettingFooter(Copy.framing, Copy.pictureControls, Copy.pictureZoom, Copy.aspectOverride, Copy.nightMode)
+        }
+    }
+
+    /// The controls drawn over the picture, and the engine underneath it.
+    private var playerSection: some View {
+        @Bindable var prefs = prefs
+        return Section {
+            Picker(selection: $prefs.playbackEngine) {
+                ForEach(EnginePolicy.Preference.allCases, id: \.self) { Text($0.title).tag($0) }
+            } label: {
+                MacSettingLabel(Copy.playbackEngineChoice)
+            }
+            .note(Copy.playbackEngineChoice)
+
+            Picker(selection: $prefs.batterySaver) {
+                ForEach(EnginePolicy.BatterySaver.allCases, id: \.self) { Text($0.title).tag($0) }
+            } label: {
+                MacSettingLabel(Copy.batterySaver)
+            }
+            .note(Copy.batterySaver)
+            .onChange(of: prefs.batterySaver) { _, _ in player.refreshPowerProfile() }
+
+            Picker(selection: $prefs.skipInterval) {
+                ForEach(Preferences.skipIntervals, id: \.self) { Text("\($0) seconds").tag($0) }
+            } label: {
+                MacSettingLabel(Copy.skipInterval)
+            }
+            .note(Copy.skipInterval)
+
+            Picker(selection: $prefs.hideControlsAfter) {
+                ForEach(Preferences.hideControlsChoices, id: \.self) { Text("\(Int($0)) seconds").tag($0) }
+            } label: {
+                MacSettingLabel(Copy.hideControlsAfter)
+            }
+            .note(Copy.hideControlsAfter)
+
+            Toggle(isOn: $prefs.showsRemainingTime) { MacSettingLabel(Copy.showsRemainingTime) }
+                .note(Copy.showsRemainingTime)
+        } header: {
+            Text("Player")
+        } footer: {
+            MacSettingFooter(Copy.playbackEngineChoice, Copy.batterySaver,
+                             Copy.skipInterval, Copy.hideControlsAfter, Copy.showsRemainingTime)
         }
     }
 
@@ -1180,6 +1232,7 @@ private struct AppearanceSettingsPage: View {
 
 private struct VideoSettingsPage: View {
     @Environment(Preferences.self) private var prefs
+    @Environment(PlayerModel.self) private var player
 
     var body: some View {
         @Bindable var prefs = prefs
@@ -1212,10 +1265,39 @@ private struct VideoSettingsPage: View {
                     .labelsHidden()
                     .fixedSize()
                 }
+                .onChange(of: prefs.fillScreen) { _, _ in player.applyFraming(switchingIfNeeded: true) }
+                PictureAdjustRows()
+                Toggle(Copy.nightMode.name ?? "", isOn: $prefs.nightMode)
+                    .onChange(of: prefs.nightMode) { _, _ in player.applyNightMode() }
             } header: {
                 Text("Picture")
             } footer: {
-                SettingsFooter(Copy.framing, Copy.pictureControls)
+                SettingsFooter(Copy.framing, Copy.pictureControls, Copy.pictureZoom, Copy.aspectOverride, Copy.nightMode)
+            }
+
+            Section {
+                Picker(Copy.playbackEngineChoice.name ?? "", selection: $prefs.playbackEngine) {
+                    ForEach(EnginePolicy.Preference.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                Picker(Copy.batterySaver.name ?? "", selection: $prefs.batterySaver) {
+                    ForEach(EnginePolicy.BatterySaver.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .onChange(of: prefs.batterySaver) { _, _ in player.refreshPowerProfile() }
+                Picker(Copy.skipInterval.name ?? "", selection: $prefs.skipInterval) {
+                    ForEach(Preferences.skipIntervals, id: \.self) { Text("\($0) seconds").tag($0) }
+                }
+                Picker(Copy.hideControlsAfter.name ?? "", selection: $prefs.hideControlsAfter) {
+                    ForEach(Preferences.hideControlsChoices, id: \.self) { Text("\(Int($0)) seconds").tag($0) }
+                }
+                Toggle(Copy.showsRemainingTime.name ?? "", isOn: $prefs.showsRemainingTime)
+                Toggle(Copy.holdForDoubleSpeed.name ?? "", isOn: $prefs.holdForDoubleSpeed)
+                Toggle(Copy.edgeGestures.name ?? "", isOn: $prefs.edgeGestures)
+            } header: {
+                Text("Player")
+            } footer: {
+                SettingsFooter(Copy.playbackEngineChoice, Copy.batterySaver,
+                               Copy.skipInterval, Copy.hideControlsAfter, Copy.showsRemainingTime,
+                               Copy.holdForDoubleSpeed, Copy.edgeGestures)
             }
 
             Section {
@@ -1581,11 +1663,13 @@ private struct StationMixSettingsPage: View {
 }
 
 private struct AboutSettingsPage: View {
+    @Environment(PlayerModel.self) private var player
+
     var body: some View {
         Form {
             Section {
                 LabeledContent("Aquarium", value: "\(Bundle.appVersion) (\(Bundle.appBuild))")
-                LabeledContent("Playback engine", value: "AVFoundation")
+                LabeledContent("Playback engine", value: player.engineDescription)
             } footer: {
                 SettingsFooter(Copy.playbackEngine)
             }
@@ -1834,6 +1918,61 @@ struct StationMixSection: View {
 
     private func binding(_ dial: MixPoints.Dial) -> Binding<Int> {
         Binding(get: { prefs.mixPoints[dial] }, set: { prefs.mixPoints[dial] = $0 })
+    }
+}
+
+/// Brightness, contrast, saturation and gamma, the zoom and the aspect
+/// override, with a Reset: the mpv engine's picture, as rows of the Video
+/// page on an iPhone and the Video tab on a Mac. Applied to the live picture
+/// where one is playing, and a title on Apple's engine is handed to mpv when
+/// any of them leaves neutral.
+struct PictureAdjustRows: View {
+    @Environment(Preferences.self) private var prefs
+    @Environment(PlayerModel.self) private var player
+
+    var body: some View {
+        @Bindable var prefs = prefs
+        Group {
+            slider("Brightness", value: $prefs.pictureBrightness)
+            slider("Contrast", value: $prefs.pictureContrast)
+            slider("Saturation", value: $prefs.pictureSaturation)
+            slider("Gamma", value: $prefs.pictureGamma)
+            HStack {
+                Text("Zoom")
+                Spacer(minLength: 16)
+                Text("\(prefs.pictureZoom.formatted(.number.precision(.fractionLength(2))))×")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Slider(value: $prefs.pictureZoom, in: 1...2, step: 0.05)
+                    .frame(maxWidth: 220)
+                    .accessibilityLabel("Zoom")
+            }
+            .onChange(of: prefs.pictureZoom) { _, _ in player.applyFraming(switchingIfNeeded: true) }
+            Picker("Aspect ratio", selection: $prefs.aspectOverride) {
+                ForEach(Preferences.aspectChoices, id: \.ratio) { Text($0.label).tag($0.ratio) }
+            }
+            .onChange(of: prefs.aspectOverride) { _, _ in player.applyFraming(switchingIfNeeded: true) }
+            Button("Reset Picture") {
+                prefs.resetPicture()
+                player.applyPicture()
+                player.applyFraming()
+            }
+            .disabled(!prefs.pictureIsAdjusted)
+        }
+    }
+
+    private func slider(_ name: String, value: Binding<Double>) -> some View {
+        HStack {
+            Text(name)
+            Spacer(minLength: 16)
+            Text("\(Int(value.wrappedValue))")
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Slider(value: value, in: -100...100, step: 1)
+                .frame(maxWidth: 220)
+                .accessibilityLabel(name)
+        }
+        .onChange(of: value.wrappedValue) { _, _ in player.applyPicture(switchingIfNeeded: true) }
     }
 }
 
@@ -2252,15 +2391,16 @@ enum SettingsCopy {
         text: "Downloads the channels and the guide again straight away, instead of waiting for the next scheduled refresh."
     )
     #if os(tvOS)
-    // The Apple TV plays through mpv, not Apple's player: its framing is only
-    // set here (the player has no control for it), and the picture controls
-    // missing are a choice rather than something the player can't do.
+    // The Apple TV plays through mpv alone, so every picture control is
+    // live there; the engine row and Battery saver (it is on mains) are not
+    // offered.
     static let framing = SettingNote(
         name: "Framing",
         text: "Fill is how you put a 2.35:1 film on a 16:9 screen without watching it between black bars. It does cut the edges of the frame off."
     )
     static let pictureControls = SettingNote(
-        text: "There are no brightness, contrast or colour controls here: the television's own picture settings are the place for them, and they apply to everything on screen."
+        name: "Picture",
+        text: "Brightness, contrast, saturation and gamma, each from −100 to 100 with 0 as the file's own, applied by the player as it draws. The television's own picture settings still apply over them to everything on screen; the player's Picture tab has the same controls over the live picture, which is the better place to judge them."
     )
     #else
     static let framing = SettingNote(
@@ -2268,9 +2408,60 @@ enum SettingsCopy {
         text: "Fill is how you put a 2.35:1 film on a 16:9 screen without watching it between black bars. It does cut the edges of the frame off. Also reachable from the player itself, so it can be judged against what's on screen."
     )
     static let pictureControls = SettingNote(
-        text: "There are no brightness, contrast or colour controls: Apple's video player has no way to adjust the picture of a stream."
+        name: "Picture",
+        text: "Brightness, contrast, saturation and gamma, each from −100 to 100 with 0 as the file's own. They are the mpv engine's: setting any of them switches a title playing on Apple's engine over to mpv, and the player's Picture tab has the same sliders over the live picture."
     )
     #endif
+    static let pictureBrightness = SettingNote(name: "Brightness", text: pictureControls.text)
+    static let pictureContrast = SettingNote(name: "Contrast", text: pictureControls.text)
+    static let pictureSaturation = SettingNote(name: "Saturation", text: pictureControls.text)
+    static let pictureGamma = SettingNote(name: "Gamma", text: pictureControls.text)
+    static let resetPicture = SettingNote(
+        name: "Reset picture",
+        text: "Puts the file's own picture back: no adjustment, no zoom, its own shape."
+    )
+    static let nightMode = SettingNote(
+        name: "Night mode",
+        text: "Evens the sound out: quiet dialogue comes up and loud passages come down, for a room where the volume has to stay low. The mpv engine's; a title playing through Apple's engine is left as it is, and the player's Picture tab says so. Stays on this device rather than following you to your others, like the volume."
+    )
+    static let pictureZoom = SettingNote(
+        name: "Zoom",
+        text: "Enlarges the picture about its centre, up to 2×, cropping what spills over the edges. The mpv engine's, like the sliders above."
+    )
+    static let aspectOverride = SettingNote(
+        name: "Aspect ratio",
+        text: "Stretches or crops the picture to a shape other than the file's own, for a film letterboxed inside its own frame. The mpv engine's too."
+    )
+    #if !os(tvOS)
+    static let playbackEngineChoice = SettingNote(
+        name: "Playback engine",
+        text: "Automatic plays through Apple's engine and switches a title to mpv only when it needs something Apple's cannot do — picture subtitles, DTS or TrueHD, the picture controls, an audio delay on a transcode, a Matroska download. Apple: hardware decode straight to the screen, Picture in Picture, AirPlay and Watch Together, and the least battery; Matroska and DTS go to the server to convert, and picture subtitles are burned in there. mpv: opens the original file whatever it is and has every control, at a shader pass per frame that costs more battery; Picture in Picture, AirPlay and Watch Together hand the title back to Apple's engine while they run."
+    )
+    static let batterySaver = SettingNote(
+        name: "Battery saver",
+        text: "How the mpv engine draws. Always: the cheapest chain that still looks right — bilinear scaling, no dithering or debanding, 8-bit intermediates. Never: mpv's full-quality chain. Automatic: the cheap chain on an iPhone or iPad, on a Mac running on its battery or in Low Power Mode, and on any device running hot, which overrides the other two."
+    )
+    #endif
+    static let skipInterval = SettingNote(
+        name: "Skip by",
+        text: "How far the two skip buttons jump, and a double-tap on the left or right of the picture. Taps in a row add up, and the total is shown as they do."
+    )
+    static let edgeGestures = SettingNote(
+        name: "Edge drags for brightness and volume",
+        text: "Drag up or down along the left edge of the picture for brightness and along the right edge for volume. Off unless you want it: on some devices the drags fight the system's own edge gestures."
+    )
+    static let holdForDoubleSpeed = SettingNote(
+        name: "Hold for 2×",
+        text: "Hold a finger on the picture to play at double speed, and lift it to go back to the speed you were at."
+    )
+    static let hideControlsAfter = SettingNote(
+        name: "Hide controls after",
+        text: "How long the controls stay up after the last touch while something plays. They never hide while paused, while a panel is open, or while VoiceOver is on."
+    )
+    static let showsRemainingTime = SettingNote(
+        name: "Show time remaining",
+        text: "Whether the time at the right of the timeline counts down to the end or shows the whole length. Tapping it in the player flips this too."
+    )
     static let concurrency = SettingNote(
         name: "Parallel downloads",
         text: "How many transfers run at once. One at a time is kindest to a server that has to transcode each of them."
@@ -2315,8 +2506,9 @@ enum SettingsCopy {
     /// What the About panel says — on a Mac the app menu's About item, now
     /// that the General tab no longer carries it. The version first, then the
     /// engine, then the paragraph.
+    @MainActor
     static var aboutLines: [String] {
-        ["Aquarium \(Bundle.appVersion) (\(Bundle.appBuild))", "Playback engine: AVFoundation", about.text]
+        ["Aquarium \(Bundle.appVersion) (\(Bundle.appBuild))", "Playback engine: \(PlayerModel.shared.engineDescription)", about.text]
     }
     #if os(tvOS)
     static let playbackEngine = SettingNote(
@@ -2326,7 +2518,7 @@ enum SettingsCopy {
     #else
     static let playbackEngine = SettingNote(
         name: "Playback engine",
-        text: "Apple's AVFoundation, the same media framework the system's own players are built on — so what plays directly, and what the server is asked to convert, follows what this device supports."
+        text: "Which engine is playing right now, or which Settings → Video → Playback engine will pick. Apple's AVFoundation is the same media framework the system's own players are built on; mpv is the library the Apple TV and the Linux app play through, and it opens the original file whatever it is."
     )
     #endif
 }
