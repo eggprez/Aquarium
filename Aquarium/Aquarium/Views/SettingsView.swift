@@ -176,6 +176,7 @@ struct SettingsView: View {
             if shows(.video) {
                 qualitySection
                 pictureSection
+                playerSection
                 playingSection
                 audioLanguageSection
             }
@@ -399,6 +400,35 @@ struct SettingsView: View {
             Text("Picture")
         } footer: {
             MacSettingFooter(Copy.framing, Copy.pictureControls)
+        }
+    }
+
+    /// The controls drawn over the picture. The Mac window adopts them in
+    /// phase 3 of the player overhaul; the settings travel over iCloud now so
+    /// a phone and a Mac agree on them when it does.
+    private var playerSection: some View {
+        @Bindable var prefs = prefs
+        return Section {
+            Picker(selection: $prefs.skipInterval) {
+                ForEach(Preferences.skipIntervals, id: \.self) { Text("\($0) seconds").tag($0) }
+            } label: {
+                MacSettingLabel(Copy.skipInterval)
+            }
+            .note(Copy.skipInterval)
+
+            Picker(selection: $prefs.hideControlsAfter) {
+                ForEach(Preferences.hideControlsChoices, id: \.self) { Text("\(Int($0)) seconds").tag($0) }
+            } label: {
+                MacSettingLabel(Copy.hideControlsAfter)
+            }
+            .note(Copy.hideControlsAfter)
+
+            Toggle(isOn: $prefs.showsRemainingTime) { MacSettingLabel(Copy.showsRemainingTime) }
+                .note(Copy.showsRemainingTime)
+        } header: {
+            Text("Player")
+        } footer: {
+            MacSettingFooter(Copy.skipInterval, Copy.hideControlsAfter, Copy.showsRemainingTime)
         }
     }
 
@@ -1216,6 +1246,23 @@ private struct VideoSettingsPage: View {
                 Text("Picture")
             } footer: {
                 SettingsFooter(Copy.framing, Copy.pictureControls)
+            }
+
+            Section {
+                Picker(Copy.skipInterval.name ?? "", selection: $prefs.skipInterval) {
+                    ForEach(Preferences.skipIntervals, id: \.self) { Text("\($0) seconds").tag($0) }
+                }
+                Picker(Copy.hideControlsAfter.name ?? "", selection: $prefs.hideControlsAfter) {
+                    ForEach(Preferences.hideControlsChoices, id: \.self) { Text("\(Int($0)) seconds").tag($0) }
+                }
+                Toggle(Copy.showsRemainingTime.name ?? "", isOn: $prefs.showsRemainingTime)
+                Toggle(Copy.holdForDoubleSpeed.name ?? "", isOn: $prefs.holdForDoubleSpeed)
+                Toggle(Copy.edgeGestures.name ?? "", isOn: $prefs.edgeGestures)
+            } header: {
+                Text("Player")
+            } footer: {
+                SettingsFooter(Copy.skipInterval, Copy.hideControlsAfter, Copy.showsRemainingTime,
+                               Copy.holdForDoubleSpeed, Copy.edgeGestures)
             }
 
             Section {
@@ -2271,6 +2318,26 @@ enum SettingsCopy {
         text: "There are no brightness, contrast or colour controls: Apple's video player has no way to adjust the picture of a stream."
     )
     #endif
+    static let skipInterval = SettingNote(
+        name: "Skip by",
+        text: "How far the two skip buttons jump, and a double-tap on the left or right of the picture. Taps in a row add up, and the total is shown as they do."
+    )
+    static let edgeGestures = SettingNote(
+        name: "Edge drags for brightness and volume",
+        text: "Drag up or down along the left edge of the picture for brightness and along the right edge for volume. Off unless you want it: on some devices the drags fight the system's own edge gestures."
+    )
+    static let holdForDoubleSpeed = SettingNote(
+        name: "Hold for 2×",
+        text: "Hold a finger on the picture to play at double speed, and lift it to go back to the speed you were at."
+    )
+    static let hideControlsAfter = SettingNote(
+        name: "Hide controls after",
+        text: "How long the controls stay up after the last touch while something plays. They never hide while paused, while a panel is open, or while VoiceOver is on."
+    )
+    static let showsRemainingTime = SettingNote(
+        name: "Show time remaining",
+        text: "Whether the time at the right of the timeline counts down to the end or shows the whole length. Tapping it in the player flips this too."
+    )
     static let concurrency = SettingNote(
         name: "Parallel downloads",
         text: "How many transfers run at once. One at a time is kindest to a server that has to transcode each of them."

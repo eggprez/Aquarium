@@ -374,15 +374,11 @@ extension PlayerModel {
 
     // MARK: The audio offset
 
-    /// Always zero on an iPhone or iPad: nothing between the device and its
-    /// own speaker to lag.
-    var audioDelay: Double {
-        #if os(iOS)
-        0
-        #else
-        prefs.audioDelay
-        #endif
-    }
+    /// The offset in force, from Settings. On an iPhone or iPad it used to be
+    /// pinned at zero on the grounds that nothing between the device and its
+    /// own speaker lags; Bluetooth headphones and AirPlay speakers do, and the
+    /// player's Sync tab is where it is set now.
+    var audioDelay: Double { prefs.audioDelay }
 
     var appliedAudioDelay: Double { audioDelay }
     var appliedAudioDelayMilliseconds: Int { Int((appliedAudioDelay * 1000).rounded()) }

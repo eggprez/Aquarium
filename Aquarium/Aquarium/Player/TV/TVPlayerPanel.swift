@@ -10,24 +10,6 @@
 
 import SwiftUI
 
-enum PlayerTab: String, Hashable, CaseIterable, Identifiable {
-    case info, channels, audio, subtitles, quality, speed, sync
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .info: "Info"
-        case .channels: "Channels"
-        case .audio: "Audio"
-        case .subtitles: "Subtitles"
-        case .quality: "Quality"
-        case .speed: "Speed"
-        case .sync: "Sync"
-        }
-    }
-}
-
 struct TVPlayerPanel: View {
     @Environment(PlayerModel.self) private var player
     @Binding var tab: PlayerTab?
@@ -144,6 +126,9 @@ struct TVPlayerPanel: View {
         case .quality: QualityTab()
         case .speed: SpeedTab()
         case .sync: SyncTab()
+        // Picture controls come with phase 4 of the player overhaul; the tab
+        // is never offered here until then (see `tabs`).
+        case .picture: EmptyView()
         }
     }
 }

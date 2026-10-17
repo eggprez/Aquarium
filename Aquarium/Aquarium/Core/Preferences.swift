@@ -616,6 +616,41 @@ final class Preferences {
         didSet { write(fillScreen, forKey: "fill_screen") }
     }
 
+    // ---- The player's controls ----
+
+    /// How far the skip buttons and a double-tap on the picture jump, in
+    /// seconds: 10, 15 or 30.
+    var skipInterval: Int {
+        didSet { write(skipInterval, forKey: "player_skip_interval") }
+    }
+
+    /// A vertical drag on the left edge of the picture for brightness and on
+    /// the right for volume. Off unless asked for: on some devices the drags
+    /// fight the system's own edge gestures.
+    var edgeGestures: Bool {
+        didSet { write(edgeGestures, forKey: "player_edge_gestures") }
+    }
+
+    /// Holding a finger on the picture plays at 2× until it lifts.
+    var holdForDoubleSpeed: Bool {
+        didSet { write(holdForDoubleSpeed, forKey: "player_hold_2x") }
+    }
+
+    /// Seconds the controls stay up after the last touch while playing. They
+    /// never hide while paused or with a panel open.
+    var hideControlsAfter: Double {
+        didSet { write(hideControlsAfter, forKey: "player_hide_after") }
+    }
+
+    /// What the right-hand time under the timeline shows: the time left, or
+    /// the whole length. Tapping it in the player flips this.
+    var showsRemainingTime: Bool {
+        didSet { write(showsRemainingTime, forKey: "player_show_remaining") }
+    }
+
+    static let skipIntervals = [10, 15, 30]
+    static let hideControlsChoices: [Double] = [2, 4, 6, 10]
+
     // ---- Live TV source ----
 
     var liveTVSource: LiveTVSource {
@@ -855,6 +890,11 @@ final class Preferences {
         subtitleSize = d.object(forKey: "sub_font_size") == nil ? 100 : d.double(forKey: "sub_font_size")
         subtitleBackground = SubtitleBackground(rawValue: d.string(forKey: "sub_bg") ?? "") ?? .outline
         fillScreen = d.bool(forKey: "fill_screen")
+        skipInterval = Self.skipIntervals.contains(d.integer(forKey: "player_skip_interval")) ? d.integer(forKey: "player_skip_interval") : 10
+        edgeGestures = d.bool(forKey: "player_edge_gestures")
+        holdForDoubleSpeed = d.object(forKey: "player_hold_2x") == nil ? true : d.bool(forKey: "player_hold_2x")
+        hideControlsAfter = Self.hideControlsChoices.contains(d.double(forKey: "player_hide_after")) ? d.double(forKey: "player_hide_after") : 4
+        showsRemainingTime = d.object(forKey: "player_show_remaining") == nil ? true : d.bool(forKey: "player_show_remaining")
         liveTVSource = LiveTVSource(rawValue: d.string(forKey: "livetv_source") ?? "") ?? .jellyfin
         iptvPlaylistURL = d.string(forKey: "iptv_playlist_url") ?? ""
         iptvGuideURL = d.string(forKey: "iptv_guide_url") ?? ""
@@ -941,6 +981,11 @@ final class Preferences {
         CloudSync.set(audiobookSpeed, forKey: "audiobook_speed")
         CloudSync.set(defaults.data(forKey: "smart_playlists"), forKey: "smart_playlists")
         CloudSync.set(fillScreen, forKey: "fill_screen")
+        CloudSync.set(skipInterval, forKey: "player_skip_interval")
+        CloudSync.set(edgeGestures, forKey: "player_edge_gestures")
+        CloudSync.set(holdForDoubleSpeed, forKey: "player_hold_2x")
+        CloudSync.set(hideControlsAfter, forKey: "player_hide_after")
+        CloudSync.set(showsRemainingTime, forKey: "player_show_remaining")
         CloudSync.set(liveTVSource.rawValue, forKey: "livetv_source")
         CloudSync.set(iptvPlaylistURL, forKey: "iptv_playlist_url")
         CloudSync.set(iptvGuideURL, forKey: "iptv_guide_url")
@@ -1015,6 +1060,13 @@ final class Preferences {
         if let v = CloudSync.object(forKey: "sub_bg") as? String,
            let b = SubtitleBackground(rawValue: v), b != subtitleBackground { subtitleBackground = b }
         if let v = CloudSync.object(forKey: "fill_screen") as? Bool, v != fillScreen { fillScreen = v }
+        if let v = (CloudSync.object(forKey: "player_skip_interval") as? NSNumber)?.intValue,
+           Self.skipIntervals.contains(v), v != skipInterval { skipInterval = v }
+        if let v = CloudSync.object(forKey: "player_edge_gestures") as? Bool, v != edgeGestures { edgeGestures = v }
+        if let v = CloudSync.object(forKey: "player_hold_2x") as? Bool, v != holdForDoubleSpeed { holdForDoubleSpeed = v }
+        if let v = (CloudSync.object(forKey: "player_hide_after") as? NSNumber)?.doubleValue,
+           Self.hideControlsChoices.contains(v), v != hideControlsAfter { hideControlsAfter = v }
+        if let v = CloudSync.object(forKey: "player_show_remaining") as? Bool, v != showsRemainingTime { showsRemainingTime = v }
         if let v = CloudSync.object(forKey: "livetv_source") as? String,
            let s = LiveTVSource(rawValue: v), s != liveTVSource { liveTVSource = s }
         if let v = CloudSync.object(forKey: "iptv_playlist_url") as? String, v != iptvPlaylistURL {

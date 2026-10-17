@@ -1,8 +1,9 @@
-//  The stream facts the Mac's inspector lists: the file the server holds, what
-//  is actually coming down the wire, and where playback is. See
-//  `StreamInfoInspector`. The Apple TV draws its own in the player's Info tab.
+//  The stream facts the Mac's inspector and the iPhone's Info tab list: the
+//  file the server holds, what is actually coming down the wire, and where
+//  playback is. See `StreamInfoInspector` and `PlayerPanel`. The Apple TV
+//  draws its own in the player's Info tab.
 
-#if os(macOS)
+#if !os(tvOS)
 
 import Foundation
 
@@ -121,11 +122,11 @@ struct PlayerStreamRows {
             let ms = player.appliedAudioDelayMilliseconds
             rows.append(("Audio delay", "\(ms > 0 ? "+" : "")\(ms) ms"))
         }
-        if let index = player.selectedAudioTrack, index < player.audioTracks.count {
-            rows.append(("Audio track", player.audioTracks[index].label))
+        if let id = player.selectedAudioTrack, let track = player.audioTracks.first(where: { $0.id == id }) {
+            rows.append(("Audio track", track.label))
         }
-        if let index = player.selectedSubtitleTrack, index < player.subtitleTracks.count {
-            rows.append(("Subtitles", player.subtitleTracks[index].label))
+        if let id = player.selectedSubtitleTrack, let track = player.subtitleTracks.first(where: { $0.id == id }) {
+            rows.append(("Subtitles", track.label))
         } else if !player.subtitleTracks.isEmpty {
             rows.append(("Subtitles", "Off"))
         }

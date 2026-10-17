@@ -345,6 +345,70 @@ section passes on each, and the only `AVFoundation` import outside
 
 ### Phase 2: the iPhone and iPad chrome (L)
 
+> **Shipped 2026-10-16** on `player-overhaul` (uncommitted at the time of
+> writing). `AVPlayerViewController` is gone from iOS and `Player/
+> TransportBarExtras.swift` is deleted. `Player/Chrome/VideoSurface.swift`
+> is a `UIView` (`VideoLayerHostView`) that gives its bounds to one `CALayer`,
+> an `AVPlayerLayer` today and the mpv `CAMetalLayer` in phase 4;
+> `Chrome/PictureInPicture.swift` runs `AVPictureInPictureController` over it
+> with `canStartPictureInPictureAutomaticallyFromInline`, and AirPlay is an
+> `AVRoutePickerView` in the title row. The shared chrome under
+> `Player/Chrome/`: `PlayerChrome` (the state — visibility, panel, scrub,
+> skip run, hold, edge level — and the composition), `PlayerTransport`
+> (scrims with `TVTransportBar`'s stops, title row with dismiss / LIVE /
+> AirPlay / PiP / `…`, centre cluster with the spinner in the play glyph's
+> place, times with tap-to-toggle total, the pill row), `PlayerTimeline`
+> (played in `Theme.accent`, buffered white 30 %, segments, chapter ticks,
+> trickplay above the thumb, drag with a vertical pull-away that slows it,
+> adjustable for VoiceOver), `PlayerPanel` (Info · Channels · Audio ·
+> Subtitles · Quality · Speed · Sync, `.picture` reserved; sheet with medium
+> and large detents on a phone, popover off the pill on an iPad; rows that
+> cannot be honoured say why), `PlayerGestures` (tap, double-tap skip with
+> ripple and the lifted `skipTotal`, pinch Fit/Fill, hold 2×, edge drags
+> behind the Settings toggle), `PlayerOverlays` (the moment overlays, now
+> structs the Mac window also uses), `PlayerChromeStyle` (`glassEffect` on
+> 26, `.ultraThinMaterial` + `Theme.border` hairline before, `Theme.raised`
+> at 85 % under Reduce Transparency; `PlayerMetrics` per platform) and
+> `PlayerParts` (`PlayerTime`, `TrickplayStore` on ImageIO, `ChannelSchedule`,
+> `InfoArtwork`, `SkipBadge`, `playerGlass`, lifted out of `TV/` for every
+> platform; `PlayerTab` likewise). `PlayerModel+Chrome.swift` gives the
+> non-tvOS model `currentChannel` / `channelLineup` / `playChannel`,
+> `panelTabs`, `offersQuality` and the "why not" strings. Everything the old
+> pills and gear menu offered is reachable: quality rungs (Quality tab and
+> pill), the file's audio and subtitle tracks and the preferred languages
+> (Audio and Subtitles tabs), sleep timer and stop-after-this (`…` menu and
+> Info tab), resync and re-encode for sync (Sync tab, also `…` → Audio Sync),
+> the queue (Up Next pill), Watch Together (`…`), Fill (pill and pinch),
+> Stream Info (`…` → Info tab, which lists `PlayerStreamRows`, now compiled
+> for iOS). Speed left AVKit's control for the Speed tab and the hold
+> gesture; the audio offset is set from the Sync tab with the Mac popover's
+> settle-then-rebuild, and `PlayerModel.audioDelay` is no longer pinned to
+> zero on iOS. Settings → Video gained the Player group on iPhone and Mac
+> (skip 10/15/30 s, hide after 2/4/6/10 s, show remaining, hold for 2×, edge
+> drags), in `Preferences` and `CloudSync.syncedKeys`. Debug builds take
+> `-AquariumPlayURL <url>` (and `-AquariumPlayTitle`, `-AquariumPlayPaused
+> YES`) on every platform now, which is how the simulator screenshots in
+> `qa-2026-10-16/player-phase-2/` were taken with no server to sign in to.
+> iOS, macOS and tvOS build; `AquariumTests` (31) pass.
+>
+> **Left for later phases.** The Mac window still draws `AVPlayerView` and
+> its own row (phase 3), tvOS its own bar and panel (phase 5); the chrome
+> files are `#if !os(tvOS)` as whole files because the model still has two
+> shapes (`isLocal`, `queue`, `chapters`, `bitrateNotice` exist only off
+> tvOS), which is phase 4/5's fold, not a chrome `#if`. `PlayerTransport`'s
+> AirPlay and `PlayerGestures`' brightness/volume setters are the only
+> platform-split input mechanics. Landscape lock for a wide picture and
+> portrait for a phone-shaped one is not done (`allowsLandscape` as before).
+> Hover-to-show on a Mac waits for phase 3. The Picture tab exists but is
+> never listed. The iOS 17 fallback branches compile and the material falls
+> back by `#available`, but no iOS 17 simulator runtime is installed on this
+> Mac (27.0 and 27.1 only), so it was not seen. PiP, AirPlay, swipe-home and
+> background audio were not exercised: the iPhone simulator reports Picture
+> in Picture as not possible (the iPad simulator shows the button), and
+> background audio relies on `AVEngine`'s `continuesIfPossible` policy, which
+> is unchanged. Edge drags, hold-for-2× and pinch were not driven by hand on
+> a device. The 2026-10-15 QA script's player section has not been re-run.
+
 `VideoSurface` becomes a `UIView` hosting an `AVPlayerLayer` (or the mpv
 layer, phase 4), `AVPlayerViewController` goes, `TransportBarExtras.swift`
 is deleted, and `PlayerTransport`, `PlayerPanel`, `Timeline` (with

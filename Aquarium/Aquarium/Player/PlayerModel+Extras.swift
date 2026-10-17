@@ -508,13 +508,30 @@ extension PlayerModel {
     }
     #endif
 
-    #if os(tvOS) && DEBUG
-    /// Launched with `-AquariumPlayURL <url>`, play that URL straight away.
+    #if DEBUG
+    /// Launched with `-AquariumPlayURL <url>` (and, optionally,
+    /// `-AquariumPlayTitle <title>`), play that URL straight away: how the
+    /// player is looked at on a simulator that is signed in to no server.
+    /// Played as a title rather than a channel, so the timeline and the
+    /// on-demand controls are what is drawn. Debug builds only.
     func playDebugStreamIfAsked() {
         guard let string = UserDefaults.standard.string(forKey: "AquariumPlayURL"),
               let url = URL(string: string) else { return }
-        playExternal(title: url.lastPathComponent, subtitle: url.host ?? "", artworkURL: nil, streamURL: url)
+        let title = UserDefaults.standard.string(forKey: "AquariumPlayTitle") ?? url.lastPathComponent
+        playExternal(title: title, subtitle: url.host ?? "", artworkURL: nil, streamURL: url)
         isLive = false
+        #if !os(tvOS)
+        options.live = false
+        autoplayCancelled = false
+        #endif
+        // `-AquariumPlayPaused YES` pauses once the stream has opened, which
+        // keeps the controls on screen for a screenshot.
+        if UserDefaults.standard.bool(forKey: "AquariumPlayPaused") {
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(4))
+                self?.pause()
+            }
+        }
     }
     #endif
 }
