@@ -32,6 +32,13 @@ final class VideoLayerHostView: UIView {
         isAccessibilityElement = true
         accessibilityLabel = "Video"
         accessibilityTraits = .image
+        // The display scale changes when the view moves between screens
+        // (AirPlay mirroring, an external display): the layer is told so it
+        // keeps drawing at the new screen's pixel size.
+        registerForTraitChanges([UITraitDisplayScale.self]) { (view: Self, _: UITraitCollection) in
+            view.videoLayer?.contentsScale = view.traitCollection.displayScale
+            view.videoLayer.map(sizeDrawable)
+        }
     }
 
     @available(*, unavailable)
@@ -50,12 +57,6 @@ final class VideoLayerHostView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         fitVideoLayer()
-    }
-
-    override func traitCollectionDidChange(_ previous: UITraitCollection?) {
-        super.traitCollectionDidChange(previous)
-        videoLayer?.contentsScale = traitCollection.displayScale
-        videoLayer.map(sizeDrawable)
     }
 
     private func fitVideoLayer() {

@@ -59,7 +59,9 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
         observers = [
             made.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] controller, _ in
                 let possible = controller.isPictureInPicturePossible
-                Task { @MainActor in
+                // Re-captured here: the outer `weak self` is a variable, and
+                // a Task may not read a captured variable from another thread.
+                Task { @MainActor [weak self] in
                     guard let self else { return }
                     self.isPossible = possible
                     if possible, self.wantsStart {
@@ -71,7 +73,7 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
             },
             made.observe(\.isPictureInPictureActive, options: [.initial, .new]) { [weak self] controller, _ in
                 let active = controller.isPictureInPictureActive
-                Task { @MainActor in self?.isActive = active }
+                Task { @MainActor [weak self] in self?.isActive = active }
             },
         ]
     }
