@@ -13,17 +13,27 @@ extension View {
     /// Dark glass: the system material with the app's own dark laid over it,
     /// so it reads the same over a snow scene as over a night one.
     func playerGlass(cornerRadius: CGFloat = 32) -> some View {
-        background {
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(Theme.background.opacity(0.55))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(.white.opacity(0.08), lineWidth: 1)
-                )
+        modifier(PlayerGlass(cornerRadius: cornerRadius))
+    }
+}
+
+/// The television's glass, and the skip badge's: the thin material under a
+/// wash of the app's background. Solid under Reduce Transparency.
+private struct PlayerGlass: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        content.background {
+            let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            if reduceTransparency {
+                shape.fill(Theme.raised.opacity(0.95))
+                    .overlay(shape.strokeBorder(.white.opacity(0.08), lineWidth: 1))
+            } else {
+                shape.fill(.ultraThinMaterial)
+                    .overlay(shape.fill(Theme.background.opacity(0.55)))
+                    .overlay(shape.strokeBorder(.white.opacity(0.08), lineWidth: 1))
+            }
         }
     }
 }

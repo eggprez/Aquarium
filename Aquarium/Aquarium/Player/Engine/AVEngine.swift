@@ -842,6 +842,7 @@ final class AVEngine: PlaybackEngine {
     var framing: Framing = .fit
     var picture = PictureAdjustment.neutral
     var nightMode = false
+    let nightModeUnavailableReason: String? = "Night mode needs the mpv engine; Apple's has no such filter."
     var powerProfile: PowerProfile = .quality
     /// `continuesIfPossible` already drops the picture and keeps the sound
     /// when the app goes behind another; there is nothing to switch here.

@@ -472,6 +472,7 @@ final class PlayerModel {
         refreshSubtitleStyling()
         applyFraming()
         applyPicture()
+        applyNightMode()
         refreshPowerProfile()
         NowPlaying.shared.attach(to: self)
     }
@@ -524,7 +525,10 @@ final class PlayerModel {
             // The first frame is the usual way the cover comes off; a stream
             // whose engine says nothing of one comes out from under it on
             // its first tick of playing.
-            if pictureIsStale, !isOpening, !isBuffering, seconds > 0 { pictureIsStale = false }
+            if pictureIsStale, !isOpening, !isBuffering, seconds > 0 {
+                Self.log.info("cover off on the first tick of playing")
+                pictureIsStale = false
+            }
             refreshCues()
             maybeReport()
             checkSleepDeadline()
@@ -604,6 +608,7 @@ final class PlayerModel {
     }
 
     private func onFirstFrame() {
+        Self.log.info("first frame on \(self.engine?.kind.title ?? "-", privacy: .public) (was opening: \(self.isOpening, privacy: .public), cover: \(self.pictureIsStale, privacy: .public))")
         if isOpening {
             isOpening = false
             adaptive.noteOpened()

@@ -228,13 +228,16 @@ extension PlayerModel {
                 MainActor.assumeIsolated { self?.powerStateChanged() }
             })
         }
+        #if DEBUG
+        PowerDebugHook.start()
+        #endif
     }
 
     func powerStateChanged() {
         refreshPowerProfile()
         guard prefs.adaptiveQuality, prefs.powerAwareQuality, isActive, !isLocal, !isExternal else { return }
-        let info = ProcessInfo.processInfo
-        if adaptive.notePower(thermal: info.thermalState, lowPower: info.isLowPowerModeEnabled, currentBitrate: currentBitrate) {
+        let power = devicePower
+        if adaptive.notePower(thermal: power.thermal, lowPower: power.lowPower, currentBitrate: currentBitrate) {
             maybeAdapt()
         }
     }
@@ -242,7 +245,87 @@ extension PlayerModel {
     /// The rung a stream may open at right now, given the device's state.
     var powerCapBitrate: Int? {
         guard prefs.adaptiveQuality, prefs.powerAwareQuality else { return nil }
+        let power = devicePower
+        return AdaptiveQuality.powerRung(thermal: power.thermal, lowPower: power.lowPower)
+    }
+
+    /// What the device says about its power right now: the thermal state,
+    /// Low Power Mode, and on a Mac whether it is on its battery. Read in one
+    /// place so a debug build can stand in for a device that is hot or
+    /// unplugged — see `PowerDebugHook`.
+    var devicePower: (thermal: ProcessInfo.ThermalState, lowPower: Bool, onBattery: Bool) {
         let info = ProcessInfo.processInfo
-        return AdaptiveQuality.powerRung(thermal: info.thermalState, lowPower: info.isLowPowerModeEnabled)
+        var power = (thermal: info.thermalState, lowPower: info.isLowPowerModeEnabled, onBattery: PowerSource.onBattery)
+        #if DEBUG
+        if let thermal = PowerDebugHook.thermal { power.thermal = thermal }
+        if let lowPower = PowerDebugHook.lowPower { power.lowPower = lowPower }
+        if let onBattery = PowerDebugHook.onBattery { power.onBattery = onBattery }
+        #endif
+        return power
     }
 }
+
+#if DEBUG
+/// Debug builds only: a device that is hot, in Low Power Mode or on its
+/// battery, faked from the Mac, since a simulator is never any of them and
+/// the Mac's own state can't be changed from a script without a password.
+///
+///     xcrun simctl spawn booted notifyutil -p aquarium.debug.thermal.serious
+///     notifyutil -p aquarium.debug.battery.on          # the Mac app
+///
+/// Names: `thermal.<nominal|fair|serious|critical|real>`, `lowpower.<on|off|real>`,
+/// `battery.<on|off|real>`; `real` hands the reading back to the device. Each
+/// runs the same `powerStateChanged` a real change would, so the render
+/// profile and the quality cap follow.
+@MainActor
+enum PowerDebugHook {
+    static var thermal: ProcessInfo.ThermalState?
+    static var lowPower: Bool?
+    static var onBattery: Bool?
+    private static var registered = false
+
+    private static let names = [
+        "thermal.nominal", "thermal.fair", "thermal.serious", "thermal.critical", "thermal.real",
+        "lowpower.on", "lowpower.off", "lowpower.real",
+        "battery.on", "battery.off", "battery.real",
+    ]
+
+    static func start() {
+        guard !registered else { return }
+        registered = true
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        for name in names {
+            CFNotificationCenterAddObserver(
+                center, nil,
+                { _, _, name, _, _ in
+                    guard let raw = name?.rawValue as String? else { return }
+                    Task { @MainActor in PowerDebugHook.received(raw) }
+                },
+                "aquarium.debug.\(name)" as CFString,
+                nil, .deliverImmediately
+            )
+        }
+    }
+
+    private static func received(_ full: String) {
+        let parts = full.split(separator: ".")
+        guard parts.count == 4 else { return }
+        let value = String(parts[3])
+        switch parts[2] {
+        case "thermal":
+            thermal = switch value {
+            case "nominal": .nominal
+            case "fair": .fair
+            case "serious": .serious
+            case "critical": .critical
+            default: nil
+            }
+        case "lowpower": lowPower = value == "real" ? nil : value == "on"
+        case "battery": onBattery = value == "real" ? nil : value == "on"
+        default: return
+        }
+        PlayerModel.log.notice("power hook: \(full, privacy: .public)")
+        PlayerModel.shared.powerStateChanged()
+    }
+}
+#endif

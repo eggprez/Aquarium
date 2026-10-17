@@ -400,10 +400,14 @@ struct SettingsView: View {
 
             PictureAdjustRows()
                 .note(Copy.pictureControls)
+
+            Toggle(isOn: $prefs.nightMode) { MacSettingLabel(Copy.nightMode) }
+                .note(Copy.nightMode)
+                .onChange(of: prefs.nightMode) { _, _ in player.applyNightMode() }
         } header: {
             Text("Picture")
         } footer: {
-            MacSettingFooter(Copy.framing, Copy.pictureControls, Copy.pictureZoom, Copy.aspectOverride)
+            MacSettingFooter(Copy.framing, Copy.pictureControls, Copy.pictureZoom, Copy.aspectOverride, Copy.nightMode)
         }
     }
 
@@ -1263,10 +1267,12 @@ private struct VideoSettingsPage: View {
                 }
                 .onChange(of: prefs.fillScreen) { _, _ in player.applyFraming(switchingIfNeeded: true) }
                 PictureAdjustRows()
+                Toggle(Copy.nightMode.name ?? "", isOn: $prefs.nightMode)
+                    .onChange(of: prefs.nightMode) { _, _ in player.applyNightMode() }
             } header: {
                 Text("Picture")
             } footer: {
-                SettingsFooter(Copy.framing, Copy.pictureControls, Copy.pictureZoom, Copy.aspectOverride)
+                SettingsFooter(Copy.framing, Copy.pictureControls, Copy.pictureZoom, Copy.aspectOverride, Copy.nightMode)
             }
 
             Section {
@@ -2413,6 +2419,10 @@ enum SettingsCopy {
     static let resetPicture = SettingNote(
         name: "Reset picture",
         text: "Puts the file's own picture back: no adjustment, no zoom, its own shape."
+    )
+    static let nightMode = SettingNote(
+        name: "Night mode",
+        text: "Evens the sound out: quiet dialogue comes up and loud passages come down, for a room where the volume has to stay low. The mpv engine's; a title playing through Apple's engine is left as it is, and the player's Picture tab says so. Stays on this device rather than following you to your others, like the volume."
     )
     static let pictureZoom = SettingNote(
         name: "Zoom",

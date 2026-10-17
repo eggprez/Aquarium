@@ -140,9 +140,32 @@ extension PlayerModel {
             if prefs.playbackEngine == .mpv, engineOverride != .apple {
                 return "Settings → Video → Playback engine is set to mpv."
             }
+            // A file with nothing to remux it — a download, a bare address —
+            // in a container AVFoundation won't open: handing it over would
+            // only reach the error card. A server item is remuxed on the way.
+            if let container = fileContainerWithNothingToRemux,
+               !EnginePolicy.fileContainersAVFoundationOpens.contains(container) {
+                return "Apple's engine can't open a .\(container) file on its own; Picture in Picture and AirPlay need a stream the server remuxes."
+            }
         }
         return nil
         #endif
+    }
+
+    /// The container of what is playing when it is a file no server stands
+    /// behind — a download, a playlist entry or debug URL that is a file —
+    /// else nil.
+    private var fileContainerWithNothingToRemux: String? {
+        #if !os(tvOS)
+        if isLocal, let id = localRecordId, let record = DownloadManager.shared.record(for: id) {
+            return record.hlsPath != nil ? nil : EnginePolicy.fileContainer(of: URL(fileURLWithPath: record.fileName))
+        }
+        #endif
+        if isExternal, let url = externalChannel?.streamURL {
+            let container = EnginePolicy.fileContainer(of: url)
+            return container == "m3u8" || container == "m3u" ? nil : container
+        }
+        return nil
     }
 
     /// Reopen whatever is playing on `kind` at the same position, and keep
@@ -245,16 +268,39 @@ extension PlayerModel {
         Task { await switchEngine(to: .mpv, reason: "picture adjusted") }
     }
 
+    // MARK: - Night mode
+
+    /// Dynamic range compression on the sound, from Settings, on an engine
+    /// that has it. Apple's engine has no such filter and is left alone: the
+    /// row that sets this says so rather than switching the engine, since a
+    /// quieter film is not worth a reopen.
+    func applyNightMode() {
+        guard let engine, engine.capabilities.contains(.nightMode) else { return }
+        if engine.nightMode != prefs.nightMode {
+            Self.log.info("night mode \(self.prefs.nightMode ? "on" : "off", privacy: .public)")
+        }
+        engine.nightMode = prefs.nightMode
+    }
+
+    /// Why the Night mode row cannot act on what is playing, or nil.
+    var nightModeUnavailableReason: String? {
+        guard let engine else { return "Once the stream has opened." }
+        if engine.capabilities.contains(.nightMode) { return engine.nightModeUnavailableReason }
+        if !isActive || isOpening { return "Once the stream has opened." }
+        return (engine.nightModeUnavailableReason ?? "Night mode needs the mpv engine.")
+            + " Switch from the Picture tab's sliders or Settings → Video → Playback engine."
+    }
+
     // MARK: - Power
 
     /// How much of mpv's rendering budget to spend, from Settings and the
     /// device's state: on a battery, in Low Power Mode, or running hot.
     func refreshPowerProfile() {
         guard let engine else { return }
-        let info = ProcessInfo.processInfo
+        let power = devicePower
         let profile = EnginePolicy.powerProfile(
-            platform: platform, saver: prefs.batterySaver, onBattery: PowerSource.onBattery,
-            lowPower: info.isLowPowerModeEnabled, thermal: info.thermalState)
+            platform: platform, saver: prefs.batterySaver, onBattery: power.onBattery,
+            lowPower: power.lowPower, thermal: power.thermal)
         if engine.powerProfile != profile {
             Self.log.info("render profile: \(profile == .battery ? "battery" : "quality", privacy: .public)")
         }

@@ -129,6 +129,21 @@ final class EnginePolicyTests: XCTestCase {
         XCTAssertNil(EnginePolicy.fileContainer(of: URL(string: "https://example.net/stream")!))
     }
 
+    func testBareTransportStreamIsMPVUnlessAppleIsPinned() {
+        // AVFoundation reads MPEG-TS inside an HLS playlist and never on its
+        // own, so a `.ts` address is the one live stream that needs mpv.
+        var r = request(source: nil)
+        r.isExternalFile = true
+        r.isLive = true
+        r.fileContainer = EnginePolicy.fileContainer(of: URL(string: "http://iptv.example/live/123.ts")!)
+        XCTAssertEqual(EnginePolicy.choose(r), .mpv)
+        r.preference = .apple
+        XCTAssertEqual(EnginePolicy.choose(r), .apple, "a pinned engine is a decision already made")
+        r.preference = .automatic
+        r.mpvAvailable = false
+        XCTAssertEqual(EnginePolicy.choose(r), .apple, "nothing to go to without the engine")
+    }
+
     func testPictureInPictureAirPlayAndSharePlayNeedApple() {
         var r = request(source: source(audio: "dts", subtitles: ["pgssub"]))
         r.subtitleStreamIndex = 2

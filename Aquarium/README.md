@@ -87,9 +87,12 @@ Everything the Linux build does, with the exceptions listed further down.
   **aspect-ratio override** — the player's Picture tab and Settings → Video →
   Picture. They are mpv's: touching one switches the title to the mpv engine
   at the same position, and Reset puts the file's own picture back.
-- **Night mode** (dynamic range compression) and an **audio delay on any
-  stream**, HLS and live included — mpv's too; the Sync tab offers the switch
-  on a stream Apple's engine cannot shift.
+- **Audio delay on any stream**, HLS and live included — mpv's; the Sync tab
+  offers the switch on a stream Apple's engine cannot shift. **Night mode**
+  (dynamic range compression) has its row in the Picture tab and Settings →
+  Video, but the FFmpeg inside MPVKit's LGPL build carries no audio
+  compressor (`dynaudnorm` is not compiled in), so the row says so rather than
+  acting until the package's FFmpeg does.
 - **MKV direct play**, DTS, TrueHD and picture subtitles (PGS, VOBSUB, ASS)
   — direct from the file on mpv, chosen automatically when the video is one
   this device decodes in hardware; a Matroska download plays on mpv since
@@ -414,8 +417,9 @@ plays with the phone switched off, as long as it has been signed in once.
 
 The Linux build drives mpv, which can open essentially anything and exposes
 every knob it has. The Apple app has mpv too now (see *The mpv engine*), so
-the picture controls, night mode and MKV direct play are in the features list
-above; what is still absent is what belongs to the system rather than to a
+the picture controls and MKV direct play are in the features list above
+(night mode is wired but waits on an FFmpeg with a compressor in it — see
+there); what is still absent is what belongs to the system rather than to a
 player, or has no place on a television:
 
 | Linux | Apple | Why |

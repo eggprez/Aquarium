@@ -237,7 +237,10 @@ private struct VideoSettingsPage: View {
                     prefs.resetPicture()
                 }
                 .disabled(!prefs.pictureIsAdjusted)
+                SettingChoice(Copy.nightMode, selection: $prefs.nightMode,
+                              options: [(false, "Off"), (true, "On — quiet dialogue up, loud passages down")])
             }
+            .onChange(of: prefs.nightMode) { _, _ in player.applyNightMode() }
             .onChange(of: prefs.fillScreen) { _, _ in player.applyFraming() }
             .onChange(of: prefs.picture) { _, _ in player.applyPicture() }
             .onChange(of: prefs.pictureZoom) { _, _ in player.applyFraming() }

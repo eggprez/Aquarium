@@ -207,10 +207,14 @@ struct PlayerChrome: View {
     @State private var skips = 0
     /// Acknowledged once and not shown again for this stream.
     @State private var dismissedNoVideoNotice = false
-    #if os(macOS)
-    /// The picture's size: a Mac window runs from 480×270 to a full display,
-    /// and the small metrics are for the small end of that.
+    /// The chrome's size and the safe area round it: on a Mac the window
+    /// runs from 480×270 to a full display and the small metrics are for the
+    /// small end of that; on a phone or an iPad held upright they say where
+    /// a wide picture's black bars are, so the controls can sit against the
+    /// picture rather than at the screen's edges.
     @State private var size: CGSize = .zero
+    @State private var safeArea: EdgeInsets = .init()
+    #if os(macOS)
     private var mac: PlayerMacState { PlayerMacState.shared }
     #endif
 
@@ -232,6 +236,30 @@ struct PlayerChrome: View {
         sizeClass == .compact
         #else
         false
+        #endif
+    }
+
+    /// A wide picture in a view taller than it is wide — an iPad upright, a
+    /// phone before it has turned or kept upright by a square-ish film, a
+    /// narrow split-view pane — sits between two black bars, and the
+    /// controls go against it rather than to the screen's edges. Nil when
+    /// the picture fills the view, or the bars have no room for them.
+    private var letterbox: PlayerTransport.Letterbox? {
+        #if os(iOS)
+        let picture = player.pictureSize
+        guard size.height > size.width, picture.width > 0, picture.height > 0,
+              !prefs.fillScreen, prefs.aspectOverride == 0, abs(prefs.pictureZoom - 1) < 0.001 else { return nil }
+        let fullWidth = size.width + safeArea.leading + safeArea.trailing
+        let fullHeight = size.height + safeArea.top + safeArea.bottom
+        let pictureHeight = fullWidth * picture.height / picture.width
+        let bar = (fullHeight - pictureHeight) / 2
+        // Room for the title row above and the bottom band below, inside
+        // the safe area; otherwise the usual layout.
+        guard bar - safeArea.top >= PlayerTransport.Letterbox.titleRoom,
+              bar - safeArea.bottom >= PlayerTransport.Letterbox.bandRoom else { return nil }
+        return .init(pictureHeight: pictureHeight, shift: (safeArea.top - safeArea.bottom) / 2)
+        #else
+        return nil
         #endif
     }
 
@@ -297,6 +325,7 @@ struct PlayerChrome: View {
                 PlayerTransport(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork,
                                 pictureInPicture: pictureInPicture, compact: compact, usesSheet: usesSheet,
                                 timelineOnly: PlayerMetrics.television && chrome.panelOpen,
+                                letterbox: letterbox,
                                 onInteract: interact, onDismiss: onDismiss)
                     .transition(.opacity)
             }
@@ -338,6 +367,11 @@ struct PlayerChrome: View {
         .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(duration: 0.25), value: chrome.skipTotal)
         .animation(.easeOut(duration: 0.2), value: chrome.holdingDoubleSpeed)
         .animation(.easeOut(duration: 0.2), value: chrome.edgeLevel)
+        .background(GeometryReader { geo in
+            Color.clear
+                .onChange(of: geo.size, initial: true) { _, now in size = now }
+                .onChange(of: geo.safeAreaInsets, initial: true) { _, now in safeArea = now }
+        })
         .panelPresentation(chrome: chrome, usesSheet: usesSheet, schedule: schedule, artwork: artwork,
                            reduceMotion: reduceMotion)
         #if os(tvOS)
@@ -351,9 +385,6 @@ struct PlayerChrome: View {
         .sensoryFeedback(trigger: player.currentBitrate) { was, _ in was == nil ? nil : .selection }
         #endif
         #if os(macOS)
-        .background(GeometryReader { geo in
-            Color.clear.onChange(of: geo.size, initial: true) { _, now in size = now }
-        })
         // The pointer: moving over the picture brings the controls up and
         // starts the clock; leaving the window takes them away.
         .onContinuousHover { phase in
@@ -511,6 +542,20 @@ extension PlayerChromeState.PanelAnchor {
 
 // MARK: - The panel's presentation
 
+/// The sheet's material, solid under Reduce Transparency as the chrome's
+/// pills are.
+private struct PanelSheetBackground: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.presentationBackground(Theme.raised)
+        } else {
+            content.presentationBackground(.ultraThinMaterial)
+        }
+    }
+}
+
 private extension View {
     /// A sheet with medium and large detents on a phone; a popover hung off
     /// the pill that opened it on an iPad or a Mac; on a television a card
@@ -542,7 +587,7 @@ private extension View {
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
                     .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-                    .presentationBackground(.ultraThinMaterial)
+                    .modifier(PanelSheetBackground())
                     // The sheet is its own presentation and takes the app's
                     // theme unless told; the player is dark.
                     .preferredColorScheme(.dark)

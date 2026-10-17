@@ -174,6 +174,9 @@ private struct TelevisionPanelBody<Content: View>: View {
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .focusSection()
+                // While focus is on the row of tabs, a tab's choices can say
+                // which of them Down should land on — see `panelEntryOnly`.
+                .environment(\.panelTabsHaveFocus, focusedTab != nil)
         }
         .onChange(of: focusedTab) { was, focused in
             // Belt to the braces in `tabs`: should focus reach another tab
@@ -187,6 +190,12 @@ private struct TelevisionPanelBody<Content: View>: View {
                 tabWasFocused = true
             }
             tabsFocused?(focused != nil)
+        }
+        // The tab opened from outside the row — a stream that lost its
+        // Channels, the debug hook — while focus is on another tab: focus
+        // follows, so the lit tab and the open one are the same thing.
+        .onChange(of: tab) { _, now in
+            if let focused = focusedTab, focused != now { focusedTab = now }
         }
         .defaultFocus($focusedTab, tab)
         // Claimed on appearing, and again a moment later if nothing has it:
@@ -239,6 +248,39 @@ private struct TelevisionPanelBody<Content: View>: View {
 #endif
 
 // MARK: - Rows
+
+/// Whether focus is on the television panel's row of tabs. Read by a tab
+/// whose choices are laid out in columns, where the focus engine would take
+/// Down to whichever control is nearest the tab rather than the first: while
+/// this is true every control but the first is kept from taking focus, so
+/// Down can only land there. Off a television it is never true.
+private struct PanelTabsHaveFocusKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private extension EnvironmentValues {
+    var panelTabsHaveFocus: Bool {
+        get { self[PanelTabsHaveFocusKey.self] }
+        set { self[PanelTabsHaveFocusKey.self] = newValue }
+    }
+}
+
+private extension View {
+    /// Kept from taking focus while the tabs have it, unless this is the
+    /// control Down should land on.
+    func panelEntryOnly(_ isEntry: Bool) -> some View {
+        modifier(PanelEntryOnly(isEntry: isEntry))
+    }
+}
+
+private struct PanelEntryOnly: ViewModifier {
+    @Environment(\.panelTabsHaveFocus) private var tabsHaveFocus
+    let isEntry: Bool
+
+    func body(content: Content) -> some View {
+        content.disabled(tabsHaveFocus && !isEntry)
+    }
+}
 
 /// The width a card in a row takes on a television; nil shares the row with
 /// the other cards in it.
@@ -534,7 +576,16 @@ private struct PanelSlider: View {
     let range: ClosedRange<Double>
     let step: Double
     var enabled = true
+    /// On a television, the control Down lands on from the row of tabs —
+    /// see `panelEntryOnly`.
+    var isEntry = false
     let format: (Double) -> String
+
+    /// The label's column and the value's, in points at the default type
+    /// size; wider as the type grows so neither clips at the
+    /// accessibility sizes.
+    @ScaledMetric(relativeTo: .subheadline) private var labelWidth: CGFloat = 88
+    @ScaledMetric(relativeTo: .subheadline) private var valueWidth: CGFloat = 52
 
     var body: some View {
         #if os(tvOS)
@@ -546,6 +597,8 @@ private struct PanelSlider: View {
             PanelStepButton(title: "−", width: 84, isDisabled: !enabled || value <= range.lowerBound) {
                 value = max(range.lowerBound, value - step)
             }
+            .panelEntryOnly(isEntry)
+            .accessibilityLabel("Decrease \(name)")
             VStack(spacing: 6) {
                 Text(format(value))
                     .font(.headline.monospacedDigit())
@@ -563,6 +616,8 @@ private struct PanelSlider: View {
             PanelStepButton(title: "+", width: 84, isDisabled: !enabled || value >= range.upperBound) {
                 value = min(range.upperBound, value + step)
             }
+            .panelEntryOnly(false)
+            .accessibilityLabel("Increase \(name)")
         }
         .opacity(enabled ? 1 : 0.5)
         .accessibilityElement(children: .contain)
@@ -572,7 +627,7 @@ private struct PanelSlider: View {
         HStack(spacing: 12) {
             Text(name)
                 .font(.subheadline)
-                .frame(width: 88, alignment: .leading)
+                .frame(width: labelWidth, alignment: .leading)
             Slider(value: $value, in: range, step: step)
                 .tint(Theme.accent)
                 .disabled(!enabled)
@@ -581,7 +636,8 @@ private struct PanelSlider: View {
             Text(format(value))
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(Theme.textDim)
-                .frame(width: 52, alignment: .trailing)
+                .frame(width: valueWidth, alignment: .trailing)
+                .accessibilityHidden(true)
         }
         .opacity(enabled ? 1 : 0.5)
         #endif
@@ -1229,16 +1285,22 @@ private struct PictureTab: View {
             }
 
             if PlayerMetrics.television {
+                // Down from the row of tabs lands on Brightness's "−", the
+                // first control, whichever tab it comes from: the others
+                // are kept from taking focus until it is in the columns.
                 HStack(alignment: .top, spacing: 40) {
                     VStack(alignment: .leading, spacing: 10) {
-                        adjustment("Brightness", value: $prefs.pictureBrightness, enabled: live)
+                        adjustment("Brightness", value: $prefs.pictureBrightness, enabled: live, isEntry: true)
                         adjustment("Contrast", value: $prefs.pictureContrast, enabled: live)
                         adjustment("Saturation", value: $prefs.pictureSaturation, enabled: live)
                     }
                     VStack(alignment: .leading, spacing: 10) {
                         adjustment("Gamma", value: $prefs.pictureGamma, enabled: live)
                         zoom(enabled: live)
-                        reset
+                        HStack(spacing: 20) {
+                            reset.panelEntryOnly(false)
+                            nightMode.panelEntryOnly(false)
+                        }
                     }
                 }
             } else {
@@ -1264,9 +1326,12 @@ private struct PictureTab: View {
                     }
                 }
             }
+            .panelEntryOnly(false)
 
             if !PlayerMetrics.television {
                 reset
+                PanelHeading(text: "Sound")
+                nightMode
                 if live {
                     PanelNote(text: "Saved for everything you play on this device.")
                 }
@@ -1275,10 +1340,28 @@ private struct PictureTab: View {
     }
 
     /// One of the four adjustments: -100…100, 0 being the file's own.
-    private func adjustment(_ name: String, value: Binding<Double>, enabled: Bool) -> some View {
+    private func adjustment(_ name: String, value: Binding<Double>, enabled: Bool, isEntry: Bool = false) -> some View {
         PanelSlider(name: name, value: value, range: -100...100, step: PlayerMetrics.television ? 5 : 1,
-                    enabled: enabled) { "\(Int($0))" }
+                    enabled: enabled, isEntry: isEntry) { "\(Int($0))" }
             .onChange(of: value.wrappedValue) { _, _ in player.applyPicture() }
+    }
+
+    /// Dynamic range compression on the sound: the engine's existing knob,
+    /// with a reason in place of the switch where the engine has none.
+    private var nightMode: some View {
+        let tv = PlayerMetrics.television
+        let reason = player.nightModeUnavailableReason
+        // Ticked only while it is in force: a setting left on against an
+        // engine that refused it is not a night mode.
+        return PanelRow(title: tv ? (prefs.nightMode && reason == nil ? "Night mode: On" : "Night mode: Off") : "Night mode",
+                        detail: tv ? nil : "Quiet dialogue up, loud passages down, for a room where the volume has to stay low",
+                        isSelected: prefs.nightMode && reason == nil,
+                        disabledReason: reason,
+                        width: 460, height: tv ? 64 : nil, centered: tv) {
+            prefs.nightMode.toggle()
+            player.applyNightMode()
+        }
+        .accessibilityValue(prefs.nightMode ? "On" : "Off")
     }
 
     private func zoom(enabled: Bool) -> some View {

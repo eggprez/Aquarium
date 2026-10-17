@@ -495,8 +495,23 @@ extension PlayerModel {
             guard let self, !Task.isCancelled, self.generation == mine else { return }
             self.externalResolve = nil
             guard !resolved.isBareTransportStream else {
+                // A transport stream on its own is the one thing a channel
+                // can be that Apple's engine never opens — it reads MPEG-TS
+                // inside an HLS playlist and nowhere else — so it is the one
+                // live stream that needs mpv, and goes there: the policy's
+                // rule for a `.ts` address, applied to an address that only
+                // turned out to be one when read. Everything else live stays
+                // on Apple's engine. The card is for a build or a setting
+                // with no mpv to go to.
+                if self.canSwitchEngine(to: .mpv) {
+                    Self.log.notice("\(streamURL.lastPathComponent, privacy: .public) is a raw MPEG-TS stream; reopening on mpv")
+                    self.engineOverride = .mpv
+                    self.playExternal(title: title, subtitle: subtitle, artworkURL: artworkURL, streamURL: streamURL,
+                                      channel: channel, reopening: true, startAt: startAt, paused: paused)
+                    return
+                }
                 self.isBuffering = false
-                self.errorMessage = "This channel is being sent as a raw MPEG-TS stream, which Apple's player can't open \u{2014} it reads transport-stream segments inside an HLS playlist, but never a transport stream on its own. Set this channel's stream mode to HLS on the server sending it."
+                self.errorMessage = "This channel is being sent as a raw MPEG-TS stream, which Apple's engine can't open \u{2014} it reads transport-stream segments inside an HLS playlist, but never a transport stream on its own. Set Settings → Video → Playback engine to Automatic, which plays such a channel through mpv, or set this channel's stream mode to HLS on the server sending it."
                 return
             }
             self.externalChannel?.resolvedURL = resolved.url

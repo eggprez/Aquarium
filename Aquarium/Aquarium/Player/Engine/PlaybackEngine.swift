@@ -358,7 +358,11 @@ protocol PlaybackEngine: AnyObject {
     var subtitleStyle: SubtitleStyle { get set }
     var framing: Framing { get set }
     var picture: PictureAdjustment { get set }
+    /// Dynamic range compression on the sound, on an engine with `.nightMode`.
+    /// `nightModeUnavailableReason` says why it is not in force: the engine
+    /// has no such filter, or the build of it turned out not to.
     var nightMode: Bool { get set }
+    var nightModeUnavailableReason: String? { get }
     var powerProfile: PowerProfile { get set }
     /// Off, the picture is neither decoded nor drawn and the sound carries
     /// on — the background-audio case.

@@ -83,6 +83,12 @@ final class MPVMetalLayer: CAMetalLayer {
         backgroundColor = CGColor(gray: 0, alpha: 1)
     }
 
+    /// Called by the view hosting the layer when the drawable has been
+    /// given a new size — a rotation, a window resize, the first layout —
+    /// so the engine can have mpv's output configured for it; see
+    /// `MPVEngine.surfaceResized`.
+    var onResize: (() -> Void)?
+
     override var drawableSize: CGSize {
         get { super.drawableSize }
         set {
@@ -184,6 +190,13 @@ final class MPVEngine: @unchecked Sendable {
     private var fileIsOpen = false
     private var sawFirstFrame = false
     private var loadedLive = false
+    /// The layer mpv draws into, kept so a load can wait for it to have a
+    /// size — see `load`.
+    private let layer: MPVMetalLayer
+    /// A `loadfile` held back until the layer has a size, and the resize
+    /// nudge waiting to run; both on the main thread.
+    private var pendingLoad: [String]?
+    private var resizeNudge: DispatchWorkItem?
     /// The profile applied last, so the next can restore it first.
     private var appliedProfile: PowerProfile?
 
@@ -206,9 +219,11 @@ final class MPVEngine: @unchecked Sendable {
         (events, continuation) = AsyncStream.makeStream(of: EngineEvent.self)
         guard let h = mpv_create() else { return nil }
         handle = h
+        self.layer = layer
 
         var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
         mpv_set_option(h, "wid", MPV_FORMAT_INT64, &wid)
+        layer.onResize = { [weak self] in self?.surfaceResized() }
 
         // The two profiles, from a file of this app's own, so they can be put
         // on and taken off with `apply-profile` exactly as the Linux app does.
@@ -274,7 +289,9 @@ final class MPVEngine: @unchecked Sendable {
             }
         }
         #if DEBUG
-        mpv_request_log_messages(h, "warn")
+        // `-AquariumMPVLog v` (or `debug`, `trace`) for mpv's own account of a
+        // stream, in the app's log under the mpv category.
+        mpv_request_log_messages(h, UserDefaults.standard.string(forKey: "AquariumMPVLog") ?? "warn")
         #else
         mpv_request_log_messages(h, "error")
         #endif
@@ -312,6 +329,9 @@ final class MPVEngine: @unchecked Sendable {
     /// Stop reading events and destroy the handle. Safe to call twice.
     func shutdown() {
         guard let h = handle else { return }
+        pendingLoad = nil
+        resizeNudge?.cancel()
+        layer.onResize = nil
         #if os(iOS)
         pacing?.invalidate()
         pacing = nil
@@ -412,10 +432,71 @@ final class MPVEngine: @unchecked Sendable {
         if let audio = request.audioTrack { perFile.append("aid=\(audio)") }
         if let subtitle = request.subtitleTrack { perFile.append("sid=\(subtitle)") }
         if !perFile.isEmpty { args.append(perFile.joined(separator: ",")) }
-        command(args)
+        // mpv's MoltenVK context reads the layer's drawable size as the
+        // output is configured and again only at a reconfigure. A file
+        // opened before the layer has been laid out — the debug URL at
+        // launch, a download — met a 1×1 drawable and drew into it, black,
+        // for as long as it played. So the open waits, briefly, for the
+        // layer to be hosted and sized; the resize nudge below is the
+        // second line.
+        pendingLoad = nil
+        if layerIsSized {
+            command(args)
+        } else {
+            pendingLoad = args
+            loadWhenSized(deadline: .now + .milliseconds(1500))
+        }
+    }
+
+    private var layerIsSized: Bool {
+        layer.superlayer != nil && layer.bounds.width >= 2 && layer.bounds.height >= 2
+    }
+
+    private func loadWhenSized(deadline: ContinuousClock.Instant) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(16)) { [weak self] in
+            guard let self, let args = self.pendingLoad else { return }
+            if self.layerIsSized || ContinuousClock.now >= deadline {
+                if !self.layerIsSized { Self.log.notice("opening with the layer still unsized") }
+                self.pendingLoad = nil
+                self.command(args)
+            } else {
+                self.loadWhenSized(deadline: deadline)
+            }
+        }
+    }
+
+    /// The layer's drawable was given a new size. mpv's MoltenVK context
+    /// only learns the size when the output is configured, so the picture
+    /// would otherwise stay drawn for the old one — stretched across the
+    /// new frame after a rotation, or 1×1 and black after an open that beat
+    /// the layout. A reconfigure is had by changing the decoded picture's
+    /// parameters: a crop two rows short, then none, each of which the
+    /// output is configured for as the next frame goes through — and while
+    /// paused no frame would, so a seek to where it is pushes one. Settled
+    /// a moment, since a live resize lays out every frame.
+    func surfaceResized() {
+        resizeNudge?.cancel()
+        let nudge = DispatchWorkItem { [weak self] in self?.reconfigureOutput() }
+        resizeNudge = nudge
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(120), execute: nudge)
+    }
+
+    private func reconfigureOutput() {
+        guard handle != nil, queue.sync(execute: { fileIsOpen }),
+              let w = getInt("width"), let h = getInt("height"), w > 2, h > 2 else { return }
+        Self.log.info("surface resized to \(Int(self.layer.bounds.width), privacy: .public)×\(Int(self.layer.bounds.height), privacy: .public); reconfiguring the output")
+        let paused = getFlag("pause")
+        setString("video-crop", "\(w)x\(h - 2)+0+0")
+        if paused { command(["seek", "0", "relative+exact"]) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(150)) { [weak self] in
+            guard let self, self.handle != nil, self.queue.sync(execute: { self.fileIsOpen }) else { return }
+            self.setString("video-crop", "")
+            if self.getFlag("pause") { self.command(["seek", "0", "relative+exact"]) }
+        }
     }
 
     func stop() {
+        pendingLoad = nil
         command(["stop"])
     }
 
@@ -578,16 +659,42 @@ final class MPVEngine: @unchecked Sendable {
     }
 
     /// Dynamic range compression on the sound: quiet dialogue up, explosions
-    /// down, for a room where the volume has to stay low.
+    /// down, for a room where the volume has to stay low. FFmpeg's
+    /// `dynaudnorm`, through mpv's `lavfi` filter — which the FFmpeg inside
+    /// MPVKit's LGPL build does not carry (its audio filters are `aformat`,
+    /// `aresample`, `atempo`, `volume` and the equalizers), so on that build
+    /// the filter is refused as it is set and the chain is cleared again,
+    /// with `nightModeUnavailableReason` saying so. Never left half-set: a
+    /// filter chain that fails to build silences the sound.
     var nightMode = false {
-        didSet {
-            if nightMode {
-                command(["af", "set", "lavfi=[dynaudnorm=f=150:g=15:p=0.9]"])
-            } else {
+        didSet { applyNightMode() }
+    }
+
+    /// Set against a running audio chain, where a filter the build lacks
+    /// is refused on the spot and cleared again. Before a file is open the
+    /// option would be taken without a word and fail as the chain is built,
+    /// which can leave the sound off — so with no file open the wish waits
+    /// for `MPV_EVENT_FILE_LOADED`, which applies it then.
+    private func applyNightMode() {
+        guard queue.sync(execute: { fileIsOpen }) else { return }
+        if nightMode {
+            if command(["af", "set", Self.nightModeFilter]) < 0 {
                 command(["af", "clr", ""])
+                if nightModeUnavailableReason == nil {
+                    Self.log.notice("night mode refused: this build's FFmpeg has no audio compressor")
+                }
+                nightModeUnavailableReason = Self.noCompressorReason
             }
+        } else {
+            command(["af", "clr", ""])
         }
     }
+
+    private static let nightModeFilter = "lavfi=[dynaudnorm=f=150:g=15:p=0.9]"
+    private static let noCompressorReason = "This build of the mpv engine has no audio compressor (FFmpeg's dynaudnorm is not in MPVKit's LGPL build), so night mode cannot be applied."
+
+    /// Why night mode cannot be applied, once a try has shown it can't.
+    private(set) var nightModeUnavailableReason: String?
 
     /// Which profile is on. Applied on every set, not only on a change: a
     /// fresh handle has neither on, and the model's first set is what puts
@@ -604,6 +711,7 @@ final class MPVEngine: @unchecked Sendable {
         }
         command(["apply-profile", Self.profileName(powerProfile)])
         appliedProfile = powerProfile
+        Self.log.info("profile \(Self.profileName(self.powerProfile), privacy: .public) applied")
     }
 
     private static func profileName(_ profile: PowerProfile) -> String {
@@ -757,6 +865,7 @@ final class MPVEngine: @unchecked Sendable {
                 }
             case MPV_EVENT_FILE_LOADED:
                 fileIsOpen = true
+                if nightMode { DispatchQueue.main.async { [weak self] in self?.applyNightMode() } }
                 deliver(.fileLoaded)
                 deliver(.chapters(readChapters()))
             case MPV_EVENT_PLAYBACK_RESTART:

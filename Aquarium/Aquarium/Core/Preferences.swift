@@ -671,6 +671,15 @@ final class Preferences {
         ("File's own", 0), ("16:9", 16.0 / 9), ("4:3", 4.0 / 3), ("1.85:1", 1.85), ("2.35:1", 2.35), ("2.39:1", 2.39),
     ]
 
+    /// Night mode: dynamic range compression on the sound, so quiet dialogue
+    /// comes up and loud passages come down for a room where the volume has
+    /// to stay low. The mpv engine's (`dynaudnorm`); Apple's engine leaves
+    /// the sound as it is. Not synced: like the volume, it describes the
+    /// room rather than the account.
+    var nightMode: Bool {
+        didSet { write(nightMode, forKey: "player_night_mode") }
+    }
+
     // ---- The engine ----
 
     /// Which engine plays video on an iPhone, iPad or Mac: Apple's, mpv, or
@@ -720,6 +729,17 @@ final class Preferences {
 
     static let skipIntervals = [10, 15, 30]
     static let hideControlsChoices: [Double] = [2, 4, 6, 10]
+
+    /// Until it is set: 2 s on a Mac, where a pointer brings the controls
+    /// back with a nudge and QuickTime and the TV app hide theirs about as
+    /// fast; 4 s where a finger or a remote has to find them again.
+    static let defaultHideControlsAfter: Double = {
+        #if os(macOS)
+        2
+        #else
+        4
+        #endif
+    }()
 
     /// The ranges the picture values are kept to, whatever a defaults file
     /// or another device sends.
@@ -972,12 +992,13 @@ final class Preferences {
         pictureGamma = Self.pictureValue(d.double(forKey: "picture_gamma"))
         pictureZoom = Self.zoomValue(d.object(forKey: "picture_zoom") == nil ? 1 : d.double(forKey: "picture_zoom"))
         aspectOverride = Self.aspectValue(d.double(forKey: "picture_aspect"))
+        nightMode = d.bool(forKey: "player_night_mode")
         playbackEngine = EnginePolicy.Preference(rawValue: d.string(forKey: "player_engine") ?? "") ?? .automatic
         batterySaver = EnginePolicy.BatterySaver(rawValue: d.string(forKey: "player_battery_saver") ?? "") ?? .automatic
         skipInterval = Self.skipIntervals.contains(d.integer(forKey: "player_skip_interval")) ? d.integer(forKey: "player_skip_interval") : 10
         edgeGestures = d.bool(forKey: "player_edge_gestures")
         holdForDoubleSpeed = d.object(forKey: "player_hold_2x") == nil ? true : d.bool(forKey: "player_hold_2x")
-        hideControlsAfter = Self.hideControlsChoices.contains(d.double(forKey: "player_hide_after")) ? d.double(forKey: "player_hide_after") : 4
+        hideControlsAfter = Self.hideControlsChoices.contains(d.double(forKey: "player_hide_after")) ? d.double(forKey: "player_hide_after") : Self.defaultHideControlsAfter
         showsRemainingTime = d.object(forKey: "player_show_remaining") == nil ? true : d.bool(forKey: "player_show_remaining")
         liveTVSource = LiveTVSource(rawValue: d.string(forKey: "livetv_source") ?? "") ?? .jellyfin
         iptvPlaylistURL = d.string(forKey: "iptv_playlist_url") ?? ""

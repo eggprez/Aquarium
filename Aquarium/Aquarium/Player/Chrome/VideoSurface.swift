@@ -55,16 +55,21 @@ final class VideoLayerHostView: UIView {
     override func traitCollectionDidChange(_ previous: UITraitCollection?) {
         super.traitCollectionDidChange(previous)
         videoLayer?.contentsScale = traitCollection.displayScale
+        videoLayer.map(sizeDrawable)
     }
 
     private func fitVideoLayer() {
-        guard let videoLayer, videoLayer.frame != bounds else { return }
-        // No implicit animation: a rotation would otherwise show the picture
-        // sliding to its new frame after the view had already turned.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        videoLayer.frame = bounds
-        CATransaction.commit()
+        guard let videoLayer else { return }
+        if videoLayer.frame != bounds {
+            // No implicit animation: a rotation would otherwise show the
+            // picture sliding to its new frame after the view had already
+            // turned.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            videoLayer.frame = bounds
+            CATransaction.commit()
+        }
+        sizeDrawable(videoLayer)
     }
 }
 #else
@@ -108,19 +113,44 @@ final class VideoLayerHostView: NSView {
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         videoLayer?.contentsScale = window?.backingScaleFactor ?? 2
+        videoLayer.map(sizeDrawable)
     }
 
     private func fitVideoLayer() {
-        guard let videoLayer, videoLayer.frame != bounds else { return }
-        // No implicit animation: a live resize would otherwise show the
-        // picture lagging a frame behind the window's edge.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        videoLayer.frame = bounds
-        CATransaction.commit()
+        guard let videoLayer else { return }
+        if videoLayer.frame != bounds {
+            // No implicit animation: a live resize would otherwise show the
+            // picture lagging a frame behind the window's edge.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            videoLayer.frame = bounds
+            CATransaction.commit()
+        }
+        sizeDrawable(videoLayer)
     }
 }
 #endif
+
+/// A Metal layer's drawable, kept at the layer's size in pixels. Left to
+/// itself a `CAMetalLayer` sizes its drawable from its bounds — until
+/// something sets `drawableSize` by hand, after which it stays put. MoltenVK
+/// does exactly that as it builds mpv's swapchain, so from then on a rotation
+/// or a window resize changed the frame and not the drawable: the picture
+/// was stretched to the new frame (a film turned sideways drawn as a band
+/// across the middle), and a stream opened before the view had its bounds
+/// drew into a drawable of nothing and stayed black. Set on every layout,
+/// the swapchain sees the new extent and is rebuilt for it.
+@MainActor
+private func sizeDrawable(_ layer: CALayer) {
+    guard let metal = layer as? CAMetalLayer else { return }
+    let scale = metal.contentsScale
+    let size = CGSize(width: (metal.bounds.width * scale).rounded(), height: (metal.bounds.height * scale).rounded())
+    guard size.width > 1, size.height > 1, metal.drawableSize != size else { return }
+    metal.drawableSize = size
+    #if canImport(Libmpv)
+    (metal as? MPVMetalLayer)?.onResize?()
+    #endif
+}
 
 /// The engine's layer in the host view: the model's Metal layer while mpv is
 /// playing, else an `AVPlayerLayer` made for AVPlayer if the view has none

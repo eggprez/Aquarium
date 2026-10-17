@@ -1,7 +1,75 @@
 # Player overhaul: one player for iPhone, iPad, Mac and Apple TV
 
-Written 2026-10-16. A plan, not a record: nothing below has shipped. Paths are
-relative to `Aquarium/`.
+Written 2026-10-16 as a plan; now a record. Paths are relative to
+`Aquarium/`. Each phase's heading carries the note written when it shipped,
+left as it was, and this section says where the whole thing stands.
+
+## Status
+
+**Phases 1 to 6 shipped on `player-overhaul`, 2026-10-16 to 2026-10-17.**
+Phase 0 (the energy measurement) has not been run; the engine policy stands
+on the plan's reasoning, not on numbers.
+
+**What shipped, across the six phases.** One `PlayerModel` for iPhone, iPad,
+Mac and Apple TV, with the two engines behind `PlaybackEngine`: `AVEngine`
+(AVPlayer) and `MPVEngine` (libmpv through MPVKit, on every platform now).
+`EnginePolicy.choose` picks per stream — Apple's engine by default on
+anything with a battery, mpv when the file or a control asks for what
+AVPlayer cannot give (picture subtitles, DTS and TrueHD on hardware-decoded
+video, the picture controls, an audio delay on HLS, a download or a bare
+address in a container AVFoundation won't open, a raw MPEG-TS stream),
+always mpv on the Apple TV — and `StreamPlan.decide` asks the server for the
+file or a transcode by the engine's profile. One chrome under
+`Player/Chrome/`, styled per platform through `PlayerMetrics`: the transport,
+the timeline with trickplay, the panel (Info · Channels · Audio · Subtitles ·
+Quality · Speed · Sync · Picture), the gestures, the Mac's pointer and menus,
+the television's remote driver and focus. `AVPlayerViewController`,
+`AVPlayerView`, `TransportBarExtras`, `TVPlayerModel`, `TVTransportBar`,
+`TVPlayerPanel` and `TVPlayerParts` are gone. mpv's battery profile, the
+background `vid=no`, the software-decode fallback, the hand-over to AVPlayer
+for Picture in Picture, AirPlay and Watch Together, the Picture tab and
+Settings rows, a landscape lock on the phone, a Night mode row, the Mac
+window at any size. `AquariumTests` (39) cover the policy, the stream plan
+and the track preference. The QA passes are `qa-2026-10-16/player-phase-2…4/`
+and `qa-2026-10-17/player-phase-5/`, `player-phase-6/` (the last with the
+report).
+
+**What still needs the physical iPhone, Apple TV or Mac.**
+
+- Phase 0's energy numbers: `xctrace` Energy Log on the iPhone,
+  `powermetrics` on the Mac. Until then the policy's thresholds are the
+  plan's defaults.
+- Picture in Picture's hand-over and its return to mpv, AirPlay's hand-over
+  from the picker, Watch Together: compile-checked, the hand-over seen to
+  fire on the iPad simulator, the rest needs a server item on a device (the
+  iPhone simulator has no PiP, a bare Matroska address has nothing to remux
+  it).
+- The thermal and Low Power paths: exercised through the DEBUG
+  `PowerDebugHook` on the simulators and the Mac, not on a device running
+  hot.
+- VideoToolbox decoding under mpv on the Mac: the unsigned Debug build here
+  reported `hwdec-current = no`; a signed build should be checked, as should
+  the Apple TV's after phase 6.
+- Match Frame Rate on the Apple TV, the software-decode fallback to a server
+  transcode, trickplay, Up Next, Live TV and the Channels tab, sidecar
+  subtitles, swipe-home PiP and background audio on AVPlayer: all need a
+  server item and most a device.
+- Mac full screen, iPad Split View and Stage Manager: not seen from a script.
+
+**Left out by decision.**
+
+- Night mode is a row that cannot act: MPVKit's LGPL FFmpeg has no audio
+  compressor (`dynaudnorm` is not compiled in), so the engine refuses the
+  filter and the row says so. It waits on a package build with the filter,
+  not on this app.
+- Picture in Picture and AirPlay are not offered on a download or a bare
+  address in a container AVFoundation won't open: the hand-over could only
+  reach the error card.
+- The Apple engine stays the default on battery-powered devices, SharePlay
+  stays AVPlayer's, `DelayedVideoRenderer` is gone, the deployment targets
+  stay, the Linux app is untouched — the decisions at the foot of this file.
+- `AVPlayerView`'s magnification and Live Text did not carry to the Mac.
+- The chrome has no volume slider on the Mac (keys, scroll wheel and M).
 
 ## Why
 
@@ -747,6 +815,70 @@ and `TVPlayerParts` are replaced by the shared components with tvOS
 metrics. The sync test clips and `DisplayMatch` are untouched.
 
 ### Phase 6: polish and the QA pass (M)
+
+> **Shipped 2026-10-17** on `player-overhaul` (uncommitted at the time of
+> writing); the pass is written up in `qa-2026-10-17/player-phase-6/REPORT.md`
+> with the screenshots beside it. The loose ends of phases 2–5: a picture
+> wider than tall locks the phone to landscape (`OrientationLock.lockToLandscape`,
+> fed by `pictureSize` from `PlayerScreen`) and a phone-shaped one leaves it
+> free; in an upright view a wide picture gets the title row and the bottom
+> band against its own edges rather than the screen's (`PlayerTransport.Letterbox`,
+> computed by `PlayerChrome` from the safe area), the usual layout when the
+> bars have no room. The television panel's lit tab and open tab are one
+> thing (focus follows a tab opened from outside the row), and Down from
+> any tab lands on Brightness's "−": while the tabs have focus every other
+> control of the Picture tab is kept from taking it (`panelEntryOnly`,
+> `panelTabsHaveFocus`). Night mode has its row in the Picture tab (a Sound
+> heading; a card on the Apple TV) and in Settings → Video → Picture on all
+> three, `Preferences.nightMode` unsynced like the volume, disabled with a
+> reason on Apple's engine — and refused by this build of mpv too, since
+> MPVKit's LGPL FFmpeg carries no audio compressor: the engine now applies
+> the filter only against an open file, where the refusal is synchronous,
+> clears the chain and keeps the reason (`nightModeUnavailableReason` on the
+> protocol), which the row shows in place of a tick; the README says so. A
+> raw MPEG-TS stream is deliberately mpv's: `.ts` by the policy's file rule,
+> and an address that only turns out to be one when read reopens on mpv from
+> the resolver (the card stays for a build or a setting with no mpv to go
+> to); HLS and everything else live stay on Apple's engine; a test covers
+> it. The Mac window reads the title of what plays (the inspector's
+> `navigationTitle` is gone) and hides its controls after 2 s by default,
+> 4 s elsewhere. The phase 4 exit on opening Settings → Video turned out to
+> be a `pkill -x Aquarium` meant for the Mac app: a simulator's app process
+> has the same name and took the SIGTERM (seen again here, to the iPad,
+> with SpringBoard's exit record); a fresh install opened Settings → Video
+> first time. The thermal, Low Power and Mac-on-battery profile switches
+> were exercised through a DEBUG `PowerDebugHook` (Darwin notifications
+> `aquarium.debug.thermal.<state>`, `.lowpower.<on|off|real>`,
+> `.battery.<on|off|real>`, read through `PlayerModel.devicePower`), the
+> background `vid=no` and its return on the iPhone, `hwdec-current` on every
+> simulator and on the unsigned Mac build (software, all of them). Two real
+> bugs came out of the pass. mpv drew nothing, or a stretched band, on
+> iPhone, iPad and Mac: its MoltenVK context reads the Metal layer's
+> drawable size only as the output is configured, so a file that opened
+> before the layer was laid out drew into a 1×1 drawable for good, and a
+> rotation or a window resize left the picture at the old size — fixed by
+> keeping `drawableSize` at the layer's pixel size on every layout (a
+> `CAMetalLayer` stops tracking its bounds once MoltenVK sets it), holding
+> `loadfile` until the layer is hosted and sized, and on a resize having the
+> output reconfigured through a two-row crop and back (with a seek while
+> paused so a frame goes through). And the PiP hand-over on a bare Matroska
+> reached the error card, since nothing remuxes it: the hand-over to Apple's
+> engine is refused for a download or a bare address in a container
+> AVFoundation won't open, which takes PiP and AirPlay off the title row for
+> those. The polish: solid fallbacks under Reduce Transparency for the
+> phone's sheet and the television's glass, `@ScaledMetric` columns in the
+> panel's sliders, labels on the Apple TV's steppers, the slider's value
+> text hidden from VoiceOver; the Mac window seen at 480×270 and following a
+> resize; iOS 17 reviewed by reading (one `#available`, for the glass);
+> PRIVACY.md unchanged. Debug builds also take `-AquariumMPVLog <level>`.
+> iOS, macOS and tvOS build; `AquariumTests` (39) pass.
+>
+> **Not done here.** Phase 0's energy numbers; PiP's return, AirPlay, Watch
+> Together, the software-decode fallback, trickplay, Up Next, Live TV and
+> sidecar subtitles (a server item and a device); Mac full screen (the menu
+> command sent from the background did not switch; needs the keyboard);
+> iPad Split View and Stage Manager (not scriptable); VideoToolbox under mpv
+> on a signed Mac build. See the Status section at the top.
 
 Reduce Motion / Transparency, Dynamic Type at accessibility sizes, the
 iPad's split-view and Stage Manager sizes, a Mac window at 480×270, the

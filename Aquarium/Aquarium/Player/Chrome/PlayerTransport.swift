@@ -34,6 +34,22 @@ struct PlayerTransport: View {
     /// Only the timeline and the times: the television's panel is down over
     /// where the heading goes.
     var timelineOnly = false
+    /// A wide picture between black bars in an upright view: the title row
+    /// and the bottom band go against the picture's edges rather than the
+    /// screen's. Nil for the usual layout.
+    var letterbox: Letterbox?
+
+    /// Where the picture is, in an upright view, for the controls to sit
+    /// against. `pictureHeight` is the picture's; `shift` is how far the
+    /// screen's centre sits above the chrome's, which the safe area makes
+    /// unequal top and bottom.
+    struct Letterbox: Equatable {
+        var pictureHeight: CGFloat
+        var shift: CGFloat
+        /// The least bar that fits the title row, and the bottom band.
+        static let titleRoom: CGFloat = 56
+        static let bandRoom: CGFloat = 128
+    }
     /// A touch on any control: keeps the controls up a while longer.
     let onInteract: () -> Void
     let onDismiss: () -> Void
@@ -137,13 +153,28 @@ struct PlayerTransport: View {
         ZStack {
             scrims
             VStack(spacing: 0) {
-                titleRow
-                    .pointerHover { hoverTitle = $0 }
-                Spacer(minLength: 0)
-                bottom
-                    .pointerHover { hoverBottom = $0 }
+                if let letterbox {
+                    // Against the picture: the title row above it, the band
+                    // below, the pair centred where the picture is.
+                    Spacer(minLength: 0)
+                    titleRow
+                        .pointerHover { hoverTitle = $0 }
+                    Color.clear.frame(height: letterbox.pictureHeight)
+                    bottom
+                        .pointerHover { hoverBottom = $0 }
+                    Spacer(minLength: 0)
+                } else {
+                    titleRow
+                        .pointerHover { hoverTitle = $0 }
+                    Spacer(minLength: 0)
+                    bottom
+                        .pointerHover { hoverBottom = $0 }
+                }
             }
             .padding(.horizontal, edge)
+            .padding(.bottom, max(0, (letterbox?.shift ?? 0) * 2))
+            .padding(.top, max(0, -(letterbox?.shift ?? 0) * 2))
+            .animation(nil, value: letterbox)
             // The cluster steps aside while a finger is on the timeline, so
             // the thumbnail has the middle of the picture to itself.
             if chrome.scrub == nil, player.errorMessage == nil {
