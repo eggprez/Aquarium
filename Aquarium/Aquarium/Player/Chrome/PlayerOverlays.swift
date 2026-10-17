@@ -4,13 +4,46 @@
 //  error card, the banner for a stream with no picture, the ripple a
 //  double-tap leaves, the 2× badge and the edge-drag level.
 //
-//  Shared by the iPhone chrome and, until phase 3 moves it onto the chrome,
-//  the Mac window over `AVPlayerView` — which is why the Mac keeps its
-//  material and its Title Case here, by `#if`.
+//  Shared by the iPhone, iPad and Mac chrome. The Mac keeps its Title Case
+//  and tighter corners here, by `#if`; nothing else differs.
 
 #if !os(tvOS)
 
 import SwiftUI
+
+// MARK: - Styling
+
+extension View {
+    /// What the overlays sit on: the black wash the phone's and the
+    /// television's controls use.
+    func overlayBackdrop<S: InsettableShape>(_ shape: S, opacity: Double) -> some View {
+        background(.black.opacity(opacity), in: shape)
+    }
+
+    /// The overlays read as part of the dark HUD whatever the app's theme.
+    func playerOverlayScheme() -> some View {
+        environment(\.colorScheme, .dark)
+    }
+
+    /// Return and Escape, on the platforms with a keyboard to press them on.
+    @ViewBuilder
+    func playerDefaultAction() -> some View {
+        #if os(macOS)
+        keyboardShortcut(.defaultAction)
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder
+    func playerCancelAction() -> some View {
+        #if os(macOS)
+        keyboardShortcut(.cancelAction)
+        #else
+        self
+        #endif
+    }
+}
 
 // MARK: - Loading
 
@@ -122,13 +155,8 @@ struct PlayerNoVideoBanner: View {
             Button {
                 dismissed = true
             } label: {
-                #if os(macOS)
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-                #else
                 Image(systemName: "xmark")
                     .foregroundStyle(.white.opacity(0.8))
-                #endif
             }
             .buttonStyle(.plain)
             .help("Dismiss")
@@ -163,9 +191,7 @@ struct PlayerUpNextCard: View {
             HStack(spacing: 10) {
                 Button(PlayerOverlayText.label(mac: "Play Now", elsewhere: "Play now")) { Task { await player.playNextNow() } }
                     .buttonStyle(.borderedProminent)
-                    #if !os(macOS)
                     .tint(Theme.accentStrong)
-                    #endif
                     .controlSize(.small)
                     .playerDefaultAction()
                 Button(PlayerOverlayText.label(mac: "Not Now", elsewhere: "Not now")) { player.cancelAutoplay() }
@@ -246,11 +272,8 @@ struct BitrateBadge: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .overlayBackdrop(Capsule(), opacity: 0.62)
-        #if os(macOS)
-        .playerOverlayScheme()
-        #else
         .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
-        #endif
+        .playerOverlayScheme()
         .accessibilityElement(children: .combine)
     }
 }

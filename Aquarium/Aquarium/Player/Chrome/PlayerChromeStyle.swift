@@ -60,13 +60,20 @@ extension View {
 // MARK: - Metrics
 
 /// The sizes that differ by platform and by the room there is. `compact` is a
-/// phone (compact width); everything else is an iPad, a Mac window or a
-/// television.
+/// phone (compact width) or a Mac window narrower than `narrowWindow`;
+/// everything else is an iPad, a Mac window with room, or a television. A
+/// Mac's glyphs are a step smaller than an iPad's at either size: a pointer
+/// needs no finger-sized target, and the window can be 480×270.
 enum PlayerMetrics {
+    /// A Mac window narrower than this takes the compact metrics.
+    static let narrowWindow: CGFloat = 640
+
     /// The chrome's inset from the picture's edges.
     static func edge(compact: Bool) -> CGFloat {
         #if os(tvOS)
         90
+        #elseif os(macOS)
+        compact ? 14 : 22
         #else
         compact ? 16 : 28
         #endif
@@ -76,6 +83,8 @@ enum PlayerMetrics {
     static func centreGlyph(compact: Bool) -> CGFloat {
         #if os(tvOS)
         72
+        #elseif os(macOS)
+        compact ? 34 : 46
         #else
         compact ? 40 : 52
         #endif
@@ -85,6 +94,8 @@ enum PlayerMetrics {
     static func skipGlyph(compact: Bool) -> CGFloat {
         #if os(tvOS)
         48
+        #elseif os(macOS)
+        compact ? 24 : 32
         #else
         compact ? 30 : 38
         #endif
@@ -93,6 +104,8 @@ enum PlayerMetrics {
     static func clusterSpacing(compact: Bool) -> CGFloat {
         #if os(tvOS)
         90
+        #elseif os(macOS)
+        compact ? 40 : 64
         #else
         compact ? 52 : 76
         #endif
@@ -102,8 +115,30 @@ enum PlayerMetrics {
     static func previewWidth(compact: Bool) -> CGFloat {
         #if os(tvOS)
         400
+        #elseif os(macOS)
+        compact ? 150 : 220
         #else
         compact ? 160 : 220
+        #endif
+    }
+
+    /// How far the title row starts in from the leading edge on a Mac, so
+    /// it clears the window's close, minimise and zoom buttons; nothing in
+    /// full screen, where they are gone, and nothing anywhere else.
+    static func titleLeadingInset(fullScreen: Bool) -> CGFloat {
+        #if os(macOS)
+        fullScreen ? 0 : 58
+        #else
+        0
+        #endif
+    }
+
+    /// Whether the player window is full screen; always false off a Mac.
+    @MainActor static var isFullScreen: Bool {
+        #if os(macOS)
+        PlayerMacState.shared.isFullScreen
+        #else
+        false
         #endif
     }
 

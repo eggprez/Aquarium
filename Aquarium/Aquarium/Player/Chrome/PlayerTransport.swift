@@ -22,10 +22,20 @@ struct PlayerTransport: View {
     let schedule: ChannelSchedule
     let artwork: InfoArtwork
     var pictureInPicture: PictureInPicture?
+    /// The smaller glyphs and insets: a phone, or a narrow Mac window.
     let compact: Bool
+    /// The panel is a sheet of the chrome's rather than a popover off a pill
+    /// here: a phone.
+    var usesSheet = false
     /// A touch on any control: keeps the controls up a while longer.
     let onInteract: () -> Void
     let onDismiss: () -> Void
+
+    /// Where the pointer is, by region; together they are
+    /// `PlayerChromeState.pointerOnControls`. Never set by a finger.
+    @State private var hoverTitle = false
+    @State private var hoverCluster = false
+    @State private var hoverBottom = false
 
     private var edge: CGFloat { PlayerMetrics.edge(compact: compact) }
 
@@ -34,16 +44,23 @@ struct PlayerTransport: View {
             scrims
             VStack(spacing: 0) {
                 titleRow
+                    .onHover { hoverTitle = $0 }
                 Spacer(minLength: 0)
                 bottom
+                    .onHover { hoverBottom = $0 }
             }
             .padding(.horizontal, edge)
             // The cluster steps aside while a finger is on the timeline, so
             // the thumbnail has the middle of the picture to itself.
             if chrome.scrub == nil, player.errorMessage == nil {
                 centreCluster
+                    .onHover { hoverCluster = $0 }
             }
         }
+        .onChange(of: hoverTitle || hoverCluster || hoverBottom, initial: true) { _, on in
+            chrome.pointerOnControls = on
+        }
+        .onDisappear { chrome.pointerOnControls = false }
     }
 
     // MARK: - Scrims
@@ -111,6 +128,9 @@ struct PlayerTransport: View {
                 .popover(isPresented: popover(for: .more), arrowEdge: .top) { panelPopover }
         }
         .padding(.top, compact ? 2 : 8)
+        // Clear of the window's close, minimise and zoom buttons, which sit
+        // over the picture in a window with no title bar.
+        .padding(.leading, PlayerMetrics.titleLeadingInset(fullScreen: PlayerMetrics.isFullScreen))
     }
 
     private var liveBadge: some View {
@@ -402,7 +422,7 @@ struct PlayerTransport: View {
     /// by `PlayerChrome`, and these bindings stay false.
     private func popover(for anchor: PlayerChromeState.PanelAnchor) -> Binding<Bool> {
         Binding(
-            get: { !compact && chrome.panelOpen && chrome.panelAnchor == anchor },
+            get: { !usesSheet && chrome.panelOpen && chrome.panelAnchor == anchor },
             set: { if !$0 { chrome.panel = nil } }
         )
     }

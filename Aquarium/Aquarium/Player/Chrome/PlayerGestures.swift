@@ -11,7 +11,9 @@
 //
 //  The drag along the timeline is the timeline's own — see `PlayerTimeline`.
 //  Everything here is a SwiftUI gesture, so the same layer serves a pointer
-//  on a Mac; only the brightness and volume setters are UIKit's.
+//  on a Mac, where a double-click on the picture is full screen (QuickTime
+//  Player's) rather than a skip; only that, and the brightness and volume
+//  setters, are platform-split. The scroll wheel is `PlayerPointer`'s.
 
 #if !os(tvOS)
 
@@ -49,8 +51,13 @@ struct PlayerGestureLayer: View {
                 // The double-tap first: declared before the single, SwiftUI
                 // holds the single back until a second tap has had its chance.
                 .onTapGesture(count: 2, coordinateSpace: .local) { location in
+                    #if os(macOS)
+                    _ = location
+                    PlayerMacState.shared.toggleFullScreen()
+                    #else
                     guard !player.isLive else { return }
                     onSkip(location.x > geo.size.width / 2)
+                    #endif
                 }
                 .onTapGesture { onTap() }
                 .simultaneousGesture(hold, including: holdAllowed ? .all : .subviews)

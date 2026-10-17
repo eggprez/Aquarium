@@ -7,9 +7,13 @@
 //  holding 2×. The transport, the timeline, the gesture layer and the panel
 //  all read and write it rather than talking to each other.
 //
-//  Shared by iPhone, iPad and (from phase 3) the Mac window. Nothing here is
-//  about fingers or pointers — that is `PlayerGestureLayer` — and the numbers
-//  that differ by platform are `PlayerMetrics`.
+//  Shared by iPhone, iPad and the Mac window. Nothing here is about fingers
+//  or pointers — that is `PlayerGestureLayer`, and on a Mac `PlayerPointer`
+//  — and the numbers that differ by platform are `PlayerMetrics`. The one
+//  thing a pointer changes about the chrome itself is who keeps the clock on
+//  the controls: a finger's tap starts `PlayerChromeState`'s, a pointer's
+//  movement starts `PlayerMacState`'s, and `showsControls` reads whichever
+//  the platform has.
 
 #if !os(tvOS)
 
@@ -18,6 +22,10 @@ import SwiftUI
 @MainActor @Observable
 final class PlayerChromeState {
     var controlsVisible = true
+    /// The pointer is on the title row, the centre cluster or the bottom
+    /// band — which keeps the controls up on a Mac and the scroll wheel
+    /// theirs. Set by the transport's hover; never true under a finger.
+    var pointerOnControls = false
     /// The open panel tab; nil is closed.
     var panel: PlayerTab?
     /// Which pill the panel hangs off, where it is a popover.
@@ -190,10 +198,25 @@ struct PlayerChrome: View {
     @State private var skips = 0
     /// Acknowledged once and not shown again for this stream.
     @State private var dismissedNoVideoNotice = false
+    #if os(macOS)
+    /// The picture's size: a Mac window runs from 480×270 to a full display,
+    /// and the small metrics are for the small end of that.
+    @State private var size: CGSize = .zero
+    private var mac: PlayerMacState { PlayerMacState.shared }
+    #endif
 
     /// A phone, or an iPad narrowed to one: the sheet rather than the
-    /// popover, the smaller glyphs. A Mac window is never compact.
+    /// popover, the smaller glyphs. A Mac window takes the smaller glyphs
+    /// while it is narrow and never the sheet.
     private var compact: Bool {
+        #if os(macOS)
+        size.width > 0 && size.width < PlayerMetrics.narrowWindow
+        #else
+        sizeClass == .compact
+        #endif
+    }
+
+    private var usesSheet: Bool {
         #if os(macOS)
         false
         #else
@@ -201,28 +224,64 @@ struct PlayerChrome: View {
         #endif
     }
 
+    /// On a Mac the clock is the pointer's (`PlayerMacState`), so the
+    /// chrome's own never runs: `hideAfter` 0 is "no clock".
     private var hideContext: PlayerChromeState.HideContext {
-        .init(isPaused: player.isPaused, voiceOver: voiceOver,
-              hideAfter: prefs.hideControlsAfter, hasError: player.errorMessage != nil)
+        #if os(macOS)
+        let after = 0.0
+        #else
+        let after = prefs.hideControlsAfter
+        #endif
+        return .init(isPaused: player.isPaused, voiceOver: voiceOver,
+                     hideAfter: after, hasError: player.errorMessage != nil)
+    }
+
+    /// Whether the clock says the controls are up: a finger's on iOS, the
+    /// pointer's on a Mac, where the pointer resting on the controls keeps
+    /// them too.
+    private var clockSaysVisible: Bool {
+        #if os(macOS)
+        mac.controlsVisible || chrome.pointerOnControls
+        #else
+        chrome.controlsVisible
+        #endif
     }
 
     /// The controls are up when they are showing, or while anything that
     /// needs them is: a pause, a scrub, the panel, an error.
     private var showsControls: Bool {
-        chrome.controlsVisible || player.isPaused || chrome.scrub != nil || chrome.panelOpen
+        clockSaysVisible || player.isPaused || chrome.scrub != nil || chrome.panelOpen
             || player.errorMessage != nil || voiceOver
+    }
+
+    /// A touch or a click on a control: keeps the controls up a while longer.
+    private func interact() {
+        #if os(macOS)
+        mac.noteActivity()
+        #endif
+        chrome.show(hideContext)
+    }
+
+    /// A tap on the picture: a finger toggles the controls; a click on a Mac
+    /// only counts as the pointer moving, since the pointer is what hides
+    /// them.
+    private func tapPicture() {
+        #if os(macOS)
+        mac.noteActivity()
+        #else
+        chrome.toggle(hideContext)
+        #endif
     }
 
     var body: some View {
         ZStack {
-            PlayerGestureLayer(chrome: chrome, compact: compact, onTap: { chrome.toggle(hideContext) },
-                               onSkip: skip)
+            PlayerGestureLayer(chrome: chrome, compact: compact, onTap: tapPicture, onSkip: skip)
 
             // The scrims and the transport come and go together.
             if showsControls {
                 PlayerTransport(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork,
-                                pictureInPicture: pictureInPicture, compact: compact,
-                                onInteract: { chrome.show(hideContext) }, onDismiss: onDismiss)
+                                pictureInPicture: pictureInPicture, compact: compact, usesSheet: usesSheet,
+                                onInteract: interact, onDismiss: onDismiss)
                     .transition(.opacity)
             }
 
@@ -263,27 +322,73 @@ struct PlayerChrome: View {
         .animation(.spring(duration: 0.25), value: chrome.skipTotal)
         .animation(.easeOut(duration: 0.2), value: chrome.holdingDoubleSpeed)
         .animation(.easeOut(duration: 0.2), value: chrome.edgeLevel)
-        .panelPresentation(chrome: chrome, compact: compact, schedule: schedule, artwork: artwork)
+        .panelPresentation(chrome: chrome, usesSheet: usesSheet, schedule: schedule, artwork: artwork)
         #if os(iOS)
         .sensoryFeedback(.impact(weight: .medium), trigger: skips)
         .sensoryFeedback(.impact(weight: .light), trigger: chrome.skipTotal) { _, now in now != 0 }
         .sensoryFeedback(trigger: player.currentBitrate) { was, _ in was == nil ? nil : .selection }
         #endif
+        #if os(macOS)
+        .background(GeometryReader { geo in
+            Color.clear.onChange(of: geo.size, initial: true) { _, now in size = now }
+        })
+        // The pointer: moving over the picture brings the controls up and
+        // starts the clock; leaving the window takes them away.
+        .onContinuousHover { phase in
+            switch phase {
+            case .active: mac.noteActivity()
+            case .ended: mac.pointerLeft()
+            }
+        }
+        // Playback ▸ … ▸ Show … Panel, and the Sync tab from Adjust Audio
+        // Delay: a menu command has no pill to hang the popover off, so the
+        // request comes through `PlayerMacState` and the tab's own pill is
+        // used, or the "…" button for the tabs with none.
+        .onChange(of: mac.panelRequest) { _, request in
+            guard let request else { return }
+            mac.panelRequest = nil
+            chrome.panelAnchor = PlayerChromeState.PanelAnchor.anchor(for: request)
+            chrome.panel = request
+        }
+        .onChange(of: mac.togglePanelRequest) { _, _ in
+            if chrome.panelOpen { chrome.panel = nil } else {
+                chrome.panelAnchor = .more
+                chrome.panel = .info
+            }
+        }
+        .onAppear { mac.pictureInPicture = pictureInPicture }
+        #endif
         .onChange(of: player.isPaused) { _, _ in chrome.scheduleHide(hideContext) }
         .onChange(of: chrome.panel) { _, open in
-            if open == nil { chrome.show(hideContext) } else { chrome.holdControls() }
+            if open == nil { interact() } else { chrome.holdControls() }
         }
         .onChange(of: chrome.scrub) { _, scrub in if scrub == nil { chrome.scheduleHide(hideContext) } }
         .onChange(of: showsControls, initial: true) { _, raised in player.raiseSubtitles(raised) }
         .onChange(of: player.item?.Id) { _, _ in
             chrome.resetForNewStream()
             dismissedNoVideoNotice = false
-            chrome.show(hideContext)
+            interact()
         }
         .onChange(of: player.trickplay, initial: true) { _, info in trickplay.reset(info) }
         .task(id: player.currentChannel?.Id) { await schedule.load(for: player.currentChannel) }
         .task(id: InfoArtwork.url(for: player)) { await artwork.load(InfoArtwork.url(for: player)) }
-        .onAppear { chrome.show(hideContext) }
+        // The controls start up with their clock running on both platforms:
+        // on a Mac that is the pointer's clock, before the pointer has moved.
+        .onAppear {
+            interact()
+            #if DEBUG
+            // `-AquariumPlayPanel <tab>` opens the panel on that tab once the
+            // stream is up, for a screenshot with nobody at the keyboard —
+            // the companion of `-AquariumPlayURL`.
+            if let name = UserDefaults.standard.string(forKey: "AquariumPlayPanel"), let tab = PlayerTab(rawValue: name) {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(5))
+                    chrome.panelAnchor = PlayerChromeState.PanelAnchor.anchor(for: tab)
+                    chrome.panel = tab
+                }
+            }
+            #endif
+        }
     }
 
     // MARK: - Moments
@@ -345,7 +450,20 @@ struct PlayerChrome: View {
         player.seek(by: Double(delta))
         chrome.countSkip(delta)
         chrome.rippleOnce(forward: forward)
-        chrome.show(hideContext)
+        interact()
+    }
+}
+
+extension PlayerChromeState.PanelAnchor {
+    /// The pill a tab's popover hangs off: its own where it has one, the "…"
+    /// button for the rest.
+    static func anchor(for tab: PlayerTab) -> Self {
+        switch tab {
+        case .audio, .subtitles: .audio
+        case .speed: .speed
+        case .quality: .quality
+        case .info, .channels, .sync, .picture: .more
+        }
     }
 }
 
@@ -355,9 +473,9 @@ private extension View {
     /// A sheet with medium and large detents on a phone; a popover hung off
     /// the pill that opened it on an iPad or a Mac.
     @ViewBuilder
-    func panelPresentation(chrome: PlayerChromeState, compact: Bool, schedule: ChannelSchedule,
+    func panelPresentation(chrome: PlayerChromeState, usesSheet: Bool, schedule: ChannelSchedule,
                            artwork: InfoArtwork) -> some View {
-        if compact {
+        if usesSheet {
             self.sheet(isPresented: Binding(
                 get: { chrome.panel != nil },
                 set: { if !$0 { chrome.panel = nil } }

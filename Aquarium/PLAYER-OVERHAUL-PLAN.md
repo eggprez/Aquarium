@@ -424,6 +424,80 @@ player, iOS 17 looks right without glass.
 
 ### Phase 3: the Mac window (M)
 
+> **Shipped 2026-10-16** on `player-overhaul` (uncommitted at the time of
+> writing). `AVPlayerView` is gone: `Chrome/VideoSurface.swift` now has an
+> `NSView` twin of the iOS host view (`VideoLayerHostView`, layer-backed,
+> `hitTest` nil so every click and hover goes to the chrome, the layer given
+> the window's backing scale for phase 4's Metal layer), and Fit / Fill is
+> the `AVPlayerLayer`'s `videoGravity` as before. `PlayerScreen` is one body
+> for iPhone, iPad and Mac — `VideoSurface` + `PlayerChrome` — with `#if`
+> only around the status bar and orientation on iOS and the right-click menu
+> and pointer adapter on macOS; the Mac's own overlay row (quality button,
+> gear menu, hover state) and its `AVPlayerView` coordinator are deleted. The
+> chrome is pointer-driven through a small adapter rather than a fork:
+> `PlayerMacState.noteActivity` / `pointerLeft` is the clock (fed by
+> `onContinuousHover`; the interval is Settings → Video → Hide controls
+> after, the same row a phone reads), `PlayerChrome.showsControls` reads it
+> in place of the chrome's own timer on macOS, and
+> `PlayerChromeState.pointerOnControls` — set by `onHover` on the title row,
+> cluster and bottom band — keeps the controls up while the pointer is on
+> them; paused, a panel, a scrub and an error keep them up as on iOS.
+> `Chrome/PlayerPointer.swift` carries the scroll wheel (vertical is volume,
+> sideways is a scrub, left alone over the controls so the pill row can
+> scroll); a double-click on the picture is full screen (`PlayerGestureLayer`,
+> one `#if`), a single click only counts as pointer movement. The panel is
+> the popover off the pill, as on iPad; `compact` on a Mac now means a
+> window narrower than 640 pt (`PlayerMetrics.narrowWindow`) and picks the
+> smaller glyphs and insets (a Mac set, a step under the iPad's at either
+> size) while `usesSheet` stays false; the title row is inset 58 pt from the
+> leading edge while the window's traffic lights are over the picture and
+> not in full screen (`PlayerMacState.isFullScreen`, from the window's
+> notifications). `PlayerMacMenus`: `PlayerMacState` lost `showsAudioDelay`
+> and gained `panelRequest` / `togglePanelRequest` (the chrome opens the tab
+> off its pill, or the "…" button for Info, Sync and Channels), a weak
+> `pictureInPicture`, and `isFullScreen`; `PlayerMenuItems` gained a Speed
+> submenu (picker, plus Slower/Faster as before) and every submenu ends in
+> "Show … Panel"; Adjust Audio Delay… opens the Sync tab and
+> `AudioDelayOverlay.swift` (the stepper popover) is deleted; the AVKit
+> action-button `NSMenu` (`PlayerActionMenu`) is deleted, the right-click
+> menu being the SwiftUI `PlayerContextMenu` over the same `PlayerMenuItems`,
+> now with Picture in Picture and Enter / Exit Full Screen. The Playback menu
+> gained Show Panel (⌘K), Picture in Picture (P) and the full-screen item's
+> state; Space, arrows, [ ], ⌥[ ⌥] ⌥0, M, S, C, F, ⌘I, ⌘. are unchanged and
+> act on the model. Picture in Picture is `AVPictureInPictureController` over
+> the layer through the shared `PictureInPicture` class, which on macOS puts
+> the window away on start (not in full screen) and brings it back on stop or
+> on the floating window's return button — the delegate behaviour
+> `AVPlayerView` had. `StreamInfoInspector` stays as ⌘I; the Info tab lists
+> `PlayerStreamRows` as on iOS. The overlays lost their Mac-only material
+> and dismiss glyph (the AVKit panel they matched is gone) and the styling
+> helpers moved from `PlayerScreen` into `PlayerOverlays`. Every control
+> keeps its VoiceOver label; the chrome's buttons are ordinary SwiftUI
+> buttons, which Full Keyboard Access tabs through. `AVPlayerView`'s
+> magnification and Live Text are not carried over, as decided. Debug builds
+> also take `-AquariumPlayPanel <tab>` and `-AquariumPlayFullScreen YES`
+> beside `-AquariumPlayURL`. The only AVKit left in the Mac player is
+> `AVPictureInPictureController` (`Chrome/PictureInPicture.swift`) and
+> `AVRoutePickerView` (`Chrome/PlayerTransport.swift`). iOS, macOS and tvOS
+> build; `AquariumTests` pass.
+>
+> **Left for later phases.** The `qa-2026-10-16/player-phase-3/` screenshots were
+> not taken: the Mac's screen was locked for the whole session, which
+> refuses both screen control and `screencapture`; the four shots (chrome
+> up, panel open, chrome hidden, full screen at 900×506) are one run of
+> `qa-2026-10-16/player-phase-3/take-screenshots.sh` on an unlocked screen. Not seen running:
+> Picture in Picture's window-away-and-back, AirPlay, the scroll-wheel
+> scrub, a right-click on the picture, the Sync tab from the menu, and Tab
+> through the chrome with Full Keyboard Access — all compile-checked only.
+> The hide interval on a Mac is the Settings value (default 4 s) rather than
+> the plan's 2 s, so the Settings row means what it says on both platforms;
+> drop the default to 2 if the Mac wants it. The player window's title
+> reads "Stream Info" in the Window menu (the inspector's `navigationTitle`
+> wins over the window's; pre-existing). The chrome has no volume slider —
+> ↑ / ↓, the scroll wheel and M are the Mac's volume — and no Fill via pinch
+> was checked on a trackpad. The `Preferences.fillScreen` toggle in the
+> menus now calls `applyFraming`, which the old AVKit path did not need.
+
 `AVPlayerView` goes; the shared chrome runs pointer-driven in
 `PlayerWindow`; `PlayerMacMenus` and `MacCommands` point at the model; PiP
 through `AVPictureInPictureController`; the Stream Info inspector stays.
