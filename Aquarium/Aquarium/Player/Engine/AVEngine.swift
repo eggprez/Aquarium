@@ -1038,8 +1038,15 @@ final class AVEngine: PlaybackEngine {
                 lastReportedPaused = paused
                 deliver(.paused(paused))
             }
-            if player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
-                reportBuffering(true)
+            // Both ways, every tick. Waiting is buffering; playing is not —
+            // and the flags above don't always say so: a file on this device
+            // has `isPlaybackLikelyToKeepUp` true from the start, so an empty
+            // buffer reported as it began had nothing to clear it, and the
+            // centre button span over a picture that was playing.
+            switch player.timeControlStatus {
+            case .waitingToPlayAtSpecifiedRate: reportBuffering(true)
+            case .playing: reportBuffering(false)
+            default: break
             }
         }
         // Frames given up on, as a running total. `accessLog()` hands back a

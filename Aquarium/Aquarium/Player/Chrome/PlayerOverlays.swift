@@ -1,7 +1,6 @@
 //  The moment overlays and the badges: things drawn over the picture that
 //  come and go with their moment rather than with the controls. Skip intro /
-//  Skip credits, the Up Next card, the bitrate notice, the loading card, the
-//  error card, the banner for a stream with no picture, the ripple a
+//  Skip credits, the Up Next card, the bitrate notice, the error card, the banner for a stream with no picture, the ripple a
 //  double-tap leaves, the 2× badge and the edge-drag level.
 //
 //  Shared by every platform's chrome. The Mac keeps its Title Case and
@@ -46,40 +45,8 @@ extension View {
     }
 }
 
-// MARK: - Loading
-
-/// One line, out of the middle of the screen, while a stream is opening at a
-/// position: the wait can run to tens of seconds while a transcode catches
-/// up to the offset.
-struct PlayerLoadingCard: View {
-    @Environment(PlayerModel.self) private var player
-
-    var body: some View {
-        HStack(spacing: 10) {
-            ProgressView().controlSize(.small).tint(.white)
-            Text(player.title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-            if let bitrate = player.currentBitrate {
-                Text(Quality.shortLabel(for: bitrate))
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
-                    .lineLimit(1)
-                    .layoutPriority(1)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .overlayBackdrop(Capsule(), opacity: 0.6)
-        .frame(maxWidth: 420)
-        .padding(.horizontal, 24)
-        .playerOverlayScheme()
-        .accessibilityElement(children: .combine)
-    }
-}
-
 // MARK: - Error
+
 
 struct PlayerErrorCard: View {
     @Environment(PlayerModel.self) private var player

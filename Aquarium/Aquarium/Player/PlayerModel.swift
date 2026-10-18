@@ -149,7 +149,14 @@ final class PlayerModel {
     var trickplay: TrickplayInfo?
     var segments: [MediaSegment] = [] { didSet { refreshCues() } }
 
-    var upNext: BaseItem? { didSet { refreshCues() } }
+    /// The episodes the series has left after this one, in order, across
+    /// seasons — as many as the Up Next list shows (`PlayerModel.upNextLimit`).
+    /// Empty until `refreshUpNext` has looked, and for anything but an episode.
+    var upcoming: [BaseItem] = [] { didSet { refreshCues() } }
+    /// The one that plays next by itself.
+    var upNext: BaseItem? { upcoming.first }
+    /// How many titles the Up Next list shows at most.
+    static let upNextLimit = 5
     var isStartingNext = false
     var autoplayCancelled = false { didSet { refreshCues() } }
     /// The intro or credits sequence the playhead is in, if any.
@@ -632,7 +639,7 @@ final class PlayerModel {
         tracks = []
         segments = []
         trickplay = nil
-        upNext = nil
+        upcoming = []
         upNextSettled = false
         upNextChecked = false
         tracksApplied = false

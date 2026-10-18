@@ -7,16 +7,14 @@
 //  right-click on the picture, which is where a Mac user asks "what can I do
 //  with this". Both are SwiftUI menus and share `PlayerMenuItems`. Nothing
 //  here is a second copy of a decision — every item calls the same
-//  `PlayerModel` method the panel's tabs call, and each submenu ends with the
-//  tab it mirrors, for the choices only the panel draws (the Sync tab's
-//  steps, the language preferences).
+//  `PlayerModel` method the chrome's menus call.
 //
 //  `PlayerMacState` is the little that a menu bar command needs to reach and
 //  a view owns: the window, so Full Screen can act on it; the Picture in
 //  Picture controller, so the menu can start it; whether the stream inspector
-//  is up; a panel tab a menu has asked the chrome to open; and whether the
-//  pointer has moved lately, which is the clock the chrome's controls keep on
-//  a Mac (see `PlayerChrome`).
+//  is up; whether the panel has been asked for; and whether the pointer has
+//  moved lately, which is the clock the chrome's controls keep on a Mac (see
+//  `PlayerChrome`).
 
 #if os(macOS)
 import AppKit
@@ -46,10 +44,6 @@ final class PlayerMacState {
     /// Playback ▸ Stream Info (⌘I): the inspector beside the picture.
     var showsStreamInfo = false
 
-    /// A tab the chrome has been asked to open — Playback ▸ Audio ▸ Show
-    /// Audio Panel, Adjust Audio Delay… for the Sync tab — cleared by the
-    /// chrome once it has.
-    var panelRequest: PlayerTab?
     /// Bumped by Playback ▸ Show Panel: the panel opens on Info, or closes
     /// if it is open.
     var togglePanelRequest = 0
@@ -135,15 +129,7 @@ final class PlayerMacState {
         }
     }
 
-    // MARK: Panel
-
-    /// Ask the chrome to open the panel on `tab`. The controls come up with
-    /// it, since a popover off a pill nobody can see is a popover off
-    /// nothing.
-    func openPanel(_ tab: PlayerTab) {
-        noteActivity()
-        panelRequest = tab
-    }
+    // MARK: Picture in Picture
 
     /// Picture in Picture, or on mpv the hand-over to AVPlayer that gets it.
     func togglePictureInPicture() {
@@ -188,32 +174,12 @@ final class PlayerMacState {
             ?? options[0]
         player.selectSubtitles(next)
     }
-
-    /// The reach of the audio offset, either way: the same half second the
-    /// menu presets stop at. A stream whose picture is held back rather than
-    /// composed can only go earlier — see `PlayerModel.canDelayAudioLater`.
-    nonisolated static let delayReach = 500
-
-    /// ⌥[ / ⌥]: ten milliseconds, a fraction of a frame.
-    func nudgeAudioDelay(_ player: PlayerModel, by delta: Int) {
-        guard player.canDelayAudio else { return }
-        let upper = player.canDelayAudioLater ? Self.delayReach : 0
-        let target = min(max(player.audioDelayMilliseconds + delta, -Self.delayReach), upper)
-        guard target != player.audioDelayMilliseconds else { return }
-        player.setAudioDelay(milliseconds: target)
-    }
-
-    /// ⌥0.
-    func resetAudioDelay(_ player: PlayerModel) {
-        guard player.audioDelayMilliseconds != 0 else { return }
-        player.setAudioDelay(milliseconds: 0)
-    }
 }
 
 // MARK: - The shared SwiftUI menu content
 
-/// Quality, Audio, Subtitles, Speed, Audio Sync, Audio Delay, Up Next, Sleep
-/// and Fill Screen, as submenus with real check marks. Placed in the Playback
+/// Quality, Audio, Subtitles, Speed, Up Next, Sleep and Fill Screen, as
+/// submenus with real check marks. Placed in the Playback
 /// menu and in the picture's context menu alike.
 ///
 /// `shortcut` is asked for each key equivalent rather than the keys being
@@ -238,27 +204,24 @@ struct PlayerMenuItems: View {
                     }
                 }
                 .pickerStyle(.inline)
-                Divider()
-                showPanel(.quality)
             }
             .disabled(!player.isActive)
         }
 
         // The file's own tracks, from what the server says it contains. See
-        // `PlayerModel.audioOptions`. One track is not a choice, but the
-        // panel still has the language preference.
+        // `PlayerModel.audioOptions`.
         let audio = player.audioOptions
         Menu("Audio") {
-            if audio.count > 1 {
+            if audio.isEmpty {
+                Text(player.isActive && player.isOpening ? "Once the Stream Has Opened" : "No Audio Tracks Listed")
+            } else {
                 Picker("Audio", selection: audioBinding) {
                     ForEach(audio) { option in
                         Text(trackTitle(option)).tag(option.id as TrackOption.ID?)
                     }
                 }
                 .pickerStyle(.inline)
-                Divider()
             }
-            showPanel(.audio)
         }
         .disabled(!player.isActive)
 
@@ -276,9 +239,9 @@ struct PlayerMenuItems: View {
                 Divider()
                 Button("Toggle Subtitles") { state.cycleSubtitles(player) }
                     .keyboardShortcut(shortcut("c", []))
-                Divider()
+            } else {
+                Text("No Subtitle Tracks")
             }
-            showPanel(.subtitles)
         }
         .disabled(!player.isActive)
 
@@ -290,74 +253,30 @@ struct PlayerMenuItems: View {
                     }
                 }
                 .pickerStyle(.inline)
-                Divider()
-                showPanel(.speed)
             }
             .disabled(!player.isActive)
         }
 
-        // The repairs, ahead of the two settings under them: sleep and fill
-        // are preferences set when nothing is wrong, and this is the group
-        // opened when something is.
-        Menu("Audio Sync") {
-            Button("Resync Audio") { player.resyncAudio() }
-                .disabled(!player.canResync)
-            Button("Re-encode This Stream") { Task { await player.reencodeForSync() } }
-                .disabled(!player.canReencodeForSync)
-            Divider()
-            // The Sync tab: the steps, the reset and the repairs over the
-            // picture they are being set for.
-            Button("Adjust Audio Delay…") { state.openPanel(.sync) }
-                .disabled(!player.isActive)
-        }
-
-        Menu("Audio Delay") {
-            Button("Sound 10 ms Earlier") { state.nudgeAudioDelay(player, by: -10) }
-                .keyboardShortcut(shortcut("[", .option))
-                .disabled(!player.canDelayAudio)
-            Button("Sound 10 ms Later") { state.nudgeAudioDelay(player, by: 10) }
-                .keyboardShortcut(shortcut("]", .option))
-                .disabled(!player.canDelayAudio || !player.canDelayAudioLater)
-            Button("In Step") { state.resetAudioDelay(player) }
-                .keyboardShortcut(shortcut("0", .option))
-                .disabled(!player.canDelayAudio || player.audioDelayMilliseconds == 0)
-            Divider()
-            if player.canDelayAudio {
-                Picker("Audio Delay", selection: delayBinding) {
-                    // A value from the Sync tab can be any multiple of five;
-                    // one that isn't a preset is shown ticked at the top
-                    // rather than leaving the menu with nothing on.
-                    let current = player.audioDelayMilliseconds
-                    if !PlayerModel.audioDelays.contains(current) {
-                        Text(PlayerModel.audioDelayName(current)).tag(current)
-                    }
-                    ForEach(delayPresets, id: \.self) { milliseconds in
-                        Text(PlayerModel.audioDelayName(milliseconds)).tag(milliseconds)
-                    }
-                }
-                .pickerStyle(.inline)
-            } else {
-                // Offered greyed out with a reason rather than dropped:
-                // somebody looking for this and finding nothing concludes
-                // the app has lost it.
-                Text(player.isActive && player.isOpening ? "Once the Stream Has Opened" : "Only on a Direct-Played File")
-                if player.audioDelayMilliseconds != 0 {
-                    Text("Set to \(PlayerModel.audioDelayShortName(player.audioDelayMilliseconds)) — not applied here")
-                }
-            }
-        }
-
-        // What was queued by hand — see `PlayerModel.queueNext`. A row plays
-        // its title now; the rows above it go.
+        // What was queued by hand — see `PlayerModel.queueNext` — else the
+        // next few episodes the series has left. A row plays its title now;
+        // for the queue, the rows above it go.
         Menu("Up Next") {
-            if player.queue.isEmpty {
-                Text("Nothing Queued")
-            } else {
+            if !player.queue.isEmpty {
                 ForEach(player.queue, id: \.Id) { queued in
                     Button(PlayerModel.displayTitle(queued)) { Task { await player.playQueued(queued.Id) } }
                 }
                 Divider()
                 Button("Clear Up Next") { player.clearQueue() }
+            } else if !player.upNextList.isEmpty {
+                ForEach(player.upNextList, id: \.Id) { next in
+                    Button(PlayerModel.upNextRowTitle(next)) { Task { await player.playUpcoming(next) } }
+                }
+            } else if !player.upNextLocal.isEmpty {
+                ForEach(player.upNextLocal, id: \.itemId) { record in
+                    Button(record.title) { player.playLocal(record, keepShuffle: true) }
+                }
+            } else {
+                Text("Nothing Queued")
             }
         }
 
@@ -400,13 +319,6 @@ struct PlayerMenuItems: View {
         ))
     }
 
-    /// The row at the foot of a submenu that opens the panel on the tab the
-    /// submenu mirrors.
-    private func showPanel(_ tab: PlayerTab) -> some View {
-        Button("Show \(tab.title) Panel") { state.openPanel(tab) }
-            .disabled(!player.isActive)
-    }
-
     /// "English · 5.1 (reopens the stream)": said in the row rather than
     /// hidden. A track the stream doesn't carry is still the right one to
     /// pick — it costs the couple of seconds the server needs to build a
@@ -415,11 +327,6 @@ struct PlayerMenuItems: View {
         var title = option.isForced ? "\(option.label) (Forced)" : option.label
         if option.needsNewStream { title += " (reopens the stream)" }
         return title
-    }
-
-    /// Only the half of the ladder this stream can take.
-    private var delayPresets: [Int] {
-        player.canDelayAudioLater ? PlayerModel.audioDelays : PlayerModel.audioDelays.filter { $0 <= 0 }
     }
 
     private var qualityBinding: Binding<Int?> {
@@ -450,13 +357,6 @@ struct PlayerMenuItems: View {
         Binding(
             get: { PlayerModel.speeds.first { abs($0 - player.speed) < 0.001 } ?? 1 },
             set: { player.speed = $0 }
-        )
-    }
-
-    private var delayBinding: Binding<Int> {
-        Binding(
-            get: { player.audioDelayMilliseconds },
-            set: { player.setAudioDelay(milliseconds: $0) }
         )
     }
 }

@@ -53,16 +53,21 @@ extension PlayerModel {
     /// Where the chapters start, for the timeline's ticks.
     var chapterStarts: [Double] { chapters.map(\.start) }
 
-    /// The tabs this stream has something to show in.
+    /// The tabs this stream has something to show in. On an iPhone, an iPad
+    /// or a Mac the panel has no row of tabs: each is its own page, opened
+    /// by its own button, and the tracks, speed, quality, sync and picture
+    /// are cards or not offered at all — see `PlayerTransport`.
     var panelTabs: [PlayerTab] {
         var out: [PlayerTab] = [.info]
         if isLive, channelLineup.count > 1 { out.append(.channels) }
+        #if os(tvOS)
         out.append(.audio)
         out.append(.subtitles)
         if !isExternal, !isLive, !isLocal { out.append(.quality) }
         if !isLive { out.append(.speed) }
         out.append(.sync)
         out.append(.picture)
+        #endif
         return out
     }
 
@@ -92,10 +97,40 @@ extension PlayerModel {
     /// queued by hand first, then the one the series offers.
     var upNextItem: BaseItem? { queue.first ?? upNext }
 
-    /// How many titles wait behind this one: the hand-made queue, or the one
-    /// Up Next the series offers.
+    /// What the Up Next list shows for a server item: the hand-made queue
+    /// when there is one, else the episodes the series has left, at most
+    /// `upNextLimit` of them.
+    var upNextList: [BaseItem] {
+        queue.isEmpty ? Array(upcoming.prefix(Self.upNextLimit)) : queue
+    }
+
+    #if !os(tvOS)
+    /// The same list for a download: the episodes of its series on this
+    /// device that come after it, at most `upNextLimit`.
+    var upNextLocal: [DownloadRecord] {
+        guard isLocal, let id = localRecordId, let record = DownloadManager.shared.record(for: id),
+              record.isEpisode else { return [] }
+        let siblings = DownloadManager.shared.episodes(ofSeries: record.seriesId, seriesName: record.series)
+        guard let i = siblings.firstIndex(where: { $0.itemId == id }) else { return [] }
+        return Array(siblings.dropFirst(i + 1).prefix(Self.upNextLimit))
+    }
+    #endif
+
+    /// How many titles wait behind this one: the hand-made queue, the
+    /// episodes the series has left, or the downloads after this one.
     var upNextCount: Int {
         if !queue.isEmpty { return queue.count }
-        return upNext != nil || upNextLocalId != nil ? 1 : 0
+        if !upcoming.isEmpty { return min(upcoming.count, Self.upNextLimit) }
+        #if !os(tvOS)
+        if upNextLocalId != nil { return max(1, upNextLocal.count) }
+        #endif
+        return 0
+    }
+
+    /// A row of the Up Next list: the episode's number and name, the series
+    /// being the one playing.
+    static func upNextRowTitle(_ item: BaseItem) -> String {
+        guard item.isEpisode else { return displayTitle(item) }
+        return [item.episodeLabel, item.title].compactMap { $0 }.joined(separator: " · ")
     }
 }

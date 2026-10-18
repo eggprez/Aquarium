@@ -55,10 +55,7 @@ struct PlayerWindow: View {
             if !player.isActive { dismissWindow(id: Self.id) }
         }
         .onChange(of: player.isActive) { _, active in
-            if !active {
-                state.panelRequest = nil
-                dismissWindow(id: Self.id)
-            }
+            if !active { dismissWindow(id: Self.id) }
         }
         .onChange(of: window) { _, window in
             window?.backgroundColor = .black
@@ -195,7 +192,7 @@ private struct PlayerKeysYieldedKey: FocusedValueKey {
 /// guide, which uses the same two keys. Stopping carries ⌘ and works from any
 /// window while something is playing.
 ///
-/// The settings — Quality, Audio, Subtitles, Speed, Audio Sync, Audio Delay,
+/// The settings — Quality, Audio, Subtitles, Speed,
 /// Sleep, Fill Screen — are `PlayerMenuItems`, shared with the picture's
 /// context menu.
 struct PlaybackCommands: Commands {

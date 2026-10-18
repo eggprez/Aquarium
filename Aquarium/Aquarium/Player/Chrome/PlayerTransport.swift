@@ -1,7 +1,12 @@
 //  The transport over the picture: the scrims top and bottom, the title row
 //  with dismiss, AirPlay, Picture in Picture and the "…" menu, the centre
-//  cluster, and along the bottom the timeline, the times and the row of pills
-//  that open the panel.
+//  cluster, and along the bottom the timeline, the times and the row of
+//  pills. Each pill is its own thing: Info opens the panel on the episode
+//  and the stream facts; Audio, Subtitles, Quality and Up Next each drop a
+//  card of the chrome's own (`PlayerMenus`); Fill is a switch. The "…"
+//  button drops the More card — speed, the sleep timer, what happens after
+//  this episode, the channels, Watch Together. Nothing on an iPhone, an
+//  iPad or a Mac opens a panel with a row of tabs; that is the television's.
 //
 //  Apple's grammar in this app's palette. Nothing here knows how it was
 //  touched: taps on the picture, double-taps and pinches are
@@ -38,6 +43,10 @@ struct PlayerTransport: View {
     /// and the bottom band go against the picture's edges rather than the
     /// screen's. Nil for the usual layout.
     var letterbox: Letterbox?
+    /// How wide the panel is where it is a popover (an iPad, a Mac): most
+    /// of the picture, so the Info page has room for its two columns. The
+    /// chrome works it out from its size.
+    var panelWidth: CGFloat = 640
 
     /// Where the picture is, in an upright view, for the controls to sit
     /// against. `pictureHeight` is the picture's; `shift` is how far the
@@ -182,6 +191,11 @@ struct PlayerTransport: View {
                     .pointerHover { hoverCluster = $0 }
             }
         }
+        // The open menu card, beside the control that opened it.
+        .overlayPreferenceValue(ChromeMenuAnchors.self) { anchors in
+            ChromeMenuLayer(chrome: chrome, anchors: anchors, compact: compact, onInteract: onInteract,
+                            openPanel: { open($0, anchor: .more) })
+        }
         .onChange(of: hoverTitle || hoverCluster || hoverBottom, initial: true) { _, on in
             chrome.pointerOnControls = on
         }
@@ -256,7 +270,7 @@ struct PlayerTransport: View {
                 }
             }
 
-            moreMenu
+            moreButton
                 .panelPopover(isPresented: popover(for: .more), arrowEdge: .top) { panelPopover }
         }
         .padding(.top, compact ? 2 : 8)
@@ -294,75 +308,13 @@ struct PlayerTransport: View {
         return player.item?.title ?? player.title
     }
 
-    /// The rare things: Stream Info, Watch Together, the sync tools, the
-    /// sleep timer and "stop after this episode".
-    private var moreMenu: some View {
-        Menu {
-            Button {
-                open(.info, anchor: .more)
-            } label: {
-                Label("Stream Info", systemImage: "info.circle")
-            }
-            #if !os(tvOS)
-            if let item = player.item, !player.isLocal, !player.isLive,
-               player.engine?.capabilities.contains(.sharePlay) == true || player.canSwitchEngine(to: .apple) {
-                let shareplay = SharePlayCoordinator.shared
-                if shareplay.isActive {
-                    Button {
-                        shareplay.leave()
-                    } label: {
-                        Label("Leave SharePlay", systemImage: "shareplay.slash")
-                    }
-                } else {
-                    // On mpv the stream is handed to AVPlayer first, whose
-                    // player the session coordinates.
-                    Button {
-                        Task {
-                            await player.prepareForSharePlay()
-                            await shareplay.share(item)
-                        }
-                    } label: {
-                        Label("Watch Together", systemImage: "shareplay")
-                    }
-                }
-            }
-            #endif
-            Button {
-                open(.sync, anchor: .more)
-            } label: {
-                Label("Audio Sync", systemImage: "waveform.path.ecg")
-            }
-            Divider()
-            Menu {
-                if let left = player.sleepMinutesRemaining {
-                    Button("Cancel sleep timer (\(left) min left)") { player.cancelSleepTimer() }
-                } else {
-                    ForEach([15, 30, 60, 90], id: \.self) { minutes in
-                        Button("Stop in \(minutes) minutes") { player.setSleepTimer(minutes: minutes) }
-                    }
-                }
-            } label: {
-                Label(player.sleepMinutesRemaining.map { "Sleep timer · \($0) min" } ?? "Sleep timer",
-                      systemImage: "moon")
-            }
-            if !player.isLive {
-                Button {
-                    if player.autoplayCancelled { player.resumeAutoplay() } else { player.cancelAutoplay() }
-                } label: {
-                    Label(player.autoplayCancelled ? "Keep playing after this" : "Stop after this episode",
-                          systemImage: player.autoplayCancelled ? "play.circle" : "stop.circle")
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 40, height: 40)
-                .contentShape(Circle())
+    /// The "…" button: the More card — speed, the sleep timer, what happens
+    /// after this episode, the channels, Watch Together. See `PlayerMenus`.
+    private var moreButton: some View {
+        PlayerGlyphButton(symbol: "ellipsis", label: "More", size: 18, isOn: chrome.menu == .more) {
+            toggleMenu(.more)
         }
-        .menuIndicator(.hidden)
-        .tint(.white)
-        .accessibilityLabel("More")
+        .chromeMenuAnchor(.more)
     }
 
     // MARK: - Centre cluster
@@ -463,24 +415,25 @@ struct PlayerTransport: View {
 
     // MARK: - Pills
 
+    /// Info opens the panel; Audio, Subtitles, Quality and Up Next drop
+    /// their cards; Fill is a switch.
     private var pills: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                pill(symbol: "captions.bubble", title: "Audio & Subtitles", label: "Audio and subtitles",
-                     tab: .audio, anchor: .audio)
-                if !player.isLive {
-                    pill(symbol: "gauge.with.dots.needle.67percent",
-                         title: player.speed == 1 ? "Speed" : PlayerModel.speedName(player.speed),
-                         label: "Speed, \(PlayerModel.speedName(player.speed))",
-                         tab: .speed, anchor: .speed)
-                }
+                pill(symbol: PlayerTab.info.symbol, title: "Info",
+                     label: player.isLive ? "Channel info" : "Episode info",
+                     tab: .info, anchor: .info)
+                menuPill(.audio, symbol: "speaker.wave.2", title: "Audio", label: "Audio tracks")
+                menuPill(.subtitles, symbol: "captions.bubble", title: "Subtitles", label: "Subtitles")
                 if player.offersQuality {
-                    pill(symbol: "slider.horizontal.3", title: Quality.shortLabel(for: player.currentBitrate),
-                         label: "Quality, \(Quality.label(for: player.currentBitrate))",
-                         tab: .quality, anchor: .quality)
+                    menuPill(.quality, symbol: "slider.horizontal.3",
+                             title: Quality.shortLabel(for: player.currentBitrate),
+                             label: "Quality, \(Quality.label(for: player.currentBitrate))")
                 }
                 if !player.isLive, player.upNextCount > 0 {
-                    upNextPill
+                    menuPill(.upNext, symbol: "text.line.first.and.arrowtriangle.forward",
+                             title: player.queue.isEmpty ? "Up Next" : "Up Next · \(player.queue.count)",
+                             label: "Up next, \(player.upNextCount) waiting")
                 }
                 Button {
                     onInteract()
@@ -519,33 +472,27 @@ struct PlayerTransport: View {
         .panelPopover(isPresented: popover(for: anchor), arrowEdge: .bottom) { panelPopover }
     }
 
-    /// What is queued by hand, then the next the series offers. A row plays
-    /// its title now.
-    private var upNextPill: some View {
-        Menu {
-            ForEach(player.queue, id: \.Id) { entry in
-                Button(PlayerModel.displayTitle(entry)) { Task { await player.playQueued(entry.Id) } }
-            }
-            if player.queue.isEmpty, let next = player.upNextTitle {
-                Button {
-                    Task { await player.playNextNow() }
-                } label: {
-                    Label("Play now · \(next)", systemImage: "forward.fill")
-                }
-            }
-            if !player.queue.isEmpty {
-                Divider()
-                Button("Clear up next", role: .destructive) { player.clearQueue() }
-            }
+    /// A pill whose card drops from it; lit while the card is up.
+    private func menuPill(_ menu: PlayerChromeState.ChromeMenu, symbol: String, title: String, label: String) -> some View {
+        Button {
+            toggleMenu(menu)
         } label: {
-            PlayerPill {
-                Image(systemName: "text.line.first.and.arrowtriangle.forward")
-                Text(player.queue.isEmpty ? "Up Next" : "Up Next · \(player.queue.count)")
+            PlayerPill(isOn: chrome.menu == menu) {
+                Image(systemName: symbol)
+                Text(title)
             }
         }
-        .menuIndicator(.hidden)
         .buttonStyle(PlayerPillStyle())
-        .accessibilityLabel("Up next, \(player.upNextCount) waiting")
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(chrome.menu == menu ? [.isSelected] : [])
+        .chromeMenuAnchor(menu)
+    }
+
+    /// Open `menu`'s card, or put it away if it is the one up. The card
+    /// holds the controls while it is open — see `PlayerChrome`.
+    private func toggleMenu(_ menu: PlayerChromeState.ChromeMenu) {
+        onInteract()
+        chrome.menu = chrome.menu == menu ? nil : menu
     }
 
     // MARK: - The panel
@@ -569,7 +516,7 @@ struct PlayerTransport: View {
     private var panelPopover: some View {
         PlayerPanel(tab: Binding(get: { chrome.panel ?? .info }, set: { chrome.panel = $0 }),
                     schedule: schedule, artwork: artwork)
-            .frame(minWidth: 400, idealWidth: 440, maxWidth: 520, minHeight: 360, idealHeight: 460, maxHeight: 560)
+            .frame(minWidth: panelWidth, idealWidth: panelWidth, maxWidth: panelWidth, minHeight: 360, idealHeight: 520, maxHeight: 640)
             .playerChromeScheme()
     }
 }

@@ -1,11 +1,18 @@
-//  The panel: a row of tabs, and under it the choices for the tab that is
-//  open. Info · Channels · Audio · Subtitles · Quality · Speed · Sync ·
-//  Picture. A sheet with medium and large detents on a phone, a popover off
-//  the pill that opened it on an iPad or a Mac, and on the Apple TV the card
-//  that comes down from the top of the picture on a swipe down: wide and
-//  shallow, its tabs focusable, its rows cards in a row that scrolls
-//  sideways, so as much of the picture as possible stays in view — most of
-//  all on Sync and Picture, where the picture is what's being judged.
+//  The panel. On the Apple TV: a row of tabs, and under it the choices for
+//  the tab that is open — Info · Channels · Audio · Subtitles · Quality ·
+//  Speed · Sync · Picture — as the card that comes down from the top of the
+//  picture on a swipe down: wide and shallow, its tabs focusable, its rows
+//  cards in a row that scrolls sideways, so as much of the picture as
+//  possible stays in view — most of all on Sync and Picture, where the
+//  picture is what's being judged.
+//
+//  On an iPhone, an iPad or a Mac there is no row of tabs: the panel is one
+//  page, opened by the button that owns it — Info from its pill, Channels
+//  from the "…" card — as a sheet with medium and large detents on a phone
+//  and a popover off that button on an iPad or a Mac. Info carries the
+//  episode and every fact about the file and the stream. The tracks, speed
+//  and quality are cards there (`PlayerMenus`), and the sync and picture
+//  pages are the television's alone.
 //
 //  A row the engine cannot honour says why rather than vanishing: the quality
 //  rungs under a download, the audio offset on a transcode, the picture
@@ -52,43 +59,22 @@ struct PlayerPanel: View {
 
     // MARK: - A phone, an iPad, a Mac
 
+    /// One page, no tabs. The page says what it is at the top, except Info,
+    /// whose first line is the title itself.
     private var stacked: some View {
-        VStack(spacing: 0) {
-            tabStrip
-            Divider().overlay(Theme.border)
-            ScrollView {
-                content
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private var tabStrip: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(player.panelTabs) { item in
-                        Button {
-                            tab = item
-                        } label: {
-                            PanelTabLabel(title: item.title, isCurrent: item == tab)
-                        }
-                        .buttonStyle(PlayerFocusStyle())
-                        .id(item)
-                        .accessibilityAddTraits(item == tab ? [.isSelected] : [])
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                if tab != .info {
+                    Text(tab.title)
+                        .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                content
             }
-            .onChange(of: tab, initial: true) { _, tab in
-                withAnimation { proxy.scrollTo(tab, anchor: .center) }
-            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Panel tabs")
     }
 
     // MARK: - A television
@@ -116,19 +102,25 @@ struct PlayerPanel: View {
         switch tab {
         case .info: InfoTab(schedule: schedule, artwork: artwork)
         case .channels: ChannelsTab()
+        #if os(tvOS)
         case .audio: AudioTab()
         case .subtitles: SubtitlesTab()
         case .quality: QualityTab()
         case .speed: SpeedTab()
         case .sync: SyncTab()
         case .picture: PictureTab()
+        #else
+        // Cards off the pills and the "…" button, or not offered: never a
+        // page here. `panelTabs` doesn't list them.
+        case .audio, .subtitles, .quality, .speed, .sync, .picture: EmptyView()
+        #endif
         }
     }
 }
 
-/// A tab along the top of the panel: text, with the accent capsule behind
-/// the open one — or, on a television, behind the focused one and an accent
-/// underline under the open one.
+#if os(tvOS)
+/// A tab along the top of the television's panel: text, with the accent
+/// capsule behind the focused one and an accent underline under the open one.
 private struct PanelTabLabel: View {
     @Environment(\.isFocused) private var isFocused
     let title: String
@@ -152,7 +144,6 @@ private struct PanelTabLabel: View {
     }
 }
 
-#if os(tvOS)
 /// The television's panel: its row of tabs, driven by the focus engine, and
 /// under it the open tab's cards. Menu from a card goes back up to its tab,
 /// and from the tabs puts the panel away.
@@ -538,8 +529,8 @@ private struct PanelStepLabel: View {
     }
 }
 
-/// A heading between groups of rows.
-private struct PanelHeading: View {
+/// A heading between groups of rows; the menu cards use it too.
+struct PanelHeading: View {
     let text: String
 
     var body: some View {
@@ -553,8 +544,8 @@ private struct PanelHeading: View {
 }
 
 /// A sentence that stands in for rows the stream has none of, or explains
-/// why a whole tab is quiet.
-private struct PanelNote: View {
+/// why a whole tab is quiet; the menu cards use it too.
+struct PanelNote: View {
     let text: String
 
     var body: some View {
@@ -728,36 +719,47 @@ private struct InfoTab: View {
         }
     }
 
+    /// The episode (or the programme) with its poster, and everything about
+    /// the file and the stream: what is coming down, what the server holds,
+    /// where playback is. Two columns where the page is wide enough — the
+    /// words on the left, the facts on the right — one where it isn't. The
+    /// sleep timer and what happens after this episode are in the "…" card.
     private var tall: some View {
-        let rows = PlayerStreamRows(player: player)
         // Read here so the stream figures, which nothing writes, redraw on the
         // player's clock.
         let _ = player.position
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 24) {
+                header
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                factsColumn
+                    .frame(width: 320)
+            }
+            .frame(minWidth: 560)
+            VStack(alignment: .leading, spacing: 10) {
+                header
+                factsColumn
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 14) {
+            if let url = InfoArtwork.url(for: player) {
+                poster(url)
+                    .frame(width: player.isLive ? 110 : 84, height: player.isLive ? 70 : 126)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                if player.isLive { live } else { onDemand }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var factsColumn: some View {
+        let rows = PlayerStreamRows(player: player)
         return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 14) {
-                if let url = InfoArtwork.url(for: player) {
-                    poster(url)
-                        .frame(width: player.isLive ? 110 : 84, height: player.isLive ? 70 : 126)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    if player.isLive { live } else { onDemand }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            if !player.isLive, player.item?.isEpisode == true {
-                PanelHeading(text: "After this")
-                PanelRow(title: player.autoplayCancelled ? "Stop after this episode" : "Play the next episode automatically",
-                         detail: player.upNextTitle.map { "Next: \($0)" },
-                         isSelected: !player.autoplayCancelled) {
-                    player.autoplayCancelled ? player.resumeAutoplay() : player.cancelAutoplay()
-                }
-            }
-
-            PanelHeading(text: "Sleep timer")
-            sleepTimer
-
             let stream = rows.stream
             if !stream.isEmpty {
                 PanelHeading(text: "Coming down")
@@ -774,6 +776,24 @@ private struct InfoTab: View {
                 facts(now)
             }
         }
+    }
+
+    private func facts(_ rows: [PlayerStreamRows.Row]) -> some View {
+        VStack(spacing: 6) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(alignment: .firstTextBaseline) {
+                    Text(row.label)
+                        .foregroundStyle(Theme.textDim)
+                    Spacer(minLength: 12)
+                    Text(row.value)
+                        .multilineTextAlignment(.trailing)
+                }
+                .font(.footnote)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.06)))
     }
 
     /// The one fetched beforehand when there is one — see `InfoArtwork` — and
@@ -808,10 +828,11 @@ private struct InfoTab: View {
                 .lineLimit(tv ? 1 : nil)
         }
         if let overview = item?.Overview, !overview.isEmpty {
+            // Whole, where the page scrolls.
             Text(overview)
                 .font(tv ? .callout : .subheadline)
                 .foregroundStyle(Theme.textBody)
-                .lineLimit(tv ? 2 : 4)
+                .lineLimit(tv ? 2 : nil)
         }
     }
 
@@ -866,43 +887,6 @@ private struct InfoTab: View {
         }
     }
 
-    @ViewBuilder
-    private var sleepTimer: some View {
-        if let left = player.sleepMinutesRemaining {
-            PanelRow(title: "Stopping in \(left) min", detail: "Tap to cancel the sleep timer", isSelected: true) {
-                player.cancelSleepTimer()
-            }
-        } else {
-            HStack(spacing: 8) {
-                ForEach([15, 30, 60, 90], id: \.self) { minutes in
-                    PanelStepButton(title: "\(minutes) min") {
-                        player.setSleepTimer(minutes: minutes)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .accessibilityLabel("Stop in \(minutes) minutes")
-                }
-            }
-        }
-    }
-
-    private func facts(_ rows: [PlayerStreamRows.Row]) -> some View {
-        VStack(spacing: 6) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                HStack(alignment: .firstTextBaseline) {
-                    Text(row.label)
-                        .foregroundStyle(Theme.textDim)
-                    Spacer(minLength: 12)
-                    Text(row.value)
-                        .multilineTextAlignment(.trailing)
-                }
-                .font(.footnote)
-                .accessibilityElement(children: .combine)
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.06)))
-    }
-
     static func facts(_ item: BaseItem?) -> String? {
         guard let item else { return nil }
         var parts: [String] = []
@@ -923,6 +907,7 @@ private struct InfoTab: View {
 }
 
 // MARK: - Channels
+
 
 private struct ChannelsTab: View {
     @Environment(PlayerModel.self) private var player

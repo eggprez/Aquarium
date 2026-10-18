@@ -53,32 +53,54 @@ extension PlayerModel {
 
     func refreshUpNext() async {
         guard let item, item.isEpisode, let seriesId = item.SeriesId else { return }
-        let found = await lookUpNextEpisode(after: item, seriesId: seriesId)
+        let found = await lookUpNextEpisodes(after: item, seriesId: seriesId)
         guard self.item?.Id == item.Id else { return }
         if found.settled {
             upNextChecked = true
             upNextSettled = true
         }
-        if let next = found.next { upNext = next }
+        if !found.list.isEmpty { upcoming = found.list }
     }
 
-    /// The next episode, and whether every request needed to decide it was
-    /// answered — nil with `settled` is a series that has ended.
-    private func lookUpNextEpisode(after item: BaseItem, seriesId: String) async -> (next: BaseItem?, settled: Bool) {
+    /// The episodes after this one — the rest of its season, then the next
+    /// season's from its first, up to `upNextLimit` — and whether every
+    /// request needed to decide them was answered: an empty list with
+    /// `settled` is a series that has ended.
+    private func lookUpNextEpisodes(after item: BaseItem, seriesId: String) async -> (list: [BaseItem], settled: Bool) {
+        let limit = Self.upNextLimit
         guard let episodes = try? await client.episodes(seriesId: seriesId, seasonId: item.SeasonId) else {
-            return (nil, false)
+            return ([], false)
         }
-        if let i = episodes.firstIndex(where: { $0.Id == item.Id }), i + 1 < episodes.count {
-            return (episodes[i + 1], true)
+        var list: [BaseItem] = []
+        if let i = episodes.firstIndex(where: { $0.Id == item.Id }) {
+            list = Array(episodes.dropFirst(i + 1).prefix(limit))
         }
-        guard let seasons = try? await client.seasons(seriesId: seriesId) else { return (nil, false) }
-        guard let si = seasons.firstIndex(where: { $0.Id == item.SeasonId }), si + 1 < seasons.count else {
-            return (nil, true)
+        if list.count >= limit { return (list, true) }
+        guard let seasons = try? await client.seasons(seriesId: seriesId) else { return (list, false) }
+        guard let si = seasons.firstIndex(where: { $0.Id == item.SeasonId }) else { return (list, true) }
+        // Season by season until the list is full or the series runs out.
+        for season in seasons.dropFirst(si + 1) {
+            guard let more = try? await client.episodes(seriesId: seriesId, seasonId: season.Id) else {
+                return (list, false)
+            }
+            list.append(contentsOf: more.prefix(limit - list.count))
+            if list.count >= limit { break }
         }
-        guard let nextEpisodes = try? await client.episodes(seriesId: seriesId, seasonId: seasons[si + 1].Id) else {
-            return (nil, false)
-        }
-        return (nextEpisodes.first, true)
+        return (list, true)
+    }
+
+    /// Play one of the titles the Up Next list offers now, from wherever
+    /// this one is: a jump, so this episode isn't marked finished.
+    func playUpcoming(_ next: BaseItem) async {
+        guard !isStartingNext else { return }
+        isStartingNext = true
+        defer { isStartingNext = false }
+        var opts = options
+        opts.startSeconds = nil
+        opts.resume = true
+        await play(item: next, options: opts, meta: StartMeta(
+            inherited: true, quiet: true,
+            carriesSubtitleTranscode: transcodingForSubtitle && opts.forceTranscode))
     }
 
     func playNextNow() async {
@@ -123,7 +145,7 @@ extension PlayerModel {
         #endif
         var candidate = upNext
         if candidate == nil, !upNextSettled, let item, item.isEpisode, let seriesId = item.SeriesId {
-            candidate = await lookUpNextEpisode(after: item, seriesId: seriesId).next
+            candidate = await lookUpNextEpisodes(after: item, seriesId: seriesId).list.first
         }
         guard let next = candidate else { return false }
         await reportFinishedBeforeNext()

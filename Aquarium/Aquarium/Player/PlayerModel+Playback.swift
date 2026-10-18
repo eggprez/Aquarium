@@ -195,7 +195,7 @@ extension PlayerModel {
         self.autoplayCancelled = false
         self.tracksApplied = false
         self.wantedTracks = (opts.audioStreamIndex, opts.subtitleStreamIndex)
-        self.upNext = nil
+        self.upcoming = []
         self.upNextChecked = false
         self.upNextSettled = false
         self.prefetchAttempted = false
@@ -389,7 +389,7 @@ extension PlayerModel {
         setSelectedSubtitleTrack(nil)
         pendingTrackChoice = nil
         transcodingForSubtitle = false
-        upNext = nil
+        upcoming = []
         setUpNextLocalId(nil)
         upNextChecked = false
         upNextSettled = false
@@ -460,7 +460,7 @@ extension PlayerModel {
         setSelectedSubtitleTrack(nil)
         pendingTrackChoice = nil
         transcodingForSubtitle = false
-        upNext = nil
+        upcoming = []
         setUpNextLocalId(nil)
         upNextChecked = true
         upNextSettled = true
@@ -570,7 +570,7 @@ extension PlayerModel {
         setSelectedSubtitleTrack(nil)
         pendingTrackChoice = nil
         transcodingForSubtitle = false
-        upNext = nil
+        upcoming = []
         setUpNextLocalId(nil)
         upNextChecked = true
         upNextSettled = true

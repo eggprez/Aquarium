@@ -46,6 +46,14 @@ struct PlayerStreamRows {
                 let name = Format.resolutionLabel(video).map { " (\($0))" } ?? ""
                 rows.append(("Frame", "\(width)×\(height)\(name)"))
             }
+            if let rate = video.RealFrameRate ?? video.AverageFrameRate, rate > 0 {
+                rows.append(("Frame rate", PlayerModel.frameRateName(rate)))
+            }
+            // `HDR10`, `HLG`, `DOVI`; the coarse `HDR` when that is all the
+            // server read; nothing for plain SDR.
+            if let range = video.VideoRangeType ?? video.VideoRange, !range.isEmpty, range.uppercased() != "SDR" {
+                rows.append(("Range", range))
+            }
             if let bitrate = video.BitRate, bitrate > 0 {
                 rows.append(("Video rate", Self.mbps(Double(bitrate))))
             }

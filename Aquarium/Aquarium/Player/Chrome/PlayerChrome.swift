@@ -28,9 +28,18 @@ final class PlayerChromeState {
     /// theirs. Set by the transport's hover; never true under a finger.
     var pointerOnControls = false
     /// The open panel tab; nil is closed.
-    var panel: PlayerTab?
-    /// Which pill the panel hangs off, where it is a popover.
-    var panelAnchor: PanelAnchor = .audio
+    var panel: PlayerTab? {
+        didSet { if panel != nil { menu = nil } }
+    }
+    /// The open menu card — Audio, Subtitles, Quality, Up Next off their
+    /// pills, "…" off its button — drawn by the transport over the picture;
+    /// nil is closed. Not the system's menus: these are the chrome's own, so
+    /// they hold the controls up while they are open and go on a tap of the
+    /// picture. See `PlayerMenuCard`.
+    var menu: ChromeMenu?
+    /// Which pill the panel hangs off, where it is a popover: the Info
+    /// pill, or the "…" button for the pages opened from its menu.
+    var panelAnchor: PanelAnchor = .info
     /// Where the scrubber is, while a finger is on the timeline — or, on a
     /// television, where a swipe has left it, waiting for a click.
     var scrub: Double?
@@ -59,7 +68,11 @@ final class PlayerChromeState {
     /// The speed to go back to when the hold ends.
     @ObservationIgnored var speedBeforeHold: Double = 1
 
-    enum PanelAnchor: Hashable { case audio, speed, quality, more }
+    enum PanelAnchor: Hashable { case info, more }
+
+    enum ChromeMenu: Hashable {
+        case audio, subtitles, quality, upNext, more
+    }
 
     struct SkipRipple: Identifiable, Equatable {
         let id = UUID()
@@ -78,6 +91,7 @@ final class PlayerChromeState {
     }
 
     var panelOpen: Bool { panel != nil }
+    var menuOpen: Bool { menu != nil }
 
     // MARK: Showing and hiding
 
@@ -110,11 +124,11 @@ final class PlayerChromeState {
     func scheduleHide(_ context: HideContext) {
         hideTask?.cancel()
         hideTask = nil
-        guard context.mayHide, scrub == nil, !panelOpen, context.hideAfter > 0 else { return }
+        guard context.mayHide, scrub == nil, !panelOpen, !menuOpen, context.hideAfter > 0 else { return }
         let after = context.hideAfter
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(after))
-            guard !Task.isCancelled, let self, self.scrub == nil, !self.panelOpen else { return }
+            guard !Task.isCancelled, let self, self.scrub == nil, !self.panelOpen, !self.menuOpen else { return }
             self.controlsVisible = false
         }
     }
@@ -180,6 +194,7 @@ final class PlayerChromeState {
         holdingDoubleSpeed = false
         edgeLevel = nil
         panel = nil
+        menu = nil
     }
 }
 
@@ -263,6 +278,14 @@ struct PlayerChrome: View {
         #endif
     }
 
+    /// The popover panel's width, where the panel is one: about three
+    /// quarters of the picture, never narrower than its two columns need
+    /// nor wider than reads well. The popover clamps itself to the screen.
+    private var panelWidth: CGFloat {
+        guard size.width > 0 else { return 640 }
+        return min(max(size.width * 0.74, 560), 900)
+    }
+
     /// On a Mac the clock is the pointer's (`PlayerMacState`), so the
     /// chrome's own never runs: `hideAfter` 0 is "no clock".
     private var hideContext: PlayerChromeState.HideContext {
@@ -289,7 +312,7 @@ struct PlayerChrome: View {
     /// The controls are up when they are showing, or while anything that
     /// needs them is: a pause, a scrub, the panel, an error.
     private var showsControls: Bool {
-        clockSaysVisible || player.isPaused || chrome.scrub != nil || chrome.panelOpen
+        clockSaysVisible || player.isPaused || chrome.scrub != nil || chrome.panelOpen || chrome.menuOpen
             || player.errorMessage != nil || voiceOver
     }
 
@@ -301,10 +324,15 @@ struct PlayerChrome: View {
         chrome.show(hideContext)
     }
 
-    /// A tap on the picture: a finger toggles the controls; a click on a Mac
-    /// only counts as the pointer moving, since the pointer is what hides
-    /// them.
+    /// A tap on the picture: with a menu card open it puts the card away
+    /// and nothing else; otherwise a finger toggles the controls, and a
+    /// click on a Mac only counts as the pointer moving, since the pointer
+    /// is what hides them.
     private func tapPicture() {
+        if chrome.menuOpen {
+            chrome.menu = nil
+            return
+        }
         #if os(macOS)
         mac.noteActivity()
         #else
@@ -325,18 +353,20 @@ struct PlayerChrome: View {
                 PlayerTransport(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork,
                                 pictureInPicture: pictureInPicture, compact: compact, usesSheet: usesSheet,
                                 timelineOnly: PlayerMetrics.television && chrome.panelOpen,
-                                letterbox: letterbox,
+                                letterbox: letterbox, panelWidth: panelWidth,
                                 onInteract: interact, onDismiss: onDismiss)
                     .transition(.opacity)
             }
 
             momentOverlays
 
+            // Pops up as it is and goes the same way: no scale, no fade, no
+            // spring on the number.
             if chrome.skipTotal != 0 {
                 SkipBadge(seconds: chrome.skipTotal, compact: compact)
                     .frame(maxWidth: .infinity, alignment: chrome.skipTotal > 0 ? .trailing : .leading)
                     .padding(.horizontal, PlayerMetrics.skipBadgeInset(compact: compact))
-                    .transition(reduceMotion ? .opacity : .scale(scale: 0.8).combined(with: .opacity))
+                    .transition(.identity)
                     .allowsHitTesting(false)
             }
 
@@ -364,7 +394,7 @@ struct PlayerChrome: View {
         }
         .playerChromeScheme()
         .animation(.easeOut(duration: reduceMotion ? 0.15 : 0.25), value: showsControls)
-        .animation(reduceMotion ? .easeOut(duration: 0.15) : .spring(duration: 0.25), value: chrome.skipTotal)
+        .animation(nil, value: chrome.skipTotal)
         .animation(.easeOut(duration: 0.2), value: chrome.holdingDoubleSpeed)
         .animation(.easeOut(duration: 0.2), value: chrome.edgeLevel)
         .background(GeometryReader { geo in
@@ -393,19 +423,12 @@ struct PlayerChrome: View {
             case .ended: mac.pointerLeft()
             }
         }
-        // Playback ▸ … ▸ Show … Panel, and the Sync tab from Adjust Audio
-        // Delay: a menu command has no pill to hang the popover off, so the
-        // request comes through `PlayerMacState` and the tab's own pill is
-        // used, or the "…" button for the tabs with none.
-        .onChange(of: mac.panelRequest) { _, request in
-            guard let request else { return }
-            mac.panelRequest = nil
-            chrome.panelAnchor = PlayerChromeState.PanelAnchor.anchor(for: request)
-            chrome.panel = request
-        }
+        // Playback ▸ Show Panel: a menu command has no pill under the
+        // pointer, so the request comes through `PlayerMacState` and the
+        // popover hangs off the Info pill.
         .onChange(of: mac.togglePanelRequest) { _, _ in
             if chrome.panelOpen { chrome.panel = nil } else {
-                chrome.panelAnchor = .more
+                chrome.panelAnchor = .info
                 chrome.panel = .info
             }
         }
@@ -413,6 +436,9 @@ struct PlayerChrome: View {
         #endif
         .onChange(of: player.isPaused) { _, _ in chrome.scheduleHide(hideContext) }
         .onChange(of: chrome.panel) { _, open in
+            if open == nil { interact() } else { chrome.holdControls() }
+        }
+        .onChange(of: chrome.menu) { _, open in
             if open == nil { interact() } else { chrome.holdControls() }
         }
         .onChange(of: chrome.scrub) { _, scrub in if scrub == nil { chrome.scheduleHide(hideContext) } }
@@ -444,6 +470,28 @@ struct PlayerChrome: View {
                     chrome.panel = tab
                 }
             }
+            // `-AquariumPlayMenu audio|subtitles|quality|upnext|more` opens
+            // that card once the stream has opened, for the same reason.
+            if let name = UserDefaults.standard.string(forKey: "AquariumPlayMenu") {
+                let menu: PlayerChromeState.ChromeMenu? = switch name.lowercased() {
+                case "audio": .audio
+                case "subtitles": .subtitles
+                case "quality": .quality
+                case "upnext": .upNext
+                case "more": .more
+                default: nil
+                }
+                if let menu {
+                    Task { @MainActor in
+                        for _ in 0..<60 {
+                            try? await Task.sleep(for: .seconds(1))
+                            if player.isActive, !player.isOpening { break }
+                        }
+                        try? await Task.sleep(for: .seconds(1))
+                        chrome.menu = menu
+                    }
+                }
+            }
             #endif
         }
     }
@@ -464,9 +512,12 @@ struct PlayerChrome: View {
     private var momentOverlays: some View {
         let edge = PlayerMetrics.edge(compact: compact)
 
+        // On a television there is no centre cluster to carry the spinner,
+        // so it sits in the middle of the picture on its own, as the Apple
+        // TV player always drew it. Elsewhere the cluster's play button is
+        // the spinner while the stream opens, and the title row already
+        // says what is opening.
         if PlayerMetrics.television {
-            // No centre cluster to carry the spinner: it sits in the middle of
-            // the picture on its own, as the Apple TV player always drew it.
             if player.isBuffering || player.isOpening, player.errorMessage == nil, chrome.scrub == nil {
                 ProgressView()
                     .controlSize(.large)
@@ -475,11 +526,6 @@ struct PlayerChrome: View {
                     .playerGlass(cornerRadius: 30)
                     .allowsHitTesting(false)
             }
-        } else if player.isBuffering, player.position < 1 || player.isOpening, player.errorMessage == nil {
-            PlayerLoadingCard()
-                .frame(maxHeight: .infinity, alignment: .top)
-                .padding(.top, compact ? 64 : 88)
-                .allowsHitTesting(false)
         }
 
         if let error = player.errorMessage {
@@ -528,15 +574,10 @@ struct PlayerChrome: View {
 }
 
 extension PlayerChromeState.PanelAnchor {
-    /// The pill a tab's popover hangs off: its own where it has one, the "…"
-    /// button for the rest.
+    /// The pill a page's popover hangs off: the Info pill for Info, the "…"
+    /// button for the pages opened from its menu.
     static func anchor(for tab: PlayerTab) -> Self {
-        switch tab {
-        case .audio, .subtitles: .audio
-        case .speed: .speed
-        case .quality: .quality
-        case .info, .channels, .sync, .picture: .more
-        }
+        tab == .info ? .info : .more
     }
 }
 

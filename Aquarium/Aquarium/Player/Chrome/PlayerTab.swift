@@ -1,7 +1,8 @@
-//  The tabs of the player's panel, on every platform. The Apple TV's swipe-down
-//  panel and the iPhone's sheet show the same set; which of them a stream
-//  offers is each panel's decision (a channel has no Quality, a film no
-//  Channels).
+//  The pages of the player's panel. The Apple TV's swipe-down panel shows
+//  them as a row of tabs; on an iPhone, an iPad or a Mac each is a page of
+//  its own, opened by its own button, and the tracks, speed, quality, sync
+//  and picture are cards or not offered, never pages. Which of them a stream offers is
+//  `PlayerModel.panelTabs` (a channel has no Quality, a film no Channels).
 
 import Foundation
 
