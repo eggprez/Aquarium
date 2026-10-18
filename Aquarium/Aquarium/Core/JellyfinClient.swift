@@ -2007,6 +2007,23 @@ final class JellyfinClient {
         _ = try? await request("/Sessions/Playing/Stopped", method: "POST", body: report)
     }
 
+    /// Tell the server an encode is still wanted. Jellyfin stops an HLS encode
+    /// that nobody has pinged for a minute, whatever segments are being asked
+    /// for. A player's progress reports keep it alive; a download has none,
+    /// so it pings. See `DownloadManager.measureStreamsSoon`.
+    func pingTranscode(playSessionId: String) async {
+        _ = try? await request(
+            "/Sessions/Playing/Ping?playSessionId=\(playSessionId)", method: "POST",
+            countsForOffline: false, timeout: 10
+        )
+    }
+
+    /// The `PlaySessionId` a download's URL carries — see `withPlaySession`.
+    nonisolated static func playSessionId(of url: String) -> String? {
+        URLComponents(string: url)?.queryItems?
+            .first { $0.name.caseInsensitiveCompare("PlaySessionId") == .orderedSame }?.value
+    }
+
     /// The throwing form, for a caller that needs to know the report actually
     /// reached the server before treating it as done — unlike a live session's
     /// stopped report, which is best-effort by design.
