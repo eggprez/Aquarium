@@ -84,15 +84,24 @@ Everything the Linux build does, with the exceptions listed further down.
   needs something AVFoundation cannot do, chosen per stream. Settings → Video
   → Playback engine pins either. Apple TV always plays through mpv.
 - **Brightness, contrast, saturation and gamma**, a **zoom** and an
-  **aspect-ratio override** — the player's Picture tab and Settings → Video →
-  Picture. They are mpv's: touching one switches the title to the mpv engine
-  at the same position, and Reset puts the file's own picture back.
-- **Audio delay on any stream**, HLS and live included — mpv's; the Sync tab
-  offers the switch on a stream Apple's engine cannot shift. **Night mode**
-  (dynamic range compression) has its row in the Picture tab and Settings →
-  Video, but the FFmpeg inside MPVKit's LGPL build carries no audio
-  compressor (`dynaudnorm` is not compiled in), so the row says so rather than
-  acting until the package's FFmpeg does.
+  **aspect-ratio override** — Settings → Video → Picture on iPhone, iPad and
+  Mac, and the Apple TV player's Picture tab as well. They are mpv's:
+  touching one switches the title to the mpv engine at the same position,
+  and Reset puts the file's own picture back.
+- **Audio delay on any stream**, HLS and live included — mpv's, set in
+  Settings → Audio; the Apple TV player's Sync tab sets it over the picture
+  and offers the engine switch on a stream Apple's engine cannot shift.
+  **Night mode** (dynamic range compression) has its row in Settings → Video
+  and the Apple TV's Picture tab, but the FFmpeg inside MPVKit's LGPL build
+  carries no audio compressor (`dynaudnorm` is not compiled in), so the row
+  says so rather than acting until the package's FFmpeg does.
+- **The player's controls** (iPhone, iPad, Mac) — a row of pills under the
+  timeline: Info opens the episode and every fact about the file and the
+  stream; Audio, Subtitles, Quality and Up Next (the next five episodes,
+  with their stills) each drop a card of the player's own; Fill is a
+  switch. The "…" button's card has the speed, the sleep timer, stop after
+  this episode, the channels and Watch Together. A card stays up until you
+  choose or tap the picture.
 - **MKV direct play**, DTS, TrueHD and picture subtitles (PGS, VOBSUB, ASS)
   — direct from the file on mpv, chosen automatically when the video is one
   this device decodes in hardware; a Matroska download plays on mpv since

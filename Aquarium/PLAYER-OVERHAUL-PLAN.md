@@ -10,6 +10,19 @@ left as it was, and this section says where the whole thing stands.
 Phase 0 (the energy measurement) has not been run; the engine policy stands
 on the plan's reasoning, not on numbers.
 
+**After phase 6 (2026-10-17), the iPhone, iPad and Mac chrome changed
+shape**, and the descriptions of the panel below are the Apple TV's now.
+There the panel has no row of tabs: Info is one page (the episode and the
+stream facts, two columns where the popover is wide), Channels another;
+Audio, Subtitles, Quality and Up Next are cards of the chrome's own off
+their pills (`Chrome/PlayerMenus.swift`), the "…" button's card has speed,
+sleep, stop-after, channels and Watch Together, and the Sync and Picture
+pages are gone from those three platforms. Up Next lists the next five
+episodes. The loading card is gone, the skip badge no longer animates, and
+`AVEngine` clears buffering whenever AVPlayer reports playing (the stuck
+spinner over a download). `-AquariumPlayMenu <card>` is the debug hook for
+screenshots of a card.
+
 **What shipped, across the six phases.** One `PlayerModel` for iPhone, iPad,
 Mac and Apple TV, with the two engines behind `PlaybackEngine`: `AVEngine`
 (AVPlayer) and `MPVEngine` (libmpv through MPVKit, on every platform now).
