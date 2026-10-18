@@ -1,33 +1,32 @@
 //  The half of a half-folded player that is not the picture.
 //
 //  A foldable part-open on a table is a laptop: the picture stands up on the
-//  top half and the bottom half is flat, under the hands. AVKit keeps its own
-//  controls on the picture — the scrubber, Picture in Picture, AirPlay, the
-//  speed menu — and this is what the flat half holds: the prompts that come
-//  and go (Skip intro, Up Next), what is playing, this app's own Quality and
-//  Extras pills moved down out of AVKit's bar, the chapters, what is queued,
-//  and the rest of the season.
+//  top half with the chrome over it — the transport, the pills and their
+//  cards — and the bottom half is flat, under the hands. This is what the
+//  flat half holds: the Info page the Info pill would open as a sheet, the
+//  chapters, what is queued, and the rest of the season.
 //
 //  See `PlayerScreen.framed` for how the two halves are laid out around the
-//  fold (`FoldSplit`), and `TransportBarExtras.install` for how the pills
-//  get here.
+//  fold (`FoldSplit`).
 
 #if os(iOS)
 import SwiftUI
-import UIKit
 
 struct PlayerFoldPanel: View {
     @Environment(PlayerModel.self) private var player
     @Environment(JellyfinClient.self) private var client
-    @Binding var skips: Int
+    let schedule: ChannelSchedule
+    let artwork: InfoArtwork
 
     @State private var episodes: [BaseItem] = []
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PlayerPrompts(skips: $skips, width: 360)
-                header
+                // The same page the Info pill opens, laid flat.
+                PlayerPanel(tab: .constant(.info), schedule: schedule, artwork: artwork)
+                    .scrollDisabled(true)
+                    .fixedSize(horizontal: false, vertical: true)
                 if !player.chapters.isEmpty {
                     chapters
                 }
@@ -39,47 +38,13 @@ struct PlayerFoldPanel: View {
                 }
             }
             .padding(.horizontal, Metrics.gutter)
-            .padding(.top, 18)
+            .padding(.top, 10)
             .padding(.bottom, 32)
         }
         .scrollIndicators(.hidden)
         .background(Color.black)
-        .preferredColorScheme(.dark)
+        .playerChromeScheme()
         .task(id: seasonKey) { await loadSeason() }
-    }
-
-    // MARK: - What is playing
-
-    private var header: some View {
-        HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(player.title)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                if let line = episodeLine {
-                    Text(line)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.7))
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 0)
-            // The pills, pinned here by `TransportBarExtras` while this is
-            // on screen.
-            ExtrasHost()
-                .frame(width: 170, height: 40)
-        }
-    }
-
-    private var episodeLine: String? {
-        guard let item = player.infoItem, item.isEpisode else { return nil }
-        var parts: [String] = []
-        if let series = item.SeriesName { parts.append(series) }
-        if let season = item.ParentIndexNumber, let episode = item.IndexNumber {
-            parts.append("S\(season) · E\(episode)")
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: "  ·  ")
     }
 
     // MARK: - Chapters
@@ -130,14 +95,14 @@ struct PlayerFoldPanel: View {
             Text("Up Next")
                 .font(.headline)
                 .foregroundStyle(.white)
-            ForEach(player.queue) { item in
+            ForEach(player.queue, id: \.Id) { item in
                 Button {
                     Task { await player.playQueued(item.Id) }
                 } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "text.line.first.and.arrowtriangle.forward")
                             .foregroundStyle(.white.opacity(0.7))
-                        Text(item.Name ?? "")
+                        Text(PlayerModel.displayTitle(item))
                             .font(.subheadline)
                             .foregroundStyle(.white)
                             .lineLimit(1)
@@ -184,33 +149,6 @@ struct PlayerFoldPanel: View {
                 }
             }
         }
-    }
-}
-
-/// A plain view for `TransportBarExtras` to pin its row into. Hands itself to
-/// the player model on the way in and takes itself back on the way out; the
-/// generation bump is what makes the player screen notice either.
-private struct ExtrasHost: UIViewRepresentable {
-    @Environment(PlayerModel.self) private var player
-
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        view.backgroundColor = .clear
-        let player = self.player
-        player.extrasHost = { [weak view] in view }
-        // Not during this update: a change published mid-update is the
-        // warning SwiftUI prints, and the screen redraws a moment later anyway.
-        Task { @MainActor in player.extrasHostGeneration += 1 }
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {}
-
-    static func dismantleUIView(_ uiView: UIView, coordinator: ()) {
-        let player = PlayerModel.shared
-        guard player.extrasHost?() === uiView else { return }
-        player.extrasHost = nil
-        Task { @MainActor in player.extrasHostGeneration += 1 }
     }
 }
 #endif
