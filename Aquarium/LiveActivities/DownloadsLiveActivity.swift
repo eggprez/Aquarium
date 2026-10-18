@@ -32,8 +32,8 @@ struct DownloadsLiveActivity: Widget {
                         .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    if state.phase == .running, !context.isStale {
-                        Text(state.fraction, format: .percent.precision(.fractionLength(0)))
+                    if !context.isStale, let fraction = state.headlineFraction {
+                        Text(fraction, format: .percent.precision(.fractionLength(0)))
                             .font(.title3.weight(.semibold))
                             .monospacedDigit()
                             .padding(.trailing, 4)
@@ -125,14 +125,34 @@ extension DownloadsActivityAttributes.ContentState {
         }
     }
 
-    /// "1.2 GB of ~4.8 GB" while the batch runs or waits; how much landed
-    /// once it is over. Nil when the app couldn't size the batch.
+    /// The number beside the title: the arriving item's own share, which is
+    /// what the title beside it invites it to be read as, and what the
+    /// Downloads page shows for the same row. The batch's share is on the
+    /// overall bar, labelled. Nil between items, when there is nothing to
+    /// put it beside.
+    var headlineFraction: Double? {
+        guard phase == .running, currentTitle != nil else { return nil }
+        return currentFraction
+    }
+
+    /// "1.47 GiB of ~14.08 GiB" while the batch runs or waits; how much
+    /// landed once it is over. Nil when the app couldn't size the batch.
     var bytesLine: String? {
         guard let received = receivedBytes, let total = totalBytes, total > 0 else { return nil }
-        let arrived = received.formatted(.byteCount(style: .file))
+        let arrived = Self.bytes(received)
         if phase == .finished { return arrived }
-        let whole = (totalIsEstimate == true ? "~" : "") + total.formatted(.byteCount(style: .file))
+        let whole = (totalIsEstimate == true ? "~" : "") + Self.bytes(total)
         return "\(arrived) of \(whole)"
+    }
+
+    /// In the units the Downloads page uses (`Format.bytes` in the app), so
+    /// the two never quote the same transfer as two different numbers.
+    private static func bytes(_ n: Int64) -> String {
+        let gib: Int64 = 1 << 30, mib: Int64 = 1 << 20, kib: Int64 = 1 << 10
+        if n >= gib { return String(format: "%.2f GiB", Double(n) / Double(gib)) }
+        if n >= mib { return String(format: "%.1f MiB", Double(n) / Double(mib)) }
+        if n >= kib { return String(format: "%.0f KiB", Double(n) / Double(kib)) }
+        return "\(n) B"
     }
 }
 
@@ -154,8 +174,8 @@ private struct DownloadsLockScreen: View {
                     }
                 }
                 Spacer(minLength: 8)
-                if state.phase == .running, !isStale {
-                    Text(state.fraction, format: .percent.precision(.fractionLength(0)))
+                if !isStale, let fraction = state.headlineFraction {
+                    Text(fraction, format: .percent.precision(.fractionLength(0)))
                         .font(.title3.weight(.semibold))
                         .monospacedDigit()
                 }
@@ -273,14 +293,10 @@ private struct CurrentItemBar: View {
             }
             .progressViewStyle(.linear)
             .tint(.white)
+            // Its percentage is the number beside the title; here, only the
+            // time left, when there is a pace to tell it by.
             if let end = state.currentEnd, end > Date() {
                 Text(timerInterval: Date()...end, countsDown: true)
-                    .font(.caption.weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(ActivityPalette.dim)
-                    .frame(width: 52, alignment: .trailing)
-            } else if let fraction = state.currentFraction {
-                Text(fraction, format: .percent.precision(.fractionLength(0)))
                     .font(.caption.weight(.medium))
                     .monospacedDigit()
                     .foregroundStyle(ActivityPalette.dim)
@@ -305,8 +321,8 @@ private struct QueueLine: View {
 }
 
 /// The whole batch, labelled so it isn't mistaken for the item bar above it:
-/// how much of it has arrived, in bytes when the app could size it, and how
-/// many items are left.
+/// its percentage, how much of it has arrived (in bytes when the app could
+/// size it), and how many items are left.
 private struct OverallBar: View {
     let state: DownloadsActivityAttributes.ContentState
     let isStale: Bool
@@ -327,8 +343,10 @@ private struct OverallBar: View {
         // Stale is the app gone quiet behind a running batch: the bytes it
         // last quoted are no longer the bytes, so they go with the
         // percentage. See the note at the top of this file.
-        if !isStale, let bytes = state.bytesLine { return "\(bytes) · \(remaining)" }
-        return "All downloads · \(remaining)"
+        guard !isStale else { return "All downloads · \(remaining)" }
+        let share = state.fraction.formatted(.percent.precision(.fractionLength(0)))
+        if let bytes = state.bytesLine { return "\(share) · \(bytes) · \(remaining)" }
+        return "\(share) of all downloads · \(remaining)"
     }
 }
 

@@ -1878,6 +1878,7 @@ final class DownloadManager: NSObject {
         // would otherwise stand until the first walk of the new one.
         measuredStreamBytes[record.itemId] = nil
         projectionFraction[record.itemId] = nil
+        streamHeardAt[record.itemId] = (Date(), nil)
         if resuming, let partial = Self.partialPackage(of: record) {
             asset = AVURLAsset(url: partial)
             // The task about to start counts only what *it* pulls, from zero,
@@ -2313,6 +2314,8 @@ final class DownloadManager: NSObject {
     private func noteStreamProgress(itemId: String, fraction: Double, received: Int64) {
         let now = Date()
         activityAt[itemId] = now
+        // The package is measured again at the next walk — see `checkHearing`.
+        streamHeardAt[itemId] = (now, nil)
         guard var rec = record(for: itemId), rec.status != .complete else { return }
         // The live counts, not the record's: those are written to disk every
         // ten seconds and may be that far behind.
@@ -2407,6 +2410,7 @@ final class DownloadManager: NSObject {
         // Bytes landing on disk is the transfer alive, whether or not this
         // process heard a callback about it — see `sweepStalledTransfers`.
         if let before, bytes > before { activityAt[itemId] = now }
+        checkHearing(itemId, measured: bytes, at: now)
         rec = live(rec)
         guard rec.receivedBytes != bytes else { return }
         rec.receivedBytes = bytes
@@ -2418,9 +2422,53 @@ final class DownloadManager: NSObject {
     /// on disk; measure it now rather than at the next callback, so the page
     /// opens on the true count instead of the one from before it left.
     func appBecameActive() {
+        cameForwardAt = Date()
         streamMeasurer?.cancel()
         streamMeasurer = nil
         measureStreamsSoon()
+    }
+
+    /// When each running stream last reported progress, and its package's
+    /// size as first measured after that. See `checkHearing`.
+    @ObservationIgnored
+    private var streamHeardAt: [String: (at: Date, bytes: Int64?)] = [:]
+    /// When the app last came forward. The callbacks the system held while it
+    /// was away get this long to arrive before a quiet stream is judged.
+    @ObservationIgnored
+    private var cameForwardAt = Date.distantPast
+    private static let deafLimit: TimeInterval = 20
+    /// More than a segment or two, so a slow encoder that went quiet just
+    /// after a segment whose callback was throttled is not mistaken for this.
+    private static let deafMargin: Int64 = 8 << 20
+    private static let reconnectReason = "Reconnecting"
+
+    /// A stream whose package keeps growing while its task says nothing.
+    ///
+    /// Seen on the iPhone after the app comes back from the background: the
+    /// transfer carries on, and the package on disk grows, but no progress
+    /// callback comes again and neither does the completion. The row sits at
+    /// the fraction it had on the way out, and the download never finishes.
+    /// A pause and resume always cured it: a new task on the same package is
+    /// heard from, and finds nearly all of it already there. So this does the
+    /// same by itself, once the app has been in front long enough for any
+    /// held-back callbacks to have arrived.
+    private func checkHearing(_ itemId: String, measured: Int64, at now: Date) {
+        #if canImport(UIKit)
+        guard UIApplication.shared.applicationState == .active else { return }
+        #endif
+        guard let heard = streamHeardAt[itemId] else { return }
+        guard let base = heard.bytes else {
+            streamHeardAt[itemId] = (heard.at, measured)
+            return
+        }
+        guard now.timeIntervalSince(max(heard.at, cameForwardAt)) >= Self.deafLimit,
+              measured - base >= Self.deafMargin,
+              !isPaused, tasks.values.contains(itemId), retryingAfterCancel[itemId] == nil
+        else { return }
+        Self.log.notice("\(itemId, privacy: .public) went quiet with its package growing; reconnecting")
+        streamHeardAt[itemId] = nil
+        retryingAfterCancel[itemId] = Self.reconnectReason
+        cancelTasks(for: itemId, keepingProgress: true)
     }
 
     private func forgetProgressThrottle(_ itemId: String) {
@@ -2430,6 +2478,7 @@ final class DownloadManager: NSObject {
         streamByteBase[itemId] = nil
         measuredStreamBytes[itemId] = nil
         projectionFraction[itemId] = nil
+        streamHeardAt[itemId] = nil
     }
 
     /// Watch for transfers that have stopped moving.
@@ -2894,7 +2943,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
             // The stall sweep's own cancel, coming back round — or a pause's,
             // which is nobody's failure and is not counted as one.
             if let reason = self.retryingAfterCancel.removeValue(forKey: itemId) {
-                self.scheduleAutomaticRetry(itemId, reason: reason, countsAsAttempt: reason != Self.pausedReason && reason != Self.yieldedReason)
+                self.scheduleAutomaticRetry(itemId, reason: reason, countsAsAttempt: ![Self.pausedReason, Self.yieldedReason, Self.reconnectReason].contains(reason))
                 return
             }
 
