@@ -3,8 +3,10 @@
 //
 //  A direct port of adaptive.ts. The signals it watches are different — mpv
 //  reported cache stalls and dropped frames over an IPC socket, AVFoundation
-//  reports them through `AVPlayerItemAccessLog` and the buffer-empty flag — but
-//  the policy is the same one, thresholds included.
+//  through `AVPlayerItemAccessLog` and the buffer-empty flag — but the policy
+//  is the same one, thresholds included. The engine behind the player reads
+//  those signals now and hands them in through `sample`, so nothing here is
+//  tied to a particular one.
 //
 //  It only ever reacts to what has already gone wrong: no probing, no
 //  prediction. Two rules move it down (repeated stalls, or one long one; and
@@ -12,7 +14,6 @@
 //  (a long clean stretch with a healthy read-ahead), and a rung that failed on
 //  the way up is never tried again for the rest of the session.
 
-import AVFoundation
 import Foundation
 
 @MainActor
@@ -239,14 +240,14 @@ final class AdaptiveQuality {
         return true
     }
 
-    /// One sample of the player's state, taken on every time-observer tick.
-    /// `paused` is the player's own intent: the timebase's rate is zero for a
-    /// stall as much as for a pause, and read from there no stall was ever
-    /// long.
-    func sample(item: AVPlayerItem, position: Double, buffered: Double, paused: Bool) {
+    /// One sample of the player's state, taken on every time tick. `paused`
+    /// is the model's own intent, as distinct from a stall; `buffering` is
+    /// the engine waiting on the network; `droppedFrames` is the running
+    /// total the engine reports, or nil where it can't measure it.
+    func sample(position: Double, buffered: Double, paused: Bool, buffering: Bool, droppedFrames: Int?) {
         let now = Date()
         isPaused = paused
-        isBuffering = item.isPlaybackBufferEmpty || !item.isPlaybackLikelyToKeepUp
+        isBuffering = buffering
 
         // Seeks, spotted rather than reported: forward, the picture outruns the
         // clock; backward, it goes somewhere no amount of waiting takes it.
@@ -275,23 +276,15 @@ final class AdaptiveQuality {
 
         // Frames given up on. Sampled as a rate: this is the device failing to
         // decode what it's been sent, which a smaller stream fixes and a bigger
-        // buffer does not.
-        //
-        // The log is read only when a sample is due. `accessLog()` hands back
-        // a fresh copy of every event since the stream opened, and it was
-        // being taken twice a second — a copy that grows for the length of a
-        // film — to be looked at once every twenty seconds.
-        let dropSampleDue = dropSample.map { now.timeIntervalSince($0.at) >= dropWindow } ?? true
-        if dropSampleDue, !isPaused, let event = item.accessLog()?.events.last {
-            let frames = event.numberOfDroppedVideoFrames
-            if frames >= 0 {
-                if dropSample == nil {
-                    dropSample = (now, frames)
-                } else if let sample = dropSample, now.timeIntervalSince(sample.at) >= dropWindow {
-                    let delta = frames - sample.frames
-                    dropSample = (now, frames)
-                    if delta >= dropsToDrop, !settling { queueStepDown(reason: .drops) }
-                }
+        // buffer does not. The engine reports a running total; the delta over
+        // a window is what matters.
+        if !isPaused, let frames = droppedFrames, frames >= 0 {
+            if dropSample == nil {
+                dropSample = (now, frames)
+            } else if let sample = dropSample, now.timeIntervalSince(sample.at) >= dropWindow {
+                let delta = frames - sample.frames
+                dropSample = (now, frames)
+                if delta >= dropsToDrop, !settling { queueStepDown(reason: .drops) }
             }
         }
 
@@ -408,4 +401,46 @@ final class AdaptiveQuality {
 
         return nil
     }
+}
+
+// MARK: - The power source
+
+#if os(macOS)
+import IOKit.ps
+#endif
+
+/// Whether the machine is running on its battery — a Mac's question; a phone
+/// always is and an Apple TV never. `changed` is posted on the main queue
+/// when a Mac is plugged in or unplugged, for the mpv engine's render profile.
+enum PowerSource {
+    static let changed = Notification.Name("aquarium.powerSource.changed")
+
+    static var onBattery: Bool {
+        #if os(macOS)
+        guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let type = IOPSGetProvidingPowerSourceType(snapshot)?.takeUnretainedValue() as String?
+        else { return false }
+        return type == kIOPSBatteryPowerValue
+        #elseif os(tvOS)
+        return false
+        #else
+        return true
+        #endif
+    }
+
+    #if os(macOS)
+    private nonisolated(unsafe) static var source: CFRunLoopSource?
+
+    /// Start posting `changed`. Idempotent.
+    @MainActor
+    static func startObserving() {
+        guard source == nil else { return }
+        let callback: IOPowerSourceCallbackType = { _ in
+            DispatchQueue.main.async { NotificationCenter.default.post(name: PowerSource.changed, object: nil) }
+        }
+        guard let made = IOPSNotificationCreateRunLoopSource(callback, nil)?.takeRetainedValue() else { return }
+        CFRunLoopAddSource(CFRunLoopGetMain(), made, .commonModes)
+        source = made
+    }
+    #endif
 }

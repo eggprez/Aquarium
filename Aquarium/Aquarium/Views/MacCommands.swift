@@ -230,6 +230,7 @@ struct MacCommands: Commands {
     /// The standard About panel, with what Settings ▸ General says under
     /// "About": the version and build, the playback engine, and the note
     /// about how the app was made.
+    @MainActor
     private func showAboutPanel() {
         let credits = NSMutableAttributedString()
         let body = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -241,7 +242,8 @@ struct MacCommands: Commands {
             .foregroundColor: NSColor.labelColor,
             .paragraphStyle: paragraph,
         ]
-        credits.append(NSAttributedString(string: "Playback engine: AVFoundation\n", attributes: attributes))
+        credits.append(NSAttributedString(
+            string: "Playback engine: \(PlayerModel.shared.engineDescription)\n", attributes: attributes))
         credits.append(NSAttributedString(
             string: "A lightweight Jellyfin client — the Apple build of the same app that ships for Linux. Written with AI assistance (Anthropic’s Claude), directed and tested by one developer, and shared as-is.",
             attributes: attributes.merging([.foregroundColor: NSColor.secondaryLabelColor]) { _, new in new }
