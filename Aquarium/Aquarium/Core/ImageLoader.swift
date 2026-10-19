@@ -297,6 +297,14 @@ actor ImageLoader {
     /// queueing behind one another on the actor.
     @concurrent
     private static func run(_ url: URL, saved: (file: URL, isLargeEnough: Bool)?, session: URLSession) async -> Fetched {
+        // A file on this device — a download's artwork — is read straight off
+        // the disk. Through the session it waited in line with every poster
+        // the page was asking the server for, and a Downloads screen drew its
+        // own, already-local pictures grey for a second or two.
+        if url.isFileURL {
+            guard let data = try? Data(contentsOf: url), let image = decode(data, for: url) else { return .absent }
+            return .image(image, keep: nil)
+        }
         // A saved copy that is big enough is the answer; one that is too small
         // is kept back in case the server can't be reached for a better one.
         var fallback: PlatformImage?
@@ -358,7 +366,9 @@ actor ImageLoader {
         // write, and a logo address carrying it used to skip the scaling
         // altogether: a 30,000-pixel PNG then unpacks to gigabytes.
         let ceiling = Self.asksServerForWidth(url) ? Self.sizedMaxPixel : Self.unsizedMaxPixel
-        if url.scheme?.hasPrefix("http") == true, let small = downsample(data, maxPixel: ceiling) {
+        // Local files too: a download's artwork is whatever the server sent,
+        // and decoding it at full size is the slow part of drawing it.
+        if url.scheme?.hasPrefix("http") == true || url.isFileURL, let small = downsample(data, maxPixel: ceiling) {
             return small
         }
         #if canImport(UIKit)

@@ -1501,9 +1501,11 @@ enum PosterGrid {
 struct SkeletonCard: View {
     var width: CGFloat?
     var wide: Bool = false
+    /// An album or a book cover rather than a poster.
+    var square: Bool = false
     var showsSubtitle: Bool = true
 
-    private var aspect: CGFloat { wide ? 16.0 / 9.0 : 2.0 / 3.0 }
+    private var aspect: CGFloat { square ? 1 : wide ? 16.0 / 9.0 : 2.0 / 3.0 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.cardTextSpacing) {
@@ -1618,6 +1620,9 @@ struct SkeletonHero: View {
 struct SkeletonShelf: View {
     var wide: Bool = false
     var count: Int = 4
+    /// Square covers this wide — Music's and Audiobooks' shelves — rather
+    /// than posters, so what loads in is the shape that was waiting for it.
+    var squareWidth: CGFloat? = nil
     #if os(macOS)
     @State private var shelfWidth: CGFloat = 0
     #endif
@@ -1628,7 +1633,7 @@ struct SkeletonShelf: View {
                 .padding(.horizontal, Metrics.gutter)
             HStack(alignment: .top, spacing: Metrics.rowSpacing) {
                 ForEach(0..<cardCount, id: \.self) { _ in
-                    SkeletonCard(width: cardWidth, wide: wide)
+                    SkeletonCard(width: squareWidth ?? cardWidth, wide: wide, square: squareWidth != nil)
                 }
                 Spacer(minLength: 0)
             }

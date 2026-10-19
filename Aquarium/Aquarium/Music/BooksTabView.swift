@@ -57,7 +57,7 @@ struct BooksTabView: View {
         ScrollView {
             if isLoading, paged == nil {
                 VStack(alignment: .leading, spacing: Metrics.shelfSpacing) {
-                    SkeletonShelf()
+                    SkeletonShelf(squareWidth: MusicMetrics.tileWidth)
                     AlbumGrid(items: [], pendingCount: 6) { _ in }
                 }
                 .padding(.top, 12)
@@ -165,13 +165,22 @@ struct BooksTabView: View {
             q.parentId = parent
             return try await client.music(q)
         }
-        paged = p
         async let pageTask: Void = p.reload()
         var failure: (any Error)?
-        do { inProgress = try await resumeTask.filter(\.isAudiobook) } catch { failure = error }
-        do { recent = try await recentTask.items } catch { failure = failure ?? error }
-        authors = (try? await authorsTask.items) ?? []
+        var foundInProgress: [BaseItem] = []
+        var foundRecent: [BaseItem] = []
+        do { foundInProgress = try await resumeTask.filter(\.isAudiobook) } catch { failure = error }
+        do { foundRecent = try await recentTask.items } catch { failure = failure ?? error }
+        let foundAuthors = (try? await authorsTask.items) ?? []
         await pageTask
+        // All of it at once. The grid went up the moment its first page
+        // landed and the shelves above it arrived after, pushing All Books
+        // down the screen under your thumb; until now the skeleton holds the
+        // page, or on a refresh what was already there does.
+        inProgress = foundInProgress
+        recent = foundRecent
+        authors = foundAuthors
+        paged = p
         if let failure { error = failure.localizedDescription }
     }
 }

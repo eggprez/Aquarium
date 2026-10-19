@@ -704,7 +704,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         // One section: a second, header-less one put a section-sized gap
         // between Shuffle and the first track.
         let list = CPListTemplate(title: album.title, sections: [
-            CPListSection(items: [shuffle] + tracks.map { songItem($0, queue: tracks, title: album.title, showsArt: false) }),
+            CPListSection(items: [shuffle] + tracks.map { songItem($0, queue: tracks, title: album.title, showsArt: false, albumArtist: album.artistLine) }),
         ])
         push(list)
     }
@@ -713,7 +713,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     private func artistItem(_ artist: BaseItem) -> CPListItem {
         let item = CPListItem(text: artist.title, detailText: nil, image: symbolTile("music.mic", tint: Self.placeholderTint))
         item.accessoryType = .disclosureIndicator
-        loadArt(artist, into: item)
+        loadArt(artist, into: item, circular: true)
         item.handler = { [weak self] _, done in
             Task { @MainActor in
                 var q = JellyfinClient.MusicQuery(types: "MusicAlbum", sort: .year, limit: 100)
@@ -799,8 +799,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     }
 
     @MainActor
-    private func songItem(_ song: BaseItem, queue: [BaseItem], title: String, showsArt: Bool = true) -> CPListItem {
-        let detail: String
+    private func songItem(_ song: BaseItem, queue: [BaseItem], title: String, showsArt: Bool = true, albumArtist: String? = nil) -> CPListItem {
+        let detail: String?
         if song.isAudiobook {
             // Who wrote it, and how far in — what tells two half-heard books
             // apart from the driver's seat.
@@ -811,6 +811,10 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             } else {
                 detail = author
             }
+        } else if let albumArtist, song.artistLine == albumArtist {
+            // On an album's own page the artist is the album's, and the same
+            // name under every track says nothing. A guest still shows.
+            detail = nil
         } else {
             detail = song.artistLine
         }
@@ -838,10 +842,31 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     }
 
     @MainActor
-    private func loadArt(_ item: BaseItem, into row: CPListItem) {
+    private func loadArt(_ item: BaseItem, into row: CPListItem, circular: Bool = false) {
         guard let url = MusicArt.url(item, width: 160) else { return }
-        Task {
-            if let image = await ImageLoader.shared.load(url) { row.setImage(image) }
+        Task { @MainActor in
+            guard let image = await ImageLoader.shared.load(url) else { return }
+            row.setImage(rowTile(image, circular: circular))
+        }
+    }
+
+    /// A picture cropped to the square the car draws a row's image in. An
+    /// album cover already is one; an artist's photo is usually a wide band
+    /// shot, which stayed the grey placeholder in the car where the phone
+    /// showed the face. Artists are cut to a circle, as the phone draws them.
+    @MainActor
+    private func rowTile(_ image: UIImage, circular: Bool) -> UIImage {
+        var size = CPListItem.maximumImageSize
+        if size.width <= 0 || size.height <= 0 { size = CGSize(width: 80, height: 80) }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = interfaceController?.carTraitCollection.displayScale ?? 2
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            let bounds = CGRect(origin: .zero, size: size)
+            // The car rounds a square cover's corners itself.
+            (circular ? UIBezierPath(ovalIn: bounds) : UIBezierPath(rect: bounds)).addClip()
+            let scale = max(size.width / max(image.size.width, 1), size.height / max(image.size.height, 1))
+            let drawn = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            image.draw(in: CGRect(x: (size.width - drawn.width) / 2, y: (size.height - drawn.height) / 2, width: drawn.width, height: drawn.height))
         }
     }
 
