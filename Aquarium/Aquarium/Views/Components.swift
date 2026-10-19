@@ -583,6 +583,19 @@ struct RefreshButton: View {
         Button(action: action) {
             #if os(tvOS)
             tvLabel
+            #elseif os(iOS)
+            if overArtwork {
+                glyph
+                    .foregroundStyle(Color.white)
+                    .frame(width: Self.side, height: Self.side)
+                    .background { Circle().fill(.black.opacity(0.45)) }
+                    .contentShape(Rectangle())
+            } else {
+                // A button in the bar, drawn the way the bar's other buttons
+                // are — a bare arrow read as decoration, not something to press.
+                glyph
+                    .barButtonDisc(size: 36)
+            }
             #else
             glyph
                 .foregroundStyle(overArtwork ? Color.white : Theme.accent)
@@ -647,7 +660,7 @@ struct RefreshButton: View {
     #endif
 
     private var glyphFont: Font {
-        #if os(tvOS)
+        #if os(tvOS) || os(iOS)
         .body.weight(.semibold)
         #else
         .subheadline.weight(.semibold)

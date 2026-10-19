@@ -45,7 +45,7 @@ struct TabBarSettingsView: View {
             } footer: {
                 Text(app.usesSidebar
                     ? "Drag to reorder. On an iPad this is the order of the sidebar; on an iPhone the first \(slots) are in the tab bar and the rest are listed under More."
-                    : "Drag to reorder. The first \(slots) are in the tab bar; everything after them is listed under More. Search stays reachable either way — from More when it isn't in the bar. The tab bar changes when you leave this page.")
+                    : "Drag to reorder. The first \(slots) are in the tab bar; everything after them is listed under More. Search is the button at the top of Home. The tab bar changes when you leave this page.")
             }
         }
         .environment(\.editMode, .constant(.active))

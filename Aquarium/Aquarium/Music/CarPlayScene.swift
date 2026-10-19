@@ -305,10 +305,12 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         let seeds = Array(stations.prefix(Self.rowImageLimit))
         async let albumCovers = covers(for: albums, fallback: "square.stack")
         async let stationCovers = covers(for: seeds.map(\.seed), titles: seeds.map(\.title), fallback: "dot.radiowaves.left.and.right")
-        let recentRow = imageRow("Recently Played", covers: await albumCovers) { [weak self] index in
+        // Headed like the sections around it: a section with no header still
+        // gets the car's full section break, which read as a hole in the list.
+        let recentRow = imageRow(Self.headedRowText("Recently Played"), covers: await albumCovers) { [weak self] index in
             Task { @MainActor in await self?.openAlbum(albums[index]) }
         }
-        if let recentRow { sections.append(CPListSection(items: [recentRow])) }
+        if let recentRow { sections.append(CPListSection(items: [recentRow], header: "Recently Played", sectionIndexTitle: nil)) }
 
         let surprise = CPListItem(text: "Surprise Me", detailText: "A mix that learns as you skip", image: symbolTile("shuffle"))
         surprise.handler = { [weak self] _, done in
@@ -653,7 +655,10 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                         CPListSection(items: list.map { self.videoItem($0, showsSeries: false) }, header: number == 0 ? "Specials" : "Season \(number)", sectionIndexTitle: nil)
                     }
                 } else {
-                    sections.append(CPListSection(items: seasons.flatMap(\.1).map { self.videoItem($0, showsSeries: false) }))
+                    sections.append(CPListSection(
+                        items: seasons.flatMap(\.1).map { self.videoItem($0, showsSeries: false) },
+                        header: sections.isEmpty ? nil : "Episodes", sectionIndexTitle: nil
+                    ))
                 }
                 let list = CPListTemplate(title: series.title, sections: sections)
                 list.emptyViewTitleVariants = ["No episodes"]
@@ -696,9 +701,10 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                 done()
             }
         }
+        // One section: a second, header-less one put a section-sized gap
+        // between Shuffle and the first track.
         let list = CPListTemplate(title: album.title, sections: [
-            CPListSection(items: [shuffle]),
-            CPListSection(items: tracks.map { songItem($0, queue: tracks, title: album.title, showsArt: false) }),
+            CPListSection(items: [shuffle] + tracks.map { songItem($0, queue: tracks, title: album.title, showsArt: false) }),
         ])
         push(list)
     }
@@ -735,9 +741,11 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                         finished()
                     }
                 }
+                // Surprise Me heads the list rather than sitting in a
+                // header-less section of its own, which the car spaced off
+                // from the albums like a missing heading.
                 let list = CPListTemplate(title: artist.title, sections: [
-                    CPListSection(items: [shuffle]),
-                    CPListSection(items: albums.compactMap { self?.albumItem($0) }, header: "Albums", sectionIndexTitle: nil),
+                    CPListSection(items: [shuffle] + albums.compactMap { self?.albumItem($0) }),
                 ])
                 self?.push(list)
                 done()
@@ -914,6 +922,14 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             done()
         }
         return row
+    }
+
+    /// The image row's own title, where the section above it already says the
+    /// same thing. iOS 26 can leave it out; earlier rows need text, and an
+    /// empty line is quieter than the heading twice.
+    private static func headedRowText(_ text: String) -> String? {
+        if #available(iOS 26.0, *) { return nil }
+        return ""
     }
 
     /// The car allows five templates deep and raises an exception — which

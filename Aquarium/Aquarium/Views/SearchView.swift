@@ -57,6 +57,12 @@ struct SearchView: View {
         }
     }
     @State private var scope: Scope = .all
+    #if os(iOS)
+    /// Whether the field in the bar is active. Search is opened from Home's
+    /// search button, so it comes up ready to type into.
+    @State private var isFieldActive = false
+    @Environment(\.dismiss) private var dismiss
+    #endif
 
     var body: some View {
         ScrollView {
@@ -164,11 +170,12 @@ struct SearchView: View {
         #if os(iOS)
         // Always showing, not tucked under the title until the page is pulled
         // down. That tuck is the system's default for a field in a pushed
-        // page's bar, and Search is a pushed page whenever it lives in More —
-        // which is where it lives unless someone has made it a tab. A search
-        // screen that opens without anywhere to type reads as broken.
+        // page's bar, and Search is always a pushed page here — opened from
+        // Home's search button. A search screen that opens without anywhere
+        // to type reads as broken.
         .searchable(
             text: $term,
+            isPresented: $isFieldActive,
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: app.hasAudio ? "Movies, shows, music, books" : "Movies, shows, episodes"
         )
@@ -241,6 +248,21 @@ struct SearchView: View {
         .onChange(of: app.selection) { previous, _ in
             guard previous == .search else { return }
             reset()
+        }
+        #endif
+        #if os(iOS)
+        .task {
+            // Once, on the way in: the field can't take focus until the push
+            // has put the page on screen.
+            guard term.isEmpty, initialTerm.isEmpty else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            isFieldActive = true
+        }
+        // Cancel with nothing typed is a change of mind, not a wish to look at
+        // an empty Search page: straight back to Home rather than a second tap.
+        .onChange(of: isFieldActive) { was, now in
+            guard was, !now, term.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+            dismiss()
         }
         #endif
         .onAppear {

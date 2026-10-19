@@ -504,8 +504,21 @@ struct HomeView: View {
                 HStack(spacing: 0) {
                     BrandMark()
                     Spacer(minLength: 12)
-                    RefreshButton(isRefreshing: isRefreshing) {
-                        Task { await reload(fresh: true) }
+                    HStack(spacing: 10) {
+                        // Search lives here rather than in a tab of its own:
+                        // it opens over Home, with the field already active.
+                        Button {
+                            app.push(.search(""))
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                                .font(.body.weight(.semibold))
+                                .barButtonDisc(size: 36)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Search")
+                        RefreshButton(isRefreshing: isRefreshing) {
+                            Task { await reload(fresh: true) }
+                        }
                     }
                 }
             }

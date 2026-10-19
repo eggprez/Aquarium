@@ -553,16 +553,11 @@ final class AppModel {
         for kind in customOrder ?? customizableSections {
             switch kind {
             case .search:
-                // A phone never lists it here: there Search is a tab or it is
-                // in More — see `overflowSections`. An iPad's sidebar does. It
-                // once left Search out on the grounds that each page had a
-                // field of its own, and the library pages don't: on an iPad
-                // there was no way to search films and shows at all. A Mac's
-                // sidebar has the field itself, at its top, the way Music's
-                // does — see `sidebarSearchTerm` — so it has no row either.
-                #if !os(macOS)
-                if usesSidebar { out.append(.search) }
-                #endif
+                // Never reached on iOS, where Search is a button on Home rather
+                // than a section (see `customizableSections`), nor listed on a
+                // Mac, whose sidebar has the field itself at its top, the way
+                // Music's does — see `sidebarSearchTerm`.
+                break
             case .libraries:
                 for library in libraries {
                     out.append(.library(id: library.Id, name: library.title, collectionType: library.CollectionType))
@@ -701,7 +696,10 @@ final class AppModel {
         var out: [AppSection] = []
         if hasMusic { out.append(.music) }
         if hasBooks { out.append(.books) }
+        // On iOS Search is a button on Home, not a section — see `show`.
+        #if !os(iOS)
         out.append(.search)
+        #endif
         out.append(.libraries)
         out.append(.favorites)
         if hasLiveTV { out.append(.liveTV) }
@@ -742,16 +740,15 @@ final class AppModel {
     }
 
     /// The four sections that keep a permanent place in the phone's tab bar:
-    /// Home, Search, the libraries, and then whichever of Live TV and Downloads
-    /// this setup actually uses. Favorites is a filter you reach for
+    /// Home, the libraries, then Live TV where this setup has a guide, then
+    /// Downloads. Search is not one of them: it is a button on Home. Favorites is a filter you reach for
     /// occasionally rather than a place you live, so it goes into More along
     /// with the individual libraries.
     ///
-    /// Live TV takes the fourth slot wherever there is a guide to show — from
-    /// the server's own tuner or from a custom playlist, `hasLiveTV` doesn't
-    /// care which. A guide is somewhere you go on purpose and go back to;
-    /// Downloads is a shelf you visit before a flight, and one trip through
-    /// More is the right price for it.
+    /// Live TV goes ahead of Downloads wherever there is a guide to show —
+    /// from the server's own tuner or from a custom playlist, `hasLiveTV`
+    /// doesn't care which. A guide is somewhere you go on purpose and go back
+    /// to.
     ///
     /// Music, where the server has any, takes the slot after Home: it is a
     /// whole second application living in this one, and a tab bar has five
@@ -759,8 +756,8 @@ final class AppModel {
     /// a server — both are still one tap into More.
     ///
     /// Audiobooks take a slot of their own too, when there are any. With both,
-    /// the bar is Home, Music, Audiobooks, Search, More, and the video
-    /// Library joins Live TV and Downloads in More.
+    /// the bar is Home, Music, Audiobooks, Library, More, and Live TV and
+    /// Downloads are in More.
     ///
     /// All of that is what happens until someone puts the bar in an order of
     /// their own (Settings → Tab Bar). Then the first three of their order
@@ -797,6 +794,16 @@ final class AppModel {
     /// this run past three, which is what keeps the bar to five places.
     private var defaultPrimaryOrder: [AppSection] {
         var out: [AppSection] = []
+        #if os(iOS)
+        // No Search tab: it is a button on Home. Its place goes to whatever
+        // comes next — the libraries, then Live TV or Downloads.
+        if hasMusic { out.append(.music) }
+        if hasBooks { out.append(.books) }
+        out.append(.libraries)
+        if hasLiveTV { out.append(.liveTV) }
+        out.append(.downloads)
+        return Array(out.prefix(Self.slotsAfterHome))
+        #else
         if hasMusic { out.append(.music) }
         if hasBooks { out.append(.books) }
         out.append(.search)
@@ -805,20 +812,22 @@ final class AppModel {
         if !hasAudio { out.append(hasLiveTV ? .liveTV : .downloads) }
         #endif
         return out
+        #endif
     }
 
     /// What More lists: everything the tab bar has no room for, Settings last.
     ///
-    /// Search is added by hand when the bar hasn't got it, because `sections`
-    /// never lists it — and a phone with no search anywhere is a phone that
-    /// can't find anything.
+    /// Off iOS, Search is added by hand when the bar hasn't got it, because
+    /// `sections` never lists it. On iOS it is Home's search button.
     var overflowSections: [AppSection] {
         #if !os(tvOS)
         if isOfflineShell { return [.settings] }
         #endif
         let shown = Set(primaryTabs.map(\.id))
         var out = sections.filter { !shown.contains($0.id) && $0 != .settings }
+        #if !os(iOS)
         if !shown.contains(AppSection.search.id), !out.contains(.search) { out.append(.search) }
+        #endif
         out.append(.settings)
         return out
     }
@@ -920,6 +929,16 @@ final class AppModel {
         // No row, but a section of its own: the sidebar field's results.
         if section == .search {
             selection = .search
+            return
+        }
+        #elseif os(iOS)
+        // No tab and no row: Search opens over Home, as its button does.
+        if section == .search {
+            selection = .home
+            var path = NavigationPath()
+            path.append(Route.search(""))
+            paths[AppSection.home.id] = path
+            routeStacks[AppSection.home.id] = [.search("")]
             return
         }
         #endif
