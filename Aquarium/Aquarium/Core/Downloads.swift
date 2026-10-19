@@ -665,6 +665,14 @@ final class DownloadManager: NSObject {
 
     private func makeAssetSession(identifier: String, allowsCellular: Bool) -> AVAssetDownloadURLSession {
         let cfg = URLSessionConfiguration.background(withIdentifier: identifier)
+        // Discretionary, which is what keeps the system's own Live Activity
+        // off: iOS puts one on the Lock Screen and in the Dynamic Island for
+        // every non-discretionary stream download, and only for those (see
+        // AVAssetDownloadTask.h). The price is that the system may hold a
+        // transfer back for a better moment — Wi-Fi, a charger — rather than
+        // start it the instant it is asked for. Plain file downloads use the
+        // session above and are not affected.
+        cfg.isDiscretionary = true
         cfg.sessionSendsLaunchEvents = true
         cfg.allowsCellularAccess = allowsCellular
         // One connection, so segments are asked for in order.
@@ -1204,59 +1212,6 @@ final class DownloadManager: NSObject {
         return isQueuedOrRunning(itemId) ? .queued : nil
     }
 
-    /// Everything waiting or arriving, counted without looking at a record —
-    /// an item the pump has taken off the queue is in `active` before it has
-    /// a record to its name, and must not read as "nothing left" in between.
-    var inFlightCount: Int { queue.count + active.count }
-
-    /// What is waiting or arriving, in bytes: what has arrived of it, and
-    /// what all of it is expected to come to.
-    ///
-    /// An arriving item counts what is on disk against its own total — the
-    /// server's length for a file, the projection for a stream (see
-    /// `DownloadRecord.progressTotal`). A waiting one counts what an earlier
-    /// attempt left, against the size worked out from the item it was queued
-    /// with. `unsized` is how many had nothing to size them by, so a caller
-    /// can tell a total it may quote from one that is missing pieces.
-    struct InFlightBytes: Equatable, Sendable {
-        var received: Int64 = 0
-        var total: Int64 = 0
-        var estimated = false
-        var unsized = 0
-    }
-
-    var inFlightBytes: InFlightBytes {
-        var out = InFlightBytes()
-        var seen = Set<String>()
-        func add(_ itemId: String, quality: String?) {
-            guard seen.insert(itemId).inserted else { return }
-            if let stored = record(for: itemId) {
-                let rec = live(stored)
-                out.received += rec.receivedBytes
-                if let total = rec.progressTotal {
-                    out.total += max(total.bytes, rec.receivedBytes)
-                    out.estimated = out.estimated || total.estimated
-                    return
-                }
-            }
-            let quality = quality ?? record(for: itemId)?.quality
-            if let item = pendingItems[itemId], let quality,
-               let estimate = JellyfinClient.estimateDownloadSize(item: item, quality: DownloadQualities.named(quality)),
-               estimate > 0 {
-                out.total += estimate
-                out.estimated = true
-            } else if let estimate = record(for: itemId)?.estimatedBytes, estimate > 0 {
-                out.total += estimate
-                out.estimated = true
-            } else {
-                out.unsized += 1
-            }
-        }
-        for id in active { add(id, quality: nil) }
-        for entry in queue { add(entry.itemId, quality: entry.quality) }
-        return out
-    }
-
     /// How many songs — or audiobooks — are waiting or arriving.
     func audioBacklog(books: Bool) -> Int {
         let wanted = books ? "AudioBook" : "Audio"
@@ -1449,8 +1404,8 @@ final class DownloadManager: NSObject {
     // MARK: - Pausing
 
     /// Held by the person rather than by the network. Kept across launches:
-    /// a queue paused from the Lock Screen that started itself again the next
-    /// time the app was woken would not have been paused at all.
+    /// a paused queue that started itself again the next time the app was
+    /// woken would not have been paused at all.
     private(set) var isPaused = UserDefaults.standard.bool(forKey: DownloadManager.pausedKey) {
         didSet { UserDefaults.standard.set(isPaused, forKey: Self.pausedKey) }
     }
@@ -1469,7 +1424,7 @@ final class DownloadManager: NSObject {
     /// cancelled so as to be carried on with, not written off — so each goes
     /// back to the front of the queue with what it had fetched, and nothing
     /// new starts until the pause is lifted. It is asked for from the
-    /// Downloads page and from the download Live Activity.
+    /// Downloads page.
     func setPaused(_ paused: Bool) {
         guard paused != isPaused else { return }
         isPaused = paused
@@ -1500,13 +1455,15 @@ final class DownloadManager: NSObject {
     /// so the system carries the batch through without the app.
     ///
     /// The queue normally starts the next item when one lands. Behind, that
-    /// means the system has to wake the app to do it, and a transfer started
-    /// from the background is one the system treats as discretionary: it may
-    /// be put off for hours, and a stream started that way is demoted
-    /// outright (see AVAssetDownloadTask.h). So a batch left running used to
-    /// finish the item that was arriving and then sit. Started here, while
-    /// the app still counts as in front, the rest go to the system as
-    /// ordinary transfers, and it runs them whether or not the app is woken.
+    /// means the system has to wake the app to do it, and a file transfer
+    /// started from the background is one the system treats as
+    /// discretionary: it may be put off for hours. So a batch left running
+    /// used to finish the item that was arriving and then sit. Started here,
+    /// while the app still counts as in front, the rest are already in the
+    /// system's hands, and it runs them whether or not the app is woken.
+    /// Streams are discretionary whenever they start (see
+    /// `makeAssetSession`), so for them what this buys is only that they
+    /// are queued without waiting for the app to be woken.
     ///
     /// What still holds: a pause, Wi-Fi only, retries waiting out a delay, and
     /// one transcode at a time — the server's encoder is the reason for that
@@ -1878,6 +1835,7 @@ final class DownloadManager: NSObject {
         // would otherwise stand until the first walk of the new one.
         measuredStreamBytes[record.itemId] = nil
         projectionFraction[record.itemId] = nil
+        streamHeardAt[record.itemId] = (Date(), nil)
         if resuming, let partial = Self.partialPackage(of: record) {
             asset = AVURLAsset(url: partial)
             // The task about to start counts only what *it* pulls, from zero,
@@ -1910,8 +1868,15 @@ final class DownloadManager: NSObject {
         let task = session.makeAssetDownloadTask(downloadConfiguration: configuration)
         task.taskDescription = record.itemId
         tasks[DownloadTaskKey(session, task)] = record.itemId
+        if resuming, Self.partialPackage(of: record) != nil { resumedHere.insert(DownloadTaskKey(session, task)) }
         task.resume()
     }
+
+    /// Stream tasks this process started on a package an earlier attempt
+    /// left — the only ones whose "fetched nothing" says anything about the
+    /// package. See `didCompleteWithError`.
+    @ObservationIgnored
+    private var resumedHere: Set<DownloadTaskKey> = []
 
     /// Where a stream download's package is, if there is one on disk to
     /// resume from.
@@ -2313,6 +2278,8 @@ final class DownloadManager: NSObject {
     private func noteStreamProgress(itemId: String, fraction: Double, received: Int64) {
         let now = Date()
         activityAt[itemId] = now
+        // The package is measured again at the next walk — see `checkHearing`.
+        streamHeardAt[itemId] = (now, nil)
         guard var rec = record(for: itemId), rec.status != .complete else { return }
         // The live counts, not the record's: those are written to disk every
         // ten seconds and may be that far behind.
@@ -2390,11 +2357,38 @@ final class DownloadManager: NSObject {
                     let bytes = await Task.detached(priority: .utility) { Self.sizeOnDisk(of: url) }.value
                     self.applyMeasured(itemId: target.itemId, path: target.path, bytes: bytes)
                 }
+                self.keepEncodesAlive()
                 try? await Task.sleep(for: .seconds(Self.streamMeasureInterval))
             }
             self?.streamMeasurer = nil
         }
     }
+
+    /// Ping the server for every running stream download, every so often.
+    ///
+    /// Jellyfin stops an HLS encode a minute after its last ping, and segment
+    /// requests are not pings. Unpinged, a ten-minute episode on a slow
+    /// encoder was killed and restarted six times, each restart leaving a seam
+    /// in the package where one encode's segments meet the next's. Only while
+    /// the app runs — suspended, nothing pings, and the server restarts the
+    /// encode at the next segment asked for, as it did before.
+    private func keepEncodesAlive() {
+        let now = Date()
+        guard now.timeIntervalSince(lastEncodePing) >= Self.encodePingInterval else { return }
+        lastEncodePing = now
+        let sessions = records.compactMap { rec -> String? in
+            guard rec.status == .downloading, rec.transport != .file else { return nil }
+            return JellyfinClient.playSessionId(of: rec.sourceURL)
+        }
+        for id in sessions {
+            Task { await JellyfinClient.shared.pingTranscode(playSessionId: id) }
+        }
+    }
+
+    @ObservationIgnored
+    private var lastEncodePing = Date.distantPast
+    /// Well inside the minute Jellyfin allows.
+    private static let encodePingInterval: TimeInterval = 20
 
     private func applyMeasured(itemId: String, path: String, bytes: Int64) {
         // Read again: the walk suspended, and the download may have finished,
@@ -2407,20 +2401,83 @@ final class DownloadManager: NSObject {
         // Bytes landing on disk is the transfer alive, whether or not this
         // process heard a callback about it — see `sweepStalledTransfers`.
         if let before, bytes > before { activityAt[itemId] = now }
+        checkHearing(itemId, measured: bytes, at: now)
         rec = live(rec)
         guard rec.receivedBytes != bytes else { return }
         rec.receivedBytes = bytes
-        updateProjection(&rec)
+        if heardSinceForward(itemId) {
+            updateProjection(&rec)
+        } else if let whole = rec.projectedBytes ?? rec.estimatedBytes, whole > 0 {
+            // Nothing from the task since the app came forward (or since a
+            // relaunch), so its fraction is the one from before it went: a
+            // row reading 8% over 122 MiB of ~314. The bytes are current, so
+            // the share is told from them against the size projected so far,
+            // until the task speaks again — never backwards, and never done.
+            // The projection is left alone: a fraction made from it would
+            // only confirm it.
+            rec.loadedFraction = max(rec.loadedFraction ?? 0, min(0.99, Double(bytes) / Double(whole)))
+        }
         publish(&rec, received: bytes, at: now)
+    }
+
+    /// Whether the running stream has reported progress since the app last
+    /// came forward. Its task, started in this process, counts as having.
+    private func heardSinceForward(_ itemId: String) -> Bool {
+        guard let heard = streamHeardAt[itemId] else { return false }
+        return heard.at > cameForwardAt
     }
 
     /// The app came forward. Whatever the transfers did while it was away is
     /// on disk; measure it now rather than at the next callback, so the page
     /// opens on the true count instead of the one from before it left.
     func appBecameActive() {
+        cameForwardAt = Date()
         streamMeasurer?.cancel()
         streamMeasurer = nil
         measureStreamsSoon()
+    }
+
+    /// When each running stream last reported progress, and its package's
+    /// size as first measured after that. See `checkHearing`.
+    @ObservationIgnored
+    private var streamHeardAt: [String: (at: Date, bytes: Int64?)] = [:]
+    /// When the app last came forward. The callbacks the system held while it
+    /// was away get this long to arrive before a quiet stream is judged.
+    @ObservationIgnored
+    private var cameForwardAt = Date.distantPast
+    private static let deafLimit: TimeInterval = 20
+    /// More than a segment or two, so a slow encoder that went quiet just
+    /// after a segment whose callback was throttled is not mistaken for this.
+    private static let deafMargin: Int64 = 8 << 20
+    private static let reconnectReason = "Reconnecting"
+
+    /// A stream whose package keeps growing while its task says nothing.
+    ///
+    /// Seen on the iPhone after the app comes back from the background: the
+    /// transfer carries on, and the package on disk grows, but no progress
+    /// callback comes again and neither does the completion. The row sits at
+    /// the fraction it had on the way out, and the download never finishes.
+    /// A pause and resume always cured it: a new task on the same package is
+    /// heard from, and finds nearly all of it already there. So this does the
+    /// same by itself, once the app has been in front long enough for any
+    /// held-back callbacks to have arrived.
+    private func checkHearing(_ itemId: String, measured: Int64, at now: Date) {
+        #if canImport(UIKit)
+        guard UIApplication.shared.applicationState == .active else { return }
+        #endif
+        guard let heard = streamHeardAt[itemId] else { return }
+        guard let base = heard.bytes else {
+            streamHeardAt[itemId] = (heard.at, measured)
+            return
+        }
+        guard now.timeIntervalSince(max(heard.at, cameForwardAt)) >= Self.deafLimit,
+              measured - base >= Self.deafMargin,
+              !isPaused, tasks.values.contains(itemId), retryingAfterCancel[itemId] == nil
+        else { return }
+        Self.log.notice("\(itemId, privacy: .public) went quiet with its package growing; reconnecting")
+        streamHeardAt[itemId] = nil
+        retryingAfterCancel[itemId] = Self.reconnectReason
+        cancelTasks(for: itemId, keepingProgress: true)
     }
 
     private func forgetProgressThrottle(_ itemId: String) {
@@ -2430,6 +2487,7 @@ final class DownloadManager: NSObject {
         streamByteBase[itemId] = nil
         measuredStreamBytes[itemId] = nil
         projectionFraction[itemId] = nil
+        streamHeardAt[itemId] = nil
     }
 
     /// Watch for transfers that have stopped moving.
@@ -2870,6 +2928,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
         // where it was, and it hands it over here and nowhere else.
         let resumeData = (error as NSError?)?.userInfo[NSURLSessionDownloadTaskResumeData] as? Data
         Task { @MainActor in
+            let resumedHere = self.resumedHere.remove(id) != nil
             guard let itemId = self.itemId(forTask: id, description: described, url: source) else {
                 // The last word from a task cancelled on purpose; nothing
                 // more will come from it.
@@ -2878,6 +2937,25 @@ extension DownloadManager: URLSessionDownloadDelegate {
             }
             if let resumeData { Self.keepResumeData(resumeData, for: itemId) }
             self.tasks[id] = nil
+            // A reconnect (see `checkHearing`) carries straight on with a new
+            // task on the same package. Through the queue it was a row that
+            // left Downloading for "Up next · Reconnecting" and came back two
+            // seconds later; it stays where it is, with its counts.
+            if failure != nil, self.retryingAfterCancel[itemId] == Self.reconnectReason {
+                self.retryingAfterCancel[itemId] = nil
+                if !self.isPaused, var rec = self.record(for: itemId), rec.status == .downloading,
+                   rec.transport == .hls, let url = URL(string: rec.sourceURL),
+                   JellyfinClient.shared.isSessionOrigin(url) {
+                    rec = self.live(rec)
+                    self.save(rec)
+                    self.activityAt[itemId] = Date()
+                    self.startStream(rec, url: url, resuming: true)
+                    return
+                }
+                // Anything else — paused meanwhile, signed out — takes the
+                // ordinary way back through the queue.
+                self.retryingAfterCancel[itemId] = Self.reconnectReason
+            }
             self.active.remove(itemId)
             self.forgetProgressThrottle(itemId)
             defer { self.pump() }
@@ -2894,7 +2972,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
             // The stall sweep's own cancel, coming back round — or a pause's,
             // which is nobody's failure and is not counted as one.
             if let reason = self.retryingAfterCancel.removeValue(forKey: itemId) {
-                self.scheduleAutomaticRetry(itemId, reason: reason, countsAsAttempt: reason != Self.pausedReason && reason != Self.yieldedReason)
+                self.scheduleAutomaticRetry(itemId, reason: reason, countsAsAttempt: ![Self.pausedReason, Self.yieldedReason, Self.reconnectReason].contains(reason))
                 return
             }
 
@@ -2904,11 +2982,6 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 stopped.status = .canceled
                 stopped.errorMessage = nil
                 self.save(stopped)
-                // The system's stop button means stop: left alone, the pump
-                // would start the next in the queue and put the activity
-                // straight back. Paused rather than cleared, so what was
-                // waiting is still there to resume from the Downloads page.
-                if failure.fromSystemControls { self.setPaused(true) }
             case .permanent:
                 // Jellyfin starts encoding when the first request comes in,
                 // and can answer it with a 404 before there's anything to
@@ -2927,7 +3000,15 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 // A resumed stream that fetched nothing at all before it
                 // failed, on a network that is up, is a package the server
                 // won't honour any more; the next go starts clean.
-                if isStream, received == 0, (self.measuredStreamBytes[itemId] ?? 0) == 0,
+                //
+                // Only a resume this process started. A task carried over
+                // from before a relaunch reports nothing received to the new
+                // process whatever it fetched, and the interruption the app's
+                // exit caused arrives just after launch — before the package
+                // has been measured — so that one looked exactly like this,
+                // and a transfer the system had stopped at half way was
+                // thrown away and begun again from nothing.
+                if isStream, resumedHere, received == 0, (self.measuredStreamBytes[itemId] ?? 0) == 0,
                    rec.hlsPath != nil || rec.partialPath != nil, self.pathIsSatisfied, !failure.isConnectivity {
                     self.discardPartialPackage(itemId)
                 }
@@ -2953,8 +3034,6 @@ extension DownloadManager: URLSessionDownloadDelegate {
         /// the end, but on a stream's first request it is usually a transcode
         /// that hasn't written its first segment yet.
         var notFound: Bool = false
-        /// Stopped from the system's Live Activity rather than from the app.
-        var fromSystemControls: Bool = false
     }
 
     /// Sort an error into "someone stopped it", "worth another go" and
@@ -2974,16 +3053,12 @@ extension DownloadManager: URLSessionDownloadDelegate {
         let detail = layers.map { "\($0.domain) \($0.code): \($0.localizedDescription)" }.joined(separator: " ← ")
         let urlErrors = layers.filter { $0.domain == NSURLErrorDomain }.map { URLError.Code(rawValue: $0.code) }
 
-        // The system's own Live Activity for stream downloads has a cancel
-        // button, and what it hands back is Cocoa's user-cancelled rather
-        // than URLError's: without this it read as a hiccup and every
-        // download the person had just cancelled was started again.
-        let systemCancel = layers.contains { $0.domain == NSCocoaErrorDomain && $0.code == NSUserCancelledError }
-        if urlErrors.contains(.cancelled) || systemCancel {
-            return Failure(
-                kind: .cancelled, isConnectivity: false, summary: "Cancelled", detail: detail,
-                fromSystemControls: systemCancel
-            )
+        // A stream can also come back with Cocoa's user-cancelled rather
+        // than URLError's — AVFoundation's word for a stop the person asked
+        // for. Read as a hiccup, it would be started straight back up.
+        let userCancel = layers.contains { $0.domain == NSCocoaErrorDomain && $0.code == NSUserCancelledError }
+        if urlErrors.contains(.cancelled) || userCancel {
+            return Failure(kind: .cancelled, isConnectivity: false, summary: "Cancelled", detail: detail)
         }
         let connectivity: Set<URLError.Code> = [
             .notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotConnectToHost,

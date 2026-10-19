@@ -109,14 +109,9 @@ struct PlayerScreen: View {
         .statusBarHidden(!chrome.controlsVisible && !player.isPaused)
         .persistentSystemOverlays(.hidden)
         // The shell is portrait on a phone; a film is the reason the phone gets
-        // turned. A picture wider than tall takes the whole phone sideways
-        // whichever way it is held; a phone-shaped video leaves it free to be
-        // either way up. See `OrientationLock`.
+        // turned, so the player follows the phone either way up. See
+        // `OrientationLock`.
         .allowsLandscape()
-        .onChange(of: player.pictureSize, initial: true) { _, size in
-            OrientationLock.shared.lockToLandscape(size.width > size.height)
-        }
-        .onDisappear { OrientationLock.shared.lockToLandscape(false) }
         #endif
         #if os(macOS)
         // The scroll wheel: volume, and a sideways scrub.

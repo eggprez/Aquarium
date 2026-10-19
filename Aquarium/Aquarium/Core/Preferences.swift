@@ -402,8 +402,9 @@ final class Preferences {
 
     // ---- Playback ----
 
-    /// May the player drop to a smaller stream by itself when one keeps
-    /// stalling? On unless turned off, as on Linux.
+    /// The player's quality is Auto: it may drop to a smaller stream by
+    /// itself when one keeps stalling, and climb back. On unless a rung is
+    /// picked in the player, as on Linux. See `PlayerModel.QualitySelection`.
     var adaptiveQuality: Bool {
         didSet { write(adaptiveQuality, forKey: "adaptive") }
     }
@@ -469,7 +470,8 @@ final class Preferences {
         return nextUpHidden[key]
     }
 
-    /// Default quality for a new stream. `nil` is direct play. This device's
+    /// The rung picked in the player, for the next stream to open at while
+    /// the quality isn't Auto (`openingBitrate`). `nil` is direct play. This device's
     /// own, not synced: what a stream can carry depends on the network and
     /// the screen it is on, and an Apple TV on Ethernet and a phone on
     /// cellular want different answers.
@@ -481,6 +483,18 @@ final class Preferences {
                 defaults.removeObject(forKey: "default_bitrate")
             }
         }
+    }
+
+    /// What a new stream opens at. Auto opens at the best there is and
+    /// leaves the rest to `AdaptiveQuality`; a rung picked in the player
+    /// opens there. The Apple TV keeps its Settings row, which is read as
+    /// it always was.
+    var openingBitrate: Int? {
+        #if os(tvOS)
+        defaultBitrate
+        #else
+        adaptiveQuality ? nil : defaultBitrate
+        #endif
     }
 
     /// Fold surround down to stereo. Unlike on Linux this is asked of the

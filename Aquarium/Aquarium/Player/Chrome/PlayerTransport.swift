@@ -39,10 +39,6 @@ struct PlayerTransport: View {
     /// Only the timeline and the times: the television's panel is down over
     /// where the heading goes.
     var timelineOnly = false
-    /// A wide picture between black bars in an upright view: the title row
-    /// and the bottom band go against the picture's edges rather than the
-    /// screen's. Nil for the usual layout.
-    var letterbox: Letterbox?
     /// How wide the panel is where it is a popover (an iPad, a Mac): most
     /// of the picture, so the Info page has room for its two columns. The
     /// chrome works it out from its size.
@@ -57,17 +53,6 @@ struct PlayerTransport: View {
 
     enum Part { case whole, aboveFold, belowFold }
 
-    /// Where the picture is, in an upright view, for the controls to sit
-    /// against. `pictureHeight` is the picture's; `shift` is how far the
-    /// screen's centre sits above the chrome's, which the safe area makes
-    /// unequal top and bottom.
-    struct Letterbox: Equatable {
-        var pictureHeight: CGFloat
-        var shift: CGFloat
-        /// The least bar that fits the title row, and the bottom band.
-        static let titleRoom: CGFloat = 56
-        static let bandRoom: CGFloat = 128
-    }
     /// A touch on any control: keeps the controls up a while longer.
     let onInteract: () -> Void
     let onDismiss: () -> Void
@@ -184,30 +169,15 @@ struct PlayerTransport: View {
         ZStack {
             scrims
             VStack(spacing: 0) {
-                if let letterbox {
-                    // Against the picture: the title row above it, the band
-                    // below, the pair centred where the picture is.
-                    Spacer(minLength: 0)
-                    titleRow
-                        .pointerHover { hoverTitle = $0 }
-                    Color.clear.frame(height: letterbox.pictureHeight)
+                titleRow
+                    .pointerHover { hoverTitle = $0 }
+                Spacer(minLength: 0)
+                if part == .whole {
                     bottom
                         .pointerHover { hoverBottom = $0 }
-                    Spacer(minLength: 0)
-                } else {
-                    titleRow
-                        .pointerHover { hoverTitle = $0 }
-                    Spacer(minLength: 0)
-                    if part == .whole {
-                        bottom
-                            .pointerHover { hoverBottom = $0 }
-                    }
                 }
             }
             .padding(.horizontal, edge)
-            .padding(.bottom, max(0, (letterbox?.shift ?? 0) * 2))
-            .padding(.top, max(0, -(letterbox?.shift ?? 0) * 2))
-            .animation(nil, value: letterbox)
             // The cluster steps aside while a finger is on the timeline, so
             // the thumbnail has the middle of the picture to itself.
             if chrome.scrub == nil, player.errorMessage == nil {
@@ -249,9 +219,14 @@ struct PlayerTransport: View {
 
     private var titleRow: some View {
         HStack(alignment: .center, spacing: 6) {
-            #if !os(macOS)
-            PlayerGlyphButton(symbol: "chevron.down", label: "Close the player", size: 18, action: onDismiss)
-            #endif
+            // Back to wherever the film was opened from, the way every other
+            // page in the app is left. A Mac window has its own close button
+            // over the picture; in full screen, where that is gone, it gets
+            // this one.
+            if showsBackButton {
+                PlayerGlyphButton(symbol: "chevron.backward", label: "Back", size: 20, action: onDismiss)
+                    .accessibilityHint("Closes the player")
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
@@ -304,6 +279,14 @@ struct PlayerTransport: View {
         // Clear of the window's close, minimise and zoom buttons, which sit
         // over the picture in a window with no title bar.
         .padding(.leading, PlayerMetrics.titleLeadingInset(fullScreen: PlayerMetrics.isFullScreen))
+    }
+
+    private var showsBackButton: Bool {
+        #if os(macOS)
+        PlayerMetrics.isFullScreen
+        #else
+        true
+        #endif
     }
 
     private var liveBadge: some View {
@@ -444,53 +427,94 @@ struct PlayerTransport: View {
 
     /// Info opens the panel; Audio, Subtitles, Quality and Up Next drop
     /// their cards; Fill is a switch.
+    ///
+    /// A phone held upright, the smallest of them especially, has no room
+    /// for six pills with their words: the row used to scroll, with Fill
+    /// cut off at the edge. So the pills draw in closer first, then the
+    /// words go before anything is cut — from the pills whose glyph says it
+    /// all, then from the two that carry a state (the quality in force, how
+    /// many are queued) — and the row only scrolls if even the glyphs can't
+    /// fit.
     private var pills: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                pill(symbol: PlayerTab.info.symbol, title: "Info",
-                     label: player.isLive ? "Channel info" : "Episode info",
-                     tab: .info, anchor: .info)
-                menuPill(.audio, symbol: "speaker.wave.2", title: "Audio", label: "Audio tracks")
-                menuPill(.subtitles, symbol: "captions.bubble", title: "Subtitles", label: "Subtitles")
-                if player.offersQuality {
-                    menuPill(.quality, symbol: "slider.horizontal.3",
-                             title: Quality.shortLabel(for: player.currentBitrate),
-                             label: "Quality, \(Quality.label(for: player.currentBitrate))")
-                }
-                if !player.isLive, player.upNextCount > 0 {
-                    menuPill(.upNext, symbol: "text.line.first.and.arrowtriangle.forward",
-                             title: player.queue.isEmpty ? "Up Next" : "Up Next · \(player.queue.count)",
-                             label: "Up next, \(player.upNextCount) waiting")
-                }
-                Button {
-                    onInteract()
-                    prefs.fillScreen.toggle()
-                    player.applyFraming()
-                } label: {
-                    PlayerPill(isOn: prefs.fillScreen) {
-                        Image(systemName: prefs.fillScreen
-                              ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                        Text("Fill")
-                    }
-                }
-                .buttonStyle(PlayerPillStyle())
-                .accessibilityLabel("Fill the screen")
-                .accessibilityValue(prefs.fillScreen ? "On" : "Off")
-            }
-            .padding(.horizontal, 2)
-            .padding(.vertical, 2)
+        ViewThatFits(in: .horizontal) {
+            pillRow(.all)
+            pillRow(.all, tight: true)
+            pillRow(.stateOnly, tight: true)
+            pillRow(.none, tight: true)
+            ScrollView(.horizontal, showsIndicators: false) { pillRow(.none, tight: true) }
+                .scrollClipDisabled()
         }
-        .scrollClipDisabled()
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func pill(symbol: String, title: String, label: String, tab: PlayerTab,
+    /// Which pills keep their words.
+    private enum PillWords { case all, stateOnly, none }
+
+    private func pillRow(_ words: PillWords, tight: Bool = false) -> some View {
+        let plain = words == .all
+        let state = words != .none
+        return HStack(spacing: tight ? 6 : 8) {
+            pill(symbol: PlayerTab.info.symbol, title: plain ? "Info" : nil,
+                 label: player.isLive ? "Channel info" : "Episode info",
+                 tab: .info, anchor: .info)
+            menuPill(.audio, symbol: "speaker.wave.2", title: plain ? "Audio" : nil, label: "Audio tracks")
+            menuPill(.subtitles, symbol: "captions.bubble", title: plain ? "Subtitles" : nil, label: "Subtitles")
+            if player.offersQualityChoice {
+                menuPill(.quality, symbol: "slider.horizontal.3",
+                         title: state ? qualityTitle : nil, label: "Quality, \(qualitySpoken)")
+            }
+            if !player.isLive, player.upNextCount > 0 {
+                menuPill(.upNext, symbol: "text.line.first.and.arrowtriangle.forward",
+                         title: !state ? nil : player.queue.isEmpty ? "Up Next" : "Up Next · \(player.queue.count)",
+                         label: "Up next, \(player.upNextCount) waiting")
+            }
+            Button {
+                onInteract()
+                prefs.fillScreen.toggle()
+                player.applyFraming()
+            } label: {
+                PlayerPill(isOn: prefs.fillScreen) {
+                    Image(systemName: prefs.fillScreen
+                          ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                    if plain { Text("Fill") }
+                }
+            }
+            .buttonStyle(PlayerPillStyle())
+            .accessibilityLabel("Fill the screen")
+            .accessibilityValue(prefs.fillScreen ? "On" : "Off")
+        }
+        .padding(.horizontal, 2)
+        .padding(.vertical, 2)
+        .fixedSize(horizontal: true, vertical: false)
+        .environment(\.playerPillsTight, tight)
+    }
+
+    /// Auto, a download, or the rung held — in the handful of characters a
+    /// pill has.
+    private var qualityTitle: String {
+        switch player.qualitySelection {
+        case .auto: "Auto"
+        case .downloaded: "Downloaded"
+        case .stream(let bitrate): bitrate == nil ? "Direct" : Quality.shortLabel(for: bitrate)
+        }
+    }
+
+    private var qualitySpoken: String {
+        switch player.qualitySelection {
+        case .auto: player.isLocal ? "Auto, playing the download" : "Auto, playing \(Quality.label(for: player.currentBitrate))"
+        case .downloaded: "Downloaded copy"
+        case .stream(let bitrate): Quality.label(for: bitrate)
+        }
+    }
+
+    private func pill(symbol: String, title: String?, label: String, tab: PlayerTab,
                       anchor: PlayerChromeState.PanelAnchor) -> some View {
         Button {
             open(tab, anchor: anchor)
         } label: {
             PlayerPill(isOn: chrome.panelAnchor == anchor && chrome.panelOpen) {
                 Image(systemName: symbol)
-                Text(title)
+                if let title { Text(title) }
             }
         }
         .buttonStyle(PlayerPillStyle())
@@ -500,13 +524,13 @@ struct PlayerTransport: View {
     }
 
     /// A pill whose card drops from it; lit while the card is up.
-    private func menuPill(_ menu: PlayerChromeState.ChromeMenu, symbol: String, title: String, label: String) -> some View {
+    private func menuPill(_ menu: PlayerChromeState.ChromeMenu, symbol: String, title: String?, label: String) -> some View {
         Button {
             toggleMenu(menu)
         } label: {
             PlayerPill(isOn: chrome.menu == menu) {
                 Image(systemName: symbol)
-                Text(title)
+                if let title { Text(title) }
             }
         }
         .buttonStyle(PlayerPillStyle())

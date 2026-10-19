@@ -1,11 +1,11 @@
 //  The Live Activities extension — iPhone and iPad only — which is also
 //  where the Now Playing widget and the Control Centre buttons live.
 //
-//  Two activities. Each is drawn three ways: the Lock Screen,
-//  the Dynamic Island, and — from iOS 18 — the small card that Apple Watch's
-//  Smart Stack and (iOS 26) the CarPlay dashboard show. That last one gets
-//  its own layout rather than the island's compact corners, which is what the
-//  system borrows when an activity offers nothing better. What each one draws is decided entirely by
+//  One activity, drawn three ways: the Lock Screen, the Dynamic Island, and
+//  — from iOS 18 — the small card that Apple Watch's Smart Stack and (iOS 26)
+//  the CarPlay dashboard show. That last one gets its own layout rather than
+//  the island's compact corners, which is what the system borrows when an
+//  activity offers nothing better. What it draws is decided entirely by
 //  the state the app hands over (Shared/LiveActivityTypes.swift); nothing in
 //  here talks to the server, reads a file, or knows what a Jellyfin is.
 
@@ -16,7 +16,6 @@ import WidgetKit
 struct AquariumLiveActivities: WidgetBundle {
     var body: some Widget {
         ListeningLiveActivity()
-        DownloadsLiveActivity()
         // The Now Playing card, and — from iOS 18 — the Control Centre
         // buttons. See NowPlayingWidget.swift.
         NowPlayingWidget()

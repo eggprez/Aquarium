@@ -1064,7 +1064,7 @@ private struct QualityTab: View {
                 }
             }
             if prefs.adaptiveQuality, player.offersQuality, !PlayerMetrics.television {
-                PanelNote(text: "The stream steps down on its own when the connection struggles, and back up once it is steady. Settings → Video turns that off.")
+                PanelNote(text: "The stream steps down on its own when the connection struggles, and back up once it is steady. Picking a quality keeps it there.")
             }
         }
     }
