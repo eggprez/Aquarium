@@ -1208,16 +1208,36 @@ final class JellyfinClient {
 
     /// The one episode the user should watch next in a series — the in-progress
     /// one, else the first unwatched. Nil when the server has nothing queued.
+    ///
+    /// The in-progress episode is asked of Resume, not left to Next Up. Next Up
+    /// works forward from the last episode marked *watched*, so someone who
+    /// joined a show at its latest season — half-way through S29E3, nothing
+    /// before it played — was offered S1E1, and Play started the show over.
     func seriesNextUp(seriesId: String) async throws -> BaseItem? {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        let q: [URLQueryItem] = [
+        let resumeQuery: [URLQueryItem] = [
+            .init(name: "userId", value: s.userId),
+            .init(name: "parentId", value: seriesId),
+            .init(name: "Limit", value: "1"),
+            .init(name: "MediaTypes", value: "Video"),
+            .init(name: "Fields", value: Self.itemFields),
+            .init(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb,Logo"),
+        ]
+        let nextQuery: [URLQueryItem] = [
             .init(name: "userId", value: s.userId),
             .init(name: "seriesId", value: seriesId),
             .init(name: "Limit", value: "1"),
             .init(name: "Fields", value: Self.itemFields),
             .init(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb,Logo"),
         ]
-        return try await get(ItemsResponse.self, "/Shows/NextUp?\(Self.encode(q))").items.first
+        async let resumed = try? get(ItemsResponse.self, "/UserItems/Resume?\(Self.encode(resumeQuery))").items
+        async let next = get(ItemsResponse.self, "/Shows/NextUp?\(Self.encode(nextQuery))").items.first
+        // Only an episode of this series: an older server ignoring parentId
+        // would hand back whatever was last left part-way, film or show.
+        if let inProgress = await resumed?.first(where: { $0.isEpisode && $0.SeriesId == seriesId }) {
+            return inProgress
+        }
+        return try await next
     }
 
     /// A handful of films and shows from the whole library, drawn at random —
