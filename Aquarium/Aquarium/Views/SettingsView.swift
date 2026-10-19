@@ -364,24 +364,16 @@ struct SettingsView: View {
 
     private var qualitySection: some View {
         @Bindable var prefs = prefs
+        // The quality itself — Auto or a rung held — is picked in the
+        // player, and only there.
         return Section {
-            Picker(selection: Self.bitrateBinding) {
-                ForEach(Quality.choices) { Text($0.label).tag($0.maxBitrate) }
-            } label: {
-                MacSettingLabel(Copy.defaultQuality)
-            }
-            .note(Copy.defaultQuality)
-
-            Toggle(isOn: $prefs.adaptiveQuality) { MacSettingLabel(Copy.adaptiveQuality) }
-                .note(Copy.adaptiveQuality)
-
             Toggle(isOn: $prefs.powerAwareQuality) { MacSettingLabel(Copy.powerAwareQuality) }
                 .disabled(!prefs.adaptiveQuality)
                 .note(Copy.powerAwareQuality)
         } header: {
             Text("Quality")
         } footer: {
-            MacSettingFooter(Copy.defaultQuality, Copy.adaptiveQuality, Copy.powerAwareQuality)
+            MacSettingFooter(Copy.powerAwareQuality)
         }
     }
 
@@ -1237,17 +1229,15 @@ private struct VideoSettingsPage: View {
     var body: some View {
         @Bindable var prefs = prefs
         Form {
+            // The quality itself — Auto or a rung held — is picked in the
+            // player, and only there.
             Section {
-                Picker(Copy.defaultQuality.name ?? "", selection: SettingsView.bitrateBinding) {
-                    ForEach(Quality.choices) { Text($0.label).tag($0.maxBitrate) }
-                }
-                Toggle(Copy.adaptiveQuality.name ?? "", isOn: $prefs.adaptiveQuality)
                 Toggle(Copy.powerAwareQuality.name ?? "", isOn: $prefs.powerAwareQuality)
                     .disabled(!prefs.adaptiveQuality)
             } header: {
                 Text("Quality")
             } footer: {
-                SettingsFooter(Copy.defaultQuality, Copy.adaptiveQuality, Copy.powerAwareQuality)
+                SettingsFooter(Copy.powerAwareQuality)
             }
 
             Section {
@@ -2282,13 +2272,9 @@ enum SettingsCopy {
         name: "Theme",
         text: "Match system follows the device's light/dark setting. The player is always dark, wherever this is set."
     )
-    static let adaptiveQuality = SettingNote(
-        name: "Adapt quality automatically",
-        text: "Drops to a smaller stream when playback keeps stalling or the device can't decode fast enough, and climbs back after the connection has been steady for a while. It never goes above the quality you picked, and never touches downloaded files or Live TV."
-    )
     static let powerAwareQuality = SettingNote(
         name: "Ease off when the device is struggling",
-        text: "Holds the stream to 1080p at 10 Mbps while the device is running hot or in Low Power Mode, and to 720p when it is at its thermal limit — before the picture starts to stutter rather than after. It climbs back the usual way once things settle. Only with adaptive quality on."
+        text: "Holds the stream to 1080p at 10 Mbps while the device is running hot or in Low Power Mode, and to 720p when it is at its thermal limit — before the picture starts to stutter rather than after. It climbs back the usual way once things settle. Only while the player's Quality is Auto; picking a quality there is choosing it yourself."
     )
     static let defaultQuality = SettingNote(
         name: "Default quality",
@@ -2609,7 +2595,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         // No adaptive quality on the Apple TV's player — see `VideoSettingsPage`.
         case .video: "The quality a stream opens at, how a wide picture is framed, what happens at the end of an episode, and the spoken language a video opens with."
         #else
-        case .video: "The quality a stream opens at, whether it adapts, how a wide picture is framed, what happens at the end of an episode, and the spoken language a video opens with."
+        case .video: "Easing the stream off when the device is struggling, how a wide picture is framed, what happens at the end of an episode, and the spoken language a video opens with."
         #endif
         case .audio: "The delay that keeps sound and picture together, and downmixing surround for a stereo setup."
         case .subtitles: "Which subtitles a video opens with, whether only the forced track shows, and how large they are drawn and on what."
@@ -2634,7 +2620,11 @@ enum SettingsSummary {
     }
 
     static func video(_ prefs: Preferences) -> String {
+        #if os(tvOS)
         var parts = [Quality.shortLabel(for: prefs.defaultBitrate)]
+        #else
+        var parts = [prefs.adaptiveQuality ? "Auto" : prefs.defaultBitrate == nil ? "Direct" : Quality.shortLabel(for: prefs.defaultBitrate)]
+        #endif
         if prefs.fillScreen { parts.append("Fill") }
         return parts.joined(separator: " · ")
     }

@@ -28,12 +28,6 @@ final class OrientationLock {
     /// permission away with it.
     private var wanting = 0
 
-    /// The player has a picture wider than tall on screen: with the turn
-    /// allowed at all, only the two landscape orientations are, so the film
-    /// fills the phone whichever way it is being held. A phone-shaped video
-    /// leaves this false and the phone free to be either way up.
-    private var landscapeOnly = false
-
     /// The mask UIKit was last actually asked for, and whether a request is
     /// already queued. Both exist for the same reason — see `scheduleApply`.
     private var lastRequested: UIInterfaceOrientationMask?
@@ -48,17 +42,12 @@ final class OrientationLock {
     /// locked.
     var mask: UIInterfaceOrientationMask {
         guard UIDevice.current.userInterfaceIdiom == .phone else { return .all }
+        // Upright as well as sideways, even for a wide film: the player used
+        // to hold a wide picture to landscape, and a phone in bed or on a
+        // stand wants it upright between the bars, with the controls against
+        // the picture (`PlayerChrome.letterbox`).
         guard wanting > 0 else { return .portrait }
-        return landscapeOnly ? .landscape : .allButUpsideDown
-    }
-
-    /// Whether the screen holding the permission wants landscape alone: the
-    /// player, once it knows the picture is wider than tall. Nothing happens
-    /// unless the permission is held; the flag waits for it.
-    func lockToLandscape(_ on: Bool) {
-        guard landscapeOnly != on else { return }
-        landscapeOnly = on
-        scheduleApply()
+        return .allButUpsideDown
     }
 
     func allowLandscape() {

@@ -248,16 +248,24 @@ struct PlayerPill<Label: View>: View {
     var isOn = false
     @ViewBuilder let label: () -> Label
 
+    /// Less air either side of the word, for a row that is nearly too wide
+    /// for its pills — see `PlayerTransport.pills`.
+    @Environment(\.playerPillsTight) private var tight
+
     var body: some View {
-        HStack(spacing: 6) { label() }
+        HStack(spacing: tight ? 5 : 6) { label() }
             .font(.footnote.weight(.semibold))
             .foregroundStyle(isOn ? Theme.link : .white)
             .lineLimit(1)
-            .padding(.horizontal, 14)
+            .padding(.horizontal, tight ? 10 : 14)
             .padding(.vertical, 9)
             .playerMaterial(Capsule())
             .contentShape(Capsule())
     }
+}
+
+extension EnvironmentValues {
+    @Entry var playerPillsTight = false
 }
 
 /// The press of a pill: a little smaller under the finger, nothing else.

@@ -24,6 +24,12 @@ struct DownloadsView: View {
     /// iPhone it's a popover now, and one attached to the page pointed at
     /// the middle of the screen whichever show it was about.
     @State private var deletingShow: DownloadSeries.ID?
+    /// How wide a poster tile came out in the grid. A tile that fills its
+    /// column has no width of its own, and the long-press preview is laid
+    /// out alone, with no column to fill: given nothing it fell back to the
+    /// artwork's ideal size, which is next to none, and the poster lifted as
+    /// a sliver. Every tile in the grid is the same width, so one will do.
+    @State private var tileWidth: CGFloat?
 
     #if os(iOS)
     /// Download All Music, in its two steps: the library being read, and then
@@ -115,9 +121,8 @@ struct DownloadsView: View {
                                 .foregroundStyle(Theme.textDim)
                         }
                         HStack(spacing: 18) {
-                            // The same pause the download Live Activity has a
-                            // button for; this is where one set from the Lock
-                            // Screen is found and lifted.
+                            // Holds the whole queue: nothing new starts until
+                            // it is lifted here.
                             Button(downloads.isPaused ? "Resume downloads" : "Pause downloads") {
                                 downloads.setPaused(!downloads.isPaused)
                             }
@@ -256,6 +261,7 @@ struct DownloadsView: View {
             app.push(.downloadedSeries(show.id))
         } label: {
             card
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { tileWidth = $0 }
         }
         .buttonStyle(PosterButtonStyle())
         .contextMenu {
@@ -276,7 +282,7 @@ struct DownloadsView: View {
                 Label("Delete this show", systemImage: "trash")
             }
         } preview: {
-            card.poster
+            card.lifted(width: tileWidth).poster
         }
         .downloadDeletionDialog(Binding(
             get: { deletingShow == show.id ? .series(show) : nil },
@@ -300,6 +306,7 @@ struct DownloadsView: View {
             player.playLocal(film)
         } label: {
             card
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { tileWidth = $0 }
         }
         .buttonStyle(PosterButtonStyle())
         .contextMenu {
@@ -318,7 +325,7 @@ struct DownloadsView: View {
                 Label("Delete download", systemImage: "trash")
             }
         } preview: {
-            card.poster
+            card.lifted(width: tileWidth).poster
         }
     }
 
@@ -791,6 +798,15 @@ struct DownloadPosterCard: View {
             }
             .frame(maxWidth: width ?? .infinity, alignment: .leading)
         }
+    }
+
+    /// The same card at the width it has in the grid, for the long-press
+    /// preview: a card that fills its column has no width to lift with —
+    /// see `DownloadsView.tileWidth`.
+    func lifted(width measured: CGFloat?) -> DownloadPosterCard {
+        var card = self
+        card.width = card.width ?? measured ?? Metrics.posterWidth
+        return card
     }
 
     /// The artwork alone, badge and all: what a long press lifts. Lifting the

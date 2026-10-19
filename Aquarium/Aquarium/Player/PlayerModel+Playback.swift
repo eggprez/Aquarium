@@ -115,9 +115,9 @@ extension PlayerModel {
         }
 
         var opts = options
-        if opts.maxBitrate == nil, !opts.bitrateIsChosen, !opts.live, prefs.defaultBitrate != nil,
+        if opts.maxBitrate == nil, !opts.bitrateIsChosen, !opts.live, let opening = prefs.openingBitrate,
            !meta.inherited {
-            opts.maxBitrate = prefs.defaultBitrate
+            opts.maxBitrate = opening
         }
         let requestedBitrate = opts.maxBitrate
         if !opts.live, let cap = powerCapBitrate, Quality.rungIndex(opts.maxBitrate) < Quality.rungIndex(cap) {
@@ -683,8 +683,28 @@ extension PlayerModel {
 
     // MARK: - Quality
 
+    /// Reopen what is playing at `bitrate`. From a download it is the
+    /// server's copy of the same title, looked up by the record's id, from
+    /// where the download had got to.
     func switchQuality(to bitrate: Int?, meta: StartMeta = .init()) async {
-        guard let item, !isLocal else { return }
+        if isLocal {
+            #if !os(tvOS)
+            guard let id = localRecordId else { return }
+            let resume = position
+            guard let streamed = try? await JellyfinClient.shared.item(id) else {
+                AppModel.shared.toast("The server can't be reached, so the download plays on", tone: .error)
+                return
+            }
+            guard isLocal, localRecordId == id else { return }
+            var opts = StreamOptions()
+            opts.maxBitrate = bitrate
+            opts.bitrateIsChosen = true
+            opts.startSeconds = resume
+            await play(item: streamed, options: opts, meta: meta)
+            #endif
+            return
+        }
+        guard let item else { return }
         var opts = options
         opts.maxBitrate = bitrate
         opts.bitrateIsChosen = true
@@ -697,6 +717,16 @@ extension PlayerModel {
     func maybeAdapt() {
         guard prefs.adaptiveQuality, !isLocal, !isExternal, isActive else { return }
         guard let decision = adaptive.decide(currentBitrate: currentBitrate) else { return }
+        // Auto's first choice is the copy on this device, so a stream that
+        // has to give ground goes there before it goes to a smaller stream:
+        // a download that finished while this played.
+        #if !os(tvOS)
+        if decision.isDrop, let record = downloadedCopy {
+            showBitrateNotice(BitrateNotice(isUp: false, headline: "Downloaded copy", detail: decision.reason))
+            playLocal(record, startAt: position)
+            return
+        }
+        #endif
         guard decision.bitrate != currentBitrate else {
             AppModel.shared.toast(decision.message, tone: .error)
             return
@@ -706,6 +736,78 @@ extension PlayerModel {
             headline: decision.bitrate == nil ? "Original quality" : Quality.label(for: decision.bitrate),
             detail: decision.reason))
         Task { await switchQuality(to: decision.bitrate, meta: StartMeta(inherited: true, quiet: true)) }
+    }
+
+    // MARK: - Choosing a quality
+
+    /// What the player's Quality card, and the Mac's Quality menu, can be
+    /// set to. The choice lives there and nowhere else: Settings has no
+    /// quality of its own.
+    enum QualitySelection: Hashable {
+        /// The Linux app's Auto: the downloaded copy first, then Direct (the
+        /// original file, no transcode), then each transcode below it,
+        /// highest bitrate first — `Quality.choices` in order. A stream opens
+        /// at the best of those there is, steps down the list when the
+        /// connection struggles (`AdaptiveQuality`) and back up once it is
+        /// steady.
+        case auto
+        /// The copy on this device, whatever the server could send.
+        case downloaded
+        /// One rung, kept: `nil` is Direct.
+        case stream(Int?)
+    }
+
+    var qualitySelection: QualitySelection {
+        if prefs.adaptiveQuality { return .auto }
+        return isLocal ? .downloaded : .stream(currentBitrate)
+    }
+
+    /// Whether the Quality card has anything to offer: a stream the server
+    /// is choosing a bitrate for, or a download that could be swapped for
+    /// one.
+    var offersQualityChoice: Bool {
+        offersQuality || (isLocal && localRecordId != nil)
+    }
+
+    #if !os(tvOS)
+    /// The finished download of what is playing, if there is one. None on
+    /// an Apple TV, which keeps no downloads.
+    var downloadedCopy: DownloadRecord? {
+        guard !isLive, !isExternal, let id = isLocal ? localRecordId : item?.Id,
+              let record = DownloadManager.shared.record(for: id), !record.isAudio,
+              DownloadManager.shared.mediaURL(for: record) != nil else { return nil }
+        return record
+    }
+    #endif
+
+    /// Auto and a fixed rung are remembered for the next stream; picking the
+    /// download is about this title only — Auto would have picked it anyway,
+    /// and a pinned rung still gives way to a download when a title opens.
+    func chooseQuality(_ selection: QualitySelection) async {
+        switch selection {
+        case .auto:
+            prefs.adaptiveQuality = true
+            prefs.defaultBitrate = nil
+            guard isActive, !isLocal else { return }
+            #if !os(tvOS)
+            if let record = downloadedCopy {
+                playLocal(record, startAt: position)
+                return
+            }
+            #endif
+            if currentBitrate != nil { await switchQuality(to: nil) }
+        case .downloaded:
+            #if !os(tvOS)
+            guard !isLocal, let record = downloadedCopy else { return }
+            playLocal(record, startAt: position)
+            #endif
+        case .stream(let bitrate):
+            prefs.adaptiveQuality = false
+            prefs.defaultBitrate = bitrate
+            if isLocal || currentBitrate != bitrate {
+                await switchQuality(to: bitrate)
+            }
+        }
     }
 
     // MARK: - Recovery

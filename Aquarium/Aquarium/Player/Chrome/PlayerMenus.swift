@@ -271,29 +271,55 @@ private struct SubtitlesMenu: View {
 /// Only offered for a stream the server is choosing a bitrate for.
 private struct QualityMenu: View {
     @Environment(PlayerModel.self) private var player
-    @Environment(Preferences.self) private var prefs
     let onInteract: () -> Void
     let close: () -> Void
 
     var body: some View {
-        if let reason = player.qualityUnavailableReason {
+        let selection = player.qualitySelection
+        let auto = selection == .auto
+        let streamable = player.offersQuality || player.isLocal
+
+        if let reason = player.qualityUnavailableReason, !player.isLocal {
             PanelNote(text: reason)
         }
-        ForEach(Quality.choices) { choice in
-            let current = player.currentBitrate == choice.maxBitrate
-            PanelRow(title: choice.label,
-                     detail: current && player.isTranscoding ? "Playing now · transcoding" : current ? "Playing now" : nil,
-                     isSelected: current,
-                     disabledReason: player.qualityUnavailableReason == nil ? nil : "Not for this stream") {
-                onInteract()
-                guard !current else { close(); return }
-                Task { await player.switchQuality(to: choice.maxBitrate) }
-                close()
+        // Auto first, then the rows in the order Auto tries them: the
+        // download, Direct, and the transcodes from the largest down.
+        PanelRow(title: "Auto",
+                 detail: auto ? "Playing now · \(playingNow)" : "Downloaded, then Direct, then smaller streams",
+                 isSelected: auto) {
+            pick(.auto)
+        }
+        #if !os(tvOS)
+        if let download = player.downloadedCopy {
+            PanelRow(title: download.quality.isEmpty ? "Downloaded" : "Downloaded · \(download.quality)",
+                     detail: player.isLocal ? (auto ? "Playing now" : "Playing now · from this device") : "From this device",
+                     isSelected: !auto && player.isLocal) {
+                pick(.downloaded)
             }
         }
-        if prefs.adaptiveQuality, player.offersQuality {
-            PanelNote(text: "Steps down on its own when the connection struggles, and back up once it is steady. Settings → Video turns that off.")
+        #endif
+        ForEach(Quality.choices) { choice in
+            let playing = !player.isLocal && player.currentBitrate == choice.maxBitrate
+            PanelRow(title: choice.maxBitrate == nil ? "Direct (original)" : choice.label,
+                     detail: playing ? (player.isTranscoding ? "Playing now · transcoding" : "Playing now")
+                        : choice.maxBitrate == nil ? "The file as it is, no transcode" : nil,
+                     isSelected: !auto && playing,
+                     disabledReason: streamable ? nil : "Not for this stream") {
+                pick(.stream(choice.maxBitrate))
+            }
         }
+        PanelNote(text: "Auto plays the downloaded copy if there is one, then Direct — the original file, no transcode — and steps down through the streams below it when the connection struggles, climbing back once it is steady. Picking a quality keeps it there.")
+    }
+
+    /// What Auto has landed on, in the pill's words.
+    private var playingNow: String {
+        player.isLocal ? "Downloaded" : player.currentBitrate == nil ? "Direct" : Quality.shortLabel(for: player.currentBitrate)
+    }
+
+    private func pick(_ selection: PlayerModel.QualitySelection) {
+        onInteract()
+        close()
+        Task { await player.chooseQuality(selection) }
     }
 }
 

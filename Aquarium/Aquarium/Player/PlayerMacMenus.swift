@@ -196,11 +196,18 @@ struct PlayerMenuItems: View {
     var body: some View {
         // Only for a stream the server is choosing a bitrate for: a download
         // has no rungs and a channel plays as broadcast.
-        if player.offersQuality {
+        if player.offersQualityChoice {
             Menu("Quality") {
+                // In the order Auto tries them — see `PlayerModel.QualitySelection`.
                 Picker("Quality", selection: qualityBinding) {
+                    Text("Auto").tag(PlayerModel.QualitySelection.auto)
+                    if let download = player.downloadedCopy {
+                        Text(download.quality.isEmpty ? "Downloaded" : "Downloaded · \(download.quality)")
+                            .tag(PlayerModel.QualitySelection.downloaded)
+                    }
                     ForEach(Quality.choices) { choice in
-                        Text(choice.label).tag(choice.maxBitrate)
+                        Text(choice.maxBitrate == nil ? "Direct (original)" : choice.label)
+                            .tag(PlayerModel.QualitySelection.stream(choice.maxBitrate))
                     }
                 }
                 .pickerStyle(.inline)
@@ -329,10 +336,10 @@ struct PlayerMenuItems: View {
         return title
     }
 
-    private var qualityBinding: Binding<Int?> {
+    private var qualityBinding: Binding<PlayerModel.QualitySelection> {
         Binding(
-            get: { player.currentBitrate },
-            set: { bitrate in Task { await player.switchQuality(to: bitrate) } }
+            get: { player.qualitySelection },
+            set: { selection in Task { await player.chooseQuality(selection) } }
         )
     }
 
