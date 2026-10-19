@@ -442,8 +442,7 @@ struct MacDownloadsView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
-            // The same pause the download Live Activity has a button for on
-            // a phone.
+            // The same pause the Downloads page has on iPhone and iPad.
             Button {
                 downloads.setPaused(!downloads.isPaused)
             } label: {

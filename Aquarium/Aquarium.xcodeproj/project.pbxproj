@@ -15,7 +15,6 @@
 		FE11A5D00000000000000121 /* LiveActivityTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000106 /* LiveActivityTypes.swift */; };
 		FE11A5D00000000000000122 /* LiveActivitiesBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000102 /* LiveActivitiesBundle.swift */; };
 		FE11A5D00000000000000123 /* ListeningLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000103 /* ListeningLiveActivity.swift */; };
-		FE11A5D00000000000000124 /* DownloadsLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000104 /* DownloadsLiveActivity.swift */; };
 		FE11A5D00000000000000125 /* LiveActivities.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000101 /* LiveActivities.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FE11A5D00000000000000126 /* WidgetTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000107 /* WidgetTypes.swift */; };
 		FE11A5D00000000000000127 /* WidgetTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000107 /* WidgetTypes.swift */; };
@@ -120,7 +119,6 @@
 		FE11A5D00000000000000101 /* LiveActivities.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LiveActivities.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		FE11A5D00000000000000102 /* LiveActivitiesBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivitiesBundle.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000103 /* ListeningLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningLiveActivity.swift; sourceTree = "<group>"; };
-		FE11A5D00000000000000104 /* DownloadsLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsLiveActivity.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000105 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		FE11A5D00000000000000106 /* LiveActivityTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityTypes.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000107 /* WidgetTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetTypes.swift; sourceTree = "<group>"; };
@@ -284,7 +282,6 @@
 			children = (
 				FE11A5D00000000000000102 /* LiveActivitiesBundle.swift */,
 				FE11A5D00000000000000103 /* ListeningLiveActivity.swift */,
-				FE11A5D00000000000000104 /* DownloadsLiveActivity.swift */,
 				FE11A5D00000000000000108 /* NowPlayingWidget.swift */,
 				FE11A5D00000000000000602 /* FollowWidget.swift */,
 				FE11A5D00000000000000105 /* Info.plist */,
@@ -592,7 +589,6 @@
 			files = (
 				FE11A5D00000000000000122 /* LiveActivitiesBundle.swift in Sources */,
 				FE11A5D00000000000000123 /* ListeningLiveActivity.swift in Sources */,
-				FE11A5D00000000000000124 /* DownloadsLiveActivity.swift in Sources */,
 				FE11A5D00000000000000128 /* NowPlayingWidget.swift in Sources */,
 				FE11A5D00000000000000121 /* LiveActivityTypes.swift in Sources */,
 				FE11A5D00000000000000127 /* WidgetTypes.swift in Sources */,

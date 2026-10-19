@@ -1074,8 +1074,9 @@ final class AppModel {
             return
         }
         #if os(iOS)
-        // Where a tap on a Live Activity lands: the queue for the download
-        // one, Now Playing for the listening one.
+        // Where a tap on the Now Playing card or the listening Live Activity
+        // lands: Downloads for a film with no server item behind it, Now
+        // Playing for music.
         if url.host == "downloads" {
             show(.downloads)
             return

@@ -1,18 +1,17 @@
-//  The app's side of its two Live Activities — see Shared/LiveActivityTypes
-//  for what they are and why their state is made of dates.
+//  The app's side of its Live Activity — see Shared/LiveActivityTypes for
+//  what it is and why its state is made of dates.
 //
-//  Nothing in the players or the download manager knows this file exists. It
-//  watches them through Observation, works out what each activity should say,
-//  and tells the system only when that has actually changed. The watching is
-//  cheap enough to do on every playback tick; the telling is not, and an
-//  activity that is updated too eagerly is one the system starts ignoring.
+//  Nothing in the players knows this file exists. It watches them through
+//  Observation, works out what the activity should say, and tells the system
+//  only when that has actually changed. The watching is cheap enough to do
+//  on every playback tick; the telling is not, and an activity that is
+//  updated too eagerly is one the system starts ignoring.
 //
 //  Two rules of ActivityKit shape what follows. An activity can only be
 //  *started* while the app is in front — so a sleep timer set from the player
 //  always gets one, and one set from CarPlay gets one the next time the app
-//  is opened. And an activity outlives the process: a download
-//  batch whose app was swapped out is picked back up here on the next launch,
-//  with the counts it began from kept in defaults.
+//  is opened. And an activity outlives the process: one left running by an
+//  app that was swapped out is picked back up here on the next launch.
 
 #if os(iOS)
 
@@ -31,7 +30,6 @@ final class LiveActivityCenter {
         subsystem: Bundle.main.bundleIdentifier ?? "Aquarium", category: "liveactivity")
 
     private typealias Listening = ListeningActivityAttributes
-    private typealias Downloads = DownloadsActivityAttributes
 
     private var started = false
     /// Calls into ActivityKit, one after another. An update and the end that
@@ -48,15 +46,11 @@ final class LiveActivityCenter {
         LiveActivityActions.handler = { [weak self] in self?.perform($0) }
 
         listening = Activity<Listening>.activities.first { Self.isLive($0) }
-        downloading = Activity<Downloads>.activities.first { Self.isLive($0) }
         // Left over from a run that ended without saying so.
         for extra in Activity<Listening>.activities where extra.id != listening?.id { end(extra) }
-        for extra in Activity<Downloads>.activities where extra.id != downloading?.id { end(extra) }
         if let listening { watchForEnd(of: listening) }
-        if let downloading { watchForEnd(of: downloading) }
 
         watchListening()
-        watchDownloads()
         settleStaleNowPlaying()
         watchNowPlaying()
 
@@ -68,7 +62,6 @@ final class LiveActivityCenter {
                 self?.dropEndedActivities()
                 self?.renewOldListening()
                 self?.refreshListening()
-                self?.refreshDownloads()
             }
         }
     }
@@ -88,8 +81,6 @@ final class LiveActivityCenter {
         case .cancelSleepTimer:
             MusicPlayer.shared.cancelSleepTimer()
             PlayerModel.shared.cancelSleepTimer()
-        case .setDownloadsPaused(let paused):
-            DownloadManager.shared.setPaused(paused)
         case .togglePlayPause:
             _ = PlayerActions.togglePlayPause()
         case .skipSegment:
@@ -98,7 +89,6 @@ final class LiveActivityCenter {
         // Said now rather than when Observation gets round to it: the system
         // redraws the activity as the intent returns.
         refreshListening(immediately: true)
-        refreshDownloads()
     }
 
     private static func minutesLeft(until deadline: Date) -> Int {
@@ -437,314 +427,6 @@ final class LiveActivityCenter {
         return drawn.jpegData(compressionQuality: 0.8)
     }
 
-    // MARK: - Downloads
-
-    private var downloading: Activity<Downloads>?
-    private var downloadsSent: Downloads.ContentState?
-    private var downloadsSentAt = Date.distantPast
-    private var downloadsTrailing: Task<Void, Never>?
-    private var downloadsSettling: Task<Void, Never>?
-    /// Swiped away; not put back until the next batch.
-    private var downloadsDismissed = false
-
-    /// What had already finished, and already failed, when the batch began.
-    /// The batch's own counts are what has been added since — two numbers,
-    /// kept in defaults, rather than a set of a music library's item ids.
-    private var baseline: (complete: Int, failed: Int)? {
-        get {
-            let d = UserDefaults.standard
-            guard d.object(forKey: Self.baselineCompleteKey) != nil else { return nil }
-            return (d.integer(forKey: Self.baselineCompleteKey), d.integer(forKey: Self.baselineFailedKey))
-        }
-        set {
-            let d = UserDefaults.standard
-            if let newValue {
-                d.set(newValue.complete, forKey: Self.baselineCompleteKey)
-                d.set(newValue.failed, forKey: Self.baselineFailedKey)
-            } else {
-                d.removeObject(forKey: Self.baselineCompleteKey)
-                d.removeObject(forKey: Self.baselineFailedKey)
-            }
-        }
-    }
-
-    private static let baselineCompleteKey = "liveActivity.downloads.baselineComplete"
-    private static let baselineFailedKey = "liveActivity.downloads.baselineFailed"
-
-    /// The bytes already downloaded when the batch began, beside the counts
-    /// above: what has landed since is the difference, so the batch can be
-    /// quoted in bytes without keeping a list of what is in it.
-    private var baselineBytes: Int64 {
-        get { Int64(UserDefaults.standard.double(forKey: Self.baselineBytesKey)) }
-        set { UserDefaults.standard.set(Double(newValue), forKey: Self.baselineBytesKey) }
-    }
-    private static let baselineBytesKey = "liveActivity.downloads.baselineBytes"
-
-    /// No more than one update a second, and no more than one every few for
-    /// a bar that has only crept: a library of songs lands one a second for
-    /// twenty minutes, and a film reports its bytes twice a second for an hour.
-    private static let downloadsMinInterval: TimeInterval = 1
-    private static let downloadsCreepInterval: TimeInterval = 4
-    /// How long nothing may be in flight before the batch is called finished.
-    /// An item between the queue and its retry is briefly in neither.
-    private static let downloadsSettleTime: TimeInterval = 2
-    /// A running batch that has said nothing for this long has an app that is
-    /// suspended behind it; the activity stops quoting a percentage then.
-    private static let downloadsStaleAfter: TimeInterval = 5 * 60
-    /// How long "Downloaded 40 items" stays on the Lock Screen.
-    private static let downloadsLinger: TimeInterval = 10 * 60
-
-    private func watchDownloads() {
-        withObservationTracking {
-            refreshDownloads()
-        } onChange: { [weak self] in
-            Task { @MainActor [weak self] in self?.watchDownloads() }
-        }
-    }
-
-    private func refreshDownloads() {
-        let manager = DownloadManager.shared
-        let inFlight = manager.inFlightCount
-        // Read whether or not they are used, so the tracking above hears of
-        // a transfer's progress and of a pause.
-        let paused = manager.isPaused
-        let live = manager.liveProgress
-
-        guard inFlight > 0 else {
-            if downloading != nil || baseline != nil { settleDownloads() }
-            return
-        }
-        downloadsSettling?.cancel()
-        downloadsSettling = nil
-
-        let tally = manager.tally
-        if baseline == nil {
-            // One song is there before an activity could say so. Anything
-            // else — a film, a book, two of anything — is worth the space.
-            let single = manager.queue.first?.type ?? tally.running.first?.type
-            guard inFlight > 1 || single != "Audio" else { return }
-            baseline = (tally.completeCount, tally.failed.count)
-            baselineBytes = tally.completeBytes
-        }
-        // A stream download — every transcode, and an original that has to
-        // be rewrapped — also gets a Live Activity from iOS itself, which
-        // can't be turned off short of letting the system put the transfer
-        // off until it pleases. That one shows a combined percentage; this
-        // one shows the batch in bytes, item by item, with a pause. Both stay.
-        let counts = batchCounts(tally)
-        let total = counts.done + counts.failed + inFlight
-        let bytes = batchBytes(tally, manager.inFlightBytes)
-
-        var arriving = 0.0
-        for record in tally.running {
-            arriving += Self.itemFraction(record, live[record.itemId]) ?? 0
-        }
-        let byCount = min((Double(counts.done + counts.failed) + arriving) / Double(max(total, 1)), 1)
-        // In bytes when every item could be sized, which is the honest share
-        // of a batch that mixes a film with a dozen songs; by count when one
-        // couldn't, rather than a share of a total with a hole in it.
-        let fraction = bytes.map { $0.total > 0 ? min(Double($0.received) / Double($0.total), 1) : byCount } ?? byCount
-        let current = paused ? nil : tally.running.first
-        let currentFraction = current.flatMap { Self.itemFraction($0, live[$0.itemId]) }
-        let span = current.flatMap { itemSpan(itemId: $0.itemId, title: $0.title, fraction: currentFraction) }
-        if current == nil { paceSamples = [] }
-        let now = Date()
-        let next = manager.queue.first { $0.isDue(at: now) } ?? manager.queue.first
-        let state = Downloads.ContentState(
-            phase: paused ? .paused : .running,
-            done: counts.done, failed: counts.failed, total: total,
-            currentTitle: current?.title,
-            fraction: fraction,
-            currentFraction: currentFraction,
-            currentStart: span?.start,
-            currentEnd: span?.end,
-            nextTitle: next?.title,
-            receivedBytes: bytes?.received,
-            totalBytes: bytes?.total,
-            totalIsEstimate: bytes?.estimated
-        )
-        push(state)
-    }
-
-    /// The batch in bytes: what landed since it began, plus what is waiting
-    /// or arriving. Nil when anything in flight had nothing to size it by.
-    private func batchBytes(
-        _ tally: DownloadManager.Tally, _ inFlight: DownloadManager.InFlightBytes
-    ) -> (received: Int64, total: Int64, estimated: Bool)? {
-        guard inFlight.unsized == 0 else { return nil }
-        // A download deleted mid-batch takes its bytes out of the tally; the
-        // batch never quotes less than nothing for it.
-        let landed = max(0, tally.completeBytes - baselineBytes)
-        let received = landed + inFlight.received
-        let total = max(landed + inFlight.total, received)
-        guard total > 0 else { return nil }
-        return (received, total, inFlight.estimated)
-    }
-
-    /// How far one transfer has got, 0...1, or nil when that can't be told.
-    /// A transcode has no length until it is over; its fraction is the share
-    /// of the programme's running time fetched, and failing that the bytes
-    /// against the size estimated when it was queued.
-    private static func itemFraction(_ record: DownloadRecord, _ progress: DownloadManager.LiveProgress?) -> Double? {
-        if let fraction = progress?.fraction ?? record.loadedFraction {
-            return min(max(fraction, 0), 1)
-        }
-        if let progress, progress.total > 0 {
-            return min(Double(progress.received) / Double(progress.total), 1)
-        }
-        let received = progress?.received ?? record.receivedBytes
-        if let estimate = record.estimatedBytes, estimate > 0, received > 0 {
-            return min(Double(received) / Double(estimate), 0.99)
-        }
-        return nil
-    }
-
-    /// Recent (time, fraction) readings of the arriving item, for its pace.
-    /// A window rather than a start point, so a transfer that sped up or
-    /// slowed down is judged on how it is going now.
-    private var paceSamples: [(itemId: String, at: Date, fraction: Double)] = []
-    private static let paceWindow: TimeInterval = 90
-
-    /// The arriving item's progress as a span of time — see
-    /// `ContentState.currentStart`. Kept as it was last sent while the new
-    /// estimate agrees with it, so the bar isn't re-anchored (and the activity
-    /// updated) on every reading.
-    private func itemSpan(itemId: String, title: String, fraction: Double?) -> (start: Date, end: Date)? {
-        guard let fraction, fraction < 1 else { return nil }
-        let now = Date()
-        paceSamples.removeAll { $0.itemId != itemId || $0.fraction > fraction || now.timeIntervalSince($0.at) > Self.paceWindow }
-        if paceSamples.last.map({ now.timeIntervalSince($0.at) >= 2 }) ?? true {
-            paceSamples.append((itemId, now, fraction))
-        }
-        guard let oldest = paceSamples.first else { return nil }
-        let elapsed = now.timeIntervalSince(oldest.at)
-        let gained = fraction - oldest.fraction
-        guard elapsed >= 6, gained > 0.002 else { return nil }
-        let whole = elapsed / gained
-        let left = (1 - fraction) * whole
-        guard left.isFinite, whole.isFinite, left < 12 * 3600 else { return nil }
-        let end = now.addingTimeInterval(left)
-        if let sent = downloadsSent, sent.currentTitle == title,
-           let s = sent.currentStart, let e = sent.currentEnd,
-           abs(e.timeIntervalSince(end)) < max(5, left * 0.1) {
-            return (s, e)
-        }
-        return (now.addingTimeInterval(-fraction * whole), end)
-    }
-
-    private func batchCounts(_ tally: DownloadManager.Tally) -> (done: Int, failed: Int) {
-        guard let baseline else { return (0, 0) }
-        return (max(0, tally.completeCount - baseline.complete), max(0, tally.failed.count - baseline.failed))
-    }
-
-    private func push(_ state: Downloads.ContentState) {
-        guard let sent = downloadsSent, downloading != nil else {
-            let content = ActivityContent(state: state, staleDate: staleDate(for: state))
-            if let activity = downloading {
-                // Adopted from an earlier run; bring it up to date.
-                enqueue { await activity.update(content) }
-            } else {
-                guard !downloadsDismissed,
-                      let activity = request(Downloads(), content: content) else { return }
-                downloading = activity
-                watchForEnd(of: activity)
-            }
-            downloadsSent = state
-            downloadsSentAt = Date()
-            return
-        }
-        guard state != sent else { return }
-
-        // The span moves only when the estimate drifts (see `itemSpan`), so
-        // it is not part of what counts as creeping.
-        var sameButFraction = state
-        sameButFraction.fraction = sent.fraction
-        sameButFraction.currentFraction = sent.currentFraction
-        // Bytes climb with every reading and a projected total settles as it
-        // goes; both are the bar creeping, not news.
-        sameButFraction.receivedBytes = sent.receivedBytes
-        sameButFraction.totalBytes = sent.totalBytes
-        sameButFraction.totalIsEstimate = sent.totalIsEstimate
-        let onlyCrept = sameButFraction == sent
-        if onlyCrept, abs(state.fraction - sent.fraction) < 0.01,
-           abs((state.currentFraction ?? 0) - (sent.currentFraction ?? 0)) < 0.02 { return }
-
-        let wait = (onlyCrept ? Self.downloadsCreepInterval : Self.downloadsMinInterval)
-            - Date().timeIntervalSince(downloadsSentAt)
-        // A pause is the answer to a button; it doesn't wait its turn.
-        guard wait <= 0 || state.phase != sent.phase else {
-            guard downloadsTrailing == nil else { return }
-            downloadsTrailing = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(wait))
-                guard let self, !Task.isCancelled else { return }
-                self.downloadsTrailing = nil
-                self.refreshDownloads()
-            }
-            return
-        }
-        guard let activity = downloading else { return }
-        downloadsSent = state
-        downloadsSentAt = Date()
-        let content = ActivityContent(state: state, staleDate: staleDate(for: state))
-        enqueue { await activity.update(content) }
-    }
-
-    /// A running batch goes stale after a stretch of silence — or a minute
-    /// after the arriving item should have landed, since a bar sitting full
-    /// with nothing after it is a claim nobody is standing behind.
-    private func staleDate(for state: Downloads.ContentState) -> Date? {
-        guard state.phase == .running else { return nil }
-        let silence = Date().addingTimeInterval(Self.downloadsStaleAfter)
-        guard let end = state.currentEnd else { return silence }
-        return min(silence, max(end.addingTimeInterval(60), Date().addingTimeInterval(30)))
-    }
-
-    /// Nothing is in flight. If that is still so in a moment, the batch is
-    /// over: say what it came to and let the activity go.
-    private func settleDownloads() {
-        guard downloadsSettling == nil else { return }
-        downloadsSettling = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Self.downloadsSettleTime))
-            guard let self, !Task.isCancelled else { return }
-            self.downloadsSettling = nil
-            guard DownloadManager.shared.inFlightCount == 0 else { return }
-            self.finishDownloads()
-        }
-    }
-
-    private func finishDownloads() {
-        downloadsTrailing?.cancel()
-        downloadsTrailing = nil
-        let finalTally = DownloadManager.shared.tally
-        let counts = batchCounts(finalTally)
-        let landedBytes = max(0, finalTally.completeBytes - baselineBytes)
-        baseline = nil
-        downloadsSent = nil
-        downloadsDismissed = false
-        guard let activity = downloading else { return }
-        downloading = nil
-
-        let total = counts.done + counts.failed
-        guard total > 0 else {
-            // Everything was cancelled; there is nothing to report.
-            end(activity)
-            return
-        }
-        let state = Downloads.ContentState(
-            phase: .finished, done: counts.done, failed: counts.failed, total: total,
-            currentTitle: nil, fraction: 1,
-            receivedBytes: landedBytes > 0 ? landedBytes : nil,
-            totalBytes: landedBytes > 0 ? landedBytes : nil,
-            totalIsEstimate: false
-        )
-        // A failure stays until it has been seen; a clean finish is only
-        // worth a few minutes of Lock Screen.
-        let policy: ActivityUIDismissalPolicy =
-            counts.failed > 0 ? .default : .after(Date().addingTimeInterval(Self.downloadsLinger))
-        Self.log.notice("download batch finished: \(counts.done) done, \(counts.failed) failed")
-        enqueue { await activity.end(ActivityContent(state: state, staleDate: nil), dismissalPolicy: policy) }
-    }
-
     // MARK: - ActivityKit
 
     private func request<A: ActivityAttributes>(_ attributes: A, content: ActivityContent<A.ContentState>) -> Activity<A>? {
@@ -782,9 +464,6 @@ final class LiveActivityCenter {
         if let listening, !Self.isLive(listening) {
             activityEnded(listening.id, dismissed: listening.activityState == .dismissed)
         }
-        if let downloading, !Self.isLive(downloading) {
-            activityEnded(downloading.id, dismissed: downloading.activityState == .dismissed)
-        }
     }
 
     private func activityEnded(_ id: String, dismissed: Bool) {
@@ -793,12 +472,6 @@ final class LiveActivityCenter {
             if dismissed { listeningDismissedTitle = listeningSent?.title }
             listening = nil
             listeningSent = nil
-        }
-        if downloading?.id == id {
-            Self.log.notice("downloads activity \(dismissed ? "dismissed" : "ended by the system", privacy: .public)")
-            if dismissed { downloadsDismissed = true }
-            downloading = nil
-            downloadsSent = nil
         }
     }
 
