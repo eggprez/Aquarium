@@ -40,14 +40,39 @@ final class OrientationLock {
     /// What UIKit is told when it asks the delegate. A phone is portrait unless
     /// something on screen has asked otherwise; anything larger was never
     /// locked.
+    ///
+    /// A foldable is asked about its hinge rather than its pose, and the
+    /// difference matters: the tent — part-open, stood on its edges — is
+    /// recognised by the front screen being landscape, and the front screen
+    /// can only be landscape if landscape was allowed first. So any part-open
+    /// hinge frees the phone to turn, and the pose follows the turn. Fully
+    /// open is the inside screen, which ignores this mask anyway.
     var mask: UIInterfaceOrientationMask {
         guard UIDevice.current.userInterfaceIdiom == .phone else { return .all }
         // Upright as well as sideways, even for a wide film: the player used
         // to hold a wide picture to landscape, and a phone in bed or on a
         // stand wants it upright between the bars, with the controls against
         // the picture (`PlayerChrome.letterbox`).
-        guard wanting > 0 else { return .portrait }
-        return .allButUpsideDown
+        switch FoldState.shared.effectiveHinge {
+        case .fullyOpen:
+            return .all
+        case .partiallyOpen:
+            // Free to turn, so the tent can be recognised.
+            return .allButUpsideDown
+        case .closed, nil:
+            guard wanting > 0 else { return .portrait }
+            return .allButUpsideDown
+        }
+    }
+
+    /// The hinge has moved between closed, part-open and open. The last
+    /// answer may now be stale — a change of display is a change of what the
+    /// mask means — so it is forgotten and UIKit is asked again, deferred like
+    /// every other request here: a fold is a burst of hinge and trait changes
+    /// and one geometry update at the end of it is what is wanted.
+    func hingeChanged() {
+        lastRequested = nil
+        scheduleApply()
     }
 
     func allowLandscape() {

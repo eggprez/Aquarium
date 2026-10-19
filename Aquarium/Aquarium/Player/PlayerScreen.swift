@@ -17,6 +17,11 @@
 //  `PlayerMacMenus`); the Siri Remote is read by `PlayerRemoteDriver`
 //  (`TV/TVPlayerScreen.swift`) on a television, which also draws the code in
 //  the corner of a sync clip.
+//
+//  A foldable half-folded — part-open, flat on a table like a laptop — is
+//  split at the crease: the picture and the half of the chrome that belongs
+//  over it above the fold, and below it `PlayerFoldPanel` with the timeline,
+//  the pills, the prompts and what is playing. See `framed`.
 
 import Observation
 import OSLog
@@ -31,8 +36,21 @@ struct PlayerScreen: View {
     @State private var schedule = ChannelSchedule()
     @State private var artwork = InfoArtwork()
     @State private var pictureInPicture = PictureInPicture()
+    #if os(iOS)
+    @Environment(\.devicePose) private var pose
+    #endif
 
-    var body: some View {
+    /// Half-folded: the transport is split at the crease.
+    private var foldsBelow: Bool {
+        #if os(iOS)
+        pose == .halfFolded
+        #else
+        false
+        #endif
+    }
+
+    /// The picture and everything drawn over it.
+    private var stage: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             VideoSurface(pictureInPicture: pictureInPicture)
@@ -50,10 +68,37 @@ struct PlayerScreen: View {
             }
             #endif
             PlayerChrome(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork,
-                         pictureInPicture: pictureInPicture) {
+                         pictureInPicture: pictureInPicture, belowFold: foldsBelow) {
                 player.stop(reason: "player dismissed")
             }
         }
+    }
+
+    /// The stage — or, on a foldable half-folded, the stage above the fold
+    /// and `PlayerFoldPanel` below it. The stage is the first child of the
+    /// same stack either way, so the surface and its layer are never remade
+    /// by the fold: `FoldSplit` only changes the frame.
+    @ViewBuilder
+    private var framed: some View {
+        #if os(iOS)
+        if FoldState.shared.isFoldable {
+            FoldSplit(split: foldsBelow, crease: .black) {
+                stage
+            } lower: {
+                PlayerFoldPanel(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork)
+            }
+            .background(Color.black)
+            .ignoresSafeArea()
+        } else {
+            stage
+        }
+        #else
+        stage
+        #endif
+    }
+
+    var body: some View {
+        framed
         // Dark whatever the app's theme: the chrome is drawn over a picture,
         // and on a Mac the popovers take the window's appearance.
         .preferredColorScheme(.dark)

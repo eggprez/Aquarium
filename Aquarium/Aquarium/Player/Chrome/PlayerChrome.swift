@@ -215,6 +215,11 @@ struct PlayerChrome: View {
     let artwork: InfoArtwork
     /// Picture in Picture, where the surface offers it.
     var pictureInPicture: PictureInPicture?
+    /// The phone is half-folded and this chrome is the half over the
+    /// picture: the bottom band and the prompts (Skip intro, Up Next) are
+    /// drawn below the fold by `PlayerFoldPanel`, not here. See
+    /// `PlayerScreen.framed`.
+    var belowFold = false
     let onDismiss: () -> Void
 
     /// Bumped by Skip intro / Skip credits, purely so the haptic has something
@@ -287,8 +292,15 @@ struct PlayerChrome: View {
     /// The controls are up when they are showing, or while anything that
     /// needs them is: a pause, a scrub, the panel, an error.
     private var showsControls: Bool {
-        clockSaysVisible || player.isPaused || chrome.scrub != nil || chrome.panelOpen || chrome.menuOpen
+        clockSaysVisible || player.isPaused || chrome.scrub != nil || chrome.panelOpen || menuHoldsControls
             || player.errorMessage != nil || voiceOver
+    }
+
+    /// An open menu card holds these controls up when the card is one of
+    /// theirs: any card, unless the pills are below the fold, where only the
+    /// "…" button's card still hangs off this half.
+    private var menuHoldsControls: Bool {
+        chrome.menuOpen && (!belowFold || chrome.menu == .more)
     }
 
     /// A touch or a click on a control: keeps the controls up a while longer.
@@ -329,6 +341,7 @@ struct PlayerChrome: View {
                                 pictureInPicture: pictureInPicture, compact: compact, usesSheet: usesSheet,
                                 timelineOnly: PlayerMetrics.television && chrome.panelOpen,
                                 panelWidth: panelWidth,
+                                part: belowFold ? .aboveFold : .whole,
                                 onInteract: interact, onDismiss: onDismiss)
                     .transition(.opacity)
             }
@@ -413,7 +426,7 @@ struct PlayerChrome: View {
             if open == nil { interact() } else { chrome.holdControls() }
         }
         .onChange(of: chrome.menu) { _, open in
-            if open == nil { interact() } else { chrome.holdControls() }
+            if open == nil { interact() } else if menuHoldsControls { chrome.holdControls() }
         }
         .onChange(of: chrome.scrub) { _, scrub in if scrub == nil { chrome.scheduleHide(hideContext) } }
         .onChange(of: showsControls, initial: true) { _, raised in
@@ -523,23 +536,27 @@ struct PlayerChrome: View {
                 .padding(.top, showsControls ? 60 : 16)
         }
 
-        VStack(alignment: PlayerMetrics.television ? .trailing : .leading, spacing: 12) {
-            Spacer()
-            if player.shouldShowUpNext, let next = player.upNextTitle, player.errorMessage == nil, promptsMayShow {
-                PlayerUpNextCard(title: next, next: player.upNextItem, compact: compact)
-            } else if player.activeSegment != nil, player.errorMessage == nil, promptsMayShow {
-                PlayerSkipSegmentButton(isOutro: player.activeSegment?.isOutro == true) {
-                    skips += 1
-                    player.skipSegment()
+        // Half-folded, the prompts go below the fold with the rest of the
+        // panel rather than over a picture that is already half-size.
+        if !belowFold {
+            VStack(alignment: PlayerMetrics.television ? .trailing : .leading, spacing: 12) {
+                Spacer()
+                if player.shouldShowUpNext, let next = player.upNextTitle, player.errorMessage == nil, promptsMayShow {
+                    PlayerUpNextCard(title: next, next: player.upNextItem, compact: compact)
+                } else if player.activeSegment != nil, player.errorMessage == nil, promptsMayShow {
+                    PlayerSkipSegmentButton(isOutro: player.activeSegment?.isOutro == true) {
+                        skips += 1
+                        player.skipSegment()
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: PlayerMetrics.television ? .trailing : .leading)
+            .padding(.horizontal, edge)
+            .padding(.bottom, PlayerMetrics.overlayLift(controlsUp: showsControls, live: player.isLive))
+            .animation(.easeOut(duration: 0.2), value: player.activeSegment)
+            .animation(.easeOut(duration: 0.2), value: player.shouldShowUpNext)
+            .animation(.easeOut(duration: 0.25), value: showsControls)
         }
-        .frame(maxWidth: .infinity, alignment: PlayerMetrics.television ? .trailing : .leading)
-        .padding(.horizontal, edge)
-        .padding(.bottom, PlayerMetrics.overlayLift(controlsUp: showsControls, live: player.isLive))
-        .animation(.easeOut(duration: 0.2), value: player.activeSegment)
-        .animation(.easeOut(duration: 0.2), value: player.shouldShowUpNext)
-        .animation(.easeOut(duration: 0.25), value: showsControls)
 
         PlayerBitrateBadge()
             .frame(maxHeight: .infinity, alignment: .top)

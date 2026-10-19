@@ -87,7 +87,13 @@ enum DisplayMatch {
     /// rounded.
     static var matchedRate: Double? {
         guard let requested, !(manager?.isDisplayModeSwitchInProgress ?? true) else { return nil }
-        let screenRate = Double(UIScreen.main.maximumFramesPerSecond)
+        // The window's screen rather than `UIScreen.main`, which is on its
+        // way out: ambiguous on a device with two screens, and a television
+        // has only ever had the one the window is on.
+        let screen = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.screen
+        let screenRate = Double(screen?.maximumFramesPerSecond ?? 60)
         return abs(screenRate - requested.rounded()) <= 1 ? requested : nil
     }
 

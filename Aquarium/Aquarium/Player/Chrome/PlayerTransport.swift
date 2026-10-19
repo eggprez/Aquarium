@@ -43,6 +43,15 @@ struct PlayerTransport: View {
     /// of the picture, so the Info page has room for its two columns. The
     /// chrome works it out from its size.
     var panelWidth: CGFloat = 640
+    /// How much of the transport this is. The whole of it, usually. On a
+    /// foldable half-folded the transport is split at the crease: the half
+    /// over the picture keeps the scrims, the title row and the centre
+    /// cluster, and the half below the fold is the bottom band alone — the
+    /// timeline, the times and the pills — drawn by `PlayerFoldPanel`, where
+    /// the hands are.
+    var part: Part = .whole
+
+    enum Part { case whole, aboveFold, belowFold }
 
     /// A touch on any control: keeps the controls up a while longer.
     let onInteract: () -> Void
@@ -59,9 +68,22 @@ struct PlayerTransport: View {
     var body: some View {
         if PlayerMetrics.television {
             band
+        } else if part == .belowFold {
+            foldBand
         } else {
             handheld
         }
+    }
+
+    // MARK: - Below the fold
+
+    /// The bottom band on its own, for the half of a half-folded phone that
+    /// lies flat: no scrims, no cluster, no title row. The menu cards its
+    /// pills drop are placed by whoever lays this out — see
+    /// `PlayerFoldPanel` — so they can rise over the panel above the band.
+    private var foldBand: some View {
+        bottom
+            .padding(.horizontal, edge)
     }
 
     // MARK: - The television's band
@@ -150,8 +172,10 @@ struct PlayerTransport: View {
                 titleRow
                     .pointerHover { hoverTitle = $0 }
                 Spacer(minLength: 0)
-                bottom
-                    .pointerHover { hoverBottom = $0 }
+                if part == .whole {
+                    bottom
+                        .pointerHover { hoverBottom = $0 }
+                }
             }
             .padding(.horizontal, edge)
             // The cluster steps aside while a finger is on the timeline, so
@@ -180,8 +204,11 @@ struct PlayerTransport: View {
             LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .top, endPoint: .bottom)
                 .frame(height: compact ? 130 : 160)
             Spacer(minLength: 0)
-            LinearGradient(stops: PlayerMetrics.scrimStops, startPoint: .top, endPoint: .bottom)
-                .frame(height: compact ? 210 : 250)
+            // The bottom scrim is the band's; above a fold there is no band.
+            if part == .whole {
+                LinearGradient(stops: PlayerMetrics.scrimStops, startPoint: .top, endPoint: .bottom)
+                    .frame(height: compact ? 210 : 250)
+            }
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)

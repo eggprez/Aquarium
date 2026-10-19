@@ -662,7 +662,10 @@ final class AppModel {
             if selection == .downloads { selection = before }
         }
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom == .phone {
+        // The tab bar, wherever it is showing: a phone, an iPad in Slide Over,
+        // a foldable closed. The idiom was asked before, and an iPad in a
+        // narrow split was reconciled as if it had a sidebar.
+        if !sidebarShown {
             // Downloads is a tab of its own offline and, on most setups, a
             // row in More online. Someone on it when the server comes back
             // stays on it — `show` reopens it where it now lives.
@@ -840,15 +843,21 @@ final class AppModel {
     }
 
     #if os(iOS)
+    /// Someone in the tent pose pressed Browse: the ordinary shell instead of
+    /// the lean-back screen, until the pose changes — see `TentIdleView` and
+    /// `RootView`.
+    var tentBrowsing = false
+
     /// What `RootView.adaptiveShell` last laid out. The idiom until it says
     /// otherwise, which is what an iPad at full width gets anyway.
     private var sidebarShown = UIDevice.current.userInterfaceIdiom != .phone
 
     /// The shell has swapped between the sidebar and the tab bar — an iPad
-    /// going into or out of Slide Over or a narrow split. The selection goes
-    /// where the new shell has it, the way `reconcileSelection` does for the
-    /// offline shell: a section the bar has no tab for opens inside More, and
-    /// More, which a sidebar has no row for, becomes whatever it had open.
+    /// going into or out of Slide Over or a narrow split, a foldable opened
+    /// or closed. The selection goes where the new shell has it, the way
+    /// `reconcileSelection` does for the offline shell: a section the bar has
+    /// no tab for opens inside More, and More, which a sidebar has no row
+    /// for, becomes whatever it had open.
     func shellChanged(toSidebar sidebar: Bool) {
         guard sidebar != sidebarShown else { return }
         sidebarShown = sidebar
