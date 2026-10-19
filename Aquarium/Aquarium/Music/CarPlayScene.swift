@@ -911,7 +911,10 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             let elements = covers.map {
                 CPListImageRowItemImageGridElement(image: $0.image, imageShape: .roundedRectangle, title: $0.title, accessorySymbolName: nil)
             }
-            row = CPListImageRowItem(text: text, imageGridElements: elements, allowsMultipleLines: false)
+            // Multiple lines: the car sizes the row for every cover it is
+            // given whether or not it may wrap, so a single line of four
+            // left a blank second line's worth of space under the row.
+            row = CPListImageRowItem(text: text, imageGridElements: elements, allowsMultipleLines: true)
         } else if #available(iOS 17.4, *) {
             row = CPListImageRowItem(text: text ?? "", images: covers.map(\.image), imageTitles: covers.map(\.title))
         } else {
