@@ -58,9 +58,9 @@ struct SearchView: View {
     }
     @State private var scope: Scope = .all
     #if os(iOS)
-    /// Whether the field in the bar is active. Search is opened from Home's
-    /// search button, so it comes up ready to type into.
-    @State private var isFieldActive = false
+    /// Whether the field in the bar has the keyboard. Search is opened from
+    /// Home's search button, so it comes up ready to type into.
+    @FocusState private var isFieldFocused: Bool
     @Environment(\.dismiss) private var dismiss
     #endif
 
@@ -168,17 +168,14 @@ struct SearchView: View {
         .screenTitle("Search")
         .paletteBar()
         #if os(iOS)
-        // Always showing, not tucked under the title until the page is pulled
-        // down. That tuck is the system's default for a field in a pushed
-        // page's bar, and Search is always a pushed page here — opened from
-        // Home's search button. A search screen that opens without anywhere
-        // to type reads as broken.
-        .searchable(
-            text: $term,
-            isPresented: $isFieldActive,
-            placement: .navigationBarDrawer(displayMode: .always),
-            prompt: app.hasAudio ? "Movies, shows, music, books" : "Movies, shows, episodes"
-        )
+        // The page draws its own bar, as Home does, rather than taking the
+        // system's with a search field in its drawer. Pushed from Home — whose
+        // system bar is hidden — that bar sometimes stayed behind on the way
+        // back as an empty band above Home's own.
+        .toolbar(.hidden, for: .navigationBar)
+        .background { BackSwipe().frame(width: 0, height: 0) }
+        .safeAreaInset(edge: .top, spacing: 0) { searchBar }
+        .scrollDismissesKeyboard(.immediately)
         #elseif os(macOS)
         // The field is the sidebar's — see `RootView` — and this page mirrors
         // its text. Typing there, whatever section was showing, lands here
@@ -216,12 +213,6 @@ struct SearchView: View {
             schedule(immediate: true)
         }
         #endif
-        #if os(iOS)
-        .onSubmit(of: .search) {
-            prefs.rememberSearch(term)
-            schedule(immediate: true)
-        }
-        #endif
         .onChange(of: term) { _, _ in schedule() }
         // A watched tick or a star set from a result's own press-and-hold menu
         // is drawn on the card it was set from, and the card is a copy of what
@@ -256,13 +247,7 @@ struct SearchView: View {
             // has put the page on screen.
             guard term.isEmpty, initialTerm.isEmpty else { return }
             try? await Task.sleep(for: .milliseconds(350))
-            isFieldActive = true
-        }
-        // Cancel with nothing typed is a change of mind, not a wish to look at
-        // an empty Search page: straight back to Home rather than a second tap.
-        .onChange(of: isFieldActive) { was, now in
-            guard was, !now, term.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-            dismiss()
+            isFieldFocused = true
         }
         #endif
         .onAppear {
@@ -276,6 +261,46 @@ struct SearchView: View {
             }
         }
     }
+
+    #if os(iOS)
+    /// Back, and the field. Back with or without a term is the way out;
+    /// the field's own clear button empties it.
+    private var searchBar: some View {
+        AppTopBar {
+            HStack(spacing: 10) {
+                BarBackButton { dismiss() }
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(Theme.textDim)
+                    TextField(app.hasAudio ? "Movies, shows, music, books" : "Movies, shows, episodes", text: $term)
+                        .focused($isFieldFocused)
+                        .submitLabel(.search)
+                        .autocorrectionDisabled()
+                        .onSubmit {
+                            prefs.rememberSearch(term)
+                            schedule(immediate: true)
+                        }
+                    if !term.isEmpty {
+                        Button {
+                            term = ""
+                            isFieldFocused = true
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(Theme.textDim)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear")
+                    }
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 40)
+                .background(Theme.raised, in: Capsule())
+                .contentShape(Capsule())
+                .onTapGesture { isFieldFocused = true }
+            }
+        }
+    }
+    #endif
 
     #if os(macOS)
     /// The window's subtitle: how many the term found, while it has found any.
