@@ -665,14 +665,13 @@ final class DownloadManager: NSObject {
 
     private func makeAssetSession(identifier: String, allowsCellular: Bool) -> AVAssetDownloadURLSession {
         let cfg = URLSessionConfiguration.background(withIdentifier: identifier)
-        // Discretionary, which is what keeps the system's own Live Activity
-        // off: iOS puts one on the Lock Screen and in the Dynamic Island for
-        // every non-discretionary stream download, and only for those (see
-        // AVAssetDownloadTask.h). The price is that the system may hold a
-        // transfer back for a better moment — Wi-Fi, a charger — rather than
-        // start it the instant it is asked for. Plain file downloads use the
-        // session above and are not affected.
-        cfg.isDiscretionary = true
+        // Not discretionary, even though that is the only way to keep the
+        // system's own Live Activity off (see AVAssetDownloadTask.h). A
+        // discretionary stream fetches its playlist and then holds every
+        // segment for "an optimal time" — on a phone off its charger, that
+        // was never: movies sat at the playlist's 1.4 MB indefinitely. The
+        // Live Activity's cancel button is handled in `classify`.
+        cfg.isDiscretionary = false
         cfg.sessionSendsLaunchEvents = true
         cfg.allowsCellularAccess = allowsCellular
         // One connection, so segments are asked for in order.
@@ -1461,9 +1460,9 @@ final class DownloadManager: NSObject {
     /// used to finish the item that was arriving and then sit. Started here,
     /// while the app still counts as in front, the rest are already in the
     /// system's hands, and it runs them whether or not the app is woken.
-    /// Streams are discretionary whenever they start (see
-    /// `makeAssetSession`), so for them what this buys is only that they
-    /// are queued without waiting for the app to be woken.
+    /// A stream started from the background is demoted to discretionary
+    /// outright (see AVAssetDownloadTask.h), which on a phone off its charger
+    /// means it sits; started here, it isn't.
     ///
     /// What still holds: a pause, Wi-Fi only, retries waiting out a delay, and
     /// one transcode at a time — the server's encoder is the reason for that
@@ -2982,6 +2981,11 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 stopped.status = .canceled
                 stopped.errorMessage = nil
                 self.save(stopped)
+                // The system's stop button means stop: left alone, the pump
+                // would start the next in the queue and put the activity
+                // straight back. Paused rather than cleared, so what was
+                // waiting is still there to resume from the Downloads page.
+                if failure.fromSystemControls { self.setPaused(true) }
             case .permanent:
                 // Jellyfin starts encoding when the first request comes in,
                 // and can answer it with a 404 before there's anything to
@@ -3034,6 +3038,8 @@ extension DownloadManager: URLSessionDownloadDelegate {
         /// the end, but on a stream's first request it is usually a transcode
         /// that hasn't written its first segment yet.
         var notFound: Bool = false
+        /// Stopped from the system's Live Activity rather than from the app.
+        var fromSystemControls: Bool = false
     }
 
     /// Sort an error into "someone stopped it", "worth another go" and
@@ -3053,12 +3059,16 @@ extension DownloadManager: URLSessionDownloadDelegate {
         let detail = layers.map { "\($0.domain) \($0.code): \($0.localizedDescription)" }.joined(separator: " ← ")
         let urlErrors = layers.filter { $0.domain == NSURLErrorDomain }.map { URLError.Code(rawValue: $0.code) }
 
-        // A stream can also come back with Cocoa's user-cancelled rather
-        // than URLError's — AVFoundation's word for a stop the person asked
-        // for. Read as a hiccup, it would be started straight back up.
-        let userCancel = layers.contains { $0.domain == NSCocoaErrorDomain && $0.code == NSUserCancelledError }
-        if urlErrors.contains(.cancelled) || userCancel {
-            return Failure(kind: .cancelled, isConnectivity: false, summary: "Cancelled", detail: detail)
+        // The system's own Live Activity for stream downloads has a cancel
+        // button, and what it hands back is Cocoa's user-cancelled rather
+        // than URLError's: without this it read as a hiccup and every
+        // download the person had just cancelled was started again.
+        let systemCancel = layers.contains { $0.domain == NSCocoaErrorDomain && $0.code == NSUserCancelledError }
+        if urlErrors.contains(.cancelled) || systemCancel {
+            return Failure(
+                kind: .cancelled, isConnectivity: false, summary: "Cancelled", detail: detail,
+                fromSystemControls: systemCancel
+            )
         }
         let connectivity: Set<URLError.Code> = [
             .notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotConnectToHost,
