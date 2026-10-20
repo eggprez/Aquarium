@@ -221,6 +221,81 @@ final class WatchLink: NSObject {
         } catch {
             Self.log.error("context not sent: \(error.localizedDescription, privacy: .public)")
         }
+        await sendPlaylists(context.mirror.playlistIds)
+        await sendBooks(context.mirror.bookIds)
+    }
+
+    /// What each kept playlist, and the books, were last sent as, so an
+    /// unchanged one isn't sent again with every context.
+    private var sentPlaylists: [String: Data] = [:]
+    private var sentBooks: Data?
+
+    /// The songs of each kept playlist, looked up here and handed over as a
+    /// file. The watch's own way to the server can fail for good — timeouts
+    /// and TLS errors on every request, on a watch lying next to the phone —
+    /// and with nothing else to go on, a playlist switched on queued nothing.
+    private func sendPlaylists(_ ids: [String]) async {
+        let client = JellyfinClient.shared
+        guard client.session != nil, !client.isOffline else { return }
+        for id in ids {
+            guard let songs = try? await client.playlistItems(playlistId: id) else {
+                Self.log.error("playlist \(id, privacy: .public) not looked up for the watch")
+                continue
+            }
+            let named = try? await client.item(id)
+            let contents = WatchPlaylistContents(
+                id: id,
+                name: named?.title ?? "Playlist",
+                imageTag: named?.ImageTags?["Primary"],
+                songs: songs.filter(\.isAudio).map(\.forWatch)
+            )
+            guard let data = try? JSONEncoder().encode(contents), sentPlaylists[id] != data else { continue }
+            guard handOver(data, metadata: [
+                WatchFileTransfer.kindKey: WatchFileTransfer.playlistKind,
+                WatchFileTransfer.playlistKey: id,
+            ]) else { continue }
+            sentPlaylists[id] = data
+            Self.log.notice("playlist \(id, privacy: .public) sent to the watch: \(contents.songs.count) songs, \(data.count) bytes")
+        }
+    }
+
+    /// The books in progress, looked up here with their chapters and handed
+    /// over as a file, for the same reason as the playlists.
+    private func sendBooks(_ ids: [String]) async {
+        let client = JellyfinClient.shared
+        guard !ids.isEmpty, client.session != nil, !client.isOffline else { return }
+        guard let books = try? await client.songs(ids: ids, detail: true) else {
+            Self.log.error("books in progress not looked up for the watch")
+            return
+        }
+        let contents = WatchBooksContents(books: books.filter(\.isAudiobook).map(\.forWatch))
+        guard let data = try? JSONEncoder().encode(contents), sentBooks != data else { return }
+        guard handOver(data, metadata: [WatchFileTransfer.kindKey: WatchFileTransfer.booksKind]) else { return }
+        sentBooks = data
+        Self.log.notice("books in progress sent to the watch: \(contents.books.count), \(data.count) bytes")
+    }
+
+    /// A list for the watch, as a file: no size limit, and delivered in the
+    /// background with the watch app asleep. An older one of the same kind
+    /// and name still on its way is superseded.
+    private func handOver(_ data: Data, metadata: [String: String]) -> Bool {
+        guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return false }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("watch-list-\(UUID().uuidString).json")
+        do {
+            try data.write(to: file, options: .atomic)
+        } catch {
+            Self.log.error("a list for the watch wasn't written: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+        // Downloads add up rather than supersede one another.
+        for transfer in WCSession.default.outstandingFileTransfers where metadata[WatchFileTransfer.kindKey] != WatchFileTransfer.downloadKind {
+            let m = transfer.file.metadata
+            guard m?[WatchFileTransfer.kindKey] as? String == metadata[WatchFileTransfer.kindKey],
+                  m?[WatchFileTransfer.playlistKey] as? String == metadata[WatchFileTransfer.playlistKey] else { continue }
+            transfer.cancel()
+        }
+        WCSession.default.transferFile(file, metadata: metadata)
+        return true
     }
 
     /// The sign-in and the plan as they stand.
@@ -320,7 +395,32 @@ final class WatchLink: NSObject {
         else if item.isArtist { kind = .artist }
         else if item.isMusicGenre { kind = .genre }
         else { kind = .song }
-        send(.download(WatchDownloadRequest(kind: kind, id: item.Id, title: item.title)))
+        let request = WatchDownloadRequest(kind: kind, id: item.Id, title: item.title)
+        Task { await sendDownload(request) }
+    }
+
+    /// What a download comes to, looked up here and handed over as a file,
+    /// for the same reason as the playlists. When this phone can't ask the
+    /// server either, the watch is sent the bare request and tries itself.
+    private func sendDownload(_ request: WatchDownloadRequest) async {
+        let client = JellyfinClient.shared
+        var items: [BaseItem]?
+        switch request.kind {
+        case .song, .book: items = try? await client.songs(ids: [request.id], detail: true)
+        case .album: items = try? await client.albumTracks(albumId: request.id)
+        case .playlist: items = try? await client.playlistItems(playlistId: request.id)
+        case .artist: items = try? await client.allSongs(artistId: request.id)
+        case .genre: items = try? await client.songs(genreId: request.id, limit: 200)
+        }
+        let contents = items.map { WatchDownloadContents(request: request, items: $0.filter(\.isAudio).map(\.forWatch)) }
+        guard let contents, !contents.items.isEmpty,
+              let data = try? JSONEncoder().encode(contents),
+              handOver(data, metadata: [WatchFileTransfer.kindKey: WatchFileTransfer.downloadKind]) else {
+            Self.log.error("\(request.kind.rawValue, privacy: .public) \(request.id, privacy: .public) not looked up here; the watch is asked to")
+            send(.download(request))
+            return
+        }
+        Self.log.notice("\(request.kind.rawValue, privacy: .public) \(request.id, privacy: .public) sent to the watch: \(contents.items.count) items, \(data.count) bytes")
     }
 
     func requestInventory() { send(.requestInventory) }

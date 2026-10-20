@@ -226,6 +226,10 @@ final class WatchDownloads: NSObject {
     }
     private var active: String?
     private var mirrorTask: Task<Void, Never>?
+    /// Kept playlists' songs, and the books in progress, as the phone last
+    /// sent them.
+    private var phoneLists: [String: WatchPlaylistContents] = [:]
+    private var phoneBooks: [String: BaseItem] = [:]
     /// Items this watch failed to fetch for itself: asked of the phone next,
     /// even on Wi‑Fi. A watch on a network that can't reach the server
     /// (a TLS failure, a timeout) otherwise retries the same dead route.
@@ -565,25 +569,27 @@ final class WatchDownloads: NSObject {
         pump()
     }
 
-    func deletePlaylist(_ playlistId: String) {
+    /// `fromPhone`: the phone's own switch, which it already knows about —
+    /// told back, a reply crossing a switch turned on again turned it off.
+    func deletePlaylist(_ playlistId: String, fromPhone: Bool = false) {
         guard let list = playlists.first(where: { $0.id == playlistId }) else { return }
         withdraw(reason: "playlist:\(playlistId)", from: list.itemIds)
         playlists.removeAll { $0.id == playlistId }
         playlistSyncedAt[playlistId] = nil
         savePlaylists()
-        dropped([playlistId])
+        dropped([playlistId], tellPhone: !fromPhone)
         pump()
     }
 
     /// Playlists taken off the watch here: the phone is told, so its
     /// "Kept on the watch" switch goes off and its plan stops naming them,
     /// and until it has caught up its plan's word on them is set aside.
-    private func dropped(_ playlistIds: [String]) {
+    private func dropped(_ playlistIds: [String], tellPhone: Bool = true) {
         guard !playlistIds.isEmpty else { return }
         let now = Date()
         for id in playlistIds {
             droppedPlaylists[id] = now
-            WatchLink.shared.send(.playlistRemoved(id: id))
+            if tellPhone { WatchLink.shared.send(.playlistRemoved(id: id)) }
         }
         persistDropped()
     }
@@ -1099,8 +1105,12 @@ final class WatchDownloads: NSObject {
     ///
     /// `force` (Sync Now) matches every playlist whenever it was last
     /// looked at, and queues again any of its songs not on the watch.
+    ///
+    /// Not held back by `hasNetwork`: on a watch the path monitor reports
+    /// no network all day (it is for audio streaming only there), and the
+    /// playlists the phone sends need none.
     func mirror(force: Bool = false) {
-        guard mirrorTask == nil, hasNetwork, JellyfinClient.shared.isSignedIn else { return }
+        guard mirrorTask == nil, JellyfinClient.shared.isSignedIn else { return }
         let plan = plan
         let planned = plannedPlaylistIds
         let lists = planned + playlists.map(\.id).filter { !planned.contains($0) }
@@ -1113,7 +1123,9 @@ final class WatchDownloads: NSObject {
             let missingBooks = plan.bookIds.filter { record(for: $0) == nil }
             if !missingBooks.isEmpty {
                 for id in missingBooks {
-                    guard let book = try? await client.item(id), book.isAudiobook else { continue }
+                    var book = phoneBooks[id]
+                    if book == nil { book = try? await client.item(id) }
+                    guard let book, book.isAudiobook else { continue }
                     guard !Task.isCancelled else { return }
                     queued += enqueue([book], reason: "book", automatic: true)
                 }
@@ -1130,6 +1142,15 @@ final class WatchDownloads: NSObject {
         }
     }
 
+    /// The mirror's pass done, or `limit` gone by: what a background wake
+    /// holds for, so the server's answer is heard and the phone asked.
+    func mirrorSettled(within limit: Duration) async {
+        let deadline = ContinuousClock.now + limit
+        while mirrorTask != nil, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+    }
+
     /// One playlist made to match the server's: songs added there are
     /// queued, and songs taken out there leave the watch — unless an album,
     /// another playlist or a tap of their own still keeps them. A song that
@@ -1137,17 +1158,31 @@ final class WatchDownloads: NSObject {
     /// off by hand) is left off, except by `force`. Nil when the server
     /// couldn't be asked, or the list went while it was being asked.
     private func syncPlaylist(_ id: String, planned: Bool, force: Bool) async -> Int? {
-        let client = JellyfinClient.shared
-        guard let songs = try? await client.playlistItems(playlistId: id) else { return nil }
-        let named = try? await client.item(id)
+        let songs: [BaseItem]
+        var name: String?
+        var imageTag: String?
+        if let given = phoneLists[id] {
+            // The phone's word, as fresh as anything the server would say.
+            songs = given.songs
+            name = given.name
+            imageTag = given.imageTag
+        } else {
+            let client = JellyfinClient.shared
+            guard let asked = try? await client.playlistItems(playlistId: id) else { return nil }
+            songs = asked
+            if let named = try? await client.item(id) {
+                name = named.title
+                imageTag = named.ImageTags?["Primary"]
+            }
+        }
         guard !Task.isCancelled else { return nil }
         // Looked at again after the waits: taken off meanwhile, it stays off.
         let existing = playlists.first { $0.id == id }
         guard existing != nil || (planned && plannedPlaylistIds.contains(id)) else { return nil }
         var list = existing ?? WatchPlaylist(id: id, name: "Playlist", itemIds: [], automatic: true)
-        if let named {
-            list.name = named.title
-            list.imageTag = named.ImageTags?["Primary"]
+        if let name {
+            list.name = name
+            list.imageTag = imageTag
         }
         let audio = songs.filter(\.isAudio)
         let before = Set(existing?.itemIds ?? [])
@@ -1167,6 +1202,28 @@ final class WatchDownloads: NSObject {
             WatchLog.note("downloads", "playlist \(id) matched to the server: \(added) queued, \(gone.count) gone")
         }
         return added
+    }
+
+    /// A playlist's songs as the phone found them. Matched now, in place of
+    /// asking the server: a pass already waiting on the server is dropped
+    /// for this one. Kept for later passes until the phone sends it again.
+    func receivedFromPhone(playlist: WatchPlaylistContents) {
+        phoneLists[playlist.id] = playlist
+        playlistSyncedAt[playlist.id] = nil
+        mirrorTask?.cancel()
+        mirrorTask = nil
+        mirrorGeneration += 1
+        mirror()
+    }
+
+    /// The books in progress as the phone found them: queued from these,
+    /// not asked of the server.
+    func receivedFromPhone(books: WatchBooksContents) {
+        for book in books.books { phoneBooks[book.Id] = book }
+        mirrorTask?.cancel()
+        mirrorTask = nil
+        mirrorGeneration += 1
+        mirror()
     }
 
     /// Keep a whole playlist by hand: saved, and every song queued.
@@ -1247,7 +1304,7 @@ final class WatchDownloads: NSObject {
         switch kind {
         case .book: deleteBook(id)
         case .album: deleteAlbum(id)
-        case .playlist: deletePlaylist(id)
+        case .playlist: deletePlaylist(id, fromPhone: true)
         case .songs: deleteLooseSongs()
         }
     }
@@ -1255,33 +1312,41 @@ final class WatchDownloads: NSObject {
     /// A download asked for from the phone: fetch what it names and queue it.
     func download(_ request: WatchDownloadRequest) async {
         let client = JellyfinClient.shared
+        let items: [BaseItem]?
+        switch request.kind {
+        case .song, .book: items = (try? await client.item(request.id)).map { [$0] }
+        case .album: items = try? await client.albumTracks(albumId: request.id)
+        case .playlist: items = try? await client.playlistItems(playlistId: request.id)
+        case .artist: items = try? await client.songs(artistId: request.id)
+        case .genre: items = try? await client.songs(genreId: request.id)
+        }
+        guard let items else {
+            WatchLog.error("downloads", "\(request.kind.rawValue) \(request.id) not looked up: the server didn't answer")
+            return
+        }
+        keep(request, items: items)
+    }
+
+    /// A download from the phone, with what it comes to — looked up there,
+    /// or here by `download(_:)` when the phone couldn't.
+    func keep(_ request: WatchDownloadRequest, items: [BaseItem]) {
         switch request.kind {
         case .song, .book:
-            if let item = try? await client.item(request.id) {
-                enqueue([item], reason: request.kind == .book ? "book" : "song")
-            }
+            enqueue(items, reason: request.kind == .book ? "book" : "song")
         case .album:
-            if let songs = try? await client.albumTracks(albumId: request.id) {
-                enqueue(songs, reason: "album:\(request.id)")
-            }
+            enqueue(items, reason: "album:\(request.id)")
         case .playlist:
-            if let songs = try? await client.playlistItems(playlistId: request.id) {
-                var list = BaseItem()
-                list.Id = request.id
-                list.Name = request.title
-                list.type = "Playlist"
-                keep(playlist: list, songs: songs)
-            }
+            var list = BaseItem()
+            list.Id = request.id
+            list.Name = request.title
+            list.type = "Playlist"
+            keep(playlist: list, songs: items)
         case .artist:
-            if let songs = try? await client.songs(artistId: request.id) {
-                for (albumId, group) in Dictionary(grouping: songs, by: { $0.AlbumId ?? "" }) {
-                    enqueue(group, reason: albumId.isEmpty ? "song" : "album:\(albumId)")
-                }
+            for (albumId, group) in Dictionary(grouping: items, by: { $0.AlbumId ?? "" }) {
+                enqueue(group, reason: albumId.isEmpty ? "song" : "album:\(albumId)")
             }
         case .genre:
-            if let songs = try? await client.songs(genreId: request.id) {
-                enqueue(songs, reason: "song")
-            }
+            enqueue(items, reason: "song")
         }
     }
 }

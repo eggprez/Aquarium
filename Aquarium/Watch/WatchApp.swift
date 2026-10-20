@@ -85,11 +85,17 @@ final class WatchDelegate: NSObject, WKApplicationDelegate {
             case let link as WKWatchConnectivityRefreshBackgroundTask:
                 // Held while the session still has things to hand over —
                 // the pieces of a book from the phone — so the app isn't
-                // put back to sleep before they reach it.
+                // put back to sleep before they reach it. Then held for the
+                // mirror a new plan starts: a playlist switched on at the
+                // phone is looked up on the server and asked of the phone
+                // from here, and let go at once the watch slept through the
+                // answer and nothing downloaded until the app was opened.
                 Task { @MainActor in
                     for _ in 0..<20 where WCSession.default.activationState != .activated || WCSession.default.hasContentPending {
                         try? await Task.sleep(for: .milliseconds(500))
                     }
+                    try? await Task.sleep(for: .milliseconds(300))
+                    await WatchDownloads.shared.mirrorSettled(within: .seconds(15))
                     link.setTaskCompletedWithSnapshot(false)
                 }
             case let refresh as WKApplicationRefreshBackgroundTask:

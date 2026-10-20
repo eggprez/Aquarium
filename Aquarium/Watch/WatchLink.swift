@@ -488,6 +488,37 @@ extension WatchLink: WCSessionDelegate {
     /// the item's folder here and now — the system deletes it when this
     /// returns — and then measured before it is believed.
     nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
+        if file.metadata?[WatchFileTransfer.kindKey] as? String == WatchFileTransfer.playlistKind {
+            // Read now: the system deletes the file when this returns.
+            guard let data = try? Data(contentsOf: file.fileURL),
+                  let contents = try? JSONDecoder().decode(WatchPlaylistContents.self, from: data) else {
+                WatchLog.error("link", "a playlist from the phone would not read")
+                return
+            }
+            WatchLog.note("link", "playlist \(contents.id) from the phone: \(contents.songs.count) songs")
+            Task { @MainActor in WatchDownloads.shared.receivedFromPhone(playlist: contents) }
+            return
+        }
+        if file.metadata?[WatchFileTransfer.kindKey] as? String == WatchFileTransfer.downloadKind {
+            guard let data = try? Data(contentsOf: file.fileURL),
+                  let contents = try? JSONDecoder().decode(WatchDownloadContents.self, from: data) else {
+                WatchLog.error("link", "a download from the phone would not read")
+                return
+            }
+            WatchLog.note("link", "download of \(contents.request.kind.rawValue) \(contents.request.id) from the phone: \(contents.items.count) items")
+            Task { @MainActor in WatchDownloads.shared.keep(contents.request, items: contents.items) }
+            return
+        }
+        if file.metadata?[WatchFileTransfer.kindKey] as? String == WatchFileTransfer.booksKind {
+            guard let data = try? Data(contentsOf: file.fileURL),
+                  let contents = try? JSONDecoder().decode(WatchBooksContents.self, from: data) else {
+                WatchLog.error("link", "the books from the phone would not read")
+                return
+            }
+            WatchLog.note("link", "\(contents.books.count) books in progress from the phone")
+            Task { @MainActor in WatchDownloads.shared.receivedFromPhone(books: contents) }
+            return
+        }
         guard let itemId = file.metadata?[WatchFileTransfer.itemKey] as? String else {
             WatchLog.error("link", "a file with no item id arrived from the phone: \(String(describing: file.metadata))")
             return

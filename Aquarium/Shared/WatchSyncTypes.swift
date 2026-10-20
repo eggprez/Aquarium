@@ -375,9 +375,19 @@ enum WatchDownloadSource {
 
 /// The metadata on a file the phone hands the watch.
 enum WatchFileTransfer {
-    /// What a file is: absent for an audio item, `logsKind` for a log.
+    /// What a file is: absent for an audio item, `logsKind` for a log,
+    /// `playlistKind` for a kept playlist's songs (a `WatchPlaylistContents`,
+    /// named by `playlistKey` rather than `itemKey`, which means audio),
+    /// `booksKind` for the books in progress (a `WatchBooksContents`),
+    /// `downloadKind` for a download asked for on the phone.
     static let kindKey = "kind"
     static let logsKind = "logs"
+    static let playlistKind = "playlist"
+    static let playlistKey = "playlistId"
+    static let booksKind = "books"
+    /// A "Download to Watch" from the phone, songs and all: a
+    /// `WatchDownloadContents`.
+    static let downloadKind = "download"
     static let itemKey = "item"
     static let bytesKey = "bytes"
     static let secondsKey = "seconds"
@@ -394,6 +404,47 @@ enum WatchFileTransfer {
     static let piecesKey = "pieces"
     static let pieceBytesKey = "pieceBytes"
     static let pieceBytes: Int64 = 16 * 1024 * 1024
+}
+
+/// A kept playlist's songs as the phone found them on the server, sent so
+/// the watch needn't ask: its own way to the server can fail for hours — a
+/// certificate it won't take, a server only the phone's network reaches.
+struct WatchPlaylistContents: Codable, Sendable {
+    var id: String
+    var name: String
+    var imageTag: String?
+    var songs: [BaseItem]
+}
+
+/// The books in progress as the phone found them, chapters and all, sent
+/// for the same reason.
+struct WatchBooksContents: Codable, Sendable {
+    var books: [BaseItem]
+}
+
+/// A download asked for on the phone, with what it comes to — an album's
+/// tracks, an artist's songs, a book with its chapters — looked up there.
+struct WatchDownloadContents: Codable, Sendable {
+    var request: WatchDownloadRequest
+    var items: [BaseItem]
+}
+
+extension BaseItem {
+    /// Only what the watch keeps of an item: a playlist's worth of media
+    /// sources and blur hashes is most of the file.
+    var forWatch: BaseItem {
+        var s = self
+        s.MediaSources = nil
+        s.People = nil
+        s.Studios = nil
+        s.ImageBlurHashes = nil
+        s.Genres = nil
+        s.GenreItems = nil
+        s.Taglines = nil
+        s.BackdropImageTags = nil
+        s.ParentBackdropImageTags = nil
+        return s
+    }
 }
 
 /// The reply a live message gets. A queued transfer gets none.
