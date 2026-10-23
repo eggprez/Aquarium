@@ -264,27 +264,21 @@ class Canvas:
 # ---------------------------------------------------------------- the sets
 
 def iphone():
-    """6.9" iPhone: Home, the player across cards 2 and 3, Live TV, Music, a series."""
+    """6.9" iPhone, three cards: Home; the landscape player across the first
+    cut with Live TV above it; Now Playing across the second cut; a series."""
     W, H = 1320, 2868
-    c = Canvas(W, H, 6, seed=3)
-    head, top = 118, 170
+    c = Canvas(W, H, 3, seed=3)
+    head, top = 112, 170
     c.headline(0, ["Your whole library,", "front and centre"], top, head)
-    c.headline(1, ["Plays your files", "as they are"], top, head)
-    c.headline(2, ["Every control,", "one tap away"], top, head)
-    c.headline(3, ["Live TV with", "a real guide"], top, head)
-    c.headline(4, ["Your music,", "your stations"], top, head)
-    c.headline(5, ["Every series,", "every season"], top, head)
-
+    c.headline(1, ["Plays your files,", "Live TV with a guide"], top, head)
+    c.headline(2, ["Your music,", "every series"], top, head)
     phone = lambda name, w: framed(capture(name), w, "phone")
-    c.place(phone("iphone-home.png", 1040), 0.5 * W, 590)
-    # The landscape player straddles the cut between cards 2 and 3.
-    c.place(phone("iphone-player.png", 2300), 2.0 * W, 700)
-    c.pills(1, ["Direct play", "Skip intro & credits", "Up Next", "Picture in Picture"], 2000, 76)
-    c.pills(2, ["Speed", "Sleep timer", "SharePlay", "AirPlay", "Audio & subtitles"], 2000, 76)
-    c.place(phone("iphone-livetv.png", 1040), 3.5 * W, 590)
-    c.place(phone("iphone-music.png", 860), 4.36 * W, 640, rotate=5)
-    c.place(phone("iphone-nowplaying.png", 860), 4.66 * W, 820, rotate=-4)
-    c.place(phone("iphone-series.png", 1040), 5.5 * W, 590)
+    c.place(phone("iphone-home.png", 880), 0.45 * W, 520)
+    c.place(phone("iphone-livetv.png", 880), 1.55 * W, 520)
+    c.place(phone("iphone-series.png", 880), 2.6 * W, 520)
+    # In front, low: the player across the first cut, Now Playing across the second.
+    c.place(phone("iphone-player.png", 1560), 1.0 * W, 1990, rotate=2)
+    c.place(phone("iphone-nowplaying.png", 780), 2.02 * W, 1180, rotate=-5)
     c.save("iPhone-6.9in", gap_px=60)
 
 
@@ -298,59 +292,52 @@ def watch():
     c.save("AppleWatch-46mm", gap_px=20)
 
 
-def duo():
-    """iPhone Duo, open: Home, the player across cards 2 and 3 with the words
-    either side of it, Live TV, Music, a series."""
-    W, H = 2853, 2007
-    c = Canvas(W, H, 6, seed=7)
-    head, top = 104, 110
-    c.headline(0, ["Your whole library, front and centre", "on the big inside screen"], top, head)
-    c.headline(3, ["Live TV with a real guide", "every channel at a glance"], top, head)
-    c.headline(4, ["Your music, your stations", "built from what you play"], top, head)
-    c.headline(5, ["Every series, every season", "carry on where you left off"], top, head)
-    duo = lambda name, w: framed(capture(name), w, "duo")
-    for i, name in [(0, "duo-home.png"), (3, "duo-livetv.png"), (4, "duo-music.png"), (5, "duo-series.png")]:
-        c.place(duo(name, 2380), i * W + W * 0.5, 400)
+def cascade(c, shots, kind, heads, head_size):
+    """Five screens across three landscape cards, alternating high and low so
+    every other one crosses a cut: high ones in the middle of a card, low
+    ones over the cuts and in front."""
+    W, H = c.card_w, c.card_h
+    for i, text in enumerate(heads):
+        c.headline(i, [text], H * 0.045, head_size)
+    aspect = capture(shots[0]).height / capture(shots[0]).width
+    if W / H > 1.9:
+        # A wide card has no room for two rows: one row, each screen as tall
+        # as the card allows, every other one sitting over a cut.
+        top = H * 0.135
+        width = min(W * 0.58, (H * 0.975 - top) / aspect)
+        for i, name in enumerate(shots):
+            c.place(framed(capture(name), round(width), kind), (0.3 + 0.6 * i) * W, top,
+                    rotate=1.5 if i % 2 else -1.5)
+        return
+    high_top, low_top = H * 0.15, H * 0.33
+    width = min(W * 0.64, (H * 0.985 - low_top) / aspect / 1.05)
+    spots = [(0.35, high_top), (1.0, low_top), (1.55, high_top), (2.08, low_top), (2.65, high_top)]
+    for i in [0, 2, 4, 1, 3]:
+        cx, top = spots[i]
+        c.place(framed(capture(shots[i]), round(width), kind), cx * W, top,
+                rotate=(-2 if i == 1 else 2) if top == low_top else 0)
 
-    # The player hangs across the cut between cards 2 and 3, upright in the
-    # middle of the strip; each card keeps the open sea beside it for words.
-    player = duo("duo-player.png", 2250)
-    c.place(player, 2.0 * W, (H - player.height) / 2)
-    left = (W + 190, 2.0 * W - player.width / 2 - W - 330)
-    right = (2.0 * W + player.width / 2 + 140, 3 * W - (2.0 * W + player.width / 2) - 330)
-    y = c.headline(1, ["Plays your files", "as they are"], 520, 150, align="left", region=left)
-    c.pills(1, ["Direct play", "Skip intro & credits", "Up Next", "Picture in Picture"], y + 80, 76,
-            align="left", region=left)
-    y = c.headline(2, ["Every control,", "one tap away"], 520, 150, align="left", region=right)
-    c.pills(2, ["Speed", "Sleep timer", "SharePlay", "AirPlay", "Audio & subtitles"], y + 80, 76,
-            align="left", region=right)
-    c.save("iPhoneDuo", gap_px=70)
+
+def duo():
+    """iPhone Duo, open, in the two landscape sizes the store takes:
+    Home, the player, Live TV, Music, a series."""
+    shots = ["duo-home.png", "duo-player.png", "duo-livetv.png", "duo-music.png", "duo-series.png"]
+    heads = ["Your whole library, front and centre", "Plays your files, Live TV with a guide",
+             "Your music, every series"]
+    for name, (W, H), size in [("iPhoneDuo-iPad-13in", (2752, 2064), 96),
+                               ("iPhoneDuo-iPhone-6.9in", (2868, 1320), 70)]:
+        c = Canvas(W, H, 3, seed=7)
+        cascade(c, shots, "duo", heads, size)
+        c.save(name, gap_px=70)
 
 
 def tv():
-    """Apple TV, 1080p: Home, the player and its panel across cards 2 and 3,
-    audio sync, Live TV, a series."""
-    W, H = 1920, 1080
-    c = Canvas(W, H, 6, seed=5)
-    head, top = 62, 52
-    c.headline(0, ["Your library on the big screen"], top, head)
-    c.headline(3, ["Audio sync you set by ear"], top, head)
-    c.headline(4, ["Live TV with a real guide"], top, head)
-    c.headline(5, ["Every series, every season"], top, head)
-    screen = lambda name, w=1560: framed(capture(name), w, "tv")
-    for i, name in [(0, "tv-home.png"), (3, "tvp-sync.png"), (4, "tv-livetv.png"), (5, "tv-episodes.png")]:
-        c.place(screen(name), i * W + W * 0.5, 170)
-
-    player = screen("tvp-info.png", 1640)
-    c.place(player, 2.0 * W, (H - player.height) / 2)
-    left = (W + 100, 2.0 * W - player.width / 2 - W - 160)
-    right = (2.0 * W + player.width / 2 + 70, 3 * W - (2.0 * W + player.width / 2) - 160)
-    y = c.headline(1, ["Plays the file", "as it is"], 290, 80, align="left", region=left)
-    c.pills(1, ["Direct play", "MKV, DTS, TrueHD", "Your TV's frame rate"], y + 40, 38,
-            align="left", region=left)
-    y = c.headline(2, ["Everything,", "one swipe down"], 290, 80, align="left", region=right)
-    c.pills(2, ["Info", "Audio", "Subtitles", "Quality", "Speed", "Sync", "Picture"], y + 40, 38,
-            align="left", region=right)
+    """Apple TV, 1080p: Home, the player and its panel, Live TV, audio sync,
+    a series."""
+    c = Canvas(1920, 1080, 3, seed=5)
+    cascade(c, ["tv-home.png", "tvp-info.png", "tv-livetv.png", "tvp-sync.png", "tv-episodes.png"], "tv",
+            ["Your library on the big screen", "Plays the file as it is, Live TV too",
+             "Sync by ear, every series"], 58)
     c.save("AppleTV", gap_px=40)
 
 
