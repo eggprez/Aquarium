@@ -260,6 +260,21 @@ class Canvas:
             .save(os.path.join(out, "preview.png"))
         print(f"{name}: {self.cards} x {self.card_w}x{self.card_h} -> {out}")
 
+    def save_resized(self, name, size):
+        """The same cards at another store size: scaled to cover it, then
+        trimmed top and bottom (or a pixel at the sides), card by card."""
+        out = os.path.join(OUT, name)
+        os.makedirs(out, exist_ok=True)
+        tw, th = size
+        flat = self.img.convert("RGB")
+        s = max(tw / self.card_w, th / self.card_h)
+        for i in range(self.cards):
+            card = flat.crop((i * self.card_w, 0, (i + 1) * self.card_w, self.card_h))
+            card = card.resize((round(self.card_w * s), round(self.card_h * s)), Image.LANCZOS)
+            x, y = (card.width - tw) // 2, (card.height - th) // 2
+            card.crop((x, y, x + tw, y + th)).save(os.path.join(out, f"{i + 1}.png"))
+        print(f"{name}: {self.cards} x {tw}x{th} -> {out}")
+
 
 # ---------------------------------------------------------------- the sets
 
@@ -280,6 +295,10 @@ def iphone():
     c.place(phone("iphone-player.png", 1560), 1.0 * W, 1990, rotate=2)
     c.place(phone("iphone-nowplaying.png", 780), 2.02 * W, 1180, rotate=-5)
     c.save("iPhone-6.9in", gap_px=60)
+    # The other portrait sizes App Store Connect takes for iPhone.
+    for name, size in [("iPhone-6.9in-1290x2796", (1290, 2796)), ("iPhone-6.5in-1284x2778", (1284, 2778)),
+                       ("iPhone-6.5in-1242x2688", (1242, 2688)), ("iPhone-6.3in-1206x2622", (1206, 2622))]:
+        c.save_resized(name, size)
 
 
 def watch():
