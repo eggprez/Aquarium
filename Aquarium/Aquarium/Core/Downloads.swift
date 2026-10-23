@@ -670,8 +670,23 @@ final class DownloadManager: NSObject {
         // here meant turning Wi-Fi-only on or off did nothing until the next
         // launch. See `start`.
         cfg.allowsCellularAccess = true
+        // How many file transfers the system runs side by side. The hand-off
+        // on the way to the background gives it the whole batch (see
+        // `handOffBeforeBackground`), and left to itself it opened a
+        // connection for every one: an album put away mid-download was six
+        // songs each creeping along at a sixth of the link, none of them
+        // finished, and a swipe-away then left six partial files. Capped,
+        // the system runs a few and starts the next as each one lands —
+        // without the app, which is the point of handing them over. The
+        // Parallel downloads setting still raises it, for someone who has
+        // asked for more; it is read once, when the session is made.
+        cfg.httpMaximumConnectionsPerHost = max(Self.fileConnectionLimit, prefs.downloadConcurrency)
         return URLSession(configuration: cfg, delegate: self, delegateQueue: nil)
     }()
+
+    /// See `session`. Three is enough to fill a link with small files and
+    /// few enough that each finishes while the batch goes on.
+    private static let fileConnectionLimit = 3
 
     /// The session that fetches HLS downloads.
     ///
@@ -1763,6 +1778,13 @@ final class DownloadManager: NSObject {
         // which is the system's Live Activity saying "Retrying" all night.
         var transcodes = active.intersection(startedAsTranscode).count
         let transcodeLimit = max(1, prefs.downloadConcurrency)
+        // Files — songs, originals — are all handed over, not a few at a
+        // time: a transfer the app starts from the background, when one of
+        // them lands, sits until the app is next in front (seen on the
+        // simulator too), so holding any back meant holding them until
+        // the phone was unlocked. What keeps six songs from crawling along
+        // together is the session's connection limit — see `session` —
+        // which has the system run them a few at a time without the app.
         while started.count < Self.handOffLimit,
               let i = queue.firstIndex(where: {
                   $0.isDue(at: now) && !waitsForTranscode($0)

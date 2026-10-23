@@ -78,16 +78,13 @@ struct DownloadsView: View {
                 summary
 
                 // Paused with nothing waiting — the system's own stop button
-                // does this — left the Resume button, which lives under Up
-                // next, nowhere on the page, while the pause held everything
-                // queued later.
+                // does this. Resume is in the card above; this says why
+                // anything queued later will sit.
                 if downloads.isPaused && downloads.queue.isEmpty {
                     section("Paused") {
                         Text("Downloads are paused. Nothing new starts until they're resumed.")
                             .font(.caption)
                             .foregroundStyle(Theme.textDim)
-                        Button("Resume downloads") { downloads.setPaused(false) }
-                            .foregroundStyle(Theme.link)
                     }
                 }
 
@@ -134,19 +131,15 @@ struct DownloadsView: View {
                                 .font(.caption)
                                 .foregroundStyle(Theme.textDim)
                         }
-                        HStack(spacing: 18) {
-                            // Holds the whole queue: nothing new starts until
-                            // it is lifted here.
-                            Button(downloads.isPaused ? "Resume downloads" : "Pause downloads") {
-                                downloads.setPaused(!downloads.isPaused)
-                            }
-                            .foregroundStyle(Theme.link)
-                            Button("Clear the queue") {
-                                let n = downloads.clearQueue()
-                                app.toast("Removed \(n) item\(n == 1 ? "" : "s") from the queue", tone: .ok)
-                            }
-                            .foregroundStyle(Theme.danger)
+                        // Pause and Resume are in the card at the top, where
+                        // they stay put: under this list they moved every time
+                        // a song finished, and a tap meant for Pause landed on
+                        // whatever had just slid under it.
+                        Button("Clear the queue") {
+                            let n = downloads.clearQueue()
+                            app.toast("Removed \(n) item\(n == 1 ? "" : "s") from the queue", tone: .ok)
                         }
+                        .foregroundStyle(Theme.danger)
                         .font(.caption)
                         .buttonStyle(.plain)
                     }
@@ -481,6 +474,7 @@ struct DownloadsView: View {
                     .buttonStyle(.bordered)
                     .disabled(isSyncing || client.isOffline)
                 }
+                pauseButton
                 manageMenu
             }
 
@@ -536,6 +530,24 @@ struct DownloadsView: View {
         .padding(Metrics.gutter)
         .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, Metrics.gutter)
+    }
+
+    /// Pause or resume the queue, from the card at the top of the page. It
+    /// is shown whenever there is something for it to act on — a transfer
+    /// running, entries waiting, or a pause in force — and nowhere else, so
+    /// it is always in the same place.
+    @ViewBuilder
+    private var pauseButton: some View {
+        if downloads.isPaused || !downloads.queue.isEmpty || !running.isEmpty {
+            Button {
+                downloads.setPaused(!downloads.isPaused)
+            } label: {
+                Label(downloads.isPaused ? "Resume" : "Pause",
+                      systemImage: downloads.isPaused ? "play.fill" : "pause.fill")
+            }
+            .buttonStyle(.bordered)
+            .tint(downloads.isPaused ? Theme.accent : nil)
+        }
     }
 
     /// Clearing space is the one thing this screen exists for that had nowhere
