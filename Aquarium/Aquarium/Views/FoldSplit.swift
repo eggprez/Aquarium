@@ -23,7 +23,10 @@ struct FoldSplit<Upper: View, Lower: View>: View {
 
     var body: some View {
         GeometryReader { geo in
-            let fold = split ? Self.foldRect(in: geo) : nil
+            // A fold the size of the view is the "don't" answer: the crease
+            // is vertical and `upper` takes the whole view.
+            let candidate = split ? Self.foldRect(in: geo) : nil
+            let fold = candidate.flatMap { $0.height >= geo.size.height ? nil : $0 }
             VStack(spacing: 0) {
                 upper()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -46,6 +49,16 @@ struct FoldSplit<Upper: View, Lower: View>: View {
     private static func foldRect(in geo: GeometryProxy) -> CGRect {
         if #available(iOS 27.1, *) {
             if let region = geo.reservedRegions(kind: .division).first(where: \.isActive) {
+                // Held like a book the crease runs down the screen, and a
+                // picture-above-controls split makes no sense of it: the
+                // "upper" half would be the crease's top edge, which is the
+                // top of the screen, and nothing would be left to draw.
+                // `DevicePose` keeps that posture out of `.halfFolded`; this
+                // is the same check at the point of drawing, in case the
+                // two ever disagree for a frame.
+                guard region.frame.width >= region.frame.height else {
+                    return CGRect(x: 0, y: 0, width: geo.size.width, height: geo.size.height)
+                }
                 return region.frame
             }
         }

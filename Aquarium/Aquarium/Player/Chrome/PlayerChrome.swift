@@ -152,7 +152,8 @@ final class PlayerChromeState {
         skipTotal = (skipTotal == 0 || (skipTotal > 0) == (seconds > 0)) ? skipTotal + seconds : seconds
         skipTask?.cancel()
         skipTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(900))
+            // Long enough to read, short enough to be a glance.
+            try? await Task.sleep(for: .milliseconds(650))
             guard !Task.isCancelled else { return }
             self?.skipTotal = 0
         }
@@ -162,7 +163,7 @@ final class PlayerChromeState {
         ripple = SkipRipple(forward: forward)
         rippleTask?.cancel()
         rippleTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(550))
+            try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
             self?.ripple = nil
         }
@@ -348,13 +349,25 @@ struct PlayerChrome: View {
 
             momentOverlays
 
-            // Pops up as it is and goes the same way: no scale, no fade, no
-            // spring on the number.
+            #if os(iOS)
+            // On a foldable the trailing column the title row leaves clear
+            // (`PlayerTransport.foldableCornerClearance`) holds the brightness
+            // rail, with the controls and gone with them.
+            if showsControls, !belowFold, FoldState.shared.isFoldable {
+                BrightnessRail(onInteract: interact)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .padding(.trailing, 24)
+                    .transition(.opacity)
+            }
+            #endif
+
+            // Pops up as it is, no scale or spring on the number, and fades
+            // quickly once the run is over.
             if chrome.skipTotal != 0 {
                 SkipBadge(seconds: chrome.skipTotal, compact: compact)
                     .frame(maxWidth: .infinity, alignment: chrome.skipTotal > 0 ? .trailing : .leading)
                     .padding(.horizontal, PlayerMetrics.skipBadgeInset(compact: compact))
-                    .transition(.identity)
+                    .transition(.asymmetric(insertion: .identity, removal: .opacity))
                     .allowsHitTesting(false)
             }
 
@@ -382,7 +395,7 @@ struct PlayerChrome: View {
         }
         .playerChromeScheme()
         .animation(.easeOut(duration: reduceMotion ? 0.15 : 0.25), value: showsControls)
-        .animation(nil, value: chrome.skipTotal)
+        .animation(chrome.skipTotal == 0 ? .easeOut(duration: 0.15) : nil, value: chrome.skipTotal)
         .animation(.easeOut(duration: 0.2), value: chrome.holdingDoubleSpeed)
         .animation(.easeOut(duration: 0.2), value: chrome.edgeLevel)
         .background(GeometryReader { geo in
@@ -572,7 +585,10 @@ struct PlayerChrome: View {
         player.seek(by: Double(delta))
         chrome.countSkip(delta)
         chrome.rippleOnce(forward: forward)
-        interact()
+        // A double-tap is about the picture, not the controls: it flashes the
+        // ripple and the amount and leaves the rest as it was. Controls that
+        // are already up are kept up rather than left to hide mid-skip.
+        if showsControls { interact() }
     }
 }
 

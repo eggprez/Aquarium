@@ -969,6 +969,11 @@ struct HeroHeader: View {
     /// the wordmark, the text column and the pixels asked of the server all
     /// follow it.
     var availableWidth: CGFloat = 0
+    /// What the sides of the screen keep for the system — on a foldable's
+    /// front screen the tab bar's column — when the hero has been laid out
+    /// over them rather than inside them. The picture goes under; the title
+    /// and the buttons stay this far clear. See `HeroCarousel`.
+    var sideInsets: EdgeInsets = EdgeInsets()
 
     @Environment(AppModel.self) private var app
     @Environment(PlayerModel.self) private var player
@@ -1033,7 +1038,17 @@ struct HeroHeader: View {
     /// the picture would take the whole screen.
     static func height(forWidth width: CGFloat) -> CGFloat {
         #if os(iOS)
-        guard !Metrics.phoneLayout, width > 0 else { return Self.height }
+        guard width > 0 else { return Self.height }
+        if !Metrics.wideScreen {
+            // A phone on its side — which is what a foldable stood up as a
+            // tent is, browsing — has about as much height as it had width
+            // upright, and 300 of it was the whole screen, with the tab bar
+            // sitting on the hero's own buttons. Wider than it is tall, the
+            // hero takes a little over half of what the height would be.
+            let short = MainActor.assumeIsolated { FoldState.shared.portraitWidth }
+            guard width > short else { return Self.height }
+            return min(Self.height, (short * 0.62).rounded())
+        }
         return min(560, max(Self.height, (width / 2.4).rounded()))
         #else
         return Self.height
@@ -1173,12 +1188,24 @@ struct HeroHeader: View {
             .itemContextMenu(item, allowsOpen: true)
             .accessibilityLabel(Self.displayTitle(of: item))
             .accessibilityHint("Opens the title")
+            #elseif os(iOS)
+            // Edge to edge, under whatever the system keeps at the sides — on
+            // a foldable's front screen the tab bar stands in a column down
+            // the trailing edge, and the shelves below already scroll under
+            // it. The picture goes where the shelves go; the title and the
+            // buttons, in `content`, stay inside the safe area where they
+            // can be read and reached. Clipped here, at its own full width,
+            // rather than at the stack's, which stops at the safe area.
+            backdrop
+                .clipped()
+                .ignoresSafeArea(.container, edges: .horizontal)
             #else
             backdrop
             #endif
 
             content
-                .padding(.horizontal, Metrics.gutter)
+                .padding(.leading, Metrics.gutter + sideInsets.leading)
+                .padding(.trailing, Metrics.gutter + sideInsets.trailing)
                 .padding(.bottom, textInset)
                 #if os(tvOS)
                 // A band the width of the screen around the title and the
@@ -1193,9 +1220,11 @@ struct HeroHeader: View {
                 #endif
         }
         .frame(height: artHeight)
-        .clipped()
         #if os(iOS)
+        // Not clipped: the backdrop reaches past this frame on purpose.
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { measuredWidth = $0 }
+        #else
+        .clipped()
         #endif
         // A sidebar's hero is one view handed a different item rather than a
         // new one per title, so a missing wordmark has to stop being missing
@@ -1788,6 +1817,9 @@ struct HeroCarousel: View {
     /// The bar's own width, which on an iPad decides its height — see
     /// `HeroHeader.height(forWidth:)`. Zero until the first layout pass.
     @State private var width: CGFloat = 0
+    /// What the screen keeps at its sides, which this bar is drawn over —
+    /// see `body`. Zero on an ordinary phone.
+    @State private var sideInsets = EdgeInsets()
     /// Something that moves on its own is exactly what this setting is for.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -1797,16 +1829,25 @@ struct HeroCarousel: View {
         ZStack(alignment: .bottomTrailing) {
             TabView(selection: $index) {
                 ForEach(Array(items.enumerated()), id: \.element.Id) { position, item in
-                    HeroHeader(item: item, heroHeight: height, availableWidth: width)
+                    HeroHeader(item: item, heroHeight: height, availableWidth: width, sideInsets: sideInsets)
                         .tag(position)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(height: height)
 
-            if items.count > 1 { pageDots }
+            if items.count > 1 { pageDots.padding(.trailing, sideInsets.trailing) }
         }
         .frame(height: height)
+        // Edge to edge, the way the shelves under it scroll: on a foldable's
+        // front screen the tab bar stands in a column down the trailing edge
+        // and the page is laid out short of it. The page view keeps the safe
+        // area for itself, so `HeroHeader` cannot bleed from inside it; the
+        // whole bar is laid out over the column instead, and what it is now
+        // covering is measured here and handed down, so the title and the
+        // buttons stay clear of it.
+        .ignoresSafeArea(.container, edges: .horizontal)
+        .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { sideInsets = $0 }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         // Eight seconds from whichever page is showing, however it got there.
         //

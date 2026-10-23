@@ -64,6 +64,15 @@ struct PlayerFoldPanel: View {
             }
             .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize)
+            // The list meets the transport band in a fade rather than a cut:
+            // at rest a heading used to sit sliced in half on the line.
+            .mask {
+                VStack(spacing: 0) {
+                    Color.black
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 28)
+                }
+            }
 
             PlayerTransport(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork,
                             compact: compact, usesSheet: usesSheet, panelWidth: panelWidth, part: .belowFold,

@@ -234,7 +234,12 @@ struct RootView: View {
             if player.isActive {
                 PlayerScreen()
             } else {
+                // The player asks the cover for dark, and the presentation
+                // keeps that answer after the player has gone: the tent came
+                // back dark in a light app. Told the app's own appearance,
+                // read outside the cover, it comes back as it went.
                 TentIdleView()
+                    .preferredColorScheme(colorScheme)
             }
         }
         // Browse lasts for the pose it was pressed in.
@@ -516,6 +521,8 @@ struct RootView: View {
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.devicePose) private var pose
+    /// The app's appearance, for the tent cover — see `playerBinding`'s cover.
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Brings the sidebar back, while it is collapsed — see `showSidebar`.
     private var showSidebarAction: (() -> Void)? {
@@ -544,8 +551,12 @@ struct RootView: View {
     /// `AppModel.usesSidebar`.
     @ViewBuilder
     private var adaptiveShell: some View {
-        let sidebar = sizeClass == .regular
-            && (UIDevice.current.userInterfaceIdiom != .phone || pose.usesInnerDisplay)
+        // A foldable's inside screen is regular both ways and could take
+        // the sidebar; it keeps the phone's shell on purpose. The app a
+        // person opened the phone from is the app they get, bigger: the
+        // same tab bar, the same pages, with more across each row — see
+        // `Metrics.wideScreen` for what the width is spent on.
+        let sidebar = sizeClass == .regular && UIDevice.current.userInterfaceIdiom != .phone
         Group {
             if sidebar {
                 sidebarShell
@@ -556,22 +567,56 @@ struct RootView: View {
         .onChange(of: sidebar, initial: true) { _, now in app.shellChanged(toSidebar: now) }
     }
 
+    /// Two tabs or fewer — Downloads and More, offline — on a system whose
+    /// bar would shrink to fit them: the app draws the bar instead. See
+    /// `WideTabBar`.
+    private var drawsOwnTabBar: Bool {
+        guard #available(iOS 26.0, *) else { return false }
+        return app.tabSections.count <= 2
+    }
+
+    /// One tab's page: its stack, inside the offline strip, the mini player
+    /// and the toasts.
+    private func tabPage(_ section: AppSection) -> some View {
+        withToasts(
+            withOfflineStrip(
+                NavigationStack(path: app.path(for: section)) {
+                    SectionView(section: section)
+                        .clearsBottomChrome()
+                        .navigationDestination(for: Route.self) { destination($0).clearsBottomChrome() }
+                }
+                .measuresBottomChrome()
+            )
+            .withMiniPlayer()
+        )
+    }
+
     private var tabShell: some View {
-        TabView(selection: app.shownSelectionBinding) {
-            ForEach(app.tabSections) { section in
-                withToasts(
-                    withOfflineStrip(
-                        NavigationStack(path: app.path(for: section)) {
-                            SectionView(section: section)
-                                .clearsBottomChrome()
-                                .navigationDestination(for: Route.self) { destination($0).clearsBottomChrome() }
-                        }
-                        .measuresBottomChrome()
-                    )
-                    .withMiniPlayer()
-                )
-                .tabItem { Label(section.title, systemImage: section.symbol) }
-                .tag(section)
+        Group {
+            if drawsOwnTabBar, #available(iOS 26.0, *) {
+                // No TabView at all. Its bar hidden, the system's still took
+                // the taps where it would have been, so the middle of the
+                // bar drawn here did nothing. The pages are kept, one shown.
+                ZStack {
+                    ForEach(app.tabSections) { section in
+                        let shown = section == app.shownSelection
+                        tabPage(section)
+                            // Outermost, so the offline strip and the mini
+                            // player stack above it.
+                            .safeAreaInset(edge: .bottom, spacing: 0) { WideTabBar(sections: app.tabSections) }
+                            .opacity(shown ? 1 : 0)
+                            .allowsHitTesting(shown)
+                            .accessibilityHidden(!shown)
+                    }
+                }
+            } else {
+                TabView(selection: app.shownSelectionBinding) {
+                    ForEach(app.tabSections) { section in
+                        tabPage(section)
+                            .tabItem { Label(section.title, systemImage: section.symbol) }
+                            .tag(section)
+                    }
+                }
             }
         }
         // A new tab bar whenever the set of tabs changes, not the old one

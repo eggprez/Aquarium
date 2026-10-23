@@ -50,6 +50,16 @@ enum DevicePose: String, Equatable, Sendable {
     /// The big screen is the one on, so the layout is the iPad's.
     var usesInnerDisplay: Bool { self == .inside || self == .halfFolded }
 
+    /// Whether `LayoutOverride` counts on a device with no hinge: only in a
+    /// debug build, for holding a pose on a plain simulator.
+    static var overrideWithoutHinge: Bool {
+        #if DEBUG
+        true
+        #else
+        false
+        #endif
+    }
+
     /// Which pose the size classes alone describe, with no hinge at all, and
     /// which they describe with one.
     ///
@@ -63,18 +73,27 @@ enum DevicePose: String, Equatable, Sendable {
         hinge: HingeStatus?,
         horizontal: UserInterfaceSizeClass?,
         vertical: UserInterfaceSizeClass?,
+        creaseIsVertical: Bool = false,
         override: LayoutOverride,
         isPhoneIdiom: Bool
     ) -> DevicePose {
         // An override is for a foldable: a plain phone asking for the inside
         // would get nowhere useful, and the picker is not shown there anyway.
-        if override != .automatic, hinge != nil { return override.pose }
+        // A debug build honours it without a hinge, so the tent and the
+        // half-folded layouts can be held on a plain simulator that can be
+        // turned sideways — the foldable's cannot be, headless.
+        if override != .automatic, hinge != nil || Self.overrideWithoutHinge { return override.pose }
         let innerSignature = isPhoneIdiom && horizontal == .regular && vertical == .regular
         switch hinge {
         case .fullyOpen:
             return .inside
         case .partiallyOpen:
-            if horizontal == .regular { return .halfFolded }
+            // Part-open with the inside screen on is a laptop when the crease
+            // runs across the screen and a book when it runs down it. The
+            // book gets the open-flat layout: a picture-above-controls split
+            // has no top half to give it, and two pages side by side is a
+            // layout this app does not have yet.
+            if horizontal == .regular { return creaseIsVertical ? .inside : .halfFolded }
             return vertical == .compact ? .tent : .front
         case .closed:
             return .front
@@ -152,6 +171,11 @@ final class FoldState {
     /// The number the phone's TV guide is laid out against; see `Metrics`.
     private(set) var portraitWidth: CGFloat = 375
 
+    /// Which way the crease runs across the screen that is on, when the
+    /// system reports one: down it (a book) or across it (a laptop). Read at
+    /// the root by the pose provider; false where no crease is reported.
+    private(set) var creaseIsVertical = false
+
     private init() {}
 
     /// A hinge has been seen, or the developer is pretending one has.
@@ -163,8 +187,14 @@ final class FoldState {
     /// idea of it when one is set, else the real one.
     var effectiveHinge: HingeStatus? {
         let override = Preferences.shared.layoutOverride
-        if override != .automatic, hinge != nil { return override.hinge }
+        if override != .automatic, hinge != nil || DevicePose.overrideWithoutHinge { return override.hinge }
         return hinge
+    }
+
+    func creaseResolved(vertical: Bool) {
+        guard vertical != creaseIsVertical else { return }
+        Self.log.debug("crease \(vertical ? "vertical" : "horizontal")")
+        creaseIsVertical = vertical
     }
 
     func update(hinge new: HingeStatus?, angle: Double) {
@@ -226,6 +256,7 @@ private struct DevicePoseProvider: ViewModifier {
             hinge: FoldState.shared.hinge,
             horizontal: horizontal,
             vertical: vertical,
+            creaseIsVertical: FoldState.shared.creaseIsVertical,
             override: Preferences.shared.layoutOverride,
             isPhoneIdiom: UIDevice.current.userInterfaceIdiom == .phone
         )
@@ -236,9 +267,36 @@ private struct DevicePoseProvider: ViewModifier {
         content
             .environment(\.devicePose, pose)
             .modifier(HingeObserver())
+            .background { CreaseObserver() }
             .onChange(of: pose, initial: true) { _, now in
                 FoldState.shared.poseResolved(now)
             }
+    }
+}
+
+/// Which way the system's crease runs, read from the root's geometry and
+/// handed to `FoldState` outside the layout pass. The one place the
+/// reserved-region API is asked about direction; `FoldSplit` asks it where
+/// the crease is.
+private struct CreaseObserver: View {
+    var body: some View {
+        GeometryReader { geo in
+            let vertical = Self.creaseIsVertical(in: geo)
+            Color.clear
+                .onChange(of: vertical, initial: true) { _, now in
+                    FoldState.shared.creaseResolved(vertical: now)
+                }
+        }
+        .ignoresSafeArea()
+    }
+
+    private static func creaseIsVertical(in geo: GeometryProxy) -> Bool {
+        if #available(iOS 27.1, *) {
+            if let region = geo.reservedRegions(kind: .division).first(where: \.isActive) {
+                return region.frame.height > region.frame.width
+            }
+        }
+        return false
     }
 }
 

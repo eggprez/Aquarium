@@ -1,0 +1,179 @@
+<title>Aquarium on iPhone Duo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Public+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a hinge diagram up top, then one band per posture; each band is a strip of phone frames with the page name under each, and the audit notes beside it. */
+:root {
+  --bg: #f4f3f8; --paper: #ffffff; --ink: #1a1830; --muted: #5c5a74; --line: #d9d7e6;
+  --accent: #6b4ff0; --accent-ink: #4a33c7; --warn: #b4551a; --bad: #b3261e; --ok: #1e7b4e;
+  --display: "Fraunces", "Iowan Old Style", Georgia, serif;
+  --body: "Public Sans", -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #15141c; --paper: #1f1d29; --ink: #efedf7; --muted: #a9a6c0; --line: #3a3850;
+  --accent: #9a86ff; --accent-ink: #b7a8ff; --warn: #e08a4e; --bad: #ef6f66; --ok: #5ec98e; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #15141c; --paper: #1f1d29; --ink: #efedf7; --muted: #a9a6c0; --line: #3a3850;
+  --accent: #9a86ff; --accent-ink: #b7a8ff; --warn: #e08a4e; --bad: #ef6f66; --ok: #5ec98e; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.5;
+  padding-block: 28px 60px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 40px; }
+h1 { font-family: var(--display); font-weight: 700; font-size: clamp(32px, 5vw, 52px); line-height: 1.05; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--display); font-weight: 600; font-size: 26px; margin: 0; }
+h3 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+.lede { color: var(--muted); font-size: 17px; }
+.eyebrow { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); font-weight: 600; }
+header { display: grid; gap: 14px; }
+.method { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; display: grid; gap: 10px; }
+.method ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.poses { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.pose { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px 12px 10px; display: grid; gap: 6px; min-width: 0; }
+.pose svg { width: 100%; height: 64px; display: block; }
+.pose b { font-family: var(--display); font-size: 18px; font-weight: 600; }
+.pose span { font-size: 12.5px; color: var(--muted); }
+.band { display: grid; gap: 16px; border-top: 1px solid var(--line); padding-top: 26px; }
+.band-head { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; }
+.band-head .screen { color: var(--muted); font-size: 14px; }
+.chip { font-size: 12px; font-weight: 600; letter-spacing: .04em; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.chip.real { color: var(--ok); border-color: var(--ok); }
+.chip.held { color: var(--warn); border-color: var(--warn); }
+.chip.none { color: var(--bad); border-color: var(--bad); }
+.strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+figure { margin: 0; display: grid; gap: 7px; min-width: 0; }
+.frame { aspect-ratio: 466 / 678; background: #000; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); display: grid; place-items: center; }
+.frame.pad { aspect-ratio: 744 / 1133; }
+.frame.wide { aspect-ratio: 667 / 375; }
+.strip.wide { grid-template-columns: repeat(3, 1fr); }
+.frame img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.frame.empty { background: var(--paper); color: var(--muted); font-size: 13px; text-align: center; padding: 14px; }
+figcaption { font-size: 13px; line-height: 1.35; }
+figcaption b { display: block; font-weight: 600; }
+figcaption span { color: var(--muted); }
+.notes { display: grid; gap: 8px; }
+.notes p { max-width: none; }
+.findings { display: grid; gap: 12px; }
+.finding { background: var(--paper); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 6px; }
+.finding.high { border-left-color: var(--bad); } .finding.med { border-left-color: var(--warn); } .finding.low { border-left-color: var(--accent); }
+.finding b { font-size: 16px; }
+.finding .sev { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; color: var(--muted); }
+.finding p { max-width: 80ch; }
+code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.scroll { overflow-x: auto; }
+@media (max-width: 900px) { .strip, .poses { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 560px) { .strip, .poses { grid-template-columns: repeat(2, 1fr); } body { font-size: 14px; } }
+a { color: var(--accent-ink); }
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">QA · 2026-10-22 · iOS 27.1 simulator · updated after the fixes</div>
+  <h1>Aquarium on iPhone Duo</h1>
+  <p class="lede">One app, five ways to hold the phone. What the app becomes in each posture, how the main pages and the player look there, and what still needs thought.</p>
+  <div class="poses">
+    <div class="pose"><svg viewBox="0 0 100 64"><rect x="36" y="6" width="28" height="52" rx="4" fill="none" stroke="currentColor" stroke-width="2.5"/></svg><b>Front</b><span>Closed. Outer screen, 466×678 pt. A phone.</span></div>
+    <div class="pose"><svg viewBox="0 0 100 64"><rect x="14" y="12" width="72" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="2.5"/><line x1="50" y1="12" x2="50" y2="52" stroke="currentColor" stroke-width="1.5" stroke-dasharray="3 3"/></svg><b>Inside</b><span>Open flat. Inner screen, 669×951 pt. An iPad.</span></div>
+    <div class="pose"><svg viewBox="0 0 100 64"><path d="M22 56 L50 10 L78 56" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg><b>Tent</b><span>Part-open, stood on its edges. Outer screen, landscape. A television.</span></div>
+    <div class="pose"><svg viewBox="0 0 100 64"><path d="M14 54 L54 54 L54 54 L82 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><path d="M54 54 L82 16" stroke="currentColor" stroke-width="2.5"/></svg><b>Laptop</b><span>Half-folded on a table. Inner screen split at the crease. Picture up, controls down.</span></div>
+    <div class="pose"><svg viewBox="0 0 100 64"><path d="M50 56 L26 44 L26 10 L50 22 L74 10 L74 44 Z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><line x1="50" y1="22" x2="50" y2="56" stroke="currentColor" stroke-width="1.5"/></svg><b>Book</b><span>Part-open, held upright. Inner screen, vertical crease. No layout yet.</span></div>
+  </div>
+  <div class="method">
+    <h3>How these were captured</h3>
+    <ul>
+      <li><b>Front</b> is the real outer screen of the Duo simulator, signed in to the home server.</li>
+      <li><b>Tent</b> is the tent layout held (debug builds now honour the Layout override without a hinge) on an iPhone SE simulator turned to landscape, since the Duo simulator ignores programmatic rotation and its hinge can only be moved from Device Hub, which this session could not reach. Same layout, a slightly narrower screen than the Duo's cover.</li>
+      <li><b>Laptop</b> was held with the Layout override on the Duo's outer screen, in portrait: the right layout on the wrong screen, split at the middle instead of the hinge.</li>
+      <li><b>Inside</b> is an iPad mini simulator (744×1133 pt) signed in to a local test server. The code defines the inside pose as "the iPad layout", so the shell is right; the Duo's inner screen is about 10% narrower.</li>
+      <li><b>Book</b> has no pose in the code, so there was nothing to capture.</li>
+    </ul>
+  </div>
+</header>
+
+<section class="band">
+  <div class="band-head"><h2>Front</h2><span class="screen">Outer screen, closed</span><span class="chip real">Real capture</span></div>
+  <p>A phone. Tab bar, phone metrics, portrait except for the guide and the player. The hero now runs edge to edge under the side tab column, the way the shelves do; the title and buttons stay clear of it.</p>
+  <div class="strip">
+    <figure><div class="frame"><img src="shots/front-home.jpg" alt="Home on the front screen"></div><figcaption><b>Home</b><span>Hero, Next Up, On Now</span></figcaption></figure>
+    <figure><div class="frame"><img src="shots/front-livetv.jpg" alt="Live TV guide on the front screen"></div><figcaption><b>Live TV</b><span>Via More. A half hour fills the width</span></figcaption></figure>
+    <figure><div class="frame"><img src="shots/front-show-top.jpg" alt="Fallout season page on the front screen"></div><figcaption><b>TV season</b><span>Opens on the episode in progress</span></figcaption></figure>
+    <figure><div class="frame"><img src="shots/front-music.jpg" alt="Music on the front screen"></div><figcaption><b>Music</b><span>Discover, with the floating tab bar</span></figcaption></figure>
+    <figure><div class="frame"><img src="shots/front-player-chrome.jpg" alt="Player with controls on the front screen"></div><figcaption><b>Player</b><span>Upright, letterboxed, pills under the picture</span></figcaption></figure>
+  </div>
+</section>
+
+<section class="band">
+  <div class="band-head"><h2>Inside</h2><span class="screen">Inner screen, open flat</span><span class="chip held">iPad mini stand-in</span></div>
+  <p>Changed: the inside screen now keeps the phone's shell (tab bar, phone poster size, more per row) and only spends the width on room: iPad guide scale, hero proportion, channel column. These captures still show the old sidebar layout on an iPad mini; the new one needs the Duo's hinge opened to see.</p>
+  <div class="strip">
+    <figure><div class="frame pad"><img src="shots/mini-home.jpg" alt="Home with sidebar on the iPad mini"></div><figcaption><b>Home</b><span>Sidebar shell</span></figcaption></figure>
+    <figure><div class="frame pad"><img src="shots/mini-livetv.jpg" alt="Live TV guide on the iPad mini"></div><figcaption><b>Live TV</b><span>In the sidebar; hours across</span></figcaption></figure>
+    <figure><div class="frame pad"><img src="shots/mini-season.jpg" alt="Season page on the iPad mini"></div><figcaption><b>TV season</b><span>Hero, actions, episodes</span></figcaption></figure>
+    <figure><div class="frame pad"><img src="shots/mini-music.jpg" alt="Music on the iPad mini"></div><figcaption><b>Music</b><span>Discover in the detail column</span></figcaption></figure>
+    <figure><div class="frame pad"><img src="shots/mini-player-chrome.jpg" alt="Player with controls on the iPad mini"></div><figcaption><b>Player</b><span>Labelled pills, wider timeline</span></figcaption></figure>
+  </div>
+</section>
+
+<section class="band">
+  <div class="band-head"><h2>Tent</h2><span class="screen">Outer screen, part-open, stood up, landscape</span><span class="chip held">Pose held on an iPhone SE, landscape</span></div>
+  <p>A television on a table. While nothing plays the whole app is a cover: Continue Watching, the music that is on, and a Browse button. Anything played covers it with the player, and the cover is back when it stops, now in the app's own appearance. Browse opens the full app sideways; the hero is shorter there so the tab bar no longer sits on its buttons.</p>
+  <div class="strip wide">
+    <figure><div class="frame wide"><img src="shots/tent-idle.jpg" alt="Tent cover with Continue Watching, landscape"></div><figcaption><b>Home</b><span>The cover, not Home</span></figcaption></figure>
+    <figure><div class="frame wide"><img src="shots/tent-home.jpg" alt="Home after Browse in tent pose, landscape"></div><figcaption><b>Home after Browse</b><span>Shorter hero; tab bar clear of the buttons</span></figcaption></figure>
+    <figure><div class="frame wide"><img src="shots/tent-livetv.jpg" alt="Live TV after Browse in tent pose, landscape"></div><figcaption><b>Live TV</b><span>An hour and a half across</span></figcaption></figure>
+    <figure><div class="frame wide"><img src="shots/tent-show.jpg" alt="Episode page after Browse in tent pose, landscape"></div><figcaption><b>Episode page</b><span>Hero edge to edge</span></figcaption></figure>
+    <figure><div class="frame wide"><img src="shots/tent-music.jpg" alt="Music after Browse in tent pose, landscape"></div><figcaption><b>Music</b><span>Discover, sideways</span></figcaption></figure>
+    <figure><div class="frame wide"><img src="shots/tent-player-chrome.jpg" alt="Player with controls in tent pose, landscape"></div><figcaption><b>Player</b><span>Pills down the side, picture full width</span></figcaption></figure>
+  </div>
+</section>
+
+<section class="band">
+  <div class="band-head"><h2>Laptop</h2><span class="screen">Inner screen, half-folded on a table</span><span class="chip held">Pose held in Settings, outer screen</span></div>
+  <p>Picture above the crease, controls below it. The player keeps its surface in place and moves the timeline and pills under the hands; item pages put the hero up and the body down. Pages without a fold layout (Home, the guide, Music) are unchanged. Here the split is at the middle of the outer screen; on the device it is at the hinge of the inner one.</p>
+  <div class="strip">
+    <figure><div class="frame"><img src="shots/fold-home.jpg" alt="Home in the half-folded pose"></div><figcaption><b>Home</b><span>Unchanged by the pose</span></figcaption></figure>
+    <figure><div class="frame empty">Live TV has no fold layout; it is the front guide.</div><figcaption><b>Live TV</b><span>Not captured</span></figcaption></figure>
+    <figure><div class="frame"><img src="shots/fold-show.jpg" alt="Season page split at the fold"></div><figcaption><b>TV season</b><span>Hero up, episodes down</span></figcaption></figure>
+    <figure><div class="frame"><img src="shots/fold-nowplaying.jpg" alt="Now Playing in the half-folded pose"></div><figcaption><b>Music · Now Playing</b><span>Art above, controls below</span></figcaption></figure>
+    <figure><div class="frame"><img src="shots/fold-player-chrome.jpg" alt="Player split at the fold with the transport below"></div><figcaption><b>Player</b><span>Picture up, chapters and transport down</span></figcaption></figure>
+  </div>
+</section>
+
+<section class="band">
+  <div class="band-head"><h2>Book</h2><span class="screen">Inner screen, part-open, held upright</span><span class="chip none">No pose in the code</span></div>
+  <div class="notes">
+    <p>Fixed. The pose provider now reads which way the system's crease runs; part-open with a vertical crease resolves to <b>Inside</b> (the open-flat layout), and <code>FoldSplit</code> refuses to split on a vertical crease even if asked. Before this the posture resolved to half-folded and the picture-above-controls split gave the picture no height. A real two-page book layout is still open.</p>
+  </div>
+</section>
+
+<section class="band">
+  <h2>Findings</h2>
+  <div class="findings">
+    <div class="finding low"><span class="sev">Fixed</span><b>Book mode broke the player</b><p>A vertical crease now resolves to the open-flat layout, and the split refuses a vertical crease. Not seen on the simulator, which cannot be posed.</p></div>
+    <div class="finding low"><span class="sev">Not a bug</span><b>Half-folded Now Playing "did not split"</b><p>It does: logging the pose inside the sheet showed half-folded, and on a tall portrait screen the two halves land where the single column already puts the art and the controls. On the inner screen, sideways, the halves will differ.</p></div>
+    <div class="finding low"><span class="sev">Fixed</span><b>The tent cover turned dark after a video</b><p>The cover is now told the app's own appearance, read outside the presentation, so it comes back as it went.</p></div>
+    <div class="finding low"><span class="sev">Fixed</span><b>Tent browsing in landscape</b><p>Seen now, on the SE stand-in. The one problem was the hero: 300 points tall on a 375-point screen, with the tab bar on its own buttons. A sideways phone now gets a hero a little over half its height.</p></div>
+    <div class="finding low"><span class="sev">Fixed</span><b>Half-folded panel clipped at the transport</b><p>The scrolling half fades into the timeline band instead of stopping on a line.</p></div>
+    <div class="finding low"><span class="sev">Fixed</span><b>Hero stopped short of the trailing edge</b><p>On the cover screen the page is laid out short of the tab column and the shelves scrolled under it while the hero did not. The hero artwork now runs under the column on Home and on every item page; the title, buttons and page dots keep the inset, and text blocks keep the safe area as before.</p></div>
+    <div class="finding low"><span class="sev">Changed</span><b>Inside screen keeps the phone's shell</b><p>No sidebar on a foldable's inner screen: the phone's tab bar and pages, with the width spent on more per row, iPad guide scale and a hero that follows the width. Where the system puts the tab bar on that screen is unverified until the hinge can be opened.</p></div>
+    <div class="finding low"><span class="sev">Check on hardware</span><b>Now Playing sheet leaves a strip of the page along the right edge</b><p>On the outer screen the sheet looks narrower than the screen. It coincides with the simulator's status pill on the cover display.</p></div>
+    <div class="finding low"><span class="sev">Left as is</span><b>Live TV under More on the cover screen</b><p>The default bar stays; the bar can be rearranged by the user.</p></div>
+    <div class="finding low"><span class="sev">Fixed</span><b>Mini player's Next button read as "Go To Start"</b><p>Both forward buttons now say Next, or Skip forward 30 seconds for an audiobook.</p></div>
+  </div>
+</section>
+
+<section class="band">
+  <h2>What each pose is for, as the code has it</h2>
+  <div class="scroll"><table>
+    <tr><th>Pose</th><th>Screen</th><th>The app becomes</th><th>Decided in</th></tr>
+    <tr><td>Front</td><td>outer, closed</td><td>a phone: tab bar, phone metrics, portrait except the guide and the player</td><td><code>DevicePose.resolve</code>, <code>RootView.adaptiveShell</code>, <code>OrientationLock.mask</code></td></tr>
+    <tr><td>Inside</td><td>inner, open flat</td><td>the phone's app with room: tab bar, more per row, iPad guide scale, free rotation, guide restarted on the new screen</td><td>hinge fully open, or regular×regular on the phone idiom; <code>Metrics.wideScreen</code>; <code>TVGuideView</code></td></tr>
+    <tr><td>Tent</td><td>outer, part-open, landscape</td><td>a television: cover with Continue Watching, music that is on, Browse; player covers it; Browse lasts for the pose</td><td>hinge part-open + compact height; <code>TentIdleView</code>; <code>AppModel.tentBrowsing</code></td></tr>
+    <tr><td>Laptop</td><td>inner, part-open, flat</td><td>picture above the crease, controls below: player, Now Playing, item pages</td><td>hinge part-open + regular width; <code>FoldSplit</code> reads the system's division region</td></tr>
+    <tr><td>Book</td><td>inner, part-open, upright</td><td>the open-flat layout, for now</td><td>vertical crease via <code>FoldState.creaseIsVertical</code></td></tr>
+  </table></div>
+  <p>Full write-up with fixtures and the capture method: <code>qa-2026-10-22/REPORT.md</code> in the repo; the composite image is <code>qa-2026-10-22/duo-modes.png</code>.</p>
+</section>
+</div>

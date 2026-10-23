@@ -77,6 +77,9 @@ struct MiniPlayerBar: View {
                             .frame(width: 40, height: 40)
                             .contentShape(Rectangle())
                     }
+                    // The symbol's own name is "Go To Start", which is the
+                    // opposite of what the button does.
+                    .accessibilityLabel(song.isAudiobook ? "Skip forward 30 seconds" : "Next")
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.text)
                     .disabled(!song.isAudiobook && !music.hasNext)
@@ -498,6 +501,7 @@ struct NowPlayingView: View {
                     .frame(width: 60, height: 64)
                     .contentShape(Rectangle())
             }
+            .accessibilityLabel(song.isAudiobook ? "Skip forward 30 seconds" : "Next")
             .buttonStyle(.plain)
             .foregroundStyle(.white)
             .disabled(!song.isAudiobook && !music.hasNext)

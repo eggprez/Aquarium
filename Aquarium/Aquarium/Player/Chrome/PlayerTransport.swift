@@ -279,6 +279,22 @@ struct PlayerTransport: View {
         // Clear of the window's close, minimise and zoom buttons, which sit
         // over the picture in a window with no title bar.
         .padding(.leading, PlayerMetrics.titleLeadingInset(fullScreen: PlayerMetrics.isFullScreen))
+        // Clear of what a foldable keeps in its top trailing corner, which
+        // the safe area does not say: the camera's pill on the front screen,
+        // the Control Centre grab on the inside one. Both sat on AirPlay and
+        // the "…" button.
+        .padding(.trailing, Self.foldableCornerClearance)
+    }
+
+    /// How far in from the trailing edge the title row's buttons stop on a
+    /// foldable — see `titleRow`. The strip it leaves is where the
+    /// brightness rail goes (`BrightnessRail`).
+    static var foldableCornerClearance: CGFloat {
+        #if os(iOS)
+        MainActor.assumeIsolated { FoldState.shared.isFoldable } ? 92 : 0
+        #else
+        0
+        #endif
     }
 
     private var showsBackButton: Bool {

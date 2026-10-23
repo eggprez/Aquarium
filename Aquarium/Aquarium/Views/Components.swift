@@ -131,6 +131,18 @@ enum Metrics {
         #endif
     }
 
+    /// Extra room the top bar keeps from the sides of the screen, on top of
+    /// the gutter. A foldable's inside screen has corners rounder than the
+    /// safe area allows for, and the wordmark and the buttons sat in the
+    /// curve. Nothing anywhere else.
+    static var cornerClearance: CGFloat {
+        #if os(iOS)
+        isPhone && MainActor.assumeIsolated { FoldState.shared.usesInnerDisplay } ? 12 : 0
+        #else
+        0
+        #endif
+    }
+
     /// Points per minute on the Live TV guide's timeline.
     ///
     /// A phone works it out rather than naming it: half an hour is meant to be
@@ -192,7 +204,7 @@ enum Metrics {
         // points and a sitcom's 22 minutes is 75, and nearly every cell in
         // the grid read "F…" or "Bo…". At 5.5 an iPad on its side still shows
         // two hours and the titles are words.
-        guard phoneLayout else { return 5.5 }
+        guard !wideScreen else { return 5.5 }
         let width = MainActor.assumeIsolated { FoldState.shared.portraitWidth }
         return (width - guideChannelColumnWidth) / 30
     }
@@ -203,12 +215,20 @@ enum Metrics {
         UIDevice.current.userInterfaceIdiom == .phone
     }
 
-    /// Whether the screen that is on is a phone's. The idiom, except on a
-    /// foldable opened to its inside screen, which is an iPad's — see
-    /// `DevicePose`. Through the main actor the way `thumbnailScale` is: every
-    /// caller is a view's body, which is already there.
-    static var phoneLayout: Bool {
-        isPhone && !MainActor.assumeIsolated { FoldState.shared.usesInnerDisplay }
+    /// Whether the pages are drawn in the phone's design: the tab bar, the
+    /// phone's poster size, the fixed-height hero. The idiom, on both of a
+    /// foldable's screens — the inside screen is the same app with more
+    /// across each row, not an iPad — see `RootView.adaptiveShell`.
+    static var phoneLayout: Bool { isPhone }
+
+    /// Whether the screen that is on has an iPad's width to spend: an iPad,
+    /// or a foldable opened to its inside screen. Decides the things that
+    /// are about room rather than design — the guide's scale, the hero's
+    /// proportion, the channel column — see `DevicePose`. Through the main
+    /// actor the way `thumbnailScale` is: every caller is a view's body,
+    /// which is already there.
+    static var wideScreen: Bool {
+        !isPhone || MainActor.assumeIsolated { FoldState.shared.usesInnerDisplay }
     }
     #endif
 
@@ -234,7 +254,7 @@ enum Metrics {
         // that kind of word at the row's own font size, at the cost of a
         // fraction of a point per minute off the timeline the rest of the
         // guide draws against.
-        return phoneLayout ? 148 : 172
+        return wideScreen ? 172 : 148
         #endif
     }
 
@@ -2500,22 +2520,26 @@ struct AppTopBar<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Metrics.gutter)
+        .padding(.horizontal, Metrics.gutter + Metrics.cornerClearance)
         .padding(.bottom, 9)
         .frame(height: height, alignment: .bottom)
         // The bar is fitted below the status bar and its fill is what
         // reaches up past it. Measuring the inset instead — a
         // GeometryReader inside an `ignoresSafeArea`, which is the usual
         // trick — reports zero as often as not, and a bar built on that
-        // number puts the wordmark through the middle of the clock.
+        // number puts the wordmark through the middle of the clock. The fill
+        // reaches out to the sides as well: on a foldable's front screen the
+        // page stops short of the tab bar's column and the hero under this
+        // bar does not, so a bar that stopped with the page ended in mid-air.
         .background {
-            Theme.background.ignoresSafeArea(edges: .top)
+            Theme.background.ignoresSafeArea(edges: [.top, .horizontal])
         }
         // The one thing separating an opaque bar from the artwork under it.
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Theme.border)
                 .frame(height: 0.5)
+                .ignoresSafeArea(edges: .horizontal)
         }
     }
 }
