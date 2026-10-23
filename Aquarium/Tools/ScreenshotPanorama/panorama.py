@@ -368,6 +368,25 @@ def duo():
     c.save("iPhoneDuo-inner", gap_px=70)
 
 
+def duo_outer():
+    """iPhone Duo, closed: the outer display's landscape size (2034x1398, the
+    store's other "iPhone Duo" size). Five upright phones across three cards,
+    every other one over a cut."""
+    W, H = 2034, 1398
+    c = Canvas(W, H, 3, seed=13)
+    for i, text in enumerate(["Closed, it's a phone", "Plays your files, Live TV too",
+                              "Your music, every series"]):
+        c.headline(i, [text], H * 0.05, 82)
+    shots = ["duo-out-home.png", "duo-out-player.png", "duo-out-livetv.png", "duo-out-music.png",
+             "duo-out-series.png"]
+    width = 780
+    for i in [0, 2, 4, 1, 3]:
+        top = H * 0.155 if i % 2 == 0 else H * 0.235
+        c.place(framed(capture(shots[i]), width, "ipad"), (0.3 + 0.6 * i) * W, top,
+                rotate=0 if i % 2 == 0 else (4 if i == 1 else -4))
+    c.save("iPhoneDuo-outer", gap_px=50)
+
+
 def tv():
     """Apple TV, 1080p: Home, the player and its panel, Live TV, audio sync,
     a series."""
@@ -378,7 +397,7 @@ def tv():
     c.save("AppleTV", gap_px=40)
 
 
-SETS = {"iphone": iphone, "ipad": ipad, "watch": watch, "duo": duo, "tv": tv}
+SETS = {"iphone": iphone, "ipad": ipad, "watch": watch, "duo": duo, "duo_outer": duo_outer, "tv": tv}
 
 if __name__ == "__main__":
     for key in sys.argv[1:] or SETS:
