@@ -125,7 +125,7 @@ def framed(screen, width, kind):
     short = min(sw, sh)
     if kind == "phone":
         bezel, radius = round(short * 0.032), round(short * 0.14)
-    elif kind == "duo":
+    elif kind in ("duo", "ipad"):
         bezel, radius = round(short * 0.022), round(short * 0.055)
     elif kind == "watch":
         bezel, radius = round(short * 0.07), round(short * 0.24)
@@ -301,6 +301,26 @@ def iphone():
         c.save_resized(name, size)
 
 
+def ipad():
+    """13" iPad, portrait, three cards: Home, Live TV and Music behind; the
+    player across the first cut and a series across the second."""
+    W, H = 2064, 2752
+    c = Canvas(W, H, 3, seed=9)
+    head, top = 118, 150
+    c.headline(0, ["Your whole library,", "front and centre"], top, head)
+    c.headline(1, ["Plays your files,", "Live TV with a guide"], top, head)
+    c.headline(2, ["Your music,", "every series"], top, head)
+    pad = lambda name, w: framed(capture(name), w, "ipad")
+    c.place(pad("ipad-home.png", 1500), 0.42 * W, 470)
+    c.place(pad("ipad-livetv.png", 1500), 1.58 * W, 470)
+    c.place(pad("ipad-music.png", 1500), 2.58 * W, 470)
+    # In front, lower: the player across the first cut, the series across the second.
+    c.place(pad("ipad-player.png", 1180), 1.0 * W, 1150, rotate=2)
+    c.place(pad("ipad-series.png", 1180), 2.0 * W, 1150, rotate=-2)
+    c.save("iPad-13in", gap_px=60)
+    c.save_resized("iPad-12.9in-2048x2732", (2048, 2732))
+
+
 def watch():
     """Apple Watch 46 mm: the screens as they are, on one continuous sea; the
     crowns reach toward the next card."""
@@ -338,16 +358,14 @@ def cascade(c, shots, kind, heads, head_size):
 
 
 def duo():
-    """iPhone Duo, open, in the two landscape sizes the store takes:
-    Home, the player, Live TV, Music, a series."""
-    shots = ["duo-home.png", "duo-player.png", "duo-livetv.png", "duo-music.png", "duo-series.png"]
-    heads = ["Your whole library, front and centre", "Plays your files, Live TV with a guide",
-             "Your music, every series"]
-    for name, (W, H), size in [("iPhoneDuo-iPad-13in", (2752, 2064), 96),
-                               ("iPhoneDuo-iPhone-6.9in", (2868, 1320), 70)]:
-        c = Canvas(W, H, 3, seed=7)
-        cascade(c, shots, "duo", heads, size)
-        c.save(name, gap_px=70)
+    """iPhone Duo, open, at the inner display's landscape size (the store's
+    "iPhone Duo" entry takes 2853x2007): Home, the player, Live TV, Music, a
+    series."""
+    c = Canvas(2853, 2007, 3, seed=7)
+    cascade(c, ["duo-home.png", "duo-player.png", "duo-livetv.png", "duo-music.png", "duo-series.png"], "duo",
+            ["Your whole library, front and centre", "Plays your files, Live TV with a guide",
+             "Your music, every series"], 98)
+    c.save("iPhoneDuo-inner", gap_px=70)
 
 
 def tv():
@@ -360,7 +378,7 @@ def tv():
     c.save("AppleTV", gap_px=40)
 
 
-SETS = {"iphone": iphone, "watch": watch, "duo": duo, "tv": tv}
+SETS = {"iphone": iphone, "ipad": ipad, "watch": watch, "duo": duo, "tv": tv}
 
 if __name__ == "__main__":
     for key in sys.argv[1:] or SETS:
