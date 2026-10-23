@@ -57,6 +57,9 @@ struct MediaStream: Codable, Hashable, Sendable {
     var BitDepth: Int?
     /// The codec profile as ffprobe named it: `High`, `Main 10`, `High 10`.
     var Profile: String?
+    /// The four-character code the stream is stored under: `hvc1` or `hev1`
+    /// for HEVC, which decides whether Apple's player will open the file.
+    var CodecTag: String?
     /// Frames a second, as ffprobe read them. `RealFrameRate` is the stream's
     /// declared rate and the one an Apple TV matches its display to; the
     /// average is only a fallback for files that don't declare one.

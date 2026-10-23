@@ -140,6 +140,11 @@ enum PlayerActions {
             if video.selectedSubtitleOption != nil { video.selectSubtitles(nil) }
             return "Subtitles off."
         }
+        if code == TrackPreference.forcedOnly {
+            let pick = video.forcedOnlySubtitle
+            if pick?.id != video.selectedSubtitleOption { video.selectSubtitles(pick) }
+            return pick == nil ? "Saved; this file has no forced subtitles." : "Switched to the forced subtitles."
+        }
         let matching = video.subtitleOptions.filter { Languages.matches(preference: code, tag: $0.language) }
         guard let option = matching.first(where: { !$0.isForced }) ?? matching.first else {
             return "Saved, but this file has no such subtitles."

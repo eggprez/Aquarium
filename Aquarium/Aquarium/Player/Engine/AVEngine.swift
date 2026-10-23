@@ -684,6 +684,10 @@ final class AVEngine: PlaybackEngine {
             } else {
                 avItem.select(nil, in: group)
             }
+            // What was asked for and what took: a change that seems to do
+            // nothing is otherwise impossible to tell from one still on its way.
+            let now = avItem.currentMediaSelection.selectedMediaOption(in: group)?.displayName ?? "none"
+            Self.log.notice("subtitle \(trackID.map(String.init) ?? "off", privacy: .public) of \(group.options.count) asked; showing \(now, privacy: .public)")
             await readTracks(on: avItem)
         }
     }
@@ -712,7 +716,7 @@ final class AVEngine: PlaybackEngine {
                 : composed?.audio
             for (i, option) in group.options.enumerated() {
                 list.append(EngineTrack(
-                    id: i, kind: .audio, title: option.displayName,
+                    id: i, kind: .audio, title: option.displayName, manifestName: await Self.manifestName(of: option),
                     language: option.extendedLanguageTag ?? option.locale?.identifier,
                     isSelected: i == selected
                 ))
@@ -724,7 +728,7 @@ final class AVEngine: PlaybackEngine {
                 : composed?.subtitle
             for (i, option) in group.options.enumerated() {
                 list.append(EngineTrack(
-                    id: i, kind: .subtitle, title: option.displayName,
+                    id: i, kind: .subtitle, title: option.displayName, manifestName: await Self.manifestName(of: option),
                     language: option.extendedLanguageTag ?? option.locale?.identifier,
                     isForced: option.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
                         || option.displayName.localizedCaseInsensitiveContains("forced"),
@@ -734,6 +738,14 @@ final class AVEngine: PlaybackEngine {
         }
         tracks = Self.numbered(list, by: hints)
         deliver(.tracks(tracks))
+    }
+
+    /// The NAME a rendition has in the manifest, which AVFoundation keeps as
+    /// the option's title metadata rather than as its display name.
+    private static func manifestName(of option: AVMediaSelectionOption) async -> String? {
+        let titles = AVMetadataItem.metadataItems(from: option.commonMetadata, filteredByIdentifier: .commonIdentifierTitle)
+        guard let first = titles.first else { return nil }
+        return try? await first.load(.stringValue)
     }
 
     /// Line the engine's tracks up with the server's numbering.
@@ -760,7 +772,9 @@ final class AVEngine: PlaybackEngine {
                 let match: Int? = {
                     if let title = hint.title, !title.isEmpty,
                        let found = indexes.first(where: {
-                           out[$0].title?.caseInsensitiveCompare(title) == .orderedSame && !taken.contains($0)
+                           !taken.contains($0)
+                               && (out[$0].manifestName?.caseInsensitiveCompare(title) == .orderedSame
+                                   || out[$0].title?.caseInsensitiveCompare(title) == .orderedSame)
                        }) {
                         return found
                     }

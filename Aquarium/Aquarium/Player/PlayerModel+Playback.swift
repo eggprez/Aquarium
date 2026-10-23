@@ -160,7 +160,7 @@ extension PlayerModel {
 
         let startSeconds = startSeconds(for: item, options: opts)
 
-        let canHandOver = streamIsPlaying
+        let canHandOver = streamIsPlaying && !meta.forTracks
             && startSeconds > 1 && duration > 0
             && startSeconds + Self.handoverLead < duration - 30
 
@@ -258,6 +258,14 @@ extension PlayerModel {
                     url: src.url, headers: client.authHeaders(for: src.url), startAt: handoverTarget)
                 request.hints = hints
                 if await engine.handOver(to: request, at: handoverTarget) {
+                    // Overtaken while the new stream was being lined up: a
+                    // later choice is on its way, and taking this one as the
+                    // source put a stale stream in place and left the next
+                    // to wait out a full reload.
+                    guard generation == mine else {
+                        await release(src)
+                        return
+                    }
                     currentStreamURL = src.url
                     self.source = src
                     self.isTranscoding = src.isTranscode
@@ -339,9 +347,14 @@ extension PlayerModel {
         let askedForAStream = options.maxBitrate != nil || options.bitrateIsChosen
             || options.forceTranscode || options.forceFullEncode
         if askedForAStream, !meta.inherited { return nil }
-        guard let record = DownloadManager.shared.record(for: item.Id), !record.isAudio,
-              DownloadManager.shared.mediaURL(for: record) != nil else { return nil }
-        return record
+        guard let found = DownloadManager.shared.completeRecord(matching: item), !found.isAudio,
+              DownloadManager.shared.mediaURL(for: found) != nil else { return nil }
+        // Found by what it is rather than by id: the server may have it under
+        // a new one now, and its watch state belongs there.
+        if found.itemId != item.Id {
+            DownloadManager.shared.noteFoundUnderNewId(found.itemId, newId: item.Id)
+        }
+        return found
     }
 
     func playLocal(_ record: DownloadRecord, keepShuffle: Bool = false, startAt: Double? = nil, paused: Bool = false) {
@@ -406,6 +419,11 @@ extension PlayerModel {
         engineLoad(url: url, startAt: startAt ?? record.resumeSeconds, headers: [:], paused: paused)
         if paused { isPaused = true }
         Task { await refreshLocalUpNext(after: record) }
+        // Downloads made before subtitles came with them get theirs the first
+        // time they are played with a server in reach.
+        if !record.isAudio, !JellyfinClient.shared.isOffline {
+            Task { await DownloadSubtitles.fetch(itemId: record.itemId, into: DownloadManager.folder(for: record.itemId)) }
+        }
     }
 
     func endLocalSession() {
@@ -978,7 +996,6 @@ extension PlayerModel {
         guard opts.resume, prefs.resumePlayback else { return 0 }
         let ticks = item.userData.positionTicks
         guard ticks > 0, let total = item.RunTimeTicks, total > 0 else { return 0 }
-        let f = Double(ticks) / Double(total)
-        return f > 0.92 ? 0 : Double(ticks) / 10_000_000
+        return VideoProgress.isFinished(positionTicks: ticks, runTimeTicks: total) ? 0 : Double(ticks) / 10_000_000
     }
 }

@@ -59,6 +59,12 @@ struct StartMeta: Sendable {
     /// Autoplay carrying a subtitle-forced transcode into the next episode,
     /// and with it the way back to direct play once that subtitle is off.
     var carriesSubtitleTranscode: Bool = false
+    /// The same title reopened for a different audio or subtitle track. Loaded
+    /// straight away rather than handed over: a hand-over opens the new
+    /// stream twelve seconds ahead and swaps when the playhead gets there,
+    /// which for a quality change is seamless and for a subtitle is twelve
+    /// seconds of the old stream with none, under a menu saying it is on.
+    var forTracks: Bool = false
 }
 
 struct StreamOptions: Sendable {
@@ -344,6 +350,9 @@ final class PlayerModel {
         var seriesId: String?
         var seriesName: String?
         var seen: Set<String>
+        /// The downloads this shuffle draws from: a season's, when it was
+        /// started from a season. Nil is every download of the series.
+        var pool: Set<String>? = nil
     }
 
     /// Set while an interruption is in force, so a route change in the same

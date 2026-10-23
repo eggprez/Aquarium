@@ -207,17 +207,17 @@ struct SkipBadge: View {
     var compact = false
 
     var body: some View {
-        HStack(spacing: compact ? 8 : 14) {
-            if seconds < 0 { Image(systemName: "backward.fill") }
+        // Just the amount and which way, on the picture itself: no pill. A
+        // soft shadow is what keeps white text readable over a bright scene.
+        HStack(spacing: compact ? 4 : 6) {
+            if seconds < 0 { Image(systemName: "backward.fill").imageScale(.small) }
             Text(label)
                 .contentTransition(.numericText(value: Double(seconds)))
-            if seconds > 0 { Image(systemName: "forward.fill") }
+            if seconds > 0 { Image(systemName: "forward.fill").imageScale(.small) }
         }
-        .font((compact ? Font.headline : .title2).weight(.bold).monospacedDigit())
+        .font((compact ? Font.headline : .title3).weight(.semibold).monospacedDigit())
         .foregroundStyle(.white)
-        .padding(.horizontal, compact ? 18 : 34)
-        .padding(.vertical, compact ? 10 : 20)
-        .playerGlass(cornerRadius: compact ? 22 : 40)
+        .shadow(color: .black.opacity(0.6), radius: 6)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(seconds < 0 ? "Skipped back \(PlayerTime.spoken(Double(-seconds)))" : "Skipped forward \(PlayerTime.spoken(Double(seconds)))")
     }

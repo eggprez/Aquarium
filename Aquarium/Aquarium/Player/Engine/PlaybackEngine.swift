@@ -116,6 +116,11 @@ struct EngineTrack: Hashable, Sendable, Identifiable {
     var id: Int
     var kind: Kind
     var title: String?
+    /// The rendition's NAME as the HLS manifest gives it, where that is not
+    /// the title shown: AVFoundation makes `title` up from the language and
+    /// characteristics ("English Forced"), while the manifest carries the
+    /// server's own `DisplayTitle` ("English (Forced) - SUBRIP").
+    var manifestName: String?
     var language: String?
     var codec: String?
     var isDefault = false

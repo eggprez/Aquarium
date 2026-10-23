@@ -239,9 +239,10 @@ enum Languages {
     static let audioChoices: [(code: String, name: String)] =
         [("", "Whatever the file lists first")] + all
     /// What `Preferences.subtitleLanguage` can be: the file's own choice,
-    /// never, then the languages.
+    /// never, forced only, then the languages.
     static let subtitleChoices: [(code: String, name: String)] =
-        [("", "Only when the file turns them on"), ("off", "Never — no subtitles")] + all
+        [("", "Only when the file turns them on"), ("off", "Never — no subtitles"),
+         (TrackPreference.forcedOnly, "Forced only — signs and foreign lines")] + all
 
     /// A readable name for a track's language tag, for the times a file names
     /// its tracks by code and nothing else. Anything not on the list above

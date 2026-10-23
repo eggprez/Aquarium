@@ -1026,6 +1026,11 @@ private struct SubtitlesTab: View {
                     if player.selectedSubtitleOption != nil { player.selectSubtitles(nil) }
                     return
                 }
+                if code == TrackPreference.forcedOnly {
+                    let pick = player.forcedOnlySubtitle
+                    if pick?.id != player.selectedSubtitleOption { player.selectSubtitles(pick) }
+                    return
+                }
                 let matching = player.subtitleOptions.filter { Languages.matches(preference: code, tag: $0.language) }
                 guard let option = matching.first(where: { !$0.isForced }) ?? matching.first,
                       option.id != player.selectedSubtitleOption else { return }

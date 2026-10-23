@@ -108,9 +108,7 @@ struct MacSidebarRows: View {
     /// too. Zero draws no badge.
     private func badge(for section: AppSection) -> Int {
         guard section == .downloads else { return 0 }
-        return DownloadManager.shared.records.lazy
-            .filter { $0.status == .queued || $0.status == .downloading }
-            .count
+        return DownloadManager.shared.transfersToFinish
     }
 }
 

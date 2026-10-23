@@ -77,6 +77,20 @@ struct DownloadsView: View {
             VStack(alignment: .leading, spacing: 24) {
                 summary
 
+                // Paused with nothing waiting — the system's own stop button
+                // does this — left the Resume button, which lives under Up
+                // next, nowhere on the page, while the pause held everything
+                // queued later.
+                if downloads.isPaused && downloads.queue.isEmpty {
+                    section("Paused") {
+                        Text("Downloads are paused. Nothing new starts until they're resumed.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textDim)
+                        Button("Resume downloads") { downloads.setPaused(false) }
+                            .foregroundStyle(Theme.link)
+                    }
+                }
+
                 if !running.isEmpty {
                     section("Downloading") {
                         ForEach(running) { record in

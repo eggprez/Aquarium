@@ -48,6 +48,9 @@ struct WatchRecord: Codable, Identifiable, Hashable, Sendable {
     var estimatedBytes: Int64 = 0
     var status: Status = .queued
     var errorMessage: String?
+    /// Failed only because it didn't fit: tried again by the pump once
+    /// there is room, which no other failure is.
+    var lackedSpace = false
     var attempts = 0
     /// Why this is here: "book", "song", "album:<id>", "playlist:<id>". A
     /// group deleted takes its reason away; a record with none left goes.
@@ -119,6 +122,7 @@ struct WatchRecord: Codable, Identifiable, Hashable, Sendable {
         estimatedBytes = try c.decodeIfPresent(Int64.self, forKey: .estimatedBytes) ?? 0
         status = try c.decodeIfPresent(Status.self, forKey: .status) ?? .queued
         errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
+        lackedSpace = try c.decodeIfPresent(Bool.self, forKey: .lackedSpace) ?? false
         attempts = try c.decodeIfPresent(Int.self, forKey: .attempts) ?? 0
         reasons = try c.decodeIfPresent(Set<String>.self, forKey: .reasons) ?? ["song"]
         automatic = try c.decodeIfPresent(Bool.self, forKey: .automatic) ?? false
@@ -531,6 +535,8 @@ final class WatchDownloads: NSObject {
         removeFolder(itemId)
         for i in playlists.indices { playlists[i].itemIds.removeAll { $0 == itemId } }
         savePlaylists()
+        // The room freed may be what something turned away was waiting for.
+        pump()
     }
 
     /// Take away one reason for these records to be here; whatever has none
@@ -608,6 +614,7 @@ final class WatchDownloads: NSObject {
     func deleteLooseSongs() {
         let loose = songs.filter { $0.reasons == ["song"] }.map(\.itemId)
         for id in loose { removeFolder(id) }
+        pump()
     }
 
     func deleteEverything() {
@@ -711,6 +718,15 @@ final class WatchDownloads: NSObject {
     /// A phone heard from this recently is well into an item: the watch
     /// finding Wi‑Fi of its own doesn't take that one back.
     private static let phoneBusyWindow: TimeInterval = 10 * 60
+    /// How long the phone may be silent on an item before it is asked
+    /// again, doubling with each ask up to the longest. The phone can lose
+    /// an ask — killed with a send half queued — and a real watch, whose
+    /// path monitor always says down, never takes the item back to fetch
+    /// itself; without asking again it waits forever.
+    private static let reaskFirst: TimeInterval = 5 * 60
+    private static let reaskLongest: TimeInterval = 60 * 60
+    /// Items asked of the phone again since launch: how many times, and when last.
+    @ObservationIgnored private var relayReasks: [String: (count: Int, at: Date)] = [:]
 
     /// Start the next transfer, if there is one and something can carry it.
     ///
@@ -744,9 +760,10 @@ final class WatchDownloads: NSObject {
                 }
             }
         }
+        reaskPhone()
         // Asked-for things first; the mirror's things only when a phone
         // will carry them or the watch is on Wi‑Fi.
-        let candidates = makeRoom(for: records.filter { $0.status == .queued }
+        let candidates = makeRoom(for: records.filter { $0.status == .queued || ($0.status == .error && $0.lackedSpace) }
             .sorted { a, b in
                 if a.automatic != b.automatic { return !a.automatic }
                 return a.createdAt < b.createdAt
@@ -787,6 +804,37 @@ final class WatchDownloads: NSObject {
         }
     }
 
+    /// Items the phone has gone quiet on are asked for again, whatever the
+    /// path monitor says: with the phone in reach after a few minutes'
+    /// silence, out of reach once its patience has run out, and less often
+    /// each time. An item the phone is still working on costs it nothing
+    /// to be asked for again; one it lost starts over.
+    private func reaskPhone() {
+        let link = WatchLink.shared
+        guard link.hasCompanion else { return }
+        let now = Date()
+        var again: [String] = []
+        for r in records where r.status == .downloading && active != r.itemId {
+            guard let asked = r.relayAskedAt else { continue }
+            let quiet = now.timeIntervalSince(asked)
+            let last = relayReasks[r.itemId]
+            let wait = min(Self.reaskLongest, Self.reaskFirst * pow(2, Double(last?.count ?? 0)))
+            let sinceLast = last.map { now.timeIntervalSince($0.at) } ?? quiet
+            guard quiet > wait, sinceLast > wait, link.isPhoneReachable || quiet > Self.relayPatience else { continue }
+            relayReasks[r.itemId] = ((last?.count ?? 0) + 1, now)
+            again.append(r.itemId)
+        }
+        guard !again.isEmpty else { return }
+        if again.count == 1 {
+            link.send(.fetch(itemId: again[0]))
+        } else {
+            for start in stride(from: 0, to: again.count, by: 200) {
+                link.send(.fetchMany(itemIds: Array(again[start..<min(start + 200, again.count)])))
+            }
+        }
+        WatchLog.note("downloads", "asked the phone again for \(again.count) items it has gone quiet on")
+    }
+
     /// The app is being put away. The watch's own session fetches one item
     /// at a time and needs the app woken between them, which watchOS allows
     /// only now and then; the phone's downloads and file transfers carry on
@@ -807,9 +855,11 @@ final class WatchDownloads: NSObject {
 
     /// The queued items that fit, in order; what doesn't fit is failed now
     /// with the sizes, rather than downloaded for an hour and refused at
-    /// the end. What is already on its way has its room taken first.
+    /// the end. What is already on its way has its room taken first. Items
+    /// failed here before come back in as candidates, and are queued again
+    /// once something has been deleted and they fit.
     private func makeRoom(for candidates: [WatchRecord]) -> [WatchRecord] {
-        guard let free = Self.freeBytes() else { return candidates }
+        guard let free = Self.freeBytes() else { return candidates.filter { $0.status == .queued } }
         let coming = records.filter { $0.status == .downloading }
             .reduce(Int64(0)) { sum, r in sum + max(0, r.estimatedBytes - (liveBytes[r.itemId]?.received ?? 0)) }
         var room = free - Self.spareBytes - coming
@@ -817,14 +867,26 @@ final class WatchDownloads: NSObject {
         for var r in candidates {
             if r.estimatedBytes <= room {
                 room -= max(0, r.estimatedBytes)
+                if r.status == .error || r.lackedSpace {
+                    // Turned away for room before, and there is room now.
+                    if r.status == .error { WatchLog.note("downloads", "room for \(r.itemId) now: queued again") }
+                    r.status = .queued
+                    r.errorMessage = nil
+                    r.lackedSpace = false
+                    save(r)
+                }
                 fitting.append(r)
                 continue
             }
+            // Already turned away for room: written down once, not on every
+            // pass that finds the watch still full.
+            if r.status == .error { continue }
             let size = ByteCountFormatter.string(fromByteCount: r.estimatedBytes, countStyle: .file)
             let left = ByteCountFormatter.string(fromByteCount: max(0, free - Self.spareBytes), countStyle: .file)
             WatchLog.error("downloads", "no room for \(r.itemId): needs \(size), \(left) usable")
             r.status = .error
             r.errorMessage = "Not enough space: needs \(size), \(left) free"
+            r.lackedSpace = true
             save(r)
         }
         return fitting
@@ -842,6 +904,7 @@ final class WatchDownloads: NSObject {
     /// again. Written down at most once a minute.
     func phoneStillAtIt(_ itemId: String) {
         phoneWorking.insert(itemId)
+        relayReasks[itemId] = nil
         guard var r = record(for: itemId), r.status == .downloading, let asked = r.relayAskedAt,
               Date().timeIntervalSince(asked) > 60 else { return }
         r.relayAskedAt = Date()
@@ -867,7 +930,9 @@ final class WatchDownloads: NSObject {
         }
     }
 
-    /// A file the phone handed over, already moved into place by the link.
+    /// A file the phone handed over, set down in the item's folder by the
+    /// link under a name of its own. It takes the audio file's place only
+    /// here, once it is wanted.
     func receivedFromPhone(itemId: String, at url: URL, bytes: Int64) async {
         guard let r = record(for: itemId) else {
             try? FileManager.default.removeItem(at: url)
@@ -875,11 +940,27 @@ final class WatchDownloads: NSObject {
         }
         if r.status == .complete {
             // Arrived twice — a phone that resent, or a watch that fetched
-            // for itself in the meantime.
-            if url.lastPathComponent != r.fileName { try? FileManager.default.removeItem(at: url) }
+            // for itself in the meantime. The file already here stays.
+            try? FileManager.default.removeItem(at: url)
             return
         }
-        await landed(itemId: itemId, at: url, bytes: bytes)
+        let folder = Self.folder(itemId)
+        let destination = folder.appendingPathComponent("audio.\(url.pathExtension)")
+        for old in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        where old.lastPathComponent.hasPrefix("audio.") {
+            try? FileManager.default.removeItem(at: old)
+        }
+        do {
+            try FileManager.default.moveItem(at: url, to: destination)
+        } catch {
+            // Left asked of the phone, which is asked again once it has
+            // been quiet a while.
+            WatchLog.error("downloads", "couldn't put the phone's file for \(itemId) in place: \(error.localizedDescription)")
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        relayReasks[itemId] = nil
+        await landed(itemId: itemId, at: destination, bytes: bytes)
     }
 
     private func start(_ record: WatchRecord) async {

@@ -31,39 +31,90 @@ enum OfflineProgress {
     static func sync() async -> Result {
         let client = JellyfinClient.shared
         guard client.isSignedIn else { return Result(synced: 0, failed: 0) }
-        let pending = DownloadManager.shared.unsyncedRecords
-        guard !pending.isEmpty else { return Result(synced: 0, failed: 0) }
+        let manager = DownloadManager.shared
+        let pending = manager.unsyncedRecords
+        let owner = client.session?.userId
+        let owed = manager.owedProgress.filter { $0.ownerUserId == nil || $0.ownerUserId == owner }
+        guard !pending.isEmpty || !owed.isEmpty else { return Result(synced: 0, failed: 0) }
         guard await client.checkOnline() else {
-            return Result(synced: 0, failed: pending.count)
+            return Result(synced: 0, failed: pending.count + owed.count)
+        }
+
+        // Played somewhere else since it was last touched here: the server's
+        // account is the newer one. Sent regardless, an episode left at ten
+        // minutes offline and finished on the TV meanwhile went back to ten
+        // minutes. Asked once for the lot; unanswered, everything goes as
+        // before.
+        let server = (try? await client.itemsByIds(pending.map(\.itemId) + owed.map(\.itemId))) ?? []
+        let lastPlayed = Dictionary(server.map { ($0.Id, $0) }, uniquingKeysWith: { a, _ in a })
+        func serverIsNewer(_ id: String, than changed: Date?) -> BaseItem? {
+            guard let item = lastPlayed[id], let changed,
+                  let played = Format.parseDate(item.userData.LastPlayedDate),
+                  played.timeIntervalSince(changed) > BookProgress.clockSlack else { return nil }
+            return item
         }
 
         var synced = 0
         var failed = 0
         for record in pending {
+            if let newer = serverIsNewer(record.itemId, than: record.progressChangedAt) {
+                manager.takeServerState(
+                    itemId: record.itemId, positionTicks: newer.userData.positionTicks,
+                    played: newer.userData.played, revision: record.progressRevision
+                )
+                synced += 1
+                continue
+            }
             do {
-                try await send(record, with: client)
+                try await send(
+                    itemId: record.itemId, played: record.played, unplayedPending: record.unplayedPending,
+                    positionTicks: record.positionTicks, with: client
+                )
                 // Against what was sent: newer progress noted during the
                 // await leaves the record unsynced.
-                DownloadManager.shared.markSynced(record.itemId, revision: record.progressRevision)
+                manager.markSynced(record.itemId, revision: record.progressRevision)
                 synced += 1
             } catch {
                 failed += 1
             }
         }
+        let current = Set(pending.map(\.itemId))
+        for entry in owed {
+            // An item downloaded again has a record saying something newer,
+            // sent above; this would only take it back.
+            if !current.contains(entry.itemId), serverIsNewer(entry.itemId, than: entry.changedAt) == nil {
+                do {
+                    try await send(
+                        itemId: entry.itemId, played: entry.played, unplayedPending: entry.unplayedPending,
+                        positionTicks: entry.positionTicks, with: client
+                    )
+                } catch APIError.server(let status, _) where status == 404 {
+                    // Gone from the server: there is nothing to tell.
+                } catch {
+                    failed += 1
+                    continue
+                }
+            }
+            manager.settleOwed(entry.itemId)
+            synced += 1
+        }
         return Result(synced: synced, failed: failed)
     }
 
-    /// One record's state, said to the server. Throws unless all of it landed.
+    /// One item's state, said to the server. Throws unless all of it landed.
     @MainActor
-    private static func send(_ record: DownloadRecord, with client: JellyfinClient) async throws {
-        if record.played {
-            try await client.markPlayed(record.itemId, played: true)
+    private static func send(
+        itemId: String, played: Bool, unplayedPending: Bool, positionTicks: Int64,
+        with client: JellyfinClient
+    ) async throws {
+        if played {
+            try await client.markPlayed(itemId, played: true)
         } else {
             // Un-watched here: said first, since the server keeps its
             // tick through a stopped report and the next refresh would
             // otherwise put it straight back.
-            if record.unplayedPending {
-                try await client.markPlayed(record.itemId, played: false)
+            if unplayedPending {
+                try await client.markPlayed(itemId, played: false)
             }
             // A stopped report is how Jellyfin records a resume point;
             // there is no "set position" endpoint that does it alone.
@@ -71,13 +122,13 @@ enum OfflineProgress {
             // this one has to actually land before the record is
             // marked synced, or a server blip mid-loop drops the
             // resume point for good.
-            if record.positionTicks > 0 {
+            if positionTicks > 0 {
                 try await client.reportPlaybackStoppedOrThrow(
                     PlaybackReport(
-                        itemId: record.itemId,
+                        itemId: itemId,
                         mediaSourceId: nil,
                         playSessionId: nil,
-                        positionSeconds: Double(record.positionTicks) / 10_000_000,
+                        positionSeconds: Double(positionTicks) / 10_000_000,
                         isPaused: true,
                         isTranscode: false
                     )
@@ -187,7 +238,7 @@ enum OfflineProgress {
     static func refreshFromServer() async {
         let client = JellyfinClient.shared
         let ids = DownloadManager.shared.records
-            .filter { $0.progressSynced }
+            .filter { $0.progressSynced && DownloadManager.shared.belongsToCurrentAccount($0) }
             .map(\.itemId)
         guard !ids.isEmpty, client.isSignedIn, !client.isOffline else { return }
         guard let items = try? await client.itemsByIds(ids) else { return }

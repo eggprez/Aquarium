@@ -92,7 +92,8 @@ struct SettingsView: View {
     static let audioLanguageOptions: [(String, String)] =
         [("", "Whatever the file lists first")] + Languages.all.map { ($0.code, $0.name) }
     static let subtitleLanguageOptions: [(String, String)] =
-        [("", "Only when the file turns them on"), ("off", "Never — no subtitles")]
+        [("", "Only when the file turns them on"), ("off", "Never — no subtitles"),
+         (TrackPreference.forcedOnly, "Forced only — signs and foreign lines")]
             + Languages.all.map { ($0.code, $0.name) }
 
     /// A first-page row: the page's name, and what it is about for the panel.

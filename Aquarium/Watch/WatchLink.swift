@@ -527,7 +527,12 @@ extension WatchLink: WCSessionDelegate {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         // The server's own file keeps its type: an .mp3 named .m4a won't open.
         let ext = (file.metadata?[WatchFileTransfer.extensionKey] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "m4a"
-        let destination = folder.appendingPathComponent("audio.\(ext)")
+        // Set down beside whatever is already here, not over it: the store
+        // decides whether it is wanted, and a song already complete keeps
+        // the file it has. Cleared out first, it was left with none.
+        // A name of its own, so two deliveries of the same item at once don't
+        // remove each other's file before it is moved.
+        let destination = folder.appendingPathComponent("received-\(UUID().uuidString).\(ext)")
         let source: URL
         if let send = file.metadata?[WatchFileTransfer.sendKey] as? String {
             guard let whole = Self.takePiece(file.fileURL, metadata: file.metadata, send: send, itemId: itemId, folder: folder) else {
@@ -538,10 +543,6 @@ extension WatchLink: WCSessionDelegate {
         } else {
             WatchLog.note("link", "file for \(itemId) arrived from the phone")
             source = file.fileURL
-        }
-        for old in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        where old.lastPathComponent.hasPrefix("audio.") {
-            try? FileManager.default.removeItem(at: old)
         }
         do {
             try FileManager.default.moveItem(at: source, to: destination)

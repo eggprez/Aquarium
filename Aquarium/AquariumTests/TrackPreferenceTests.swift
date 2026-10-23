@@ -56,6 +56,29 @@ final class TrackPreferenceTests: XCTestCase {
         XCTAssertEqual(choose(saved: .init(audio: nil, sub: "off")).subtitle, -1)
     }
 
+    func testForcedOnlyPicksTheForcedTrackOfTheSound() {
+        XCTAssertEqual(choose(sub: TrackPreference.forcedOnly).subtitle, 4, "English sound, English forced track")
+    }
+
+    func testForcedOnlyWithNoForcedTrackForTheSoundIsNone() {
+        // Japanese sound: the forced track is English, which is no help.
+        XCTAssertEqual(choose(audio: "jpn", sub: TrackPreference.forcedOnly).subtitle, -1)
+    }
+
+    func testForcedOnlyTakesAForcedTrackWithNoLanguage() {
+        let source = MediaSource(
+            MediaStreams: [
+                stream(1, "Audio", lang: "eng", isDefault: true),
+                stream(2, "Subtitle", lang: "eng"),
+                stream(3, "Subtitle", lang: nil, forced: true),
+            ],
+            DefaultAudioStreamIndex: 1
+        )
+        let c = TrackPreference.preferredStreams(
+            in: source, saved: nil, settings: .init(subtitleLanguage: TrackPreference.forcedOnly))
+        XCTAssertEqual(c.subtitle, 3)
+    }
+
     func testPlainSubtitlePreferredOverForced() {
         XCTAssertEqual(choose(sub: "en").subtitle, 3)
     }
@@ -70,10 +93,28 @@ final class TrackPreferenceTests: XCTestCase {
         XCTAssertEqual(choose(saved: .init(audio: "fra", sub: "fra"), audio: "jpn", sub: "jpn").subtitle, 5)
     }
 
-    func testServerDefaultSubtitleIsLeftUnnamed() {
+    func testDefaultSubtitleInsideAnMP4IsLeftUnnamed() {
         var s = film
+        s.MediaStreams?[3].Codec = "mov_text"
         s.DefaultSubtitleStreamIndex = 3
         let c = TrackPreference.preferredStreams(in: s, saved: nil, settings: .init(subtitleLanguage: "en"))
-        XCTAssertNil(c.subtitle)
+        XCTAssertNil(c.subtitle, "AVPlayer reads it from the file; naming it would cost the direct play")
+    }
+
+    func testDefaultSRTIsStillNamed() {
+        var s = film
+        s.MediaStreams?[3].Codec = "subrip"
+        s.DefaultSubtitleStreamIndex = 3
+        let c = TrackPreference.preferredStreams(in: s, saved: nil, settings: .init(subtitleLanguage: "en"))
+        XCTAssertEqual(c.subtitle, 3, "unasked, the server never puts it in the stream")
+    }
+
+    func testForcedOnlyNamesAForcedDefault() {
+        var s = film
+        s.MediaStreams?[4].Codec = "subrip"
+        s.DefaultSubtitleStreamIndex = 4
+        let c = TrackPreference.preferredStreams(
+            in: s, saved: nil, settings: .init(subtitleLanguage: TrackPreference.forcedOnly))
+        XCTAssertEqual(c.subtitle, 4)
     }
 }

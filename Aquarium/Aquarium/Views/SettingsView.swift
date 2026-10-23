@@ -511,6 +511,7 @@ struct SettingsView: View {
             Picker(selection: $prefs.subtitleLanguage) {
                 Text("Only when the file turns them on").tag("")
                 Text("Never — no subtitles").tag("off")
+                Text("Forced only — signs and foreign lines").tag(TrackPreference.forcedOnly)
                 ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
             } label: {
                 MacSettingLabel(Copy.subtitleLanguage, title: "Language")
@@ -1372,6 +1373,7 @@ private struct SubtitlesSettingsPage: View {
                 Picker("Language", selection: $prefs.subtitleLanguage) {
                     Text("File's choice").tag("")
                     Text("Never").tag("off")
+                    Text("Forced only").tag(TrackPreference.forcedOnly)
                     ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
                 }
                 Toggle(Copy.forcedOnly.name ?? "", isOn: $prefs.forcedSubtitlesOnly)
@@ -2347,7 +2349,7 @@ enum SettingsCopy {
     )
     static let subtitleLanguage = SettingNote(
         name: "Subtitles",
-        text: "Which subtitles a video opens with, when the file has them in this language. “Never” is the setting to pick if you don't use subtitles: it stops them being switched on by a file that ships with them enabled, which no other option here can do."
+        text: "Which subtitles a video opens with, when the file has them in this language. “Forced only” shows just the track that translates signs and the odd line of foreign dialogue, in the language you're listening in, and nothing when a file has no such track. “Never” is the setting to pick if you don't use subtitles: it stops them being switched on by a file that ships with them enabled, which no other option here can do."
     )
     static let forcedOnly = SettingNote(
         name: "Forced subtitles only",
@@ -2652,8 +2654,15 @@ enum SettingsSummary {
     }
 
     static func subtitles(_ prefs: Preferences) -> String {
-        var parts = [prefs.subtitleLanguage == "off" ? "Never" : language(prefs.subtitleLanguage, none: "File's choice")]
-        if prefs.forcedSubtitlesOnly { parts.append("Forced only") }
+        let first: String = switch prefs.subtitleLanguage {
+        case "off": "Never"
+        case TrackPreference.forcedOnly: "Forced only"
+        default: language(prefs.subtitleLanguage, none: "File's choice")
+        }
+        var parts = [first]
+        // The switch below the picker is about a language's own forced track;
+        // with forced only picked above, it would only say the same twice.
+        if prefs.forcedSubtitlesOnly, prefs.subtitleLanguage != TrackPreference.forcedOnly { parts.append("Forced only") }
         return parts.joined(separator: " · ")
     }
 

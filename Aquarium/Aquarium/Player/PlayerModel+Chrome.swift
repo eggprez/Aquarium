@@ -108,6 +108,9 @@ extension PlayerModel {
     /// The same list for a download: the episodes of its series on this
     /// device that come after it, at most `upNextLimit`.
     var upNextLocal: [DownloadRecord] {
+        // Online, the server's list is the one: it holds the downloaded
+        // episodes too, which were otherwise listed twice.
+        guard upcoming.isEmpty else { return [] }
         guard isLocal, let id = localRecordId, let record = DownloadManager.shared.record(for: id),
               record.isEpisode else { return [] }
         let siblings = DownloadManager.shared.episodes(ofSeries: record.seriesId, seriesName: record.series)

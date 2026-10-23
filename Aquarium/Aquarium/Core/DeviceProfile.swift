@@ -208,6 +208,15 @@ struct DeviceProfile: Encodable, Sendable {
               let video = stream.Codec?.lowercased(), fileVideoCodecs.contains(video),
               !needsDolbyVision(stream)
         else { return false }
+        // Two that AVFoundation turns away once the whole file is on the
+        // device, which is how a download came down twice and then failed as
+        // "arrived incomplete": HEVC stored as `hev1` rather than `hvc1`, and
+        // MPEG-4 Part 2 past its Simple profile (XviD, DivX). Rewrapped or
+        // re-encoded on the way instead.
+        if video == "hevc", let tag = stream.CodecTag?.lowercased(), tag != "hvc1" { return false }
+        if video == "mpeg4", let profile = stream.Profile?.lowercased(), profile != "simple profile" {
+            return false
+        }
         // Audio is allowed to be absent — silent films exist — but not to be
         // something that won't decode.
         if let audio = source.streams.first(where: { $0.type == "Audio" })?.Codec?.lowercased(),

@@ -53,7 +53,7 @@ extension PlayerModel {
 
     func refreshUpNext() async {
         guard let item, item.isEpisode, let seriesId = item.SeriesId else { return }
-        let found = await lookUpNextEpisodes(after: item, seriesId: seriesId)
+        let found = await lookUpNextEpisodes(after: item.Id, seasonId: item.SeasonId, seriesId: seriesId)
         guard self.item?.Id == item.Id else { return }
         if found.settled {
             upNextChecked = true
@@ -65,28 +65,34 @@ extension PlayerModel {
     /// The episodes after this one — the rest of its season, then the next
     /// season's from its first, up to `upNextLimit` — and whether every
     /// request needed to decide them was answered: an empty list with
-    /// `settled` is a series that has ended.
-    private func lookUpNextEpisodes(after item: BaseItem, seriesId: String) async -> (list: [BaseItem], settled: Bool) {
+    /// `settled` is a series that has ended. `located` says the episode was
+    /// found in its season at all — a download's record can carry a season
+    /// the server has since renumbered, and an empty list is no ending then.
+    private func lookUpNextEpisodes(
+        after itemId: String, seasonId: String?, seriesId: String
+    ) async -> (list: [BaseItem], settled: Bool, located: Bool) {
         let limit = Self.upNextLimit
-        guard let episodes = try? await client.episodes(seriesId: seriesId, seasonId: item.SeasonId) else {
-            return ([], false)
+        guard let episodes = try? await client.episodes(seriesId: seriesId, seasonId: seasonId) else {
+            return ([], false, false)
         }
         var list: [BaseItem] = []
-        if let i = episodes.firstIndex(where: { $0.Id == item.Id }) {
+        let index = episodes.firstIndex(where: { $0.Id == itemId })
+        if let i = index {
             list = Array(episodes.dropFirst(i + 1).prefix(limit))
         }
-        if list.count >= limit { return (list, true) }
-        guard let seasons = try? await client.seasons(seriesId: seriesId) else { return (list, false) }
-        guard let si = seasons.firstIndex(where: { $0.Id == item.SeasonId }) else { return (list, true) }
+        let located = index != nil
+        if list.count >= limit { return (list, true, located) }
+        guard let seasons = try? await client.seasons(seriesId: seriesId) else { return (list, false, located) }
+        guard let si = seasons.firstIndex(where: { $0.Id == seasonId }) else { return (list, true, located) }
         // Season by season until the list is full or the series runs out.
         for season in seasons.dropFirst(si + 1) {
             guard let more = try? await client.episodes(seriesId: seriesId, seasonId: season.Id) else {
-                return (list, false)
+                return (list, false, located)
             }
             list.append(contentsOf: more.prefix(limit - list.count))
             if list.count >= limit { break }
         }
-        return (list, true)
+        return (list, true, located)
     }
 
     /// Play one of the titles the Up Next list offers now, from wherever
@@ -98,8 +104,11 @@ extension PlayerModel {
         var opts = options
         opts.startSeconds = nil
         opts.resume = true
+        // From a download there are no stream options to carry over, so the
+        // next one opens as a fresh start would, under the opening bitrate.
+        // Inherited, it skipped that cap and opened at full rate on cellular.
         await play(item: next, options: opts, meta: StartMeta(
-            inherited: true, quiet: true,
+            inherited: !isLocal, quiet: true,
             carriesSubtitleTranscode: transcodingForSubtitle && opts.forceTranscode))
     }
 
@@ -130,12 +139,37 @@ extension PlayerModel {
         }
         #if !os(tvOS)
         if isLocal, let current = localRecordId {
-            if isShuffling, let next = nextShuffled(after: current) {
+            if isShuffling {
+                guard let next = nextShuffled(after: current) else { return false }
                 await reportLocalFinished(current)
                 playLocal(next, keepShuffle: true)
                 return true
             }
-            if let nextId = upNextLocalId, let record = DownloadManager.shared.record(for: nextId) {
+            // Online, the server's next episode wins over the next one that
+            // happens to be downloaded: with E1 and E3 on the device, E1 is
+            // followed by E2 streamed, not by E3. Playing it as a server item
+            // still opens the local copy when there is a complete one.
+            if upcoming.isEmpty, !upNextSettled, !JellyfinClient.shared.isOffline,
+               let record = DownloadManager.shared.record(for: current), let seriesId = record.seriesId {
+                let found = await lookUpNextEpisodes(after: current, seasonId: record.seasonId, seriesId: seriesId)
+                guard isLocal, localRecordId == current else { return true }
+                if !found.list.isEmpty {
+                    upcoming = found.list
+                } else if found.settled, found.located {
+                    upNextSettled = true
+                }
+            }
+            if let next = upNext {
+                await reportLocalFinished(current)
+                // Not inherited, for the reason given in `playUpcoming`.
+                await play(item: next, options: .init(), meta: StartMeta(inherited: false, quiet: true))
+                return true
+            }
+            // Offline, or the server couldn't be asked: the next download
+            // whose file is really there. One that has gone would only toast
+            // and leave the player on the episode that ended, so it is passed
+            // over rather than committed to.
+            if !upNextSettled, let record = nextPlayableDownload(after: current) {
                 await reportLocalFinished(current)
                 playLocal(record, keepShuffle: true)
                 return true
@@ -145,15 +179,18 @@ extension PlayerModel {
         #endif
         var candidate = upNext
         if candidate == nil, !upNextSettled, let item, item.isEpisode, let seriesId = item.SeriesId {
-            candidate = await lookUpNextEpisodes(after: item, seriesId: seriesId).list.first
+            candidate = await lookUpNextEpisodes(after: item.Id, seasonId: item.SeasonId, seriesId: seriesId).list.first
         }
         guard let next = candidate else { return false }
         await reportFinishedBeforeNext()
         var opts = options
         opts.startSeconds = nil
         opts.resume = true
+        // From a download there are no stream options to carry over, so the
+        // next one opens as a fresh start would, under the opening bitrate.
+        // Inherited, it skipped that cap and opened at full rate on cellular.
         await play(item: next, options: opts, meta: StartMeta(
-            inherited: true, quiet: true,
+            inherited: !isLocal, quiet: true,
             carriesSubtitleTranscode: transcodingForSubtitle && opts.forceTranscode))
         return true
     }
@@ -428,27 +465,53 @@ extension PlayerModel {
     #if !os(tvOS)
     func refreshLocalUpNext(after record: DownloadRecord) async {
         guard record.isEpisode else { return }
-        let siblings = DownloadManager.shared.episodes(ofSeries: record.seriesId, seriesName: record.series)
-        guard let i = siblings.firstIndex(where: { $0.itemId == record.itemId }), i + 1 < siblings.count else {
+        setUpNextLocalId(nextPlayableDownload(after: record.itemId)?.itemId)
+        // With the server reachable, Up Next is the series' real next episode
+        // rather than the next one on the device, so a gap in the downloads
+        // isn't skipped and a lone download doesn't end the binge. Until it
+        // answers, or if it can't, the downloads' own order stands.
+        guard !isShuffling, !JellyfinClient.shared.isOffline, let seriesId = record.seriesId else { return }
+        let found = await lookUpNextEpisodes(after: record.itemId, seasonId: record.seasonId, seriesId: seriesId)
+        guard isLocal, localRecordId == record.itemId else { return }
+        if !found.list.isEmpty {
+            upcoming = found.list
             setUpNextLocalId(nil)
-            return
+        } else if found.settled, found.located {
+            // The series has ended on the server; a download sorted after
+            // this one is a special, not the next episode.
+            upNextChecked = true
+            upNextSettled = true
+            setUpNextLocalId(nil)
         }
-        setUpNextLocalId(siblings[i + 1].itemId)
     }
 
+    /// The download after this one in its series whose file is on the device.
+    private func nextPlayableDownload(after itemId: String) -> DownloadRecord? {
+        guard let record = DownloadManager.shared.record(for: itemId), record.isEpisode else { return nil }
+        let siblings = DownloadManager.shared.episodes(ofSeries: record.seriesId, seriesName: record.series)
+        guard let i = siblings.firstIndex(where: { $0.itemId == itemId }) else { return nil }
+        return siblings.dropFirst(i + 1).first { DownloadManager.shared.mediaURL(for: $0) != nil }
+    }
+
+    /// Shuffle over these downloads only — a season's, when that is what was
+    /// asked for — rather than everything of the series on the device.
     func startShuffle(_ records: [DownloadRecord]) {
-        let pool = records.filter { $0.status == .complete }
+        let pool = records.filter { DownloadManager.shared.mediaURL(for: $0) != nil }
         guard let first = pool.randomElement() else {
             AppModel.shared.toast("Nothing to shuffle — no playable downloads", tone: .error)
             return
         }
-        shuffleSeries = DownloadShuffleState(seriesId: first.seriesId, seriesName: first.series, seen: [first.itemId])
+        shuffleSeries = DownloadShuffleState(
+            seriesId: first.seriesId, seriesName: first.series, seen: [first.itemId],
+            pool: Set(pool.map(\.itemId)))
         playLocal(first, keepShuffle: true)
     }
 
     private func nextShuffled(after current: String) -> DownloadRecord? {
         guard var state = shuffleSeries else { return nil }
         let pool = DownloadManager.shared.episodes(ofSeries: state.seriesId, seriesName: state.seriesName)
+            .filter { state.pool?.contains($0.itemId) ?? true }
+            .filter { DownloadManager.shared.mediaURL(for: $0) != nil }
         guard !pool.isEmpty else { return nil }
         var choices = pool.filter { !state.seen.contains($0.itemId) }
         if choices.isEmpty {

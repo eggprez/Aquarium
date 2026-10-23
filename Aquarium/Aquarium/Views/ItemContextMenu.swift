@@ -531,13 +531,16 @@ struct ItemMenu: View {
             #endif
             return
         }
-        DownloadManager.shared.enqueue(item: item, quality: quality)
+        guard DownloadManager.shared.enqueue(item: item, quality: quality) else {
+            app.toast("Already downloaded or on its way", tone: .ok)
+            return
+        }
         // The rung the download will actually use, which is the original file
         // when the encode would have been the larger of the two. Saying "1080p ·
         // 9 Mbps" here and then showing "Original quality" on the Downloads
         // screen a second later reads as a bug.
         let queued = JellyfinClient.effectiveQuality(item: item, quality: quality)
-        app.toast("Queued \(item.title) · \(queued.label)", tone: .ok)
+        app.toast("Queued \(item.title) · \(queued.label)" + DownloadManager.shared.pausedNote, tone: .ok)
     }
     #endif
 }

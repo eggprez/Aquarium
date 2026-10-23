@@ -80,6 +80,10 @@ final class OfflineMusicIndex {
 
     private(set) var facts: [String: SongFacts] = [:]
     private(set) var playlists: [SavedPlaylist] = []
+    /// The playlists downloaded whole, each with the songs it had when its
+    /// new ones were last queued. A song that turns up in one later is
+    /// downloaded on the refresh; one taken out is left where it is.
+    @ObservationIgnored private var followed: [String: [String]] = [:]
     /// Bumped on every change, for pages that want to redraw from it.
     private(set) var revision = 0
 
@@ -103,6 +107,7 @@ final class OfflineMusicIndex {
     private struct Saved: Codable, Sendable {
         var facts: [String: SongFacts]?
         var playlists: [SavedPlaylist]?
+        var followed: [String: [String]]?
     }
 
     /// The file being read, until it has been. Read off the main actor: the
@@ -134,6 +139,7 @@ final class OfflineMusicIndex {
         if let saved {
             facts = saved.facts ?? [:]
             playlists = saved.playlists ?? []
+            followed = saved.followed ?? [:]
         }
         let queued = waitingChanges
         waitingChanges = []
@@ -203,6 +209,14 @@ final class OfflineMusicIndex {
         }
     }
 
+    /// This playlist was downloaded whole, with these songs in it.
+    func follow(playlist id: String, itemIds: [String]) {
+        whenLoaded { [self] in
+            followed[id] = itemIds
+            touch()
+        }
+    }
+
     func setFavorite(_ itemId: String, _ favorite: Bool, pending: Bool) {
         whenLoaded { [self] in
             var f = facts[itemId] ?? SongFacts()
@@ -219,7 +233,7 @@ final class OfflineMusicIndex {
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled, let self else { return }
-            let snapshot = Saved(facts: self.facts, playlists: self.playlists)
+            let snapshot = Saved(facts: self.facts, playlists: self.playlists, followed: self.followed)
             let file = Self.file
             await Task.detached(priority: .utility) {
                 if let data = try? JSONEncoder().encode(snapshot) { try? data.write(to: file, options: .atomic) }
@@ -295,10 +309,16 @@ final class OfflineMusicIndex {
         // name, its album, its cover — on the way past (`DownloadManager.
         // describe`). The books ride along on the full read for that reason
         // alone; `note` has no use for them.
+        //
+        // Asked fifty at a time here, each on its own: a server that fails
+        // one request of many would otherwise cost the whole read, and with
+        // it the playlists and the lyrics below. A song in a fifty that
+        // failed keeps no fresh stamp and is asked about again next time.
         let wanted = due ? ids + books : ids.filter { facts[$0]?.refreshedAt == nil }
-        if !wanted.isEmpty {
-            guard let items = try? await DownloadManager.shared.describe(ids: wanted) else { return }
-            note(items)
+        for start in stride(from: 0, to: wanted.count, by: 50) {
+            guard !Task.isCancelled, !client.isOffline else { break }
+            let chunk = Array(wanted[start..<min(start + 50, wanted.count)])
+            if let items = try? await DownloadManager.shared.describe(ids: chunk) { note(items) }
         }
 
         if due {
@@ -308,14 +328,35 @@ final class OfflineMusicIndex {
             // those are changes with every download, so all are kept.
             if let lists = try? await client.audioPlaylists() {
                 var saved: [SavedPlaylist] = []
+                var added: [String: [BaseItem]] = [:]
                 for list in lists {
                     guard let entries = try? await client.playlistItems(playlistId: list.Id) else { continue }
                     saved.append(SavedPlaylist(id: list.Id, name: list.title, itemIds: entries.map(\.Id)))
+                    if let before = followed[list.Id].map({ Set($0) }) {
+                        // Every song of it gone from the device: the person
+                        // deleted the playlist's downloads, and wants no more
+                        // of it. Followed regardless, its new songs kept
+                        // arriving every six hours with nothing to stop them.
+                        guard before.contains(where: { DownloadManager.shared.record(for: $0) != nil }) else {
+                            followed[list.Id] = nil
+                            touch()
+                            continue
+                        }
+                        added[list.Id] = entries.filter { !before.contains($0.Id) }
+                    }
                 }
                 if saved != playlists {
                     playlists = saved
                     touch()
                 }
+                // A followed playlist the server no longer has is let go; one
+                // that only failed to list this time is kept for the next.
+                let present = Set(lists.map(\.Id))
+                for id in followed.keys where !present.contains(id) {
+                    followed[id] = nil
+                    touch()
+                }
+                await fetchAdded(added, in: saved)
             }
         }
 
@@ -325,6 +366,97 @@ final class OfflineMusicIndex {
             guard !Task.isCancelled, !client.isOffline else { break }
             if let found = try? await client.lyrics(itemId: id) { OfflineLyrics.keep(found, for: id) }
         }
+    }
+}
+
+extension OfflineMusicIndex {
+    /// Queue the songs added to followed playlists since they were last
+    /// looked at, as the original file like the rest of them. Each playlist's
+    /// record moves on to what it holds now, less any song that couldn't be
+    /// queued — that one is tried again on the next refresh rather than
+    /// forgotten. A playlist whose new songs don't fit on the device is left
+    /// as it was, to be tried again too.
+    fileprivate func fetchAdded(_ added: [String: [BaseItem]], in saved: [SavedPlaylist]) async {
+        for (id, songs) in added {
+            guard !Task.isCancelled, !JellyfinClient.shared.isOffline else { return }
+            guard let now = saved.first(where: { $0.id == id })?.itemIds else { continue }
+            let fresh = songs.filter { DownloadManager.shared.record(for: $0.Id) == nil }
+            var missed = Set<String>()
+            if !fresh.isEmpty {
+                let (full, _) = await MusicFiles.withSources(fresh)
+                let got = Set(full.map(\.Id))
+                missed = Set(fresh.map(\.Id)).subtracting(got)
+                if let verdict = DownloadManager.checkSpace(for: full, quality: MusicFiles.quality), !verdict.fits {
+                    continue
+                }
+                note(full)
+                DownloadManager.shared.enqueue(items: full, quality: MusicFiles.quality)
+            }
+            let next = now.filter { !missed.contains($0) }
+            if followed[id] != next {
+                followed[id] = next
+                touch()
+            }
+        }
+    }
+}
+
+// MARK: - Songs with their files
+
+/// What a music download needs before it can be queued. Here rather than
+/// beside `MusicDownloads`, which is iPhone and iPad only, because the
+/// index's refresh queues the songs added to a followed playlist too.
+enum MusicFiles {
+    /// Music is always asked for as the original file — see `MusicDownloads`.
+    @MainActor
+    static var quality: DownloadQuality {
+        DownloadQualities.all.first { $0.original } ?? DownloadQualities.all[0]
+    }
+
+    /// These songs with their media sources, and how many couldn't be given
+    /// them. The list query leaves MediaSources out, and the download needs
+    /// the container to decide file-or-encode — a song queued without them
+    /// can't be fetched as its file and comes down as a 256k stream while
+    /// labelled Original, so one still lacking them is left out and counted.
+    ///
+    /// Fetched fifty to a request rather than a request per song, which for
+    /// an album was a dozen round trips before anything queued. Each fifty
+    /// stands alone: one that fails is asked again once, and only if it fails
+    /// again are its songs asked for one at a time — a single failed request
+    /// used to throw away every other answer and fall back to hundreds. A
+    /// song a batch that did answer left out is one the server has no file
+    /// for, and asking again on its own won't find one.
+    @MainActor
+    static func withSources(_ songs: [BaseItem]) async -> (full: [BaseItem], missing: Int) {
+        let client = JellyfinClient.shared
+        let lacking = songs.filter { $0.MediaSources?.isEmpty != false }.map(\.Id)
+        var fetched: [String: BaseItem] = [:]
+        var unanswered = Set<String>()
+        for start in stride(from: 0, to: lacking.count, by: 50) {
+            let chunk = Array(lacking[start..<min(start + 50, lacking.count)])
+            var batch = try? await client.songs(ids: chunk, detail: true)
+            if batch == nil, !Task.isCancelled { batch = try? await client.songs(ids: chunk, detail: true) }
+            guard let batch else {
+                unanswered.formUnion(chunk)
+                continue
+            }
+            for item in batch where item.MediaSources?.isEmpty == false { fetched[item.Id] = item }
+        }
+        var full: [BaseItem] = []
+        var missing = 0
+        for song in songs {
+            if song.MediaSources?.isEmpty == false {
+                full.append(song)
+            } else if let found = fetched[song.Id] {
+                full.append(found)
+            } else if unanswered.contains(song.Id), !Task.isCancelled,
+                      let single = try? await client.musicItem(song.Id), single.MediaSources?.isEmpty == false {
+                full.append(single)
+            } else {
+                missing += 1
+            }
+        }
+        return (full, missing)
     }
 }
 

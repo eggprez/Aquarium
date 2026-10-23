@@ -13,7 +13,8 @@ enum TrackPreference {
     struct Settings: Sendable, Hashable {
         /// A language tag, or "" for the file's own choice.
         var audioLanguage = ""
-        /// "" = only when the file turns them on, "off" = never, else a tag.
+        /// "" = only when the file turns them on, "off" = never, "forced" =
+        /// forced only (see `forcedOnly`), else a tag.
         var subtitleLanguage = ""
         var forcedSubtitlesOnly = false
     }
@@ -30,6 +31,26 @@ enum TrackPreference {
     ///
     /// `nil` leaves a choice to the server; `-1` for the subtitle is Jellyfin's
     /// spelling of none.
+    /// `Preferences.subtitleLanguage` for "forced subtitles only, whatever
+    /// the language": the forced track of the language being listened to.
+    static let forcedOnly = "forced"
+
+    /// The track "forced only" means: the forced one in the language the
+    /// sound is in — the signs and the odd foreign line, for someone already
+    /// following the dialogue — or, where the file doesn't say what language
+    /// its forced track is in, that one. Nil is no subtitles at all.
+    static func forcedPick<T>(
+        _ tracks: [T], audioLanguage: String?,
+        language: (T) -> String?, isForced: (T) -> Bool
+    ) -> T? {
+        let forced = tracks.filter(isForced)
+        if let audioLanguage, !audioLanguage.isEmpty,
+           let match = forced.first(where: { Languages.matches(preference: audioLanguage, tag: language($0)) }) {
+            return match
+        }
+        return forced.first { (language($0) ?? "").isEmpty || language($0) == "und" }
+    }
+
     static func preferredStreams(
         in source: MediaSource, saved: Preferences.TrackChoice?, settings: Settings
     ) -> (audio: Int?, subtitle: Int?) {
@@ -65,6 +86,14 @@ enum TrackPreference {
                 subtitle = subtitleStreams.isEmpty ? nil : -1
                 break
             }
+            if want == forcedOnly {
+                let pick = forcedPick(
+                    subtitleStreams, audioLanguage: (audio ?? defaultAudio)?.Language,
+                    language: \.Language, isForced: \.isForced
+                )
+                subtitle = pick?.Index ?? (subtitleStreams.isEmpty ? nil : -1)
+                break
+            }
             let candidates = subtitleStreams.filter { Languages.matches(preference: want, tag: $0.Language) }
             if fromSettings, settings.forcedSubtitlesOnly, audioMatches {
                 subtitle = candidates.first(where: \.isForced)?.Index ?? (subtitleStreams.isEmpty ? nil : -1)
@@ -77,8 +106,15 @@ enum TrackPreference {
             // A saved language the file doesn't have falls through to
             // Settings, as it does once the stream is open.
         }
-        if let subtitle, subtitle >= 0, subtitle == source.DefaultSubtitleStreamIndex {
-            // Already what the server would send.
+        if let subtitle, subtitle >= 0, subtitle == source.DefaultSubtitleStreamIndex,
+           let stream = subtitleStreams.first(where: { $0.Index == subtitle }),
+           !(stream.IsExternal ?? false), ["mov_text", "tx3g"].contains(stream.Codec?.lowercased() ?? "") {
+            // Already in the file, where AVPlayer reads it for itself: named,
+            // it would cost the direct play. Only that kind, though. The
+            // server sends nothing it isn't asked for in a stream AVPlayer
+            // plays, so a default SRT left unnamed never arrived, and a file
+            // whose forced track was its default opened with no subtitles
+            // under "Forced only".
             return (audioIndex, nil)
         }
         return (audioIndex, subtitle)

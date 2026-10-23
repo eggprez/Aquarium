@@ -98,9 +98,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
     /// sidebar last wrote stayed on the Dock.
     @MainActor private func watchTransfers() {
         withObservationTracking {
-            let count = DownloadManager.shared.records.lazy
-                .filter { $0.status == .queued || $0.status == .downloading }
-                .count
+            let count = DownloadManager.shared.transfersToFinish
             let label = count > 0 ? "\(count)" : nil
             if NSApp.dockTile.badgeLabel != label { NSApp.dockTile.badgeLabel = label }
         } onChange: { [weak self] in

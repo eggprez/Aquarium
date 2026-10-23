@@ -19,6 +19,15 @@ extension PlayerModel {
 
     /// Which of the file's tracks to ask for, from the file's own list. See
     /// `TrackPreference.preferredStreams`.
+    /// The subtitle "forced only" picks from the menu as it stands, for the
+    /// pickers that change the preference mid-play.
+    var forcedOnlySubtitle: TrackOption? {
+        let audio = audioOptions.first { $0.id == selectedAudioOption }
+        return TrackPreference.forcedPick(
+            subtitleOptions, audioLanguage: audio?.language, language: \.language, isForced: \.isForced
+        )
+    }
+
     func preferredStreams(in source: MediaSource, seriesId: String?) -> (audio: Int?, subtitle: Int?) {
         TrackPreference.preferredStreams(
             in: source,
@@ -174,6 +183,12 @@ extension PlayerModel {
     private func applyPreferredTracks() {
         if applyChosenTracks() { return }
         if applyWantedTracks() { return }
+        #if !os(tvOS)
+        if isLocal {
+            applyPreferredLocalTracks()
+            return
+        }
+        #endif
 
         if let seriesId = item?.SeriesId, let saved = prefs.trackChoice(seriesId: seriesId) {
             if let wantAudio = saved.audio,
@@ -200,6 +215,12 @@ extension PlayerModel {
             break
         case "off":
             selectSubtitleTrack(nil)
+        case TrackPreference.forcedOnly:
+            let audio = selectedAudioTrack.flatMap { id in audioTracks.first { $0.id == id } }
+            let pick = TrackPreference.forcedPick(
+                subtitleTracks, audioLanguage: audio?.language, language: \.language, isForced: \.isForced
+            )
+            selectSubtitleTrack(pick?.id)
         case let wanted:
             let audioMatches = selectedAudioTrack
                 .flatMap { id in audioTracks.first { $0.id == id } }
@@ -305,6 +326,9 @@ extension PlayerModel {
     }
 
     var subtitleOptions: [TrackOption] {
+        #if !os(tvOS)
+        if isLocal { return localSubtitleOptions }
+        #endif
         guard let streams = serverStreams?.subtitleStreams, !streams.isEmpty else {
             return subtitleTracks.map {
                 TrackOption(serverIndex: nil, avIndex: $0.id, label: $0.label, language: $0.language, isForced: $0.isForced)
@@ -376,6 +400,14 @@ extension PlayerModel {
             return
         }
         guard let index = option.serverIndex else { return }
+        #if !os(tvOS)
+        // A download has no server to ask; its subtitles are the files saved
+        // beside it.
+        if isLocal {
+            if let entry = localSidecars.first(where: { $0.index == index }) { loadSidecar(entry) }
+            return
+        }
+        #endif
         // A sidecar file the engine can take is fetched and shown, with no
         // new stream.
         if let stream = serverStreams?.subtitleStreams.first(where: { $0.Index == index }), stream.isSidecar,
@@ -417,7 +449,7 @@ extension PlayerModel {
         }
         opts.startSeconds = isLive ? nil : position
         pendingTrackChoice = (audio: audio, subtitle: subtitle)
-        await play(item: item, options: opts, meta: StartMeta(inherited: true, quiet: true))
+        await play(item: item, options: opts, meta: StartMeta(inherited: true, quiet: true, forTracks: true))
     }
 
     /// Put the just-chosen tracks back on the stream that was opened for them.
@@ -466,6 +498,186 @@ extension PlayerModel {
         engine.addExternalSubtitle(url: url, language: stream.Language, title: stream.menuLabel)
         return true
     }
+
+    // MARK: A download's subtitle files
+
+    #if !os(tvOS)
+    /// The disk read behind `localSidecars`, kept until the index changes:
+    /// the menus are rebuilt on every draw.
+    @MainActor private static var sidecarCache: (key: String, entries: [DownloadSubtitles.Entry])?
+
+    /// The download's folder, while one is playing.
+    private var localFolder: URL? {
+        guard isLocal, let id = localRecordId else { return nil }
+        return DownloadManager.folderPath(for: id)
+    }
+
+    /// The subtitle files saved beside the download that is playing (see
+    /// `DownloadSubtitles`).
+    var localSidecars: [DownloadSubtitles.Entry] {
+        guard let folder = localFolder else { return [] }
+        let indexPath = folder.appendingPathComponent(DownloadSubtitles.indexName).path
+        let stamp = (try? FileManager.default.attributesOfItem(atPath: indexPath)[.modificationDate] as? Date)?
+            .timeIntervalSince1970 ?? 0
+        let key = "\(indexPath)|\(stamp)"
+        if let cached = Self.sidecarCache, cached.key == key { return cached.entries }
+        let entries = DownloadSubtitles.local(in: folder)
+        Self.sidecarCache = (key, entries)
+        return entries
+    }
+
+    /// The engine's id for a subtitle file once it has been added. mpv lists
+    /// it under the URL it was given, which ends in the file's name.
+    private func engineTrack(forSidecar entry: DownloadSubtitles.Entry) -> Int? {
+        tracks.first {
+            $0.kind == .subtitle && $0.isExternal && ($0.externalURL?.hasSuffix(entry.fileName) ?? false)
+        }?.id
+    }
+
+    /// The download's own subtitle tracks, then the files beside it. A file
+    /// is left out where it is a copy of a track already in the file, which
+    /// is what an embedded subtitle of a file download is: matched by the
+    /// file's numbering where the engine reads it, by language where it
+    /// doesn't. A file the engine has taken in is listed once, as the file,
+    /// keeping its id whether or not it has been loaded yet.
+    private var localSubtitleOptions: [TrackOption] {
+        let sidecars = localSidecars
+        let loaded = Set(sidecars.compactMap { engineTrack(forSidecar: $0) })
+        let inFile = tracks.filter { $0.kind == .subtitle && !loaded.contains($0.id) }
+        let fileNumbered = inFile.contains { !$0.isExternal && $0.fileIndex != nil }
+        var out = subtitleTracks.filter { !loaded.contains($0.id) }.map {
+            TrackOption(serverIndex: nil, avIndex: $0.id, label: $0.label, language: $0.language, isForced: $0.isForced)
+        }
+        for entry in sidecars {
+            if !entry.isExternal, inFile.contains(where: { track in
+                guard !track.isExternal else { return false }
+                if fileNumbered { return track.fileIndex == entry.index }
+                return Languages.matches(preference: entry.language ?? "", tag: track.language)
+                    && track.isForced == entry.isForced
+            }) { continue }
+            out.append(TrackOption(
+                serverIndex: entry.index, avIndex: engineTrack(forSidecar: entry),
+                label: entry.title, language: entry.language, isForced: entry.isForced))
+        }
+        return out
+    }
+
+    /// A subtitle file chosen on an engine that can't take one, carried
+    /// across the reopen on mpv by the download it was chosen for.
+    @MainActor private static var pendingSidecar: (recordId: String, index: Int)?
+
+    /// Show one of the download's subtitle files. mpv adds it; AVPlayer has
+    /// no way to take a file in, so the download is reopened on mpv at the
+    /// same moment, where that is allowed, and the file put on once it opens.
+    /// False when there is no way to show it here.
+    @discardableResult
+    private func loadSidecar(_ entry: DownloadSubtitles.Entry) -> Bool {
+        guard let engine, let folder = localFolder, let recordId = localRecordId else { return false }
+        if let id = engineTrack(forSidecar: entry) {
+            engine.selectSubtitle(trackID: id)
+            setSelectedSubtitleTrack(id)
+            return true
+        }
+        let url = folder.appendingPathComponent(entry.fileName)
+        guard FileManager.default.fileExists(atPath: url.path) else { return false }
+        if engine.capabilities.contains(.externalSubtitles) {
+            engine.addExternalSubtitle(url: url, language: entry.language, title: entry.title)
+            return true
+        }
+        // Only for a file someone picked from the menu. Done for a Settings
+        // preference, every episode opened twice, and a hand-over to Apple's
+        // player for picture in picture or AirPlay re-applied it and went
+        // straight back.
+        guard !Self.pickingAutomatically else {
+            Self.log.notice("subtitle file \(entry.fileName, privacy: .public) needs mpv; not switching for a preference")
+            return false
+        }
+        guard canSwitchEngine(to: .mpv) else {
+            Self.log.notice("subtitle file \(entry.fileName, privacy: .public) needs mpv: \(self.engineSwitchUnavailableReason(to: .mpv) ?? "", privacy: .public)")
+            return false
+        }
+        Self.pendingSidecar = (recordId, entry.index)
+        Task { await switchEngine(to: .mpv, reason: "a downloaded subtitle file") }
+        return true
+    }
+
+    /// `applyPreferredTracks` for a download, which has no server to have
+    /// asked: the saved choice for the series, then Settings, over the
+    /// download's own tracks and the subtitle files beside it, the file's
+    /// tracks first since they need nothing loaded.
+    /// Set while `applyPreferredLocalTracks` picks, so a pick it makes never
+    /// changes the engine. See `loadSidecar`.
+    @MainActor private static var pickingAutomatically = false
+
+    private func applyPreferredLocalTracks() {
+        Self.pickingAutomatically = true
+        defer { Self.pickingAutomatically = false }
+        let recordId = localRecordId
+        let seriesId = recordId.flatMap { DownloadManager.shared.record(for: $0)?.seriesId }
+        let saved = seriesId.flatMap { prefs.trackChoice(seriesId: $0) }
+
+        for want in [saved?.audio, prefs.audioLanguage] {
+            guard let want, !want.isEmpty,
+                  let match = audioTracks.first(where: { Languages.matches(preference: want, tag: $0.language) })
+            else { continue }
+            if match.id != selectedAudioTrack { selectAudioTrack(match.id) }
+            break
+        }
+
+        let choices = localSubtitleOptions
+        if let pending = Self.pendingSidecar, pending.recordId == recordId {
+            Self.pendingSidecar = nil
+            if let option = choices.first(where: { $0.serverIndex == pending.index }) {
+                selectSubtitles(option)
+                return
+            }
+        }
+
+        let audioMatches = selectedAudioTrack
+            .flatMap { id in audioTracks.first { $0.id == id } }
+            .map { Languages.matches(preference: prefs.audioLanguage, tag: $0.language) } ?? false
+        for (want, fromSettings) in [(saved?.sub, false), (prefs.subtitleLanguage, true)] {
+            guard let want, !want.isEmpty else { continue }
+            if want == "off" {
+                selectSubtitleTrack(nil)
+                return
+            }
+            if want == TrackPreference.forcedOnly {
+                let audio = selectedAudioTrack.flatMap { id in audioTracks.first { $0.id == id } }
+                if let pick = TrackPreference.forcedPick(
+                    choices, audioLanguage: audio?.language, language: \.language, isForced: \.isForced
+                ) {
+                    selectSubtitles(pick)
+                } else {
+                    selectSubtitleTrack(nil)
+                }
+                return
+            }
+            let candidates = choices.filter { Languages.matches(preference: want, tag: $0.language) }
+            if fromSettings, prefs.forcedSubtitlesOnly, audioMatches {
+                if let forced = candidates.first(where: \.isForced) {
+                    selectSubtitles(forced)
+                } else {
+                    selectSubtitleTrack(nil)
+                }
+                return
+            }
+            if let pick = candidates.first(where: { !$0.isForced }) ?? candidates.first {
+                selectSubtitles(pick)
+                return
+            }
+        }
+
+        // Neither says: what the file would show. The engine has already
+        // put on a track the file marks as default; a file beside it is put
+        // on where the server would have sent that one.
+        guard selectedSubtitleTrack == nil, let folder = localFolder,
+              let index = DownloadSubtitles.index(in: folder)?.defaultIndex, index >= 0,
+              let option = choices.first(where: { $0.serverIndex == index })
+        else { return }
+        selectSubtitles(option)
+    }
+    #endif
 
     // MARK: The audio offset
 

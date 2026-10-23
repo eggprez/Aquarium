@@ -439,11 +439,28 @@ struct DownloadIntent: AppIntent {
         var wanted: [BaseItem] = []
         if item.kind == "Series" {
             let episodes = (try? await client.episodes(seriesId: item.id, seasonId: nil)) ?? []
-            let next = episodes.filter { !$0.userData.played && manager.record(for: $0.Id) == nil && !manager.isQueuedOrRunning($0.Id) }
+            // The next episodes are the story's: season by season, episode by
+            // episode. The server lists specials (season 0) first, and "the
+            // next three" should never be three specials — they only count
+            // when the series has nothing else left to fetch.
+            // Matched by what an episode is as well as by id, as `enqueue`
+            // does, so one already here under an old id isn't picked and then
+            // skipped, leaving "the next three" one short. An episode with no
+            // season number is not a special.
+            let unfetched = episodes.filter {
+                !$0.userData.played && manager.completeRecord(matching: $0) == nil && !manager.isQueuedOrRunning($0.Id)
+            }
+            let regular = unfetched.filter { $0.ParentIndexNumber != 0 }
+            let next = (regular.isEmpty ? unfetched : regular).sorted {
+                (DownloadGroups.seasonSortKey($0.ParentIndexNumber), $0.IndexNumber ?? 0)
+                    < (DownloadGroups.seasonSortKey($1.ParentIndexNumber), $1.IndexNumber ?? 0)
+            }
             let ids = next.prefix(count).map(\.Id)
-            wanted = ids.isEmpty ? [] : try await client.itemsByIds(ids, fields: "MediaSources")
+            let fetched = ids.isEmpty ? [] : try await client.itemsByIds(ids, fields: "MediaSources")
+            // Queued in the order chosen, whatever order the server sends them.
+            wanted = fetched.sorted { (ids.firstIndex(of: $0.Id) ?? .max) < (ids.firstIndex(of: $1.Id) ?? .max) }
         } else {
-            guard manager.record(for: item.id) == nil, !manager.isQueuedOrRunning(item.id) else {
+            guard !isDownloaded(item.id) else {
                 return .result(value: [item], dialog: "\(item.title) is already downloaded.")
             }
             wanted = [try await client.item(item.id)]
@@ -455,7 +472,16 @@ struct DownloadIntent: AppIntent {
         }
         let outcome = manager.enqueue(items: wanted, quality: rung)
         let what = wanted.count == 1 ? wanted[0].title : "\(outcome.queued) episodes of \(item.title)"
+        guard outcome.queued > 0 else { return .result(value: [], dialog: "\(item.title) is already downloaded.") }
         return .result(value: wanted.map(MediaItemEntity.init), dialog: "Queued \(what).")
+    }
+
+    /// On the device or on its way there. A record alone isn't that: a
+    /// cancelled or failed one is still listed, and is worth asking for again.
+    @MainActor
+    private func isDownloaded(_ itemId: String) -> Bool {
+        let manager = DownloadManager.shared
+        return manager.record(for: itemId)?.status == .complete || manager.isQueuedOrRunning(itemId)
     }
 }
 

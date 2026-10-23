@@ -463,6 +463,22 @@ struct WatchReply: Codable, Sendable {
     var playback: PhonePlaybackState?
 }
 
+// MARK: - Watching rules
+
+/// When a film or episode counts as watched. One rule for marking it played and
+/// for declining to resume it, so nothing sits between the two: left in that
+/// gap, an episode stopped 38 minutes into 42 was neither watched nor resumed,
+/// and opened at 0:00. The rule is the server's, so the two agree.
+enum VideoProgress {
+    /// Jellyfin marks a video played when it is stopped past this much of it:
+    /// its MaxResumePct, 90 unless changed.
+    static let finishedFraction = 0.9
+
+    static func isFinished(positionTicks: Int64, runTimeTicks: Int64) -> Bool {
+        runTimeTicks > 0 && positionTicks > 0 && Double(positionTicks) / Double(runTimeTicks) > finishedFraction
+    }
+}
+
 // MARK: - Listening rules, both ends
 
 /// When a book counts as finished, and which of two accounts of it is the

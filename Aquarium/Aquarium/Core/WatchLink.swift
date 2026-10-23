@@ -1095,7 +1095,18 @@ final class WatchLink: NSObject {
     }
 
     private func handOver(itemId: String, file: URL, seconds: Double? = nil) {
-        guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return }
+        guard WCSession.isSupported() else { return }
+        guard WCSession.default.activationState == .activated else {
+            // Nothing can be queued before the session is up. The row reads
+            // as sending with nothing in flight, which is what activation
+            // looks for: the file goes over then.
+            Self.log.notice("\(itemId, privacy: .public) waits for the watch session to hand over")
+            updateRelay(itemId) { r in
+                r.stage = .sending
+                r.transferFraction = 0
+            }
+            return
+        }
         let bytes = ((try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? NSNumber)?.int64Value ?? 0
         var metadata: [String: Any] = [
             WatchFileTransfer.itemKey: itemId,
@@ -1122,7 +1133,16 @@ final class WatchLink: NSObject {
         currentSend[itemId] = send
         metadata[WatchFileTransfer.sendKey] = send
         metadata[WatchFileTransfer.pieceBytesKey] = WatchFileTransfer.pieceBytes
+        // Cutting a book takes seconds the app may not have once it is put
+        // away or was woken for the download; held awake until every piece
+        // is queued, or it is suspended halfway with the row left sending.
+        let hold = BackgroundHold("WatchRelayHandOver")
+        settling += 1
         Task {
+            defer {
+                settling -= 1
+                hold.end()
+            }
             let pieces = await Task.detached(priority: .utility) {
                 Self.cut(file, into: Self.piecesFolder(itemId, send: send))
             }.value
@@ -1403,6 +1423,23 @@ extension WatchLink: WCSessionDelegate {
                 updateRelay(id) { $0.stage = .sending; $0.transferFraction = sent }
             }
             if !transferring.isEmpty { watchTransfers() }
+            // A row left sending with nothing in WatchConnectivity: the app
+            // was killed before its pieces were queued, or the session wasn't
+            // up when the file landed. The file goes over again, or is
+            // fetched again if it is gone; left alone, it waits forever.
+            //
+            // After a few seconds, not at once: a send that finished while
+            // the app was gone reports so just after activation, and a row
+            // still marked sending in that moment had a whole book sent again.
+            if activationState == .activated {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(10))
+                    for r in relayItems where r.stage == .sending && !transferring.contains(r.id) {
+                        Self.log.notice("send of \(r.id, privacy: .public) to the watch never got going; trying again")
+                        enqueueFetch(r.id)
+                    }
+                }
+            }
             isActivated = activationState == .activated
             isPaired = paired
             isWatchAppInstalled = installed

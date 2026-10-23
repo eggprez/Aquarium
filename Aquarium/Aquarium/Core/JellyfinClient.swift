@@ -1815,6 +1815,9 @@ final class JellyfinClient {
                 subtitleStreamIndex: subtitleStreamIndex,
                 in: stream
             )
+            if engine == .apple {
+                stream = Self.subtitleTimedSegments(stream, source: ms, audioStreamIndex: audioStreamIndex)
+            }
             if Self.claimsHDRItCannotCarry(ms) {
                 stream = await variantPlaylist(of: stream) ?? stream
             }
@@ -1969,6 +1972,34 @@ final class JellyfinClient {
     /// Make sure the chosen tracks are in the address the player opens, even on
     /// a server that didn't write them into it.
     ///
+    /// MPEG-TS segments rather than fMP4 for a stream carrying its subtitles in
+    /// the manifest. Jellyfin's fMP4 segments start at zero while the WebVTT it
+    /// serves beside them maps its cues to a ten-second offset, so AVPlayer
+    /// showed every line ten seconds late — a forced track looked empty, its
+    /// lines landing after the signs they translate had gone. TS segments carry
+    /// the offset the cues expect. Only where TS can carry the stream: H.264
+    /// picture (HEVC reaches AVPlayer in fMP4 alone) and sound TS takes.
+    nonisolated static func subtitleTimedSegments(_ url: URL, source: MediaSource, audioStreamIndex: Int?) -> URL {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              var query = parts.queryItems else { return url }
+        func value(_ name: String) -> String? {
+            query.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.value
+        }
+        guard let subtitle = value("SubtitleStreamIndex").flatMap(Int.init), subtitle >= 0,
+              value("SubtitleMethod")?.lowercased() == "hls",
+              value("SegmentContainer")?.lowercased() == "mp4",
+              source.streams.first(where: { $0.type == "Video" })?.Codec?.lowercased() == "h264"
+        else { return url }
+        let audioIndex = audioStreamIndex ?? source.DefaultAudioStreamIndex
+        let audio = source.audioStreams.first { $0.Index == audioIndex } ?? source.audioStreams.first
+        guard let codec = audio?.Codec?.lowercased(), ["aac", "ac3", "mp3"].contains(codec) else { return url }
+        for i in query.indices where query[i].name.caseInsensitiveCompare("SegmentContainer") == .orderedSame {
+            query[i].value = "ts"
+        }
+        parts.queryItems = query
+        return parts.url ?? url
+    }
+
     /// Jellyfin builds `TranscodingUrl` from the very request above, so this is
     /// normally a no-op — and it is here for the case where it isn't. A
     /// transcode whose URL names no `AudioStreamIndex` re-reads the source's
@@ -2175,6 +2206,31 @@ final class JellyfinClient {
         ]
         if let id = source?.Id { q.append(URLQueryItem(name: "MediaSourceId", value: id)) }
 
+        // An HLS download carries one audio track, so it has to be the one the
+        // player would have picked. Text subtitles travel beside it as files
+        // (see `DownloadSubtitles`); only a picture subtitle the user would
+        // have had on is asked for here, painted into an encode that is
+        // happening anyway.
+        if let source {
+            let tracks = Self.downloadTracks(
+                in: source,
+                saved: item.SeriesId.flatMap { prefs.trackChoice(seriesId: $0) },
+                settings: TrackPreference.Settings(
+                    audioLanguage: prefs.audioLanguage,
+                    subtitleLanguage: prefs.subtitleLanguage,
+                    forcedSubtitlesOnly: prefs.forcedSubtitlesOnly),
+                reencodesPicture: !quality.original)
+            if let audio = tracks.audio {
+                q.append(URLQueryItem(name: "AudioStreamIndex", value: String(audio)))
+            }
+            if let burnIn = tracks.burnIn {
+                q += [
+                    URLQueryItem(name: "SubtitleStreamIndex", value: String(burnIn)),
+                    URLQueryItem(name: "SubtitleMethod", value: "Encode"),
+                ]
+            }
+        }
+
         if quality.original {
             // Original picture, new wrapper — the source is something
             // AVFoundation can't open as it stands. Stream copy left on, so the
@@ -2206,6 +2262,38 @@ final class JellyfinClient {
         guard let url = URL(string: "\(s.server)/Videos/\(Self.pathId(item.Id))/master.m3u8?\(Self.encode(q))") else { return nil }
         let suffix = quality.original ? "" : " (\(quality.maxHeight ?? 0)p)"
         return (Self.withPlaySession(url), "\(safe)\(suffix)", .hls)
+    }
+
+    /// The tracks to ask an HLS download for, chosen the way the player
+    /// chooses them for a stream (`TrackPreference.preferredStreams`).
+    ///
+    /// `audio` is nil when the server's own default is the one wanted. A
+    /// subtitle is only ever named to be burned in, and only when it is a
+    /// picture subtitle and the picture is being re-encoded regardless: a text
+    /// one is fetched as a file and can be switched off, and burning into an
+    /// Original would turn a stream copy into a full encode. The file's
+    /// default subtitle counts as chosen, since the preference leaves that one
+    /// unnamed for the server to send.
+    static func downloadTracks(
+        in source: MediaSource, saved: Preferences.TrackChoice?, settings: TrackPreference.Settings,
+        reencodesPicture: Bool
+    ) -> (audio: Int?, burnIn: Int?) {
+        let picked = TrackPreference.preferredStreams(in: source, saved: saved, settings: settings)
+        guard reencodesPicture else { return (picked.audio, nil) }
+        let subtitle = picked.subtitle ?? source.DefaultSubtitleStreamIndex
+        guard let subtitle, subtitle >= 0,
+              let stream = source.subtitleStreams.first(where: { $0.Index == subtitle }), stream.isImageSubtitle
+        else { return (picked.audio, nil) }
+        return (picked.audio, subtitle)
+    }
+
+    /// Where the server serves one subtitle stream as a file, converted to
+    /// `format` (`srt`, `ass`, `vtt`). The same endpoint a stream's
+    /// `DeliveryUrl` names for a sidecar, but it extracts embedded text tracks
+    /// too, which is what lets a download carry subtitles the HLS remux drops.
+    /// Server-relative, for `request`, so the token goes in the header.
+    nonisolated static func subtitlePath(itemId: String, mediaSourceId: String, index: Int, format: String) -> String {
+        "/Videos/\(pathId(itemId))/\(pathId(mediaSourceId))/Subtitles/\(index)/0/Stream.\(format)"
     }
 
     /// `url` with a `PlaySessionId` of its own, if it hasn't one already.

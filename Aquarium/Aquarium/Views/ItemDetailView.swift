@@ -1659,7 +1659,8 @@ struct ItemDetailView: View {
         if result.queued > 0 {
             app.toast(
                 "Queued \(result.queued) item\(result.queued == 1 ? "" : "s") · \(quality.label)"
-                    + (result.skipped > 0 ? " (\(result.skipped) already there)" : ""),
+                    + (result.skipped > 0 ? " (\(result.skipped) already there)" : "")
+                    + DownloadManager.shared.pausedNote,
                 tone: .ok
             )
         } else if result.skipped > 0 {
