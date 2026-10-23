@@ -504,6 +504,18 @@ final class DownloadManager: NSObject {
     /// "cancelled" would otherwise take.
     @ObservationIgnored
     private var retiredTasks: Set<DownloadTaskKey> = []
+    /// Tasks whose last word this process has already heard. The relaunch
+    /// sweep and the stall sweep list the sessions' tasks and look each one
+    /// up by the item id written on it, and that lookup *creates* the
+    /// mapping it fails to find. A task whose completion had landed a moment
+    /// before — the system replays what it held the instant a session is
+    /// made, while `allTasks` is still being answered — was mapped and
+    /// adopted again as a running transfer that nothing would ever finish.
+    /// With Parallel downloads at one, that single phantom held the only
+    /// slot: every song behind it read "picking it back up" and never
+    /// moved, and Pause and Resume had nothing to act on.
+    @ObservationIgnored
+    private var completedTasks: Set<DownloadTaskKey> = []
     private var active: Set<String> = []
     private var pendingItems: [String: BaseItem] = [:]  // queued item id → the item
     /// A cancel that arrived while `resolveThenStart` was still asking the
@@ -733,6 +745,40 @@ final class DownloadManager: NSObject {
             for task in await s.allTasks { out.append((s, task)) }
         }
         return out
+    }
+
+    /// The tasks that are still transfers: running, or made and not yet
+    /// resumed. A task the system is cancelling, or has finished with, is
+    /// listed by `allTasks` until its completion has been delivered, and it
+    /// is about to be — adopting it as a running download claimed a slot
+    /// for a transfer that was already over. The state is read after the
+    /// listing comes back, so a task that completed in between reads as
+    /// completed.
+    private func liveTasks() async -> [(session: URLSession, task: URLSessionTask)] {
+        await everyTask().filter { $0.task.state == .running || $0.task.state == .suspended }
+    }
+
+    /// A task this process has made for an item: whatever an earlier task
+    /// under the same key had left behind is forgotten, and the key answers
+    /// to this item from now on.
+    private func register(_ task: URLSessionTask, in session: URLSession, for itemId: String) {
+        let key = DownloadTaskKey(session, task)
+        task.taskDescription = itemId
+        completedTasks.remove(key)
+        retiredTasks.remove(key)
+        tasks[key] = itemId
+    }
+
+    /// The task's last callback has been handled; nothing it says afterwards
+    /// — and no listing of it — is a transfer.
+    private func noteCompleted(_ key: DownloadTaskKey) {
+        tasks[key] = nil
+        retiredTasks.remove(key)
+        // A music library is thousands of tasks in one run; the set is only
+        // guarding against a listing made in the same instant, so it needn't
+        // remember them all.
+        if completedTasks.count >= 4096 { completedTasks.removeAll(keepingCapacity: true) }
+        completedTasks.insert(key)
     }
 
     /// The completion handlers the system hands over when it relaunches the
@@ -1969,6 +2015,9 @@ final class DownloadManager: NSObject {
         // resume data carried on over cellular — the request archived in it
         // still allowed it — and a stream sat taking up a slot.
         guard !heldForWiFi else { return }
+        // Nothing counted as running without a transfer behind it: a slot
+        // held by a phantom is a slot the queue never gets.
+        reapGhosts()
         let now = Date()
         // The first entry that is *due*, not the first entry: a retry waiting
         // out its delay at the front of the queue must not hold up everything
@@ -1983,16 +2032,73 @@ final class DownloadManager: NSObject {
         }
     }
 
+    /// Whether an item counted as running has a transfer behind it: a task
+    /// in one of the sessions, or a lookup of the item in flight.
+    private func hasTransfer(_ itemId: String) -> Bool {
+        resolving.contains(itemId) || tasks.values.contains(itemId)
+    }
+
+    /// Items in `active` with nothing running for them, put back where they
+    /// belong.
+    ///
+    /// `active` is memory, kept beside the sessions' tasks, and the two
+    /// have drifted: a task adopted a second time after its completion had
+    /// already been handled, a slot claimed for an item whose transfer was
+    /// never made. A phantom there is worse than a lost download: it holds a
+    /// slot against the Parallel downloads limit for as long as the process
+    /// lives, so with the limit at one — the default — the whole queue sits
+    /// behind it, and Pause and Resume, which act on tasks, change nothing.
+    /// Reading the two against each other costs nothing, so it is done every
+    /// time the pump runs and every time the stall sweep does.
+    private func reapGhosts() {
+        let ghosts = active.filter { !hasTransfer($0) }
+        guard !ghosts.isEmpty else { return }
+        for itemId in ghosts {
+            Self.log.error("\(itemId, privacy: .public) was counted as running with no transfer behind it")
+            active.remove(itemId)
+            retryingAfterCancel[itemId] = nil
+            forgetProgressThrottle(itemId)
+        }
+        for itemId in ghosts { requeueIfLost(itemId) }
+    }
+
+    /// An item the records say is waiting or arriving that nothing is
+    /// doing anything about: not in the queue, not running, not being
+    /// settled. Put back in the queue to be picked up, as a relaunch does.
+    private func requeueIfLost(_ itemId: String) {
+        guard let rec = record(for: itemId), rec.status == .downloading || rec.status == .queued,
+              !isQueuedOrRunning(itemId), !finishing.contains(itemId)
+        else { return }
+        scheduleAutomaticRetry(itemId, reason: Self.interruptedReason, countsAsAttempt: false)
+    }
+
+    /// What a transfer the app lost track of says when it is put back: the
+    /// process ended under it, or its slot was found held by nothing.
+    private static let interruptedReason = "Interrupted — picking it back up"
+
     private func start(_ entry: QueuedDownload) {
         // A stale entry: the item is already running (adopted from the
         // system after a relaunch the saved queue didn't keep up with) or has
         // already landed. Started anyway, it ran as two transfers, the second
         // throwing away the package the first was writing — or it fetched a
         // finished download all over again.
-        if active.contains(entry.itemId) || record(for: entry.itemId)?.status == .complete {
+        if record(for: entry.itemId)?.status == .complete {
             Self.log.notice("Skipping a stale queue entry for \(entry.itemId, privacy: .public)")
             pendingItems[entry.itemId] = nil
             return
+        }
+        if active.contains(entry.itemId) {
+            if hasTransfer(entry.itemId) {
+                Self.log.notice("Skipping a stale queue entry for \(entry.itemId, privacy: .public)")
+                pendingItems[entry.itemId] = nil
+                return
+            }
+            // Counted as running with nothing running. Dropped here, the
+            // entry was gone from the queue for good and the record stayed
+            // "queued" — shown nowhere, and started by nothing.
+            Self.log.error("\(entry.itemId, privacy: .public) was counted as running with no transfer; starting it")
+            active.remove(entry.itemId)
+            retryingAfterCancel[entry.itemId] = nil
         }
         active.insert(entry.itemId)
         if Self.isTranscode(quality: entry.quality, type: entry.type) {
@@ -2071,6 +2177,12 @@ final class DownloadManager: NSObject {
             // straight round the loop to discard the next entry, and the next,
             // until the queue is empty — which is what a relaunch used to do to
             // a season that was still waiting.
+            //
+            // Marked as being looked up here and now, not inside the task:
+            // between this return and the task's first line the item was in
+            // `active` with nothing to show for it, which is what a phantom
+            // looks like — see `reapGhosts`.
+            resolving.insert(entry.itemId)
             Task { await self.resolveThenStart(entry) }
             return
         }
@@ -2107,8 +2219,7 @@ final class DownloadManager: NSObject {
         // not survive the app being terminated while the system carries on with
         // the transfer — which is the ordinary way a large download finishes.
         // What the task carries comes back with it.
-        task.taskDescription = entry.itemId
-        tasks[DownloadTaskKey(session, task)] = entry.itemId
+        register(task, in: session, for: entry.itemId)
         task.resume()
     }
 
@@ -2163,8 +2274,7 @@ final class DownloadManager: NSObject {
         let configuration = AVAssetDownloadConfiguration(asset: asset, title: record.title)
         let session = prefs.downloadsWiFiOnly ? wifiAssetSession : assetSession
         let task = session.makeAssetDownloadTask(downloadConfiguration: configuration)
-        task.taskDescription = record.itemId
-        tasks[DownloadTaskKey(session, task)] = record.itemId
+        register(task, in: session, for: record.itemId)
         if resuming, Self.partialPackage(of: record) != nil { resumedHere.insert(DownloadTaskKey(session, task)) }
         task.resume()
     }
@@ -2340,7 +2450,9 @@ final class DownloadManager: NSObject {
     /// download that can't be described is left as a failure with a Retry on it
     /// rather than vanishing.
     private func resolveThenStart(_ entry: QueuedDownload) async {
-        resolving.insert(entry.itemId)
+        // `resolving` was marked by `start`, before this task was even
+        // scheduled, so the slot it holds is accounted for from the first
+        // instant — see `reapGhosts`.
         let item = try? await JellyfinClient.shared.item(entry.itemId)
         resolving.remove(entry.itemId)
         guard cancelledResolves.remove(entry.itemId) == nil else {
@@ -2393,7 +2505,7 @@ final class DownloadManager: NSObject {
     /// record.
     private func itemId(forTask key: DownloadTaskKey, description: String?, url: String?) -> String? {
         if let known = tasks[key] { return known }
-        if retiredTasks.contains(key) { return nil }
+        if retiredTasks.contains(key) || completedTasks.contains(key) { return nil }
         if let description, record(for: description) != nil {
             tasks[key] = description
             return description
@@ -2415,7 +2527,11 @@ final class DownloadManager: NSObject {
         // Creating the session is what makes the system start replaying the
         // callbacks it held while the app was away, so this is also the moment
         // the backlog begins to arrive.
-        let running = await everyTask()
+        // Only what is still a transfer. The listing also names every task
+        // whose completion the system is about to replay — the ones a swipe
+        // away cancelled, the ones that finished overnight — and adopting
+        // those claimed slots for transfers that were already over.
+        let running = await liveTasks()
         var live = Set<String>()
         for (session, task) in running {
             guard let itemId = itemId(
@@ -2460,12 +2576,27 @@ final class DownloadManager: NSObject {
         for rec in records
         where rec.status == .downloading && !live.contains(rec.itemId) && !active.contains(rec.itemId)
             && !finishing.contains(rec.itemId) {
-            scheduleAutomaticRetry(rec.itemId, reason: "Interrupted — picking it back up", countsAsAttempt: false)
+            scheduleAutomaticRetry(rec.itemId, reason: Self.interruptedReason, countsAsAttempt: false)
         }
+        // And records that say "queued" with no queue entry behind them —
+        // what an earlier build left when it dropped an entry it took for a
+        // duplicate. Shown nowhere and started by nothing until now.
+        requeueLostRecords()
         // And a retry that was waiting out its delay when the process ended:
         // its queue entry is back, but with a time in the past on it, which
         // the pump treats as now.
         pump()
+    }
+
+    /// Every record waiting on nothing — see `requeueIfLost`. A pass over
+    /// the records, so it is asked at relaunch and once a minute, not on
+    /// every pump.
+    private func requeueLostRecords() {
+        let lost = records.filter { rec in
+            (rec.status == .downloading || rec.status == .queued) && !isQueuedOrRunning(rec.itemId)
+                && !finishing.contains(rec.itemId)
+        }
+        for rec in lost { requeueIfLost(rec.itemId) }
     }
 
     /// A transfer said how far along it is.
@@ -2876,6 +3007,11 @@ final class DownloadManager: NSObject {
     /// with a Retry on it — which is a download you can see and act on, rather
     /// than a bar that never moves again.
     private func sweepStalledTransfers() async {
+        // The books first: a slot held by nothing, a record waiting on
+        // nothing. Before the route check, because neither needs a network
+        // to be put right — only to be started, which the queue sees to.
+        reapGhosts()
+        requeueLostRecords()
         // No route, no verdict. The transfers are not stalled, the phone is
         // somewhere without signal, and the clock is put back when it returns
         // — see `pathChanged`.
@@ -2896,7 +3032,7 @@ final class DownloadManager: NSObject {
         // that had been running happily all along. The byte count on the task
         // itself is kept up to date whether this process was listening or not.
         var live: [String: Int64] = [:]
-        for (session, task) in await everyTask() {
+        for (session, task) in await liveTasks() {
             guard let itemId = itemId(
                 forTask: DownloadTaskKey(session, task),
                 description: task.taskDescription,
@@ -3291,9 +3427,12 @@ extension DownloadManager: URLSessionDownloadDelegate {
                   var rec = self.record(for: itemId)
             else {
                 try? FileManager.default.removeItem(at: staged)
+                self.noteCompleted(id)
                 return
             }
-            self.tasks[id] = nil
+            // The task is over here; its "complete" callback carries no
+            // error and is not acted on, so this is where it is marked.
+            self.noteCompleted(id)
             // An older task for an item that has started again on a new one;
             // see the same check in `didCompleteWithError`. Taken as the
             // item's own, it freed the running task's slot.
@@ -3398,10 +3537,10 @@ extension DownloadManager: URLSessionDownloadDelegate {
             guard let itemId = self.itemId(forTask: id, description: described, url: source) else {
                 // The last word from a task cancelled on purpose; nothing
                 // more will come from it.
-                self.retiredTasks.remove(id)
+                self.noteCompleted(id)
                 return
             }
-            self.tasks[id] = nil
+            self.noteCompleted(id)
             // A task that has already been replaced. After a relaunch the old
             // one's cancel can turn up once the item has started again on a
             // new task; handled as the item's own, it took the item out of the
