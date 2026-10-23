@@ -78,6 +78,53 @@ struct LibrariesView: View {
     }
 }
 
+#if os(iOS)
+/// The libraries as a strip of capsules under an iPad's hero, in place of
+/// the row of tiles: on a 13-inch screen "My Media" was a second row of
+/// artwork before the first row of anything to watch, and every tile was a
+/// word printed over a still of something it was not about. The sidebar
+/// lists the same libraries; this is the shortcut under the picture.
+struct LibraryChipsRow: View {
+    let libraries: [BaseItem]
+    var onSelect: (BaseItem) -> Void
+
+    var body: some View {
+        if !libraries.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(libraries) { library in
+                        Button { onSelect(library) } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: symbol(for: library))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(Theme.link)
+                                Text(library.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(Theme.text)
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 14)
+                            .frame(height: 36)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .background(Theme.raised.opacity(0.7), in: Capsule())
+                            .overlay(Capsule().strokeBorder(Theme.border.opacity(0.7), lineWidth: 0.5))
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, Metrics.gutter)
+            }
+        }
+    }
+
+    /// The glyph the sidebar gives the same library.
+    private func symbol(for library: BaseItem) -> String {
+        AppSection.library(id: library.Id, name: library.title, collectionType: library.CollectionType).symbol
+    }
+}
+#endif
+
 /// A library as a wide tile: its own artwork where Jellyfin has one, its name,
 /// and what kind of thing is inside it. Shared with Home's "My Media" row —
 /// see `LibraryTilesRow`.

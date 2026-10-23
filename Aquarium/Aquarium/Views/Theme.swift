@@ -64,6 +64,11 @@ enum Theme {
     static let text = adaptive(dark: 0xECECF4, light: 0x16161F)
     static let textBody = adaptive(dark: 0xC9C9DA, light: 0x3D3D4E)
     static let textDim = adaptive(dark: 0x9A9AB0, light: 0x63637A)
+
+    /// An iPad's sidebar: a step up from the page, a step short of a card,
+    /// so the column reads as a surface the pages sit beside rather than a
+    /// list painted on the page.
+    static let sidebar = adaptive(dark: 0x121219, light: 0xF1F1F7)
     #endif
 
     /// A word that goes somewhere. `accent` itself is a fill colour — mid
@@ -119,6 +124,9 @@ enum Theme {
     /// artwork at six to eight, and anything rounder reads as a widget.
     #if os(macOS)
     static let cornerRadius: CGFloat = 8
+    #elseif os(iOS)
+    /// Fourteen on an iPad, whose cards are bigger and sit further off.
+    static var cornerRadius: CGFloat { Metrics.phoneLayout ? 12 : 14 }
     #else
     static let cornerRadius: CGFloat = 12
     #endif
@@ -171,6 +179,11 @@ struct CardChrome: ViewModifier {
     private var lineWidth: CGFloat {
         #if os(macOS)
         colorScheme == .dark ? 1 : 0
+        #elseif os(iOS)
+        // None on an iPad: a hairline round every tile is what made a
+        // 13-inch grid read as a page of web cards. The artwork keeps its
+        // own edge, and the room between tiles does the rest.
+        Metrics.phoneLayout ? 0.5 : 0
         #else
         0.5
         #endif

@@ -39,15 +39,16 @@ struct LibraryView: View {
     /// The sort run the other way from its natural direction — set by clicking
     /// a column heading twice in the Mac's list view.
     @State private var reversed = false
+    /// What is typed in the search field — the Mac's toolbar field, an
+    /// iPad's in the filter header — and the copy of it the query is made
+    /// from: the field changes on every keystroke, the query a moment after
+    /// the last one, so a name typed out is one request and not one per
+    /// letter. A phone has no field, and these stay empty there.
+    @State private var searchTerm = ""
+    @State private var activeSearchTerm = ""
     #if os(macOS)
     /// Posters or a list; remembered across libraries and launches.
     @AppStorage("libraryLayout") private var layout: LibraryLayout = .grid
-    /// What is typed in the toolbar's search field, and the copy of it the
-    /// query is made from: the field changes on every keystroke, the query
-    /// a moment after the last one, so a name typed out is one request and
-    /// not one per letter.
-    @State private var searchTerm = ""
-    @State private var activeSearchTerm = ""
     /// The tiles or rows selected, shared by the grid and the table so a
     /// selection survives switching between them. The toolbar acts on it.
     @State private var selection: Set<String> = []
@@ -257,6 +258,19 @@ struct LibraryView: View {
         // The filter bar is the one place in the app where a tap changes what
         // the whole page says without moving anything under your finger.
         .sensoryFeedback(.selection, trigger: filterKey)
+        // An iPad's filters and search are pinned under the bar rather than
+        // scrolling away with the first row — see `padFilterHeader`.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !Metrics.phoneLayout { padFilterHeader }
+        }
+        .task(id: searchTerm) {
+            // Wait for the typing to pause before asking.
+            if !searchTerm.isEmpty {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+            }
+            activeSearchTerm = searchTerm
+        }
         #endif
         // "Unwatched only" and "Favorites only" are both filters a press-and-
         // hold menu can knock an item out of from the grid itself.
@@ -289,6 +303,8 @@ struct LibraryView: View {
             reversed = false
             unwatchedOnly = false
             favouritesOnly = false
+            searchTerm = ""
+            activeSearchTerm = ""
             #endif
         }
     }
@@ -349,8 +365,11 @@ struct LibraryView: View {
                 // and scrolls away with the first row of posters.
                 PageHeading(title: title)
                 #endif
-                #if !os(macOS)
-                // The Mac has these in the window's toolbar — see `macToolbar`.
+                #if os(iOS)
+                // The Mac has these in the window's toolbar — see `macToolbar`
+                // — and an iPad in the header pinned above the grid.
+                if Metrics.phoneLayout { filterBar }
+                #elseif !os(macOS)
                 filterBar
                     .hiddenOnTV()
                 #endif
@@ -464,7 +483,7 @@ struct LibraryView: View {
             symbol: emptySymbol,
             title: "Nothing here",
             message: emptyMessage,
-            actionTitle: hasFilters ? "Clear Filters" : nil
+            actionTitle: hasFilters || !activeSearchTerm.isEmpty ? "Clear Filters" : nil
         ) {
             clearFilters()
         }
@@ -475,6 +494,8 @@ struct LibraryView: View {
         unwatchedOnly = false
         favouritesOnly = false
         genre = nil
+        searchTerm = ""
+        activeSearchTerm = ""
     }
 
     /// A filter glyph would be pointing at a bar that isn't drawn on a
@@ -495,9 +516,13 @@ struct LibraryView: View {
         #else
         // Only blamed on the filters when one is on; an empty library with
         // none set was told it didn't match them.
-        hasFilters
-            ? "No items in this library match the filters above."
-            : "This library has nothing in it yet."
+        if !activeSearchTerm.isEmpty {
+            "Nothing in this library matches “\(activeSearchTerm)”."
+        } else if hasFilters {
+            "No items in this library match the filters above."
+        } else {
+            "This library has nothing in it yet."
+        }
         #endif
     }
 
@@ -513,7 +538,7 @@ struct LibraryView: View {
     /// libraries when this screen first asks.
     private var filterKey: String {
         var key = "\(parentId)|\(includeTypes ?? "")|\(sort.rawValue)|\(reversed)|\(unwatchedOnly)|\(favouritesOnly)|\(genre ?? "")"
-        #if os(macOS)
+        #if os(macOS) || os(iOS)
         key += "|\(activeSearchTerm)"
         #endif
         return key
@@ -669,6 +694,77 @@ struct LibraryView: View {
 
     private var filterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
+            filterChips
+                .padding(.horizontal, Metrics.gutter)
+        }
+    }
+
+    #if os(iOS)
+    /// An iPad's header, pinned under the bar: how many there are, the
+    /// filters, and a field that narrows the library by name.
+    private var padFilterHeader: some View {
+        HStack(spacing: 12) {
+            if total > 0 {
+                Text("\(total) \(countNoun)")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textDim)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                filterChips
+            }
+            padSearchField
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.vertical, 10)
+        .background {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .overlay(Theme.background.opacity(0.6))
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.border).frame(height: 0.5)
+        }
+    }
+
+    private var padSearchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.textDim)
+            TextField("Search \(title)", text: $searchTerm)
+                .font(.subheadline)
+                .textFieldStyle(.plain)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+            if !searchTerm.isEmpty {
+                Button {
+                    searchTerm = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Theme.textDim)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(width: 240, height: 36)
+        .background(Theme.raised, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 0.5))
+    }
+
+    private var countNoun: String {
+        switch resolvedCollectionType {
+        case "movies": total == 1 ? "film" : "films"
+        case "tvshows": total == 1 ? "show" : "shows"
+        default: total == 1 ? "item" : "items"
+        }
+    }
+    #endif
+
+    private var filterChips: some View {
             HStack(spacing: 10) {
                 Menu {
                     Picker("Sort", selection: $sort) {
@@ -700,8 +796,6 @@ struct LibraryView: View {
                     }
                 }
             }
-            .padding(.horizontal, Metrics.gutter)
-        }
     }
 
     private func chip(label: String, symbol: String, active: Bool) -> some View {
@@ -803,7 +897,7 @@ struct LibraryView: View {
     /// rides along with every query — the first page, the later ones, and the
     /// count "Random" needs up front.
     private func fetch(_ q: JellyfinClient.LibraryQuery) async throws -> ItemsResponse {
-        #if os(macOS)
+        #if os(macOS) || os(iOS)
         try await client.libraryItems(parentId: parentId, query: q, searchTerm: activeSearchTerm)
         #else
         try await client.libraryItems(parentId: parentId, query: q)

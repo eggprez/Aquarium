@@ -29,6 +29,14 @@ struct RootView: View {
     /// back. Driving visibility ourselves lets those pages draw a toggle of
     /// their own — see `showSidebar`.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
+    /// Whether the sidebar is off screen, kept apart from `sidebarVisibility`.
+    /// The split view writes its own value back into the binding once it
+    /// has collapsed the column — `.automatic` on an iPad held upright — so
+    /// "is it `.detailOnly`" was false the moment after it had been made so,
+    /// and nothing that depends on the column being gone (the toggle a page
+    /// draws, the music bar coming back across the page) ever knew. See
+    /// `onChange` in `sidebarShell`.
+    @State private var sidebarHidden = false
 
     var body: some View {
         Group {
@@ -448,23 +456,22 @@ struct RootView: View {
     private var sidebarShell: some View {
         @Bindable var app = app
         return NavigationSplitView(columnVisibility: $sidebarVisibility) {
+            #if os(macOS)
             List(selection: sidebarSelection) {
-                #if os(macOS)
                 MacSidebarRows()
-                #else
-                ForEach(app.sections) { section in
-                    Label(section.title, systemImage: section.symbol)
-                        .tag(section)
-                }
-                #endif
             }
             .navigationTitle("Aquarium")
-            // On an iPad as well as a Mac. Left to itself an iPad's sidebar is
-            // 320 points, which held upright is two fifths of the screen spent
-            // on ten short words — and the page beside it, hero, shelves and
-            // grids, laid out in what was left.
             .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
             .safeAreaInset(edge: .bottom) { SidebarFooter() }
+            #else
+            // The app's own column — see `PadSidebar`. Its header stands in
+            // for the navigation bar, toggle included. Left to itself an
+            // iPad's sidebar is 320 points, which held upright is two fifths
+            // of the screen spent on ten short words.
+            PadSidebar { sidebarVisibility = .detailOnly }
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 300)
+            #endif
         } detail: {
             withToasts(
                 withOfflineStrip(
@@ -478,7 +485,7 @@ struct RootView: View {
                     .id(app.shownSelection)
                     .measuresBottomChrome()
                 )
-                .withMiniPlayer()
+                .withShellMusic(sidebarShowing: !sidebarHidden)
             )
             #if os(iOS)
             // The way back to a collapsed sidebar, for the pages without a
@@ -489,6 +496,15 @@ struct RootView: View {
             // under the system's on all of those.
             .environment(\.showSidebar, showSidebarAction)
             #endif
+        }
+        // An explicit value is the column going or coming; `.automatic` is
+        // the split view settling after either, and says nothing new.
+        .onChange(of: sidebarVisibility) { _, now in
+            switch now {
+            case .detailOnly: sidebarHidden = true
+            case .all, .doubleColumn: sidebarHidden = false
+            default: break
+            }
         }
         #if os(macOS)
         // Search is the field at the top of the sidebar, as in Music, rather
@@ -526,7 +542,7 @@ struct RootView: View {
 
     /// Brings the sidebar back, while it is collapsed — see `showSidebar`.
     private var showSidebarAction: (() -> Void)? {
-        guard sidebarVisibility == .detailOnly else { return nil }
+        guard sidebarHidden else { return nil }
         return { sidebarVisibility = .all }
     }
 
@@ -853,8 +869,11 @@ struct ZoomedDestination<Content: View>: View {
 /// a pair of properties on `RootView` it made the whole shell — the split
 /// view, its stacks, the toasts — a reader of the download list, redrawn
 /// whenever a download changed state.
-private struct SidebarFooter: View {
+struct SidebarFooter: View {
     @Environment(JellyfinClient.self) private var client
+    #if os(iOS)
+    @Environment(AppModel.self) private var app
+    #endif
 
     var body: some View {
         #if os(macOS)
@@ -863,6 +882,30 @@ private struct SidebarFooter: View {
         status
         #endif
     }
+
+    #if os(iOS)
+    /// Settings is the gear beside the status, not a row in the list: a
+    /// sidebar of places to browse ends with the one place that isn't.
+    private var settingsButton: some View {
+        let selected = app.shownSelection == .settings
+        return Button {
+            if selected {
+                app.path(for: .settings).wrappedValue = NavigationPath()
+            } else {
+                app.selection = .settings
+            }
+        } label: {
+            Image(systemName: "gearshape")
+                .font(.body.weight(.medium))
+                .foregroundStyle(selected ? Theme.accent : Theme.textDim)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Settings")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+    #endif
 
     @ViewBuilder
     private var status: some View {
@@ -884,6 +927,18 @@ private struct SidebarFooter: View {
         #if os(macOS)
         // Under the account's name in `MacSidebarFooter`, which draws the rule.
         line
+        #elseif os(iOS)
+        VStack(alignment: .leading, spacing: 4) {
+            Divider()
+            HStack(spacing: 8) {
+                line
+                Spacer(minLength: 8)
+                settingsButton
+            }
+            .padding(.leading, 18)
+            .padding(.trailing, 12)
+            .padding(.bottom, 8)
+        }
         #else
         VStack(alignment: .leading, spacing: 4) {
             Divider()

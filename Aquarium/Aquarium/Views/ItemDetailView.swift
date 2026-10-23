@@ -96,20 +96,34 @@ struct ItemDetailView: View {
         // on top of a large-titled screen opens at *that* screen's height and
         // only takes its own when something else makes the page redraw, which
         // on a page that loads in stages is the moment after it has finished.
-        scroll()
-            .safeAreaInset(edge: .top, spacing: 0) { topBar }
-            .toolbar(.hidden, for: .navigationBar)
-            // Hiding the bar takes the back-swipe with it unless it is asked
-            // for again.
-            .background { BackSwipe().frame(width: 0, height: 0) }
-            .onPreferenceChange(DetailScrollKey.self) { offset in
-                // A bar's worth of scrolling, not the height of the hero: an
-                // episode page is short enough that its scroll stops before the
-                // artwork has cleared the bar, and a threshold measured from the
-                // hero's own height would leave that page permanently without
-                // its title.
-                scrolledPastHero = -offset > 80
+        Group {
+            if Metrics.phoneLayout {
+                scroll()
+                    .safeAreaInset(edge: .top, spacing: 0) { topBar }
+            } else {
+                // An iPad's bar floats over the page instead, and the page
+                // reaches up under the clock — the same arrangement as Home.
+                // See `padBar` and `padHeader`.
+                ZStack(alignment: .top) {
+                    scroll()
+                        .ignoresSafeArea(.container, edges: .top)
+                    padBar
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
             }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        // Hiding the bar takes the back-swipe with it unless it is asked
+        // for again.
+        .background { BackSwipe().frame(width: 0, height: 0) }
+        .onPreferenceChange(DetailScrollKey.self) { offset in
+            // A bar's worth of scrolling, not the height of the hero: an
+            // episode page is short enough that its scroll stops before the
+            // artwork has cleared the bar, and a threshold measured from the
+            // hero's own height would leave that page permanently without
+            // its title.
+            scrolledPastHero = -offset > 80
+        }
         #elseif os(tvOS)
         scroll()
             .screenTitle(navigationTitle)
@@ -260,6 +274,55 @@ struct ItemDetailView: View {
 
     #if os(iOS)
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.showSidebar) private var showSidebar
+    /// What the top of the screen keeps for the clock, read from outside the
+    /// scroll view that ignores it — see `body`. iPad only.
+    @State private var padTopInset: CGFloat = 0
+    /// The season whose episodes an iPad's series page is showing — see
+    /// `padEpisodeSection`.
+    @State private var padSeasonId: String?
+    /// Whether that season's list is on its way.
+    @State private var padEpisodesLoading = false
+    /// The overview, unfolded from its four lines by a tap.
+    @State private var padOverviewExpanded = false
+    /// How wide the header was laid out, which decides whether the facts
+    /// fit beside the poster — see `padHeader`. Zero until the first pass.
+    @State private var padHeaderWidth: CGFloat = 0
+
+    /// How far down an iPad's content starts: the clock and the floating bar.
+    private var padContentInset: CGFloat {
+        Metrics.phoneLayout ? 0 : padTopInset + Metrics.topBar
+    }
+
+    /// An iPad's bar: the way back and, once the header has gone past, the
+    /// title — floating over the header's wash, with a surface of its own
+    /// only after the page has scrolled. See `padBarSurface`.
+    private var padBar: some View {
+        HStack(spacing: 8) {
+            if let showSidebar {
+                Button(action: showSidebar) {
+                    Image(systemName: "sidebar.leading")
+                        .font(.body.weight(.semibold))
+                        .barButtonDisc(size: 36)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show sidebar")
+            }
+            BarBackButton { dismiss() }
+            if scrolledPastHero {
+                Text(navigationTitle)
+                    .font(.headline)
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+                    .transition(.opacity)
+            }
+            Spacer(minLength: 12)
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .frame(height: Metrics.topBar)
+        .padBarSurface(filled: scrolledPastHero)
+        .animation(.easeInOut(duration: 0.2), value: scrolledPastHero)
+    }
 
     /// The way back, and — once the artwork carrying it has gone past — what
     /// this page is. Nothing here changes the bar's height, so the title can
@@ -429,9 +492,11 @@ struct ItemDetailView: View {
                     .padding(.horizontal, Metrics.gutter)
                     SkeletonShelf()
                 }
+                .padding(.top, skeletonInset)
                 .padding(.bottom, 40)
             } else if let error, item == nil {
                 ErrorState(error: error) { Task { await load() } }
+                    .padding(.top, skeletonInset)
             } else if let item {
                 // Eager on a television, lazy everywhere else.
                 //
@@ -568,13 +633,34 @@ struct ItemDetailView: View {
         bodySections(item)
     }
 
+    /// Where a page that has nothing on it yet starts: below an iPad's
+    /// floating bar, and at the top everywhere else.
+    private var skeletonInset: CGFloat {
+        #if os(iOS)
+        padContentInset
+        #else
+        0
+        #endif
+    }
+
     /// The artwork and what the title is: the top of the page, and the top
     /// half of a half-folded one.
     @ViewBuilder
     private func headerSections(_ item: BaseItem) -> some View {
+        #if os(iOS)
+        if Metrics.phoneLayout {
+            HeroHeader(item: item, style: .detail)
+                .id(Self.topAnchor)
+            details(item)
+        } else {
+            padHeader(item)
+                .id(Self.topAnchor)
+        }
+        #else
         HeroHeader(item: item, style: .detail)
             .id(Self.topAnchor)
         details(item)
+        #endif
     }
 
     /// The lists under it.
@@ -582,9 +668,20 @@ struct ItemDetailView: View {
     private func bodySections(_ item: BaseItem) -> some View {
         // A show is its seasons, and a season is its episodes. The two lists
         // never appear on the same page: mixing them is what made "which season
-        // am I looking at" a question.
+        // am I looking at" a question. An iPad has the room to answer it
+        // instead — the seasons are a switch over the one list, and the
+        // switch says which. See `padEpisodeSection`.
+        #if os(iOS)
+        if Metrics.phoneLayout {
+            if item.isSeries { seasonsSection }
+            if item.isSeason { episodesSection }
+        } else if item.isSeries || item.isSeason {
+            padEpisodeSection(item)
+        }
+        #else
         if item.isSeries { seasonsSection }
         if item.isSeason { episodesSection }
+        #endif
         castSection(item)
         MediaShelf(title: "More Like This", items: similar) { app.push(.item($0.Id)) }
     }
@@ -715,6 +812,361 @@ struct ItemDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Metrics.gutter)
     }
+
+    #if os(iOS)
+    // MARK: - iPad header
+
+    /// An iPad's top of page: the poster beside the facts, on a wash of the
+    /// backdrop's own colour, under the bar that floats over it. The phone's
+    /// hero band and the block under it, folded into one.
+    private func padHeader(_ item: BaseItem) -> some View {
+        // Two columns want the room for both: an iPad mini held upright
+        // beside the sidebar has about 480 points, and the facts column
+        // was 160 of them. Narrower than this, the poster stands beside
+        // the title and the facts only, and the rest runs under both.
+        let wide = padHeaderWidth == 0 || padHeaderWidth >= 720
+        return Group {
+            if wide {
+                HStack(alignment: .top, spacing: 32) {
+                    padArtwork(item, compact: false)
+                    VStack(alignment: .leading, spacing: 14) {
+                        padTitleBlock(item, compact: false)
+                        padFacts(item)
+                        padBody(item)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .top, spacing: 20) {
+                        padArtwork(item, compact: true)
+                        VStack(alignment: .leading, spacing: 10) {
+                            padTitleBlock(item, compact: true)
+                            padFacts(item)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    padBody(item)
+                }
+            }
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.top, padContentInset + 20)
+        .padding(.bottom, 8)
+        .background(alignment: .top) { padAmbient(item) }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { padHeaderWidth = $0 }
+    }
+
+    @ViewBuilder
+    private func padTitleBlock(_ item: BaseItem, compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if item.isEpisode || item.isSeason {
+                AncestorTrail(item: item)
+            }
+            Text(item.title)
+                .font(.system(size: compact ? 30 : 40, weight: .heavy))
+                .foregroundStyle(Theme.text)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
+        }
+    }
+
+    /// The short facts: the tagline, the year and runtime and rating, the
+    /// genres.
+    @ViewBuilder
+    private func padFacts(_ item: BaseItem) -> some View {
+        if let tagline = item.Taglines?.first, !tagline.isEmpty {
+            Text(tagline)
+                .font(.callout.italic())
+                .foregroundStyle(Theme.textDim)
+        }
+        FactsLine(item: item)
+        if let genres = item.Genres, !genres.isEmpty {
+            WrappingRow(spacing: 8, rowSpacing: 8) {
+                ForEach(genres.prefix(6), id: \.self) { genre in
+                    MetaChip(text: genre)
+                }
+            }
+        }
+    }
+
+    /// The overview, what Play will start, the actions, and the file.
+    @ViewBuilder
+    private func padBody(_ item: BaseItem) -> some View {
+        if let overview = item.Overview, !overview.isEmpty {
+            // Four lines, and the rest on a tap: a page's worth of synopsis
+            // above the episodes pushed them off the screen.
+            Text(overview)
+                .font(.body)
+                .foregroundStyle(Theme.textBody)
+                .lineLimit(padOverviewExpanded ? nil : 4)
+                .frame(maxWidth: 680, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.2)) { padOverviewExpanded.toggle() }
+                }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint(padOverviewExpanded ? "Folds the overview" : "Unfolds the overview")
+        }
+        if let target = playable(for: item), target.Id != item.Id, target.isEpisode {
+            Text(upNextLine(target))
+                .font(.subheadline)
+                .foregroundStyle(Theme.textBody)
+                .lineLimit(2)
+        }
+
+        padActions(item)
+            .padding(.top, 4)
+
+        MediaSummaryLine(item: item)
+            .fixedSize(horizontal: false, vertical: true)
+        if let studios = item.Studios?.compactMap(\.Name).filter({ !$0.isEmpty }), !studios.isEmpty {
+            Label(studios.joined(separator: " · "), systemImage: "building.2")
+                .font(.caption)
+                .foregroundStyle(Theme.textDim)
+        }
+    }
+
+    /// The poster, or a still for an episode, standing a little off the page.
+    @ViewBuilder
+    private func padArtwork(_ item: BaseItem, compact: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: compact ? 12 : 16, style: .continuous)
+        Group {
+            if item.isEpisode {
+                RemoteImage(url: Artwork.still(for: item, width: 800), blurHash: Artwork.hash(item))
+                    .frame(width: compact ? 224 : 320, height: compact ? 126 : 180)
+            } else {
+                RemoteImage(url: Artwork.poster(for: item, width: 600), blurHash: Artwork.hash(item))
+                    .frame(width: compact ? 150 : 232, height: compact ? 225 : 348)
+            }
+        }
+        .clipShape(shape)
+        .shadow(color: .black.opacity(0.45), radius: 24, y: 12)
+    }
+
+    /// The backdrop as a wash under the header: blurred until it is colour
+    /// rather than a picture, dimmed, and gone by the foot of the header.
+    /// A small picture blurred wide costs little and looks the same.
+    private func padAmbient(_ item: BaseItem) -> some View {
+        RemoteImage(
+            url: Artwork.url(item, type: "Backdrop", width: 400) ?? Artwork.url(item, type: "Primary", width: 400),
+            blurHash: Artwork.hash(item, type: "Backdrop") ?? Artwork.hash(item)
+        )
+        .scaleEffect(1.3)
+        .blur(radius: 60)
+        .saturation(0.9)
+        .opacity(0.45)
+        .overlay(
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: Theme.background.opacity(0.4), location: 0.55),
+                    .init(color: Theme.background, location: 1),
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
+        )
+        .clipped()
+        .ignoresSafeArea(.container, edges: [.top, .horizontal])
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    /// One prominent button for the thing the page is for, and the rest as
+    /// discs with their words beneath — see `IconDiscLabelStyle`.
+    private func padActions(_ item: BaseItem) -> some View {
+        let playable = playable(for: item)
+        return WrappingRow(spacing: 18, rowSpacing: 12) {
+            if let playable {
+                VStack(spacing: 6) {
+                    Button {
+                        Task { await player.play(item: playable) }
+                    } label: {
+                        Label(playLabel(playable), systemImage: "play.fill")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 22)
+                            .frame(height: 48)
+                            .background(Theme.accentStrong, in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    if let progress = playable.progressFraction {
+                        Text(remainingText(progress, of: playable))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Theme.textDim)
+                    }
+                }
+            }
+
+            Button {
+                Task { await toggleFavourite(item) }
+            } label: {
+                Label(
+                    item.userData.isFavorite ? "Favorited" : "Favorite",
+                    systemImage: item.userData.isFavorite ? "star.fill" : "star"
+                )
+                .contentTransition(.symbolEffect(.replace))
+                .symbolEffect(.bounce, value: item.userData.isFavorite)
+            }
+            .labelStyle(IconDiscLabelStyle(tint: item.userData.isFavorite ? Theme.warn : nil))
+            .buttonStyle(.plain)
+
+            if !item.isSeries {
+                Button {
+                    Task { await toggleWatched(item) }
+                } label: {
+                    Label(
+                        item.userData.played ? "Watched" : "Mark watched",
+                        systemImage: item.userData.played ? "checkmark.circle.fill" : "checkmark.circle"
+                    )
+                    .contentTransition(.symbolEffect(.replace))
+                }
+                .labelStyle(IconDiscLabelStyle(tint: item.userData.played ? Theme.accent : nil))
+                .buttonStyle(.plain)
+            }
+
+            downloadMenu(item)
+                .labelStyle(IconDiscLabelStyle())
+                .buttonStyle(.plain)
+
+            if Trailers.has(item) {
+                Button {
+                    Task { await playTrailer(item) }
+                } label: {
+                    Label("Trailer", systemImage: "film")
+                }
+                .labelStyle(IconDiscLabelStyle())
+                .buttonStyle(.plain)
+            }
+
+            if let playable {
+                Menu {
+                    qualityMenu(playable)
+                } label: {
+                    Label("Quality", systemImage: "slider.horizontal.3")
+                }
+                .labelStyle(IconDiscLabelStyle())
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: - iPad episodes
+
+    /// The episodes, two across where the page is wide enough, under a
+    /// switch between the seasons on a show's page. A season's own page
+    /// has no switch: it is one season by definition.
+    @ViewBuilder
+    private func padEpisodeSection(_ item: BaseItem) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 12) {
+                Text("Episodes")
+                    .font(shelfTitleFont)
+                    .foregroundStyle(Theme.text)
+                if item.isSeries, !seasons.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(seasons) { season in
+                                padSeasonChip(season)
+                            }
+                        }
+                    }
+                }
+                Spacer(minLength: 8)
+                if !episodes.isEmpty {
+                    Text(padEpisodeSummary)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.textDim)
+                }
+            }
+            if episodes.isEmpty {
+                if padEpisodesLoading || isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                } else {
+                    Text("Nothing in this season yet.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.textDim)
+                        .padding(.vertical, 8)
+                }
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 420), spacing: 32, alignment: .top)],
+                    alignment: .leading,
+                    spacing: 20
+                ) {
+                    ForEach(episodes) { episode in
+                        EpisodeRow(episode: episode, isHighlighted: episodeHighlight == episode.Id) {
+                            Task { await player.play(item: episode) }
+                        } onOpen: {
+                            app.push(.item(episode.Id))
+                        }
+                        // Named so the arrival can scroll to it — see `scroll`.
+                        .id(episode.Id)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, Metrics.gutter)
+    }
+
+    /// One season on the switch. A press-and-hold has the season's own menu,
+    /// its page included, since the poster that used to open it is gone.
+    private func padSeasonChip(_ season: BaseItem) -> some View {
+        let selected = season.Id == padSeasonId
+        return Button {
+            selectPadSeason(season.Id)
+        } label: {
+            Text(season.title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(selected ? Theme.text : Theme.textBody)
+                .padding(.horizontal, 16)
+                .frame(height: 34)
+                .background {
+                    if selected { Capsule().fill(Theme.text.opacity(0.1)) }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .itemContextMenu(season, allowsOpen: true)
+    }
+
+    private var padEpisodeSummary: String {
+        let watched = episodes.filter(\.userData.played).count
+        var text = "\(episodes.count) episode\(episodes.count == 1 ? "" : "s")"
+        if watched > 0 { text += " · \(watched) watched" }
+        return text
+    }
+
+    /// The season the switch opens on: the one already chosen if the show
+    /// still has it, else the one Next Up is in, else the first.
+    private func loadPadSeason(preferring seasonId: String?) async {
+        let kept = padSeasonId.flatMap { id in seasons.contains { $0.Id == id } ? id : nil }
+        guard let chosen = kept
+            ?? seasons.first(where: { $0.Id == seasonId })?.Id
+            ?? seasons.first?.Id
+        else { return }
+        padSeasonId = chosen
+        padEpisodesLoading = true
+        await loadEpisodes(seriesId: itemId, seasonId: chosen)
+        padEpisodesLoading = false
+    }
+
+    private func selectPadSeason(_ id: String) {
+        guard id != padSeasonId else { return }
+        padSeasonId = id
+        episodes = []
+        padEpisodesLoading = true
+        Task {
+            await loadEpisodes(seriesId: itemId, seasonId: id)
+            padEpisodesLoading = false
+        }
+    }
+    #endif
 
     /// Whether the page repeats its own name under the artwork. An episode's
     /// own name, a season's number, and — since the hero above may be showing
@@ -1334,7 +1786,8 @@ struct ItemDetailView: View {
 
     private var shelfTitleFont: Font {
         #if os(iOS)
-        return .headline
+        // The weight Home's shelves have on an iPad — see `MediaShelf`.
+        return Metrics.phoneLayout ? .headline : .title2.weight(.bold)
         #else
         return .title3.weight(.semibold)
         #endif
@@ -1411,6 +1864,14 @@ struct ItemDetailView: View {
     private static let castTileWidth: CGFloat = 190
     private static let castNameFont: Font = .callout.weight(.medium)
     private static let castRoleFont: Font = .caption
+    #elseif os(iOS)
+    // An iPad's are a size up from the phone's: a 78-point headshot under a
+    // 348-point poster read as a speck.
+    private static var castPhotoSize: CGFloat { Metrics.phoneLayout ? 78 : 96 }
+    private static var castPhotoPixels: Int { Metrics.phoneLayout ? 200 : 240 }
+    private static var castTileWidth: CGFloat { Metrics.phoneLayout ? 108 : 128 }
+    private static var castNameFont: Font { Metrics.phoneLayout ? .caption.weight(.medium) : .footnote.weight(.medium) }
+    private static var castRoleFont: Font { Metrics.phoneLayout ? .caption2 : .caption }
     #else
     private static let castPhotoSize: CGFloat = 78
     private static let castPhotoPixels = 200
@@ -1471,6 +1932,11 @@ struct ItemDetailView: View {
         #if !os(tvOS)
         episodeHighlight = nil
         #endif
+        #if os(iOS)
+        padSeasonId = nil
+        padEpisodesLoading = false
+        padOverviewExpanded = false
+        #endif
         #if os(macOS)
         episodeSelection = []
         #endif
@@ -1512,6 +1978,11 @@ struct ItemDetailView: View {
                 guard !Task.isCancelled else { return }
                 seasons = foundSeasons ?? []
                 nextUp = foundNext ?? nil
+                #if os(iOS)
+                // An iPad's show page lists one season's episodes under the
+                // switch — see `padEpisodeSection`.
+                if !Metrics.phoneLayout { await loadPadSeason(preferring: nextUp?.SeasonId) }
+                #endif
             } else if loaded.isSeason, let seriesId = loaded.SeriesId ?? loaded.ParentId {
                 await loadEpisodes(seriesId: seriesId, seasonId: loaded.Id)
             }
@@ -1720,6 +2191,13 @@ struct EpisodeRow: View {
     private static let still = CGSize(width: 320, height: 180)
     private static let progressHeight: CGFloat = 6
     private static let detailFont: Font = .callout
+    #elseif os(iOS)
+    /// A size up on an iPad, where two of these sit across the page.
+    private static var still: CGSize {
+        Metrics.phoneLayout ? CGSize(width: 148, height: 83) : CGSize(width: 176, height: 99)
+    }
+    private static let progressHeight: CGFloat = 3
+    private static var detailFont: Font { Metrics.phoneLayout ? .caption : .footnote }
     #else
     private static let still = CGSize(width: 148, height: 83)
     private static let progressHeight: CGFloat = 3

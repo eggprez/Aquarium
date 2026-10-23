@@ -24,12 +24,24 @@ enum Metrics {
         #elseif os(macOS)
         return 168
         #else
-        return phoneLayout ? 112 : 136
+        return phoneLayout ? 112 : 156
         #endif
     }
 
     /// 16:9 stills — episodes, channels, backdrops.
     static var stillWidth: CGFloat { posterWidth * 1.62 }
+
+    /// A still on a shelf. The grid's still follows the poster, so that a
+    /// page of them packs the way a page of posters does; a shelf on an iPad
+    /// has the width to draw Continue Watching at 300, where a frame of the
+    /// episode is a picture rather than a thumbnail.
+    static var shelfStillWidth: CGFloat {
+        #if os(iOS)
+        return phoneLayout ? stillWidth : 300
+        #else
+        return stillWidth
+        #endif
+    }
 
     /// Between cards in a horizontal shelf.
     static var rowSpacing: CGFloat {
@@ -38,7 +50,7 @@ enum Metrics {
         #elseif os(macOS)
         return 16
         #else
-        return 12
+        return phoneLayout ? 12 : 16
         #endif
     }
 
@@ -50,7 +62,7 @@ enum Metrics {
         #elseif os(macOS)
         return 16
         #else
-        return 10
+        return phoneLayout ? 10 : 14
         #endif
     }
 
@@ -63,7 +75,7 @@ enum Metrics {
         #elseif os(macOS)
         return 26
         #else
-        return 18
+        return phoneLayout ? 18 : 22
         #endif
     }
 
@@ -74,7 +86,7 @@ enum Metrics {
         #elseif os(macOS)
         return 30
         #else
-        return 22
+        return phoneLayout ? 22 : 32
         #endif
     }
 
@@ -85,7 +97,7 @@ enum Metrics {
         #elseif os(macOS)
         return 10
         #else
-        return 8
+        return phoneLayout ? 8 : 12
         #endif
     }
 
@@ -115,19 +127,21 @@ enum Metrics {
         #elseif os(macOS)
         return 7
         #else
-        return 6
+        return phoneLayout ? 6 : 7
         #endif
     }
 
     /// The page margin. Twenty on the Mac — the inset a system window's
-    /// content sits at — where twenty-eight was a tablet's thumb-room.
+    /// content sits at — where twenty-eight is a tablet's thumb-room: a
+    /// phone's sixteen on a 13-inch screen put the shelves hard against the
+    /// sidebar.
     static var gutter: CGFloat {
         #if os(tvOS)
         return 60
         #elseif os(macOS)
         return 20
         #else
-        return 16
+        return phoneLayout ? 16 : 28
         #endif
     }
 
@@ -894,7 +908,7 @@ struct MediaShelf: View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: Metrics.rowSpacing) {
                 ForEach(items) { item in
-                    card(item, width: wide ? Metrics.stillWidth : Metrics.posterWidth)
+                    card(item, width: wide ? Metrics.shelfStillWidth : Metrics.posterWidth)
                 }
             }
             .padding(.horizontal, Metrics.gutter)
@@ -905,10 +919,12 @@ struct MediaShelf: View {
     #endif
 
     /// A phone fits more rows on screen with a heading the weight of a list
-    /// header than with one the weight of a page title.
+    /// header than with one the weight of a page title. An iPad has the
+    /// rows' height to spare, and its cards are big enough that a headline
+    /// over them read as a caption.
     private var titleFont: Font {
         #if os(iOS)
-        return .headline
+        return Metrics.phoneLayout ? .headline : .title2.weight(.bold)
         #else
         return .title3.weight(.semibold)
         #endif
@@ -971,9 +987,11 @@ struct SeeAllButton: View {
             Text("See All")
                 .font(.subheadline)
             #else
+            // Dim on an iPad, where the headings are heavier: a purple word
+            // at the end of every row was the loudest thing on the page.
             Text("See all")
-                .font(.subheadline)
-                .foregroundStyle(Theme.accent)
+                .font(Metrics.phoneLayout ? .subheadline : .subheadline.weight(.semibold))
+                .foregroundStyle(Metrics.phoneLayout ? Theme.accent : Theme.textDim)
             #endif
         }
         .seeAllStyle()
@@ -2670,6 +2688,60 @@ struct BackSwipe: UIViewControllerRepresentable {
         deinit { }
     }
 }
+
+#if os(iOS)
+/// An action as a glass disc with its word underneath — the row under a
+/// title on an iPad, where five spelled-out capsules were a row of web
+/// buttons. `tint` marks one that is on: the disc fills with its colour.
+struct IconDiscLabelStyle: LabelStyle {
+    var tint: Color?
+
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(spacing: 6) {
+            configuration.icon
+                .font(.body.weight(.semibold))
+                .foregroundStyle(tint ?? Theme.text)
+                .frame(width: 48, height: 48)
+                .background {
+                    if let tint {
+                        Circle().fill(tint.opacity(0.16))
+                    } else {
+                        Circle().fill(.ultraThinMaterial)
+                            .background(Theme.raised.opacity(0.5), in: Circle())
+                    }
+                }
+                .overlay(Circle().strokeBorder((tint ?? .white).opacity(tint == nil ? 0.1 : 0.4), lineWidth: 1))
+                .contentShape(Circle())
+            configuration.title
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Theme.textDim)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(width: 64)
+    }
+}
+
+extension View {
+    /// The surface under an iPad's floating bar: nothing while it sits over
+    /// artwork, and a blur with a hairline once the page has scrolled up
+    /// under it. Home and a title page both draw their bar this way.
+    func padBarSurface(filled: Bool) -> some View {
+        background {
+            if filled {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(Theme.background.opacity(0.6))
+                    .overlay(alignment: .bottom) {
+                        Rectangle().fill(Theme.border).frame(height: 0.5)
+                    }
+                    .ignoresSafeArea(edges: .top)
+                    .transition(.opacity)
+            }
+        }
+    }
+}
+#endif
 
 /// The way back, for a page that draws its own bar. The system's back button
 /// comes with the system's navigation bar, and that bar is the thing these

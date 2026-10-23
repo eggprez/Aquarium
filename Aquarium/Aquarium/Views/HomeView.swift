@@ -219,8 +219,13 @@ struct HomeView: View {
         // scroll view, and it carries the application's name rather than the
         // page's — "Home" above a hard-edged backdrop is the seam that made the
         // top of this page look bolted on.
-        scroll()
-            .toolbar(.hidden, for: .navigationBar)
+        if Metrics.phoneLayout {
+            scroll()
+                .toolbar(.hidden, for: .navigationBar)
+        } else {
+            padHome
+                .toolbar(.hidden, for: .navigationBar)
+        }
         #elseif os(tvOS)
         // The media bar is meant to be the top of the screen, not a picture
         // sitting in the middle of one: edge to edge across, and up behind the
@@ -254,6 +259,70 @@ struct HomeView: View {
             .toolbarBackground(.hidden, for: .windowToolbar)
         #endif
     }
+
+    #if os(iOS)
+    /// What the top of the screen keeps for the clock, read from outside
+    /// the scroll view that ignores it — see `padHome`.
+    @State private var padTopInset: CGFloat = 0
+    /// Whether the hero has scrolled up under the bar, which is when the
+    /// bar earns a surface and the wordmark.
+    @State private var padScrolled = false
+    @Environment(\.showSidebar) private var showSidebar
+
+    /// An iPad's Home: the hero runs up under the status bar and the bar
+    /// floats over it — glass discs on the artwork, and only once the page
+    /// has scrolled a surface of its own with the wordmark on it. The phone
+    /// keeps its solid `AppTopBar`, whose reasons — the island, the clock
+    /// sitting on a different picture every few seconds — are a phone's.
+    ///
+    /// The scroll view ignores the top of the safe area; the stack around
+    /// it does not, so its own geometry says how much was ignored, and the
+    /// hero is told to reach up by that much plus the bar — see `scroll`.
+    private var padHome: some View {
+        ZStack(alignment: .top) {
+            scroll(bleed: EdgeInsets(top: padTopInset + Metrics.topBar, leading: 0, bottom: 0, trailing: 0))
+                .ignoresSafeArea(.container, edges: .top)
+                .modifier(HeroScrollWatcher(threshold: 180, isPast: $padScrolled))
+            padBar
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
+    }
+
+    private var padBar: some View {
+        HStack(spacing: 10) {
+            if let showSidebar {
+                Button(action: showSidebar) {
+                    Image(systemName: "sidebar.leading")
+                        .font(.body.weight(.semibold))
+                        .barButtonDisc(size: 36)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show sidebar")
+            }
+            if padScrolled {
+                BrandMark()
+                    .transition(.opacity)
+            }
+            Spacer(minLength: 12)
+            Button {
+                app.push(.search(""))
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.body.weight(.semibold))
+                    .barButtonDisc(size: 36)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Search")
+            RefreshButton(isRefreshing: isRefreshing) {
+                Task { await reload(fresh: true) }
+            }
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .frame(height: Metrics.topBar)
+        .padBarSurface(filled: padScrolled)
+        .animation(.easeOut(duration: 0.2), value: padScrolled)
+    }
+    #endif
 
     #if os(macOS)
     @ToolbarContentBuilder
@@ -370,7 +439,7 @@ struct HomeView: View {
                 LazyVStack(alignment: .leading, spacing: Metrics.shelfSpacing) {
                     #if os(iOS)
                     if !heroItems.isEmpty {
-                        HeroCarousel(items: heroItems)
+                        HeroCarousel(items: heroItems, topBleed: bleed.top)
                     }
                     #elseif os(tvOS)
                     if heroItems.isEmpty {
@@ -419,7 +488,7 @@ struct HomeView: View {
                 #if os(tvOS)
                 .padding(.top, heroItems.isEmpty ? bleed.top + 12 : 0)
                 #elseif os(iOS)
-                .padding(.top, heroItems.isEmpty ? 12 : 0)
+                .padding(.top, heroItems.isEmpty ? bleed.top + 12 : 0)
                 #else
                 .padding(.top, hero == nil ? 12 : 0)
                 #endif
@@ -499,25 +568,31 @@ struct HomeView: View {
         // The bar is part of the screen rather than something drawn over it:
         // everything that scrolls arrives underneath it and is gone, and the
         // page starts where the bar ends.
+        //
+        // A phone's. An iPad's bar floats over the hero instead — see
+        // `padHome` — so here it is nothing, which takes no room.
         .safeAreaInset(edge: .top, spacing: 0) {
-            AppTopBar {
-                HStack(spacing: 0) {
-                    BrandMark()
-                    Spacer(minLength: 12)
-                    HStack(spacing: 10) {
-                        // Search lives here rather than in a tab of its own:
-                        // it opens over Home, with the field already active.
-                        Button {
-                            app.push(.search(""))
-                        } label: {
-                            Image(systemName: "magnifyingglass")
-                                .font(.body.weight(.semibold))
-                                .barButtonDisc(size: 36)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Search")
-                        RefreshButton(isRefreshing: isRefreshing) {
-                            Task { await reload(fresh: true) }
+            if Metrics.phoneLayout {
+                AppTopBar {
+                    HStack(spacing: 0) {
+                        BrandMark()
+                        Spacer(minLength: 12)
+                        HStack(spacing: 10) {
+                            // Search lives here rather than in a tab of its
+                            // own: it opens over Home, with the field already
+                            // active.
+                            Button {
+                                app.push(.search(""))
+                            } label: {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.body.weight(.semibold))
+                                    .barButtonDisc(size: 36)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Search")
+                            RefreshButton(isRefreshing: isRefreshing) {
+                                Task { await reload(fresh: true) }
+                            }
                         }
                     }
                 }
@@ -566,13 +641,18 @@ struct HomeView: View {
     private func shelf(_ section: HomeSection) -> some View {
         switch section {
         case .libraries:
-            LibraryTilesRow(libraries: app.libraries) { library in
-                app.push(.library(
-                    id: library.Id,
-                    name: library.title,
-                    collectionType: library.CollectionType
-                ))
+            #if os(iOS)
+            // An iPad has the libraries down its sidebar already; the slot
+            // is a strip of capsules rather than a second row of artwork
+            // before the first row of anything to watch.
+            if Metrics.phoneLayout {
+                LibraryTilesRow(libraries: app.libraries) { openLibrary($0) }
+            } else {
+                LibraryChipsRow(libraries: app.libraries) { openLibrary($0) }
             }
+            #else
+            LibraryTilesRow(libraries: app.libraries) { openLibrary($0) }
+            #endif
         case .resume:
             // Turned off in Settings, the slot draws nothing — Next Up keeps
             // its own place below.
@@ -627,6 +707,14 @@ struct HomeView: View {
                 app.show(.liveTV)
             }
         }
+    }
+
+    private func openLibrary(_ library: BaseItem) {
+        app.push(.library(
+            id: library.Id,
+            name: library.title,
+            collectionType: library.CollectionType
+        ))
     }
 
     /// The channels with something on them, for the Live TV row. Capped: this
@@ -1342,6 +1430,18 @@ struct HeroHeader: View {
             // They used to be one line reading "S02E04 · Some Title" under the
             // wordmark, which is a filename with a full stop in the middle.
             VStack(alignment: .leading, spacing: 6) {
+                #if os(iOS)
+                // Why this is here, in a small line over the title: an iPad
+                // has the height for it, and a bar of six titles reads
+                // better when each says what kind of thing it is.
+                if style == .home, !Metrics.phoneLayout {
+                    Text(eyebrow)
+                        .font(.caption.weight(.bold))
+                        .tracking(1.2)
+                        .foregroundStyle(Theme.link)
+                        .padding(.bottom, 2)
+                }
+                #endif
                 titleBlock
 
                 if item.isEpisode, let label = item.episodeLabel {
@@ -1424,14 +1524,18 @@ struct HeroHeader: View {
             #elseif os(macOS)
             .frame(maxWidth: logoBox.width, maxHeight: logoBox.height, alignment: .leading)
             #else
-            .frame(maxWidth: 300, maxHeight: 76, alignment: .leading)
+            .frame(
+                maxWidth: Metrics.phoneLayout ? 300 : 380,
+                maxHeight: Metrics.phoneLayout ? 76 : 96,
+                alignment: .leading
+            )
             #endif
         } else {
             // An episode and a season both belong to a show, and the show is
             // what the wordmark would have said; "Season 2" printed over the
             // artwork and again under it says nothing the second time.
             Text(Self.displayTitle(of: item))
-                .font(.system(.largeTitle, design: .default, weight: .bold))
+                .font(typesetTitleFont)
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 // A long title shrinks a little rather than wrapping to a third
@@ -1440,12 +1544,40 @@ struct HeroHeader: View {
         }
     }
 
+    /// The typeset title: the large title everywhere but an iPad, whose
+    /// hero is twice a phone's and wants a display size with the tracking
+    /// pulled in, the way a wordmark would have been set.
+    private var typesetTitleFont: Font {
+        #if os(iOS)
+        Metrics.phoneLayout
+            ? .system(.largeTitle, design: .default, weight: .bold)
+            : .system(size: 46, weight: .heavy)
+        #else
+        .system(.largeTitle, design: .default, weight: .bold)
+        #endif
+    }
+
+    #if os(iOS)
+    /// The small line over the title on an iPad: why this is here.
+    private var eyebrow: String {
+        if item.progressFraction != nil { return "CONTINUE WATCHING" }
+        if item.isEpisode { return "NEXT UP" }
+        return "FEATURED"
+    }
+    #endif
+
     /// The lines under the title. `.subheadline` was tuned for a phone and is
     /// eleven points on a Mac, which over a photograph is a caption nobody
-    /// reads; the Mac gets body text, semibold where the phone was.
+    /// reads; the Mac gets body text, semibold where the phone was. An iPad
+    /// is read from further off than a phone and gets callout.
     private func metaFont(strong: Bool) -> Font {
         #if os(macOS)
         return strong ? .body.weight(.semibold) : .callout.weight(.medium)
+        #elseif os(iOS)
+        if Metrics.phoneLayout {
+            return strong ? .subheadline.weight(.semibold) : .subheadline.weight(.medium)
+        }
+        return strong ? .callout.weight(.semibold) : .callout.weight(.medium)
         #else
         return strong ? .subheadline.weight(.semibold) : .subheadline.weight(.medium)
         #endif
@@ -1494,7 +1626,7 @@ struct HeroHeader: View {
             #if os(tvOS)
             .frame(width: 320, height: 8)
             #else
-            .frame(width: 168, height: 4)
+            .frame(width: Metrics.phoneLayout ? 168 : 240, height: 4)
             #endif
             #endif
 
@@ -1556,15 +1688,34 @@ struct HeroHeader: View {
                 .controlSize(.large)
                 .help("Show details for \(Self.displayTitle(of: item))")
             #else
-            Button {
-                Task { await start() }
-            } label: {
-                Label(playLabel, systemImage: "play.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(minWidth: 92)
+            if Metrics.phoneLayout {
+                Button {
+                    Task { await start() }
+                } label: {
+                    Label(playLabel, systemImage: "play.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(minWidth: 92)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accentStrong)
+            } else {
+                // White on the artwork, not the accent: purple over a
+                // different backdrop every few seconds fights half of them,
+                // and white on a picture is what every television app puts
+                // there. The accent is for buttons that sit on the page.
+                Button {
+                    Task { await start() }
+                } label: {
+                    Label(playLabel, systemImage: "play.fill")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 20)
+                        .frame(height: 44)
+                        .background(.white, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.accentStrong)
 
             // Not `.bordered`: its fill is drawn for a page background, and over
             // a photograph it is a grey smear with the accent colour written on
@@ -1572,12 +1723,13 @@ struct HeroHeader: View {
             // buttons do, and it stays legible whatever is behind it.
             Button { app.push(.item(item.Id)) } label: {
                 Text("Details")
-                    .font(.subheadline.weight(.semibold))
+                    .font(Metrics.phoneLayout ? .subheadline.weight(.semibold) : .body.weight(.semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, Metrics.phoneLayout ? 16 : 20)
+                    .padding(.vertical, Metrics.phoneLayout ? 8 : 11)
                     .background(.ultraThinMaterial, in: Capsule())
                     .overlay(Capsule().strokeBorder(.white.opacity(0.22), lineWidth: 0.5))
+                    .contentShape(Capsule())
             }
             .buttonStyle(.plain)
             #endif
@@ -1812,6 +1964,10 @@ struct HeroCarousel: View {
 /// says and how it is lit haven't changed; only how many of them there are.
 struct HeroCarousel: View {
     let items: [BaseItem]
+    /// Extra height on top of each page, for a bar drawn over the hero
+    /// rather than above it — an iPad's. Passed straight through to the
+    /// pages; see `HeroHeader.topBleed`.
+    var topBleed: CGFloat = 0
 
     @State private var index = 0
     /// The bar's own width, which on an iPad decides its height — see
@@ -1829,16 +1985,30 @@ struct HeroCarousel: View {
         ZStack(alignment: .bottomTrailing) {
             TabView(selection: $index) {
                 ForEach(Array(items.enumerated()), id: \.element.Id) { position, item in
-                    HeroHeader(item: item, heroHeight: height, availableWidth: width, sideInsets: sideInsets)
-                        .tag(position)
+                    HeroHeader(
+                        item: item,
+                        topBleed: topBleed,
+                        heroHeight: height,
+                        availableWidth: width,
+                        sideInsets: sideInsets
+                    )
+                    .tag(position)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: height)
+            .frame(height: height + topBleed)
 
-            if items.count > 1 { pageDots.padding(.trailing, sideInsets.trailing) }
+            if items.count > 1 {
+                // Thumbnails where there is room for them beside the text
+                // block — an iPad on its side — and dots everywhere else.
+                if !Metrics.phoneLayout, width >= 900 {
+                    pageThumbs
+                } else {
+                    pageDots.padding(.trailing, sideInsets.trailing)
+                }
+            }
         }
-        .frame(height: height)
+        .frame(height: height + topBleed)
         // Edge to edge, the way the shelves under it scroll: on a foldable's
         // front screen the tab bar stands in a column down the trailing edge
         // and the page is laid out short of it. The page view keeps the safe
@@ -1900,6 +2070,58 @@ struct HeroCarousel: View {
         .padding(.bottom, 12)
         .animation(.easeOut(duration: 0.25), value: index)
         .accessibilityHidden(true)
+    }
+
+    /// What else is in the bar, as a row of its backdrops in the corner: the
+    /// one showing ringed in white, the rest dimmed, each a tap away. Dots
+    /// say how many; these say what.
+    private var pageThumbs: some View {
+        HStack(spacing: 8) {
+            ForEach(Array(items.enumerated()), id: \.element.Id) { position, item in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.4)) { index = position }
+                } label: {
+                    RemoteImage(
+                        url: Artwork.url(item, type: "Backdrop", width: 300),
+                        blurHash: Artwork.hash(item, type: "Backdrop") ?? Artwork.hash(item)
+                    )
+                    .frame(width: 72, height: 42)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(.white, lineWidth: position == index ? 2 : 0)
+                    )
+                    .opacity(position == index ? 1 : 0.7)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(HeroHeader.displayTitle(of: item))
+                .accessibilityAddTraits(position == index ? [.isButton, .isSelected] : .isButton)
+            }
+        }
+        .padding(.trailing, Metrics.gutter)
+        .padding(.bottom, 38)
+        .animation(.easeOut(duration: 0.25), value: index)
+    }
+}
+
+/// Whether a scroll view has gone past a point, for a bar that changes once
+/// it has. iOS 18's scroll geometry; before it the answer stays "no", and
+/// the bar stays as it opens — glass discs, which read over anything.
+private struct HeroScrollWatcher: ViewModifier {
+    let threshold: CGFloat
+    @Binding var isPast: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top > threshold
+            } action: { _, past in
+                isPast = past
+            }
+        } else {
+            content
+        }
     }
 }
 #endif
