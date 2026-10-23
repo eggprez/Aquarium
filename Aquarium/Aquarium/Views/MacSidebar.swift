@@ -118,28 +118,29 @@ struct MacSidebarGroup: Identifiable {
     let sections: [AppSection]
     var id: String { title ?? "top" }
 
-    /// Home on its own at the top (Search is the field above the rows, not a
-    /// row); then the libraries and what is kept from them; then Live TV; then
-    /// what is on this Mac.
+    /// The iPad's groups (see `PadSidebarGroup`): Home on its own at the top
+    /// (Search is the field above the rows, not a row); the libraries, Music
+    /// and Audiobooks among them; Live TV; then what is yours — favourites
+    /// and what is on this Mac.
     static func grouped(_ sections: [AppSection]) -> [MacSidebarGroup] {
         var top: [AppSection] = []
-        var library: [AppSection] = []
+        var libraries: [AppSection] = []
         var live: [AppSection] = []
-        var device: [AppSection] = []
+        var you: [AppSection] = []
         for section in sections {
             switch section {
             case .home, .search: top.append(section)
             case .liveTV: live.append(section)
-            case .downloads: device.append(section)
+            case .favorites, .downloads: you.append(section)
             case .settings, .more: break
-            default: library.append(section)
+            default: libraries.append(section)
             }
         }
         return [
             MacSidebarGroup(title: nil, sections: top),
-            MacSidebarGroup(title: "Library", sections: library),
+            MacSidebarGroup(title: "Libraries", sections: libraries),
             MacSidebarGroup(title: "Live", sections: live),
-            MacSidebarGroup(title: "This Mac", sections: device),
+            MacSidebarGroup(title: "You", sections: you),
         ].filter { !$0.sections.isEmpty }
     }
 }

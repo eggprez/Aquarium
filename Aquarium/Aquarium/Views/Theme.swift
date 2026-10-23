@@ -120,10 +120,11 @@ enum Theme {
         startPoint: .top, endPoint: .bottom
     )
 
-    /// Twelve points is an iOS card. The Mac's own media apps round their
-    /// artwork at six to eight, and anything rounder reads as a widget.
+    /// Twelve points is an iOS card. The Mac and the iPad share fourteen:
+    /// their cards are bigger and sit further off, and the two screens are
+    /// meant to be the same design at two sizes — see `PadSidebar`.
     #if os(macOS)
-    static let cornerRadius: CGFloat = 8
+    static let cornerRadius: CGFloat = 14
     #elseif os(iOS)
     /// Fourteen on an iPad, whose cards are bigger and sit further off.
     static var cornerRadius: CGFloat { Metrics.phoneLayout ? 12 : 14 }
@@ -149,40 +150,28 @@ enum Theme {
 
 /// The card treatment used by every poster and row tile.
 ///
-/// On the Mac the hairline goes: a stroke around every poster is what made a
-/// grid of them read as a page of web cards. The one exception is dark mode,
-/// where artwork with a black edge sinks into a near-black window and a
-/// one-pixel separator is what keeps the tiles' shapes.
+/// On the Mac and the iPad the hairline goes: a stroke around every poster
+/// is what made a grid of them read as a page of web cards. The artwork
+/// keeps its own edge, and the room between tiles does the rest. (The Mac
+/// used to keep a separator in dark mode, where a black-edged poster sinks
+/// into a near-black window; the iPad's grid showed that the gap between
+/// tiles holds their shapes on its own, and the Mac follows it.)
 struct CardChrome: ViewModifier {
     var radius: CGFloat = Theme.cornerRadius
-    #if os(macOS)
-    @Environment(\.colorScheme) private var colorScheme
-    #endif
 
     func body(content: Content) -> some View {
         content
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(strokeStyle, lineWidth: lineWidth)
+                    .strokeBorder(Theme.border.opacity(0.6), lineWidth: lineWidth)
             )
-    }
-
-    private var strokeStyle: AnyShapeStyle {
-        #if os(macOS)
-        colorScheme == .dark ? AnyShapeStyle(.separator) : AnyShapeStyle(.clear)
-        #else
-        AnyShapeStyle(Theme.border.opacity(0.6))
-        #endif
     }
 
     private var lineWidth: CGFloat {
         #if os(macOS)
-        colorScheme == .dark ? 1 : 0
+        0
         #elseif os(iOS)
-        // None on an iPad: a hairline round every tile is what made a
-        // 13-inch grid read as a page of web cards. The artwork keeps its
-        // own edge, and the room between tiles does the rest.
         Metrics.phoneLayout ? 0.5 : 0
         #else
         0.5

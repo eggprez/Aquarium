@@ -650,6 +650,9 @@ struct HomeView: View {
             } else {
                 LibraryChipsRow(libraries: app.libraries) { openLibrary($0) }
             }
+            #elseif os(macOS)
+            // The same strip on the Mac, whose sidebar also lists them.
+            LibraryChipsRow(libraries: app.libraries) { openLibrary($0) }
             #else
             LibraryTilesRow(libraries: app.libraries) { openLibrary($0) }
             #endif
@@ -1430,15 +1433,15 @@ struct HeroHeader: View {
             // They used to be one line reading "S02E04 · Some Title" under the
             // wordmark, which is a filename with a full stop in the middle.
             VStack(alignment: .leading, spacing: 6) {
-                #if os(iOS)
+                #if os(iOS) || os(macOS)
                 // Why this is here, in a small line over the title: an iPad
-                // has the height for it, and a bar of six titles reads
-                // better when each says what kind of thing it is.
-                if style == .home, !Metrics.phoneLayout {
+                // and a Mac have the height for it, and a bar of six titles
+                // reads better when each says what kind of thing it is.
+                if style == .home, showsEyebrow {
                     Text(eyebrow)
                         .font(.caption.weight(.bold))
                         .tracking(1.2)
-                        .foregroundStyle(Theme.link)
+                        .foregroundStyle(eyebrowColor)
                         .padding(.bottom, 2)
                 }
                 #endif
@@ -1552,17 +1555,42 @@ struct HeroHeader: View {
         Metrics.phoneLayout
             ? .system(.largeTitle, design: .default, weight: .bold)
             : .system(size: 46, weight: .heavy)
+        #elseif os(macOS)
+        // The iPad's display size on a window with the room for it; a
+        // narrow window keeps the large title, which wraps sooner.
+        availableWidth >= 900
+            ? .system(size: 46, weight: .heavy)
+            : .system(.largeTitle, design: .default, weight: .bold)
         #else
         .system(.largeTitle, design: .default, weight: .bold)
         #endif
     }
 
-    #if os(iOS)
-    /// The small line over the title on an iPad: why this is here.
+    #if os(iOS) || os(macOS)
+    /// The small line over the title on an iPad and a Mac: why this is here.
     private var eyebrow: String {
         if item.progressFraction != nil { return "CONTINUE WATCHING" }
         if item.isEpisode { return "NEXT UP" }
         return "FEATURED"
+    }
+
+    private var showsEyebrow: Bool {
+        #if os(iOS)
+        !Metrics.phoneLayout
+        #else
+        true
+        #endif
+    }
+
+    /// The accent's lighter step on an iPad; on the Mac, where the accent is
+    /// the user's own and may be graphite, white at most of its strength —
+    /// the line sits on a darkened photograph like the title under it.
+    private var eyebrowColor: Color {
+        #if os(macOS)
+        .white.opacity(0.85)
+        #else
+        Theme.link
+        #endif
     }
     #endif
 
@@ -1613,7 +1641,7 @@ struct HeroHeader: View {
             ProgressView(value: progress)
                 .progressViewStyle(.linear)
                 .tint(Color.accentColor)
-                .frame(width: 168)
+                .frame(width: 240)
             #else
             ZStack(alignment: .leading) {
                 Capsule().fill(.white.opacity(0.28))

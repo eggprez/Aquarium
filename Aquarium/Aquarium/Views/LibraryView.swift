@@ -214,7 +214,11 @@ struct LibraryView: View {
         .paletteBar()
         #if os(macOS)
         .toolbar { macToolbar }
-        .navigationSubtitle(total > 0 ? "\(total) item\(total == 1 ? "" : "s")" : "")
+        // The count and the filters, pinned under the toolbar as the iPad
+        // pins them under its bar — see `macFilterHeader`. The toolbar keeps
+        // what a Mac toolbar is for: the view, the size, the selection, and
+        // the search field.
+        .safeAreaInset(edge: .top, spacing: 0) { macFilterHeader }
         // The filter, in the toolbar's own search field — a second one beside
         // the sidebar's, which searches the whole server; this one narrows
         // the library in front of you. Live TV keeps its channel filter the
@@ -391,7 +395,7 @@ struct LibraryView: View {
                         revision: listRevision
                     )
                     #if os(macOS)
-                    // The window's subtitle already says how many there are.
+                    // The header above the grid already says how many.
                     Color.clear.frame(height: 24)
                     #else
                     Text("\(items.count) of \(total)")
@@ -644,50 +648,34 @@ struct LibraryView: View {
                 .help("Bigger (⌘=)")
             }
         }
-        ToolbarItem(placement: .primaryAction) {
-            Menu {
-                Picker("Sort By", selection: $sort) {
-                    ForEach(SortOption.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.inline)
-                Divider()
-                Toggle("Reverse Order", isOn: $reversed)
-                    .disabled(sort == .random)
-            } label: {
-                Label("Sort: \(sort.label)", systemImage: "arrow.up.arrow.down")
+    }
+
+    /// The iPad's header under the bar (see `padFilterHeader`), under the
+    /// Mac's toolbar: how many there are, and the filters as chips. The
+    /// search is the toolbar's field, where a Mac keeps one.
+    private var macFilterHeader: some View {
+        HStack(spacing: 12) {
+            if total > 0 {
+                Text("\(total) \(countNoun)")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
-            .help("Sort by \(sort.label.lowercased())")
+            ScrollView(.horizontal, showsIndicators: false) {
+                filterChips
+            }
+            Spacer(minLength: 0)
         }
-        ToolbarItem(placement: .primaryAction) {
-            Toggle(isOn: $unwatchedOnly) {
-                Label("Unwatched", systemImage: "eye.slash")
-            }
-            .help("Show only what you haven't watched")
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.vertical, 8)
+        .background {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .overlay(Theme.background.opacity(0.6))
         }
-        ToolbarItem(placement: .primaryAction) {
-            Toggle(isOn: $favouritesOnly) {
-                Label("Favorites", systemImage: "star")
-            }
-            .help("Show only favorites")
-        }
-        if !genres.isEmpty {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    // One genre at a time, so a picker and not a row of
-                    // toggles: the check moves rather than adding up.
-                    Picker("Genre", selection: $genre) {
-                        Text("All Genres").tag(String?.none)
-                        Divider()
-                        ForEach(genres, id: \.self) { name in
-                            Text(name).tag(String?.some(name))
-                        }
-                    }
-                    .pickerStyle(.inline)
-                } label: {
-                    Label(genre ?? "Genre", systemImage: genre == nil ? "tag" : "tag.fill")
-                }
-                .help("Filter by genre")
-            }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.border).frame(height: 0.5)
         }
     }
     #endif
@@ -755,6 +743,10 @@ struct LibraryView: View {
         .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 0.5))
     }
 
+    #endif
+
+    /// What the count counts, for the header an iPad and a Mac pin above
+    /// the grid.
     private var countNoun: String {
         switch resolvedCollectionType {
         case "movies": total == 1 ? "film" : "films"
@@ -762,7 +754,6 @@ struct LibraryView: View {
         default: total == 1 ? "item" : "items"
         }
     }
-    #endif
 
     private var filterChips: some View {
             HStack(spacing: 10) {
@@ -770,19 +761,30 @@ struct LibraryView: View {
                     Picker("Sort", selection: $sort) {
                         ForEach(SortOption.allCases) { Text($0.label).tag($0) }
                     }
+                    #if os(macOS)
+                    // The list view's columns reverse a sort too; the chip
+                    // offers the same, where the toolbar's menu used to.
+                    Divider()
+                    Toggle("Reverse Order", isOn: $reversed)
+                        .disabled(sort == .random)
+                    #endif
                 } label: {
                     chip(label: "Sort: \(sort.label)", symbol: "arrow.up.arrow.down", active: false)
                 }
+                .macMenuAsLabel()
+                .help("Sort by \(sort.label.lowercased())")
 
                 Button { unwatchedOnly.toggle() } label: {
                     chip(label: "Unwatched", symbol: "eye.slash", active: unwatchedOnly)
                 }
                 .chipButtonStyle()
+                .help("Show only what you haven't watched")
 
                 Button { favouritesOnly.toggle() } label: {
                     chip(label: "Favorites", symbol: "star", active: favouritesOnly)
                 }
                 .chipButtonStyle()
+                .help("Show only favorites")
 
                 if !genres.isEmpty {
                     Menu {
@@ -794,8 +796,20 @@ struct LibraryView: View {
                     } label: {
                         chip(label: genre ?? "Genre", symbol: "tag", active: genre != nil)
                     }
+                    .macMenuAsLabel()
+                    .help("Filter by genre")
                 }
             }
+    }
+
+    /// `.subheadline` is eleven points on a Mac; a chip there is set in
+    /// callout, as the rest of the Mac's small controls are.
+    private var chipFont: Font {
+        #if os(macOS)
+        .callout
+        #else
+        .subheadline
+        #endif
     }
 
     private func chip(label: String, symbol: String, active: Bool) -> some View {
@@ -803,7 +817,7 @@ struct LibraryView: View {
             Image(systemName: symbol)
             Text(label)
         }
-        .font(.subheadline)
+        .font(chipFont)
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .background(active ? Theme.accentSoft : Theme.raised, in: Capsule())

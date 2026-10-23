@@ -925,6 +925,9 @@ struct MediaShelf: View {
     private var titleFont: Font {
         #if os(iOS)
         return Metrics.phoneLayout ? .headline : .title2.weight(.bold)
+        #elseif os(macOS)
+        // The iPad's weight: the Mac's cards are the iPad's size and more.
+        return .title2.weight(.bold)
         #else
         return .title3.weight(.semibold)
         #endif
@@ -982,10 +985,12 @@ struct SeeAllButton: View {
             .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
             .contentShape(Capsule())
             #elseif os(macOS)
-            // A link, in Title Case, which is what a Mac calls a small
-            // accent-coloured word that goes somewhere.
+            // In Title Case, as a Mac spells a control, and dim: beside the
+            // iPad-weight headings an accent-coloured word at the end of
+            // every row was the loudest thing on the page.
             Text("See All")
-                .font(.subheadline)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
             #else
             // Dim on an iPad, where the headings are heavier: a purple word
             // at the end of every row was the loudest thing on the page.
@@ -1002,7 +1007,7 @@ private extension View {
     @ViewBuilder
     func seeAllStyle() -> some View {
         #if os(macOS)
-        buttonStyle(.link)
+        buttonStyle(.plain)
         #else
         chipButtonStyle()
         #endif
@@ -2697,10 +2702,13 @@ struct BackSwipe: UIViewControllerRepresentable {
     }
 }
 
-#if os(iOS)
+#endif
+
+#if os(iOS) || os(macOS)
 /// An action as a glass disc with its word underneath — the row under a
-/// title on an iPad, where five spelled-out capsules were a row of web
-/// buttons. `tint` marks one that is on: the disc fills with its colour.
+/// title on an iPad and a Mac, where five spelled-out capsules were a row
+/// of web buttons. `tint` marks one that is on: the disc fills with its
+/// colour.
 struct IconDiscLabelStyle: LabelStyle {
     var tint: Color?
 
@@ -2731,6 +2739,25 @@ struct IconDiscLabelStyle: LabelStyle {
 }
 
 extension View {
+    /// A `Menu` drawn as one of the discs above, where the label is the
+    /// whole control. `.button` with `.plain` is the one menu style on a
+    /// Mac that draws a label made of more than a title and an icon;
+    /// elsewhere a plain button style is enough.
+    @ViewBuilder
+    func discMenuStyle() -> some View {
+        #if os(macOS)
+        menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+        #else
+        buttonStyle(.plain)
+        #endif
+    }
+}
+#endif
+
+#if os(iOS)
+extension View {
     /// The surface under an iPad's floating bar: nothing while it sits over
     /// artwork, and a blur with a hairline once the page has scrolled up
     /// under it. Home and a title page both draw their bar this way.
@@ -2749,7 +2776,6 @@ extension View {
         }
     }
 }
-#endif
 
 /// The way back, for a page that draws its own bar. The system's back button
 /// comes with the system's navigation bar, and that bar is the thing these
