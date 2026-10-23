@@ -51,7 +51,9 @@ struct PlayerTransport: View {
     /// the hands are.
     var part: Part = .whole
 
-    enum Part { case whole, aboveFold, belowFold }
+    /// `foldControls` is the centre cluster on its own, stacked for the
+    /// flat half's trailing column: play/pause over the two skips.
+    enum Part { case whole, aboveFold, belowFold, foldControls }
 
     /// A touch on any control: keeps the controls up a while longer.
     let onInteract: () -> Void
@@ -70,6 +72,8 @@ struct PlayerTransport: View {
             band
         } else if part == .belowFold {
             foldBand
+        } else if part == .foldControls {
+            foldControls
         } else {
             handheld
         }
@@ -84,6 +88,21 @@ struct PlayerTransport: View {
     private var foldBand: some View {
         bottom
             .padding(.horizontal, edge)
+    }
+
+    /// Play/pause, and the two skips under it, for the flat half's trailing
+    /// column — where a thumb resting on the table finds them. Always
+    /// drawn: the controls over the picture come and go, these stay put.
+    private var foldControls: some View {
+        VStack(spacing: 10) {
+            playPauseButton
+            if !player.isLive {
+                HStack(spacing: 18) {
+                    skipButton(forward: false)
+                    skipButton(forward: true)
+                }
+            }
+        }
     }
 
     // MARK: - The television's band
@@ -179,8 +198,9 @@ struct PlayerTransport: View {
             }
             .padding(.horizontal, edge)
             // The cluster steps aside while a finger is on the timeline, so
-            // the thumbnail has the middle of the picture to itself.
-            if chrome.scrub == nil, player.errorMessage == nil {
+            // the thumbnail has the middle of the picture to itself. Half-
+            // folded it lives below the fold, in `PlayerFoldPanel`.
+            if chrome.scrub == nil, player.errorMessage == nil, part == .whole {
                 centreCluster
                     .pointerHover { hoverCluster = $0 }
             }
@@ -275,7 +295,7 @@ struct PlayerTransport: View {
             moreButton
                 .panelPopover(isPresented: popover(for: .more), arrowEdge: .top) { panelPopover }
         }
-        .padding(.top, compact ? 2 : 8)
+        .padding(.top, (compact ? 2 : 8) - Self.foldableTopReclaim)
         // Clear of the window's close, minimise and zoom buttons, which sit
         // over the picture in a window with no title bar.
         .padding(.leading, PlayerMetrics.titleLeadingInset(fullScreen: PlayerMetrics.isFullScreen))
@@ -289,6 +309,16 @@ struct PlayerTransport: View {
     /// How far in from the trailing edge the title row's buttons stop on a
     /// foldable — see `titleRow`. The strip it leaves is where the
     /// brightness rail goes (`BrightnessRail`).
+    /// How far the title row rises into a foldable's deep status strip —
+    /// see `FoldState.topReclaim`. Zero everywhere else.
+    static var foldableTopReclaim: CGFloat {
+        #if os(iOS)
+        MainActor.assumeIsolated { FoldState.shared.topReclaim }
+        #else
+        0
+        #endif
+    }
+
     static var foldableCornerClearance: CGFloat {
         #if os(iOS)
         MainActor.assumeIsolated { FoldState.shared.isFoldable } ? 92 : 0
@@ -346,56 +376,55 @@ struct PlayerTransport: View {
     // MARK: - Centre cluster
 
     private var centreCluster: some View {
-        let skip = prefs.skipInterval
-        return HStack(spacing: PlayerMetrics.clusterSpacing(compact: compact)) {
+        HStack(spacing: PlayerMetrics.clusterSpacing(compact: compact)) {
             if !player.isLive {
-                PlayerGlyphButton(
-                    symbol: "gobackward.\(skip)", label: "Back \(skip) seconds",
-                    size: PlayerMetrics.skipGlyph(compact: compact), weight: .medium, padding: 12
-                ) {
-                    onInteract()
-                    player.seek(by: -Double(skip))
-                    chrome.countSkip(-skip)
-                }
-                .disabled(player.isOpening)
+                skipButton(forward: false)
             }
-
-            Button {
-                onInteract()
-                player.togglePlayPause()
-            } label: {
-                ZStack {
-                    if player.isBuffering {
-                        ProgressView()
-                            .controlSize(.large)
-                            .tint(.white)
-                    } else {
-                        Image(systemName: player.isPaused ? "play.fill" : "pause.fill")
-                            .font(.system(size: PlayerMetrics.centreGlyph(compact: compact), weight: .semibold))
-                            .foregroundStyle(.white)
-                            .contentTransition(.symbolEffect(.replace))
-                    }
-                }
-                .frame(width: PlayerMetrics.centreGlyph(compact: compact) + 32,
-                       height: PlayerMetrics.centreGlyph(compact: compact) + 32)
-                .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(player.isBuffering ? "Loading" : player.isPaused ? "Play" : "Pause")
-
+            playPauseButton
             if !player.isLive {
-                PlayerGlyphButton(
-                    symbol: "goforward.\(skip)", label: "Forward \(skip) seconds",
-                    size: PlayerMetrics.skipGlyph(compact: compact), weight: .medium, padding: 12
-                ) {
-                    onInteract()
-                    player.seek(by: Double(skip))
-                    chrome.countSkip(skip)
-                }
-                .disabled(player.isOpening)
+                skipButton(forward: true)
             }
         }
         .shadow(color: .black.opacity(0.35), radius: 10, y: 2)
+    }
+
+    private func skipButton(forward: Bool) -> some View {
+        let skip = prefs.skipInterval
+        return PlayerGlyphButton(
+            symbol: forward ? "goforward.\(skip)" : "gobackward.\(skip)",
+            label: forward ? "Forward \(skip) seconds" : "Back \(skip) seconds",
+            size: PlayerMetrics.skipGlyph(compact: compact), weight: .medium, padding: 12
+        ) {
+            onInteract()
+            player.seek(by: Double(forward ? skip : -skip))
+            chrome.countSkip(forward ? skip : -skip)
+        }
+        .disabled(player.isOpening)
+    }
+
+    private var playPauseButton: some View {
+        Button {
+            onInteract()
+            player.togglePlayPause()
+        } label: {
+            ZStack {
+                if player.isBuffering {
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                } else {
+                    Image(systemName: player.isPaused ? "play.fill" : "pause.fill")
+                        .font(.system(size: PlayerMetrics.centreGlyph(compact: compact), weight: .semibold))
+                        .foregroundStyle(.white)
+                        .contentTransition(.symbolEffect(.replace))
+                }
+            }
+            .frame(width: PlayerMetrics.centreGlyph(compact: compact) + 32,
+                   height: PlayerMetrics.centreGlyph(compact: compact) + 32)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(player.isBuffering ? "Loading" : player.isPaused ? "Play" : "Pause")
     }
 
     // MARK: - Bottom

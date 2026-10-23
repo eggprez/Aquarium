@@ -2530,6 +2530,12 @@ struct AppTopBar<Content: View>: View {
     /// everywhere else.
     @Environment(\.showSidebar) private var showSidebar
 
+    /// Zero but on a foldable's inside screen held upright, whose status
+    /// strip is deeper than a phone's and mostly empty — see
+    /// `FoldState.topReclaim`. The bar rises into it, clear of the pill in
+    /// the trailing corner.
+    private var reclaim: CGFloat { FoldState.shared.topReclaim }
+
     var body: some View {
         HStack(spacing: 8) {
             if let showSidebar {
@@ -2539,8 +2545,10 @@ struct AppTopBar<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Metrics.gutter + Metrics.cornerClearance)
+        .padding(.trailing, reclaim > 0 ? PlayerTransport.foldableCornerClearance - Metrics.cornerClearance : 0)
         .padding(.bottom, 9)
         .frame(height: height, alignment: .bottom)
+        .padding(.top, -reclaim)
         // The bar is fitted below the status bar and its fill is what
         // reaches up past it. Measuring the inset instead — a
         // GeometryReader inside an `ignoresSafeArea`, which is the usual

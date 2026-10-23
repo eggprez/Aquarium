@@ -61,6 +61,10 @@ struct SearchView: View {
     /// Whether the field in the bar has the keyboard. Search is opened from
     /// Home's search button, so it comes up ready to type into.
     @FocusState private var isFieldFocused: Bool
+    /// The field takes the keyboard on the way in, once: coming back to
+    /// the page (from a result, or after a fold rebuilt it) is not asking
+    /// to type.
+    @State private var hasFocusedOnce = false
     @Environment(\.dismiss) private var dismiss
     #endif
 
@@ -245,10 +249,16 @@ struct SearchView: View {
         .task {
             // Once, on the way in: the field can't take focus until the push
             // has put the page on screen.
-            guard term.isEmpty, initialTerm.isEmpty else { return }
+            guard term.isEmpty, initialTerm.isEmpty, !hasFocusedOnce else { return }
+            hasFocusedOnce = true
             try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
             isFieldFocused = true
         }
+        // A result opened leaves the field without the keyboard. Kept, the
+        // focus came back with the window when a foldable was opened or
+        // closed on the title page, and the keyboard rose over it.
+        .onDisappear { isFieldFocused = false }
         #endif
         .onAppear {
             if term.isEmpty, !initialTerm.isEmpty {

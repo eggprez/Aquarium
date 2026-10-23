@@ -4,11 +4,13 @@
 //  top half and the bottom half is flat, under the hands. The chrome's half
 //  over the picture keeps the scrims, the title row and the centre cluster
 //  (`PlayerTransport.Part.aboveFold`), and this is what the flat half holds:
-//  the prompts that come and go (Skip intro, Up Next), what is playing, the
-//  chapters, what is queued and the rest of the season, scrolling; and along
-//  the foot, where the hands are, the transport's bottom band — the timeline,
-//  the times and the pills (`PlayerTransport.Part.belowFold`). The band has
-//  no clock on it: a surface under the hands stays put.
+//  on the left the prompts that come and go (Skip intro, Up Next), what is
+//  playing, what is queued, the chapters and the rest of the season,
+//  scrolling — or, on a channel, the TV guide; on the right play/pause and
+//  the skips (`PlayerTransport.Part.foldControls`); and along the foot, where
+//  the hands are, the transport's bottom band — the timeline, the times and
+//  the pills (`PlayerTransport.Part.belowFold`). None of it has a clock on
+//  it: a surface under the hands stays put.
 //
 //  The pills are the same pills, dropping the same cards (`PlayerMenus`),
 //  placed here so they can rise over the panel rather than off the foot of
@@ -44,26 +46,22 @@ struct PlayerFoldPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    prompts
-                    header
-                    if !player.chapters.isEmpty {
-                        chapters
-                    }
-                    if !player.isLive, player.upNextCount > 0 {
-                        upNext
-                    }
-                    if !episodes.isEmpty {
-                        season
+            HStack(alignment: .center, spacing: 0) {
+                Group {
+                    if player.isLive {
+                        guide
+                    } else {
+                        list
                     }
                 }
-                .padding(.horizontal, Metrics.gutter)
-                .padding(.top, 16)
-                .padding(.bottom, 20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                PlayerTransport(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork,
+                                compact: compact, usesSheet: usesSheet, panelWidth: panelWidth, part: .foldControls,
+                                onInteract: {}, onDismiss: {})
+                    .frame(width: Self.controlsWidth)
+                    .frame(maxHeight: .infinity)
             }
-            .scrollIndicators(.hidden)
-            .scrollBounceBehavior(.basedOnSize)
             // The list meets the transport band in a fade rather than a cut:
             // at rest a heading used to sit sliced in half on the line.
             .mask {
@@ -96,6 +94,59 @@ struct PlayerFoldPanel: View {
         .preferredColorScheme(.dark)
         .sensoryFeedback(.impact(weight: .medium), trigger: skips)
         .task(id: seasonKey) { await loadSeason() }
+    }
+
+    /// The trailing column the cluster stands in: room for play/pause
+    /// over the two skips, and no more, so the list keeps the width.
+    private static let controlsWidth: CGFloat = 190
+
+    /// What is playing, then what comes after it.
+    private var list: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                prompts
+                header
+                if player.upNextCount > 0 {
+                    upNext
+                }
+                if !player.chapters.isEmpty {
+                    chapters
+                }
+                if !episodes.isEmpty {
+                    season
+                }
+            }
+            .padding(.leading, Metrics.gutter)
+            .padding(.trailing, 4)
+            .padding(.top, 16)
+            .padding(.bottom, 20)
+        }
+        .scrollIndicators(.hidden)
+        .scrollBounceBehavior(.basedOnSize)
+    }
+
+    // MARK: - The guide
+
+    /// A channel: what is on, then the guide, so the next channel is a tap
+    /// away while this one plays above the fold. The guide's own taps tune.
+    private var guide: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+                .padding(.leading, Metrics.gutter)
+                .padding(.top, 14)
+            let store = LiveTVStore.shared
+            if store.channels.isEmpty {
+                Spacer(minLength: 0)
+                if store.isLoading {
+                    ProgressView().frame(maxWidth: .infinity)
+                }
+                Spacer(minLength: 0)
+            } else {
+                TVGuideView(channels: store.channels, programsProvider: store.programsProvider)
+                    .environment(\.colorScheme, .dark)
+            }
+        }
+        .task { await LiveTVStore.shared.ensureLoaded() }
     }
 
     // MARK: - Prompts

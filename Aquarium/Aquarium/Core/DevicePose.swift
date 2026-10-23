@@ -176,7 +176,32 @@ final class FoldState {
     /// the root by the pose provider; false where no crease is reported.
     private(set) var creaseIsVertical = false
 
+    /// How far a page's own top bar may rise into the status strip — zero
+    /// everywhere but the inside screen held upright.
+    ///
+    /// Held sideways the inside screen keeps its clock and battery in a pill
+    /// down the trailing edge, an 84-point column. Turned upright that column
+    /// becomes an 84-point strip across the top, empty but for the pill in
+    /// its trailing corner, and a bar fitted under it stood a good 20 points
+    /// taller than the same bar on any other iPhone. So the bars that draw
+    /// themselves (`AppTopBar`, the player's title row) rise until their
+    /// content sits where a phone's would, keeping clear of the trailing
+    /// corner as the player already did (`PlayerTransport.foldableCornerClearance`).
+    private(set) var topReclaim: CGFloat = 0
+
+    /// Where a phone's top bar content starts: below a Dynamic Island.
+    private static let phoneStatusHeight: CGFloat = 59
+
     private init() {}
+
+    func safeAreaResolved(top: CGFloat, size: CGSize) {
+        let upright = size.height > size.width
+        let reclaim = usesInnerDisplay && upright && top > Self.phoneStatusHeight + 10
+            ? top - Self.phoneStatusHeight : 0
+        guard reclaim != topReclaim else { return }
+        Self.log.debug("top strip \(top, format: .fixed(precision: 0)) in \(size.width, format: .fixed(precision: 0))×\(size.height, format: .fixed(precision: 0)): bars rise \(reclaim, format: .fixed(precision: 0))")
+        topReclaim = reclaim
+    }
 
     /// A hinge has been seen, or the developer is pretending one has.
     var isFoldable: Bool {
@@ -203,6 +228,7 @@ final class FoldState {
         Self.log.debug("hinge \(String(describing: new)) at \(angle, format: .fixed(precision: 0))°")
         hinge = new
         #if os(iOS)
+        FoldKeyboardGuard.shared.screenChanging()
         OrientationLock.shared.hingeChanged()
         #endif
     }
@@ -212,7 +238,10 @@ final class FoldState {
     /// layout pass, with the display that is on.
     func poseResolved(_ pose: DevicePose) {
         let inner = pose.usesInnerDisplay
-        if inner != usesInnerDisplay { usesInnerDisplay = inner }
+        if inner != usesInnerDisplay {
+            usesInnerDisplay = inner
+            FoldKeyboardGuard.shared.screenChanging()
+        }
         let scene = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .first(where: { $0.activationState == .foregroundActive })
@@ -225,6 +254,54 @@ final class FoldState {
     }
     #endif
 }
+
+#if os(iOS)
+/// Keeps the keyboard down across a fold.
+///
+/// Opening or closing the phone moves the window to the other screen, and
+/// UIKit hands first responder back to whichever text field last had it —
+/// a search field several pages back, say — so the keyboard rose over a
+/// title page nobody was typing on. A keyboard that was down before the
+/// fold and rises within a moment of it was not asked for, and is put away.
+@MainActor
+final class FoldKeyboardGuard {
+    static let shared = FoldKeyboardGuard()
+
+    private var keyboardUp = false
+    /// Whether the keyboard was up when the screen last started to change,
+    /// and when that was.
+    private var fold: (keyboardWasUp: Bool, at: Date)?
+    private static let window: TimeInterval = 1.5
+
+    private init() {
+        let centre = NotificationCenter.default
+        centre.addObserver(forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { FoldKeyboardGuard.shared.keyboardWillShow() }
+        }
+        centre.addObserver(forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { FoldKeyboardGuard.shared.keyboardUp = false }
+        }
+    }
+
+    /// Started at launch, so the keyboard's state is known before the
+    /// first fold.
+    func start() {}
+
+    func screenChanging() {
+        // A second report of the same fold (the hinge, then the pose)
+        // keeps the first one's reading.
+        if let fold, Date().timeIntervalSince(fold.at) < Self.window { return }
+        fold = (keyboardUp, Date())
+    }
+
+    private func keyboardWillShow() {
+        defer { keyboardUp = true }
+        guard let fold, !fold.keyboardWasUp, Date().timeIntervalSince(fold.at) < Self.window else { return }
+        FoldState.log.debug("keyboard rose with the fold; putting it away")
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+#endif
 
 // MARK: - Environment
 
@@ -264,10 +341,12 @@ private struct DevicePoseProvider: ViewModifier {
 
     func body(content: Content) -> some View {
         let pose = resolved
+        let _ = FoldKeyboardGuard.shared.start()
         content
             .environment(\.devicePose, pose)
             .modifier(HingeObserver())
             .background { CreaseObserver() }
+            .background { SafeAreaObserver() }
             .onChange(of: pose, initial: true) { _, now in
                 FoldState.shared.poseResolved(now)
             }
@@ -297,6 +376,25 @@ private struct CreaseObserver: View {
             }
         }
         return false
+    }
+}
+
+/// The window's top inset and shape, for `FoldState.topReclaim`. Read where
+/// the safe area is respected, which is the only place it is reported.
+private struct SafeAreaObserver: View {
+    var body: some View {
+        GeometryReader { geo in
+            let top = geo.safeAreaInsets.top
+            let size = CGSize(width: geo.size.width + geo.safeAreaInsets.leading + geo.safeAreaInsets.trailing,
+                              height: geo.size.height + top + geo.safeAreaInsets.bottom)
+            // Read again when the display changes, too: the inset alone can
+            // stay the same across a fold while what it means does not.
+            let inner = FoldState.shared.usesInnerDisplay
+            Color.clear
+                .onChange(of: [top, size.width, size.height, inner ? 1 : 0], initial: true) { _, _ in
+                    FoldState.shared.safeAreaResolved(top: top, size: size)
+                }
+        }
     }
 }
 
