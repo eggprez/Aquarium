@@ -284,9 +284,9 @@ def iphone():
     W, H = 1320, 2868
     c = Canvas(W, H, 3, seed=3)
     head, top = 112, 170
-    c.headline(0, ["Your whole library,", "front and centre"], top, head)
-    c.headline(1, ["Plays your files,", "Live TV with a guide"], top, head)
-    c.headline(2, ["Your music,", "every series"], top, head)
+    c.headline(0, ["Continue Watching,", "synced with your server"], top, head)
+    c.headline(1, ["Live TV guide, speed", "and sleep timer"], top, head)
+    c.headline(2, ["Music player and", "offline downloads"], top, head)
     phone = lambda name, w: framed(capture(name), w, "phone")
     c.place(phone("iphone-home.png", 880), 0.45 * W, 520)
     c.place(phone("iphone-livetv.png", 880), 1.55 * W, 520)
@@ -307,9 +307,9 @@ def ipad():
     W, H = 2064, 2752
     c = Canvas(W, H, 3, seed=9)
     head, top = 118, 150
-    c.headline(0, ["Your whole library,", "front and centre"], top, head)
-    c.headline(1, ["Plays your files,", "Live TV with a guide"], top, head)
-    c.headline(2, ["Your music,", "every series"], top, head)
+    c.headline(0, ["Continue Watching,", "synced with your server"], top, head)
+    c.headline(1, ["Live TV guide, speed", "and sleep timer"], top, head)
+    c.headline(2, ["Music player and", "offline downloads"], top, head)
     pad = lambda name, w: framed(capture(name), w, "ipad")
     c.place(pad("ipad-home.png", 1500), 0.42 * W, 470)
     c.place(pad("ipad-livetv.png", 1500), 1.58 * W, 470)
@@ -364,8 +364,8 @@ def duo():
     sizes the store's iPhone Duo entry takes."""
     W, H = 2853, 2007
     c = Canvas(W, H, 3, seed=17)
-    for i, text in enumerate(["Open, it's your big screen", "Closed, it's still a phone",
-                              "Your music, every series"]):
+    for i, text in enumerate(["Wide layout on the inside screen", "Phone layout when folded, Live TV guide",
+                              "Music stations and offline downloads"]):
         c.headline(i, [text], H * 0.045, 100)
     opened = lambda name: framed(capture(name), 1880, "duo")
     closed = lambda name: framed(capture(name), 920, "ipad")
@@ -383,8 +383,8 @@ def tv():
     a series."""
     c = Canvas(1920, 1080, 3, seed=5)
     cascade(c, ["tv-home.png", "tvp-info.png", "tv-livetv.png", "tvp-sync.png", "tv-episodes.png"], "tv",
-            ["Your library on the big screen", "Plays the file as it is, Live TV too",
-             "Sync by ear, every series"], 58)
+            ["Direct play, MKV, DTS and TrueHD", "Live TV with a channel guide",
+             "Audio sync offset while you watch"], 58)
     c.save("AppleTV", gap_px=40)
 
 
