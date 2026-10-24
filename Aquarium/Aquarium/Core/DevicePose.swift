@@ -185,8 +185,11 @@ final class FoldState {
     /// its trailing corner, and a bar fitted under it stood a good 20 points
     /// taller than the same bar on any other iPhone. So the bars that draw
     /// themselves (`AppTopBar`, the player's title row) rise until their
-    /// content sits where a phone's would, keeping clear of the trailing
-    /// corner as the player already did (`PlayerTransport.foldableCornerClearance`).
+    /// content sits where a phone's would. Seen upright on the device: the
+    /// pill is in the top trailing corner and ends above the risen bar's
+    /// content, so `AppTopBar` needs no trailing clearance; the player's
+    /// title row keeps its own (`PlayerTransport.foldableCornerClearance`),
+    /// which is for the Control Centre grab, not the pill.
     private(set) var topReclaim: CGFloat = 0
 
     /// Where a phone's top bar content starts: below a Dynamic Island.

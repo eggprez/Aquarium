@@ -2537,8 +2537,11 @@ struct AppTopBar<Content: View>: View {
 
     /// Zero but on a foldable's inside screen held upright, whose status
     /// strip is deeper than a phone's and mostly empty — see
-    /// `FoldState.topReclaim`. The bar rises into it, clear of the pill in
-    /// the trailing corner.
+    /// `FoldState.topReclaim`. The bar rises into it. It used to keep its
+    /// trailing end clear of the status pill as well, the way the player's
+    /// title row does; seen on the device (2026-10-24) the pill sits wholly
+    /// above the risen bar's buttons, so the clearance only pushed Search
+    /// and Refresh in from the edge and left a hole beside them.
     private var reclaim: CGFloat { FoldState.shared.topReclaim }
 
     var body: some View {
@@ -2550,7 +2553,6 @@ struct AppTopBar<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Metrics.gutter + Metrics.cornerClearance)
-        .padding(.trailing, reclaim > 0 ? PlayerTransport.foldableCornerClearance - Metrics.cornerClearance : 0)
         .padding(.bottom, 9)
         .frame(height: height, alignment: .bottom)
         .padding(.top, -reclaim)
