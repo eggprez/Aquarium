@@ -782,7 +782,20 @@ final class DownloadManager: NSObject {
         completedTasks.remove(key)
         retiredTasks.remove(key)
         tasks[key] = itemId
+        #if canImport(UIKit)
+        // Started with the app behind — see `restartDemotedTransfers`.
+        if UIApplication.shared.applicationState == .background { startedBehind.insert(itemId) }
+        #endif
     }
+
+    /// Transfers this process started while the app was in the background:
+    /// the next episode of a season, begun when the one before it landed
+    /// overnight. A stream task resumed from the background may be demoted
+    /// to discretionary (AVAssetDownloadTask.h), and a file task started
+    /// there was seen to sit at nothing until the app was next in front —
+    /// so these are checked when it is. See `restartDemotedTransfers`.
+    @ObservationIgnored
+    private var startedBehind: Set<String> = []
 
     /// The task's last callback has been handled; nothing it says afterwards
     /// — and no listing of it — is a transfer.
@@ -2958,6 +2971,62 @@ final class DownloadManager: NSObject {
         streamMeasurer?.cancel()
         streamMeasurer = nil
         measureStreamsSoon()
+        if !startedBehind.isEmpty { Task { await restartDemotedTransfers() } }
+    }
+
+    /// How long the check below gives the system to deliver the callbacks
+    /// it held while the app was away, before a transfer started behind is
+    /// judged by what they say.
+    private static let demotionGrace: TimeInterval = 4
+
+    /// Transfers started while the app was behind that have fetched nothing,
+    /// started again now that it is in front.
+    ///
+    /// A season downloading overnight finishes one episode and starts the
+    /// next from the background, and that one may be demoted to
+    /// discretionary: it fetches its playlist, and then waits for a moment
+    /// the system finds optimal — on a phone off its charger, never. In
+    /// front, the row read 0% and did not move, and nothing here would have
+    /// moved it: the stall sweep's clock is put back every time the app
+    /// comes forward (above), so someone checking on it every few minutes
+    /// kept it from ever being called stalled. Pause and Resume cured it,
+    /// because a task started in front is not demoted. This is that, done
+    /// by itself: the task is cancelled with what it has, and the one that
+    /// takes over picks up from the package or the resume data.
+    ///
+    /// Only transfers with nothing to show. One that has fetched a segment
+    /// or a byte is running, and a restart would only cost it a connection.
+    private func restartDemotedTransfers() async {
+        try? await Task.sleep(for: .seconds(Self.demotionGrace))
+        #if canImport(UIKit)
+        guard UIApplication.shared.applicationState == .active else { return }
+        #endif
+        let suspects = startedBehind.intersection(active)
+        startedBehind.removeAll()
+        guard !suspects.isEmpty else { return }
+        var received: [String: Int64] = [:]
+        for (session, task) in await liveTasks() {
+            guard let itemId = tasks[DownloadTaskKey(session, task)], suspects.contains(itemId) else { continue }
+            received[itemId, default: 0] += task.countOfBytesReceived
+        }
+        for itemId in suspects {
+            guard let rec = record(for: itemId), rec.status == .downloading,
+                  tasks.values.contains(itemId), retryingAfterCancel[itemId] == nil
+            else { continue }
+            let moving: Bool
+            if rec.transport == .hls {
+                // A demoted stream still fetches its playlist, so bytes alone
+                // don't say; a segment loaded does.
+                let fraction = liveProgress[itemId]?.fraction ?? rec.loadedFraction ?? 0
+                moving = fraction > 0 || (measuredStreamBytes[itemId] ?? 0) > Self.deafMargin
+            } else {
+                moving = (received[itemId] ?? 0) > 0
+            }
+            guard !moving else { continue }
+            Self.log.notice("\(itemId, privacy: .public) was started behind and has fetched nothing; starting it in front")
+            retryingAfterCancel[itemId] = Self.reconnectReason
+            cancelTasks(for: itemId, keepingProgress: true)
+        }
     }
 
     /// When each running stream last reported progress, and its package's
@@ -3004,6 +3073,7 @@ final class DownloadManager: NSObject {
     }
 
     private func forgetProgressThrottle(_ itemId: String) {
+        startedBehind.remove(itemId)
         attemptBaseBytes[itemId] = nil
         liveProgress[itemId] = nil
         lastPersistAt[itemId] = nil
