@@ -239,9 +239,11 @@ final class WatchLink: NSObject {
             downloads.notePhoneProgress(itemId: itemId, fraction: fraction)
         case .fetchFailed(let itemId, let reason):
             downloads.phoneFailed(itemId: itemId, reason: reason)
+        case .deleteWant(let request):
+            downloads.deleteWant(request)
         case .phonePlayback(let state):
             take(playback: state)
-        case .progress, .fetch, .fetchMany, .cancelFetch, .playlistRemoved, .requestContext, .logs, .requestPlayback, .remote:
+        case .progress, .fetch, .fetchMany, .cancelFetch, .playlistRemoved, .wantRemoved, .requestContext, .logs, .requestPlayback, .remote:
             break
         }
     }
@@ -416,6 +418,7 @@ final class WatchLink: NSObject {
                 inventory: WatchDownloads.shared.inventory(),
                 awaitingPhone: WatchDownloads.shared.awaitingPhone,
                 playlistIds: WatchDownloads.shared.playlists.map(\.id),
+                wants: WatchDownloads.shared.wantStates(),
                 signedIn: JellyfinClient.shared.isSignedIn
             )
             do {

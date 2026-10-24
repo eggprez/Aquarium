@@ -38,6 +38,14 @@ final class WatchLink: NSObject {
     /// watch, from here, or by the plan. Kept across launches.
     private(set) var watchPlaylistIds: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "watch_kept_playlists") ?? [])
     private(set) var inventoryAt: Date?
+    /// Everything "Download to Apple Watch" was tapped for and not since
+    /// taken off: the list the watch is checked against — see
+    /// `WatchMirrorPlan.wants`. Kept across launches, sent with every plan.
+    private(set) var wants: [WatchWant] = []
+    /// Where each want stands, as the watch last said, by its key.
+    private(set) var wantStates: [String: WatchWantState] = [:]
+    private(set) var wantsReportedAt: Date?
+    private var inventoryAskedAt: Date?
     private(set) var watchSignedIn = false
     private(set) var lastContextSentAt: Date?
     /// Listening the watch handed over that the server hasn't taken yet.
@@ -142,6 +150,14 @@ final class WatchLink: NSObject {
             pendingEvents = saved
         }
         fetchQueue = UserDefaults.standard.stringArray(forKey: "watch_fetch_queue") ?? []
+        if let data = UserDefaults.standard.data(forKey: "watch_wants"),
+           let saved = try? JSONDecoder().decode([WatchWant].self, from: data) {
+            wants = saved
+        }
+        if let data = UserDefaults.standard.data(forKey: "watch_want_states"),
+           let saved = try? JSONDecoder().decode([String: WatchWantState].self, from: data) {
+            wantStates = saved
+        }
         if let data = UserDefaults.standard.data(forKey: "watch_relay_items"),
            let saved = try? JSONDecoder().decode([RelayItem].self, from: data) {
             relayItems = saved.filter { $0.stage != .delivered && (!$0.stage.isFinished || Date().timeIntervalSince($0.updatedAt) < 24 * 60 * 60) }
@@ -197,6 +213,24 @@ final class WatchLink: NSObject {
     /// the app's own and not the system's to put off.
     func resumeFetches() {
         pumpFetches()
+    }
+
+    /// Coming forward, and at launch: the watch is sent the plan again,
+    /// which it checks itself against, and asked what it holds, so the
+    /// list here is brought up to date and anything it reports missing is
+    /// sent again — see `reconcileWants`. A watch asleep gets both at its
+    /// next wake. Asked at most every few minutes.
+    func checkWatch() {
+        // Not held for `isAvailable`: at launch the session hasn't said yet
+        // whether a watch is there, and each send below checks for itself.
+        sendContext()
+        if inventoryAskedAt.map({ Date().timeIntervalSince($0) > 3 * 60 }) ?? true {
+            inventoryAskedAt = Date()
+            requestInventory()
+        }
+        // What the watch reported last time it spoke, acted on now in case
+        // it says nothing new: a want it had no contents for is sent again.
+        reconcileWants()
     }
 
     // MARK: - Phone → watch
@@ -307,6 +341,7 @@ final class WatchLink: NSObject {
         }
         var plan = WatchMirrorPlan()
         plan.playlistIds = Preferences.shared.watchPlaylistIds
+        plan.wants = wants.map(\.request)
         if !Preferences.shared.watchKeepsBooks {
             plan.bookIds = []
         } else if credentials != nil, !client.isOffline {
@@ -369,6 +404,14 @@ final class WatchLink: NSObject {
         send(.deleteGroup(kind: group.kind, id: group.id))
         // Shown gone at once; the watch's next inventory confirms it.
         inventory?.groups.removeAll { $0.id == group.id && $0.kind == group.kind }
+        // Wanted as this album or book: not any more, or it would come back.
+        // The watch does the same for the artist or genre it may be part of
+        // and says so — see `WatchDownloads.deleteAlbum`.
+        switch group.kind {
+        case .album: forgetWant(key: "album:\(group.id)")
+        case .book: forgetWant(key: "book:\(group.id)")
+        case .playlist, .songs: break
+        }
     }
 
     func deleteEverythingOnWatch() {
@@ -381,12 +424,20 @@ final class WatchLink: NSObject {
         UserDefaults.standard.set([String](), forKey: "watch_kept_playlists")
         if !Preferences.shared.watchPlaylistIds.isEmpty {
             Preferences.shared.watchPlaylistIds = []
-            sendContext()
         }
+        // And so does everything on the list.
+        wants = []
+        wantStates = [:]
+        persistWants()
+        sendContext()
     }
 
     /// Ask the watch to keep this: an album, a playlist, a book, a song, an
-    /// artist's songs, a genre.
+    /// artist's songs, a genre. Written down on the list first — a playlist
+    /// on the kept list, anything else as a want — so it is checked for
+    /// and sent again until it is there, however many times the link drops
+    /// or either app is killed on the way; then what it comes to is looked
+    /// up and sent over.
     func download(_ item: BaseItem) {
         let kind: WatchDownloadRequest.Kind
         if item.isAudiobook { kind = .book }
@@ -395,14 +446,80 @@ final class WatchLink: NSObject {
         else if item.isArtist { kind = .artist }
         else if item.isMusicGenre { kind = .genre }
         else { kind = .song }
+        if kind == .playlist {
+            setKeepsOnWatch(item.Id, true)
+            return
+        }
         let request = WatchDownloadRequest(kind: kind, id: item.Id, title: item.title)
+        wants.removeAll { $0.id == request.key }
+        // Marked sent now, ahead of the send below: a report from the watch
+        // landing in between would otherwise have it sent twice.
+        wants.insert(WatchWant(request: request, lastSentAt: Date()), at: 0)
+        wantStates[request.key] = nil
+        persistWants()
+        sendContext()
         Task { await sendDownload(request) }
+    }
+
+    /// Taken off the list here: the watch lets go of what was there for it
+    /// alone, and the plan stops naming it.
+    func removeWant(_ want: WatchWant) {
+        forgetWant(key: want.id)
+        send(.deleteWant(want.request))
+    }
+
+    /// The watch took it off, or a delete here covered it: the list lets
+    /// it go without a word to the watch.
+    private func forgetWant(key: String) {
+        guard wants.contains(where: { $0.id == key }) else { return }
+        wants.removeAll { $0.id == key }
+        wantStates[key] = nil
+        persistWants()
+        Self.log.notice("want \(key, privacy: .public) off the list")
+        sendContext()
+    }
+
+    private func persistWants() {
+        UserDefaults.standard.set(try? JSONEncoder().encode(wants), forKey: "watch_wants")
+        UserDefaults.standard.set(try? JSONEncoder().encode(wantStates), forKey: "watch_want_states")
+    }
+
+    /// How long the watch is given with a want's contents before the phone
+    /// sends them again on being told they never came.
+    private static let resendInterval: TimeInterval = 30 * 60
+
+    /// The list against what the watch said: a want the watch knows nothing
+    /// of, or has no contents for, is looked up and sent again — once every
+    /// half hour at most, since a send on its way is not a send lost. What
+    /// the watch does have on the list it fetches for itself, asking this
+    /// phone for the files; nothing to do here for that.
+    private func reconcileWants() {
+        guard isAvailable, wantsReportedAt != nil else { return }
+        let now = Date()
+        var again: [WatchWant] = []
+        for i in wants.indices {
+            let state = wantStates[wants[i].id]
+            guard state == nil || state!.needsContents else { continue }
+            if let sent = wants[i].lastSentAt, now.timeIntervalSince(sent) < Self.resendInterval { continue }
+            wants[i].lastSentAt = now
+            again.append(wants[i])
+        }
+        guard !again.isEmpty else { return }
+        persistWants()
+        Self.log.notice("\(again.count) want(s) the watch has no contents for; sending them again")
+        Task {
+            for want in again { await sendDownload(want.request, marking: false) }
+        }
     }
 
     /// What a download comes to, looked up here and handed over as a file,
     /// for the same reason as the playlists. When this phone can't ask the
     /// server either, the watch is sent the bare request and tries itself.
-    private func sendDownload(_ request: WatchDownloadRequest) async {
+    private func sendDownload(_ request: WatchDownloadRequest, marking: Bool = true) async {
+        if marking, let i = wants.firstIndex(where: { $0.id == request.key }) {
+            wants[i].lastSentAt = Date()
+            persistWants()
+        }
         let client = JellyfinClient.shared
         var items: [BaseItem]?
         switch request.kind {
@@ -502,6 +619,12 @@ final class WatchLink: NSObject {
             UserDefaults.standard.set(Array(lists), forKey: "watch_kept_playlists")
         }
         if let awaiting = context.awaitingPhone { keepOnly(Set(awaiting), saidAt: context.sentAt) }
+        if let states = context.wants {
+            wantStates = Dictionary(states.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+            wantsReportedAt = context.sentAt
+            persistWants()
+            reconcileWants()
+        }
     }
 
     /// Whether a playlist is kept on the watch, as Settings' switch shows
@@ -566,6 +689,7 @@ final class WatchLink: NSObject {
         case .fetchMany(let itemIds): for id in itemIds { enqueueFetch(id, pumping: false) }; persistFetches(); pumpFetches()
         case .cancelFetch(let itemId): cancelFetch(itemId)
         case .playlistRemoved(let id): playlistRemovedOnWatch(id)
+        case .wantRemoved(let key): forgetWant(key: key)
         case .logs(let chunk): take(chunk)
         case .remote(let command): WatchRemote.shared.handle(command)
         case .requestPlayback: WatchRemote.shared.send(force: true)
@@ -1690,6 +1814,29 @@ extension WatchLink: URLSessionDownloadDelegate {
 }
 
 /// One item fetched for the watch, for Settings.
+/// One thing "Download to Apple Watch" was tapped for, on the list until it
+/// is taken off — see `WatchLink.wants`.
+struct WatchWant: Codable, Hashable, Identifiable, Sendable {
+    var request: WatchDownloadRequest
+    var addedAt = Date()
+    /// When its contents were last sent to the watch.
+    var lastSentAt: Date?
+
+    var id: String { request.key }
+
+    /// Its standing, from what the watch last said of it.
+    func status(_ state: WatchWantState?) -> (text: String, done: Bool) {
+        guard let state else { return ("Waiting for the watch", false) }
+        if state.needsContents { return ("Being looked up", false) }
+        if state.count == 0 { return ("Nothing to fetch", true) }
+        let whole = request.kind == .book || request.kind == .song
+        if state.complete >= state.count { return ("On the watch", true) }
+        var text = whole ? "Arriving" : "\(state.complete) of \(state.count) on the watch"
+        if state.failed > 0 { text += whole ? ", failed for now" : " · \(state.failed) failed for now" }
+        return (text, false)
+    }
+}
+
 struct RelayItem: Codable, Hashable, Identifiable, Sendable {
     enum Stage: String, Codable, Sendable {
         case waiting, downloading, sending, delivered, failed

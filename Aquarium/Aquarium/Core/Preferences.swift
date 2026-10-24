@@ -828,6 +828,12 @@ final class Preferences {
     var downloadsWiFiOnly: Bool {
         didSet { write(downloadsWiFiOnly, forKey: "downloads_wifi_only") }
     }
+    /// Downloads › Keep screen awake: the screen stays on while the Downloads
+    /// page is showing and something is transferring, so a long batch can be
+    /// watched through. This device's: a Mac doesn't sleep its screen for this.
+    var downloadsKeepAwake: Bool {
+        didSet { defaults.set(downloadsKeepAwake, forKey: "downloads_keep_awake") }
+    }
 
     static let maxDownloadConcurrency = 6
 
@@ -1031,6 +1037,7 @@ final class Preferences {
         let c = d.integer(forKey: "download_concurrency")
         downloadConcurrency = (1...Preferences.maxDownloadConcurrency).contains(c) ? c : 1
         downloadsWiFiOnly = d.bool(forKey: "downloads_wifi_only")
+        downloadsKeepAwake = d.bool(forKey: "downloads_keep_awake")
         transcodesOneAtATime = d.bool(forKey: "downloads_one_transcode")
         lastRoute = d.string(forKey: "last_route") ?? ""
         recentSearches = d.stringArray(forKey: "recent_searches") ?? []

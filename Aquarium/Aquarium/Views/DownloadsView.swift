@@ -18,6 +18,8 @@ struct DownloadsView: View {
 
     @State private var downloads = DownloadManager.shared
     @State private var isSyncing = false
+    /// Whether this page is the one on screen — see `holdScreen`.
+    @State private var isShowing = false
     @State private var pendingDeletion: DownloadDeletion?
     /// The show whose poster is asking before it deletes. Kept apart from
     /// `pendingDeletion` so the confirmation hangs off that poster: on an
@@ -252,6 +254,18 @@ struct DownloadsView: View {
         .task(id: completeCount) {
             freeSpace = await Task.detached(priority: .utility) { DownloadManager.freeSpace() }.value
         }
+        #if os(iOS)
+        .onAppear {
+            isShowing = true
+            holdScreen(showing: true)
+        }
+        .onDisappear {
+            isShowing = false
+            holdScreen(showing: false)
+        }
+        .onChange(of: transferring) { _, _ in holdScreen(showing: isShowing) }
+        .onChange(of: prefs.downloadsKeepAwake) { _, _ in holdScreen(showing: isShowing) }
+        #endif
     }
 
     // MARK: - Tiles
@@ -388,9 +402,7 @@ struct DownloadsView: View {
                         .frame(width: 30)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Apple Watch").font(.body.weight(.medium)).foregroundStyle(Theme.text)
-                        Text(link.inventory.map {
-                            $0.itemCount == 0 ? "Nothing on the watch yet" : "\($0.itemCount.formatted()) item\($0.itemCount == 1 ? "" : "s") · \(Format.bytes($0.totalBytes))"
-                        } ?? "Waiting for the watch")
+                        Text(watchDetail(link))
                             .font(.caption).foregroundStyle(Theme.textDim)
                     }
                     Spacer()
@@ -406,6 +418,24 @@ struct DownloadsView: View {
             .buttonStyle(.plain)
             .padding(.horizontal, Metrics.gutter)
         }
+    }
+
+    /// What is on the watch, and how the things sent to it are getting on:
+    /// "3 of 5 sent are on the watch" until all of them are.
+    private func watchDetail(_ link: WatchLink) -> String {
+        var parts: [String] = []
+        if let inventory = link.inventory {
+            parts.append(inventory.itemCount == 0 ? "Nothing on the watch yet" : "\(inventory.itemCount.formatted()) item\(inventory.itemCount == 1 ? "" : "s") · \(Format.bytes(inventory.totalBytes))")
+        } else {
+            parts.append("Waiting for the watch")
+        }
+        if !link.wants.isEmpty {
+            let done = link.wants.filter { $0.status(link.wantStates[$0.id]).done }.count
+            parts.append(done == link.wants.count
+                ? "\(done) sent, all on the watch"
+                : "\(done) of \(link.wants.count) sent are on the watch")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private func audioDoor(_ title: String, symbol: String, detail: String, route: MusicRoute) -> some View {
@@ -526,11 +556,48 @@ struct DownloadsView: View {
                 }
             }
             .tint(Theme.accent)
+
+            #if os(iOS)
+            Toggle(isOn: $prefs.downloadsKeepAwake) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "sun.max.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.accent)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Keep screen awake")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.text)
+                        Text("While this page is open and something is downloading or on its way to the watch, the screen stays on.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textDim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .tint(Theme.accent)
+            #endif
         }
         .padding(Metrics.gutter)
         .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, Metrics.gutter)
     }
+
+    #if os(iOS)
+    /// Whether the switch above has anything to hold the screen on for:
+    /// a download running here, or a file on its way to the watch.
+    private var transferring: Bool {
+        !running.isEmpty || WatchLink.shared.relayItems.contains { $0.stage == .downloading || $0.stage == .sending }
+    }
+
+    /// Held while the page is showing, the switch is on and something is
+    /// moving; let go the moment any of the three stops. `isShowing` is
+    /// the page's own appearance, not the app's: pushed under a show's
+    /// page it isn't watching anything.
+    private func holdScreen(showing: Bool) {
+        ScreenAwake.hold("downloads", showing && prefs.downloadsKeepAwake && transferring)
+    }
+    #endif
 
     /// Pause or resume the queue, from the card at the top of the page. It
     /// is shown whenever there is something for it to act on — a transfer

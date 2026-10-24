@@ -56,6 +56,25 @@ struct WatchCredentials: Codable, Hashable, Sendable {
 struct WatchMirrorPlan: Codable, Hashable, Sendable {
     var bookIds: [String] = []
     var playlistIds: [String] = []
+    /// Everything "Download to Apple Watch" was tapped for on the phone —
+    /// an album, a book, an artist, a song — and not since taken off. The
+    /// phone keeps this list and sends it with every plan; the watch checks
+    /// it against what it holds on every pass and fetches what is missing,
+    /// so a download cut short by a dead link or a killed app is picked up
+    /// again rather than lost. Playlists go through `playlistIds` instead.
+    var wants: [WatchDownloadRequest] = []
+}
+
+extension WatchMirrorPlan {
+    private enum CodingKeys: String, CodingKey { case bookIds, playlistIds, wants }
+
+    /// Key by key, for the same reason as `PhoneContext`.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        bookIds = try c.decodeIfPresent([String].self, forKey: .bookIds) ?? []
+        playlistIds = try c.decodeIfPresent([String].self, forKey: .playlistIds) ?? []
+        wants = try c.decodeIfPresent([WatchDownloadRequest].self, forKey: .wants) ?? []
+    }
 }
 
 struct PhoneContext: Codable, Sendable {
@@ -158,13 +177,32 @@ struct WatchContext: Codable, Sendable {
     /// phone's "Kept on the watch" switches show. Apart from the inventory,
     /// which is cut to fit a message. Nil from a watch too old to say.
     var playlistIds: [String]?
+    /// How far each of the plan's `wants` has got on the watch, by
+    /// `WatchDownloadRequest.key`. Nil from a watch too old to say.
+    var wants: [WatchWantState]?
     /// Whether the watch is signed in to the same account the phone last sent.
     var signedIn: Bool
     var sentAt = Date()
 }
 
+/// Where one of the plan's wants stands on the watch.
+struct WatchWantState: Codable, Hashable, Sendable, Identifiable {
+    var key: String
+    /// How many items it comes to, and how many of them have landed.
+    var count: Int
+    var complete: Int
+    /// Items the watch has given up on for now; retried on a later pass.
+    var failed = 0
+    /// The watch doesn't know what the want comes to — the phone's list
+    /// never arrived and the server couldn't be asked — so the phone sends
+    /// it again.
+    var needsContents = false
+
+    var id: String { key }
+}
+
 extension WatchContext {
-    private enum CodingKeys: String, CodingKey { case revision, inventory, awaitingPhone, playlistIds, signedIn, sentAt }
+    private enum CodingKeys: String, CodingKey { case revision, inventory, awaitingPhone, playlistIds, wants, signedIn, sentAt }
 
     /// Key by key, for the same reason as `PhoneContext`.
     init(from decoder: any Decoder) throws {
@@ -173,6 +211,7 @@ extension WatchContext {
         inventory = try c.decode(WatchInventory.self, forKey: .inventory)
         awaitingPhone = try c.decodeIfPresent([String].self, forKey: .awaitingPhone)
         playlistIds = try c.decodeIfPresent([String].self, forKey: .playlistIds)
+        wants = try c.decodeIfPresent([WatchWantState].self, forKey: .wants)
         signedIn = try c.decode(Bool.self, forKey: .signedIn)
         sentAt = try c.decodeIfPresent(Date.self, forKey: .sentAt) ?? Date()
     }
@@ -182,10 +221,50 @@ extension WatchContext {
 
 /// Something asked for from the phone.
 struct WatchDownloadRequest: Codable, Hashable, Sendable {
-    enum Kind: String, Codable, Sendable { case album, playlist, book, song, artist, genre }
+    enum Kind: String, Codable, Sendable {
+        case album, playlist, book, song, artist, genre
+
+        var label: String {
+            switch self {
+            case .album: "Album"
+            case .playlist: "Playlist"
+            case .book: "Audiobook"
+            case .song: "Song"
+            case .artist: "Artist"
+            case .genre: "Genre"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .album: "square.stack"
+            case .playlist: "music.note.list"
+            case .book: "book"
+            case .song: "music.note"
+            case .artist: "music.mic"
+            case .genre: "guitars"
+            }
+        }
+    }
     var kind: Kind
     var id: String
     var title: String
+
+    /// One name for the want on both sides: "album:abc123".
+    var key: String { "\(kind.rawValue):\(id)" }
+
+    /// The reason a record on the watch carries for being there because of
+    /// this want — what a later delete of the want takes with it.
+    var reason: String {
+        switch kind {
+        case .book: "book"
+        case .song: "song"
+        case .album: "album:\(id)"
+        case .playlist: "playlist:\(id)"
+        case .artist: "artist:\(id)"
+        case .genre: "genre:\(id)"
+        }
+    }
 }
 
 /// Listening done on the watch, to be told to the server. One per stop,
@@ -220,6 +299,9 @@ enum WatchMessage: Codable, Sendable {
     case fetchProgress(itemId: String, fraction: Double)
     /// The phone could not fetch this; the watch may try itself.
     case fetchFailed(itemId: String, reason: String)
+    /// A want taken off the list on the phone: the watch lets go of what
+    /// was there for it alone. The plan stops naming it in the same breath.
+    case deleteWant(WatchDownloadRequest)
     // Watch → phone
     case progress([WatchProgressEvent])
     /// Fetch this item and hand it over as a file. The watch's own radio
@@ -233,6 +315,10 @@ enum WatchMessage: Codable, Sendable {
     /// A playlist was taken off the watch there: the phone stops keeping it
     /// there too, or the next plan would put it straight back.
     case playlistRemoved(id: String)
+    /// A want's album or book was taken off on the watch: the phone drops
+    /// the want (by `WatchDownloadRequest.key`), or the next check would
+    /// put it straight back.
+    case wantRemoved(key: String)
     /// Send me the sign-in and the plan now, in the reply. The application
     /// context is the usual way; this is for a watch that missed it.
     case requestContext

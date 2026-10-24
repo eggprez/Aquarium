@@ -269,7 +269,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     /// whose season is over comes off the Home Screen.
     @MainActor
     private func appBecameActive() {
-        WatchLink.shared.sendContext()
+        WatchLink.shared.checkWatch()
         WatchLink.shared.forward()
         WatchLink.shared.resumeFetches()
         AppIconChoice.retireOutOfSeason()

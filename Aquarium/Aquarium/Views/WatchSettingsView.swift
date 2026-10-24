@@ -147,6 +147,7 @@ struct WatchSettingsView: View {
         if Preferences.shared.watchKeepsBooks { parts.append("Books") }
         let lists = playlists.playlists.filter { link.keepsOnWatch($0.Id) }.count
         if lists > 0 { parts.append("\(lists) playlist\(lists == 1 ? "" : "s")") }
+        if !link.wants.isEmpty { parts.append("\(link.wants.count) sent") }
         return parts.isEmpty ? "Nothing" : parts.joined(separator: " · ")
     }
 
@@ -169,12 +170,52 @@ struct WatchSettingsView: View {
 // MARK: - Kept on the watch
 
 private struct WatchKeptPage: View {
+    @Environment(AppModel.self) private var app
     @Environment(Preferences.self) private var prefs
     @State private var link = WatchLink.shared
     @State private var playlists = PlaylistStore.shared
 
     var body: some View {
         Form {
+            if !link.wants.isEmpty {
+                Section {
+                    ForEach(link.wants) { want in
+                        let status = want.status(link.wantStates[want.id])
+                        HStack(spacing: 12) {
+                            Image(systemName: want.request.kind.symbol)
+                                .foregroundStyle(Theme.accent)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(want.request.title).lineLimit(1)
+                                Text("\(want.request.kind.label) · \(status.text)")
+                                    .font(.caption)
+                                    .foregroundStyle(status.done ? Theme.textDim : Theme.accent)
+                            }
+                            Spacer()
+                            if status.done {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(Theme.ok)
+                                    .accessibilityLabel("On the watch")
+                            } else if link.wantStates[want.id] != nil {
+                                ProgressView().controlSize(.small)
+                            }
+                        }
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                link.removeWant(want)
+                                app.toast("Removing \(want.request.title) from the watch", tone: .ok)
+                            } label: {
+                                Label("Remove", systemImage: "trash")
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Sent to the watch")
+                } footer: {
+                    Text("Everything you've sent with Download to Apple Watch. The list is checked against the watch whenever this app or the watch app opens, and whatever is missing is sent again. Swipe a row to take it off the list and the watch; something deleted on the watch itself comes off the list too.")
+                }
+            }
+
             Section {
                 Toggle(isOn: Binding(
                     get: { prefs.watchKeepsBooks },
