@@ -387,6 +387,27 @@ def duo_outer():
     c.save("iPhoneDuo-outer", gap_px=50)
 
 
+def duo_mixed():
+    """iPhone Duo, open and closed in one picture: open Duos in the middle of
+    each card, closed ones standing in front of the cuts. Rendered at the
+    inner display's 2853x2007 and cut again at the outer's 2034x1398, the two
+    sizes the store's iPhone Duo entry takes."""
+    W, H = 2853, 2007
+    c = Canvas(W, H, 3, seed=17)
+    for i, text in enumerate(["Open, it's your big screen", "Closed, it's still a phone",
+                              "Your music, every series"]):
+        c.headline(i, [text], H * 0.045, 100)
+    opened = lambda name: framed(capture(name), 1880, "duo")
+    closed = lambda name: framed(capture(name), 920, "ipad")
+    c.place(opened("duo-home.png"), 0.44 * W, H * 0.16)
+    c.place(opened("duo-livetv.png"), 1.52 * W, H * 0.16)
+    c.place(opened("duo-series.png"), 2.56 * W, H * 0.16)
+    c.place(closed("duo-out-player.png"), 1.0 * W, H * 0.33, rotate=4)
+    c.place(closed("duo-out-music.png"), 2.0 * W, H * 0.33, rotate=-4)
+    c.save("iPhoneDuo-mixed-inner", gap_px=70)
+    c.save_resized("iPhoneDuo-mixed-outer", (2034, 1398))
+
+
 def tv():
     """Apple TV, 1080p: Home, the player and its panel, Live TV, audio sync,
     a series."""
@@ -397,7 +418,7 @@ def tv():
     c.save("AppleTV", gap_px=40)
 
 
-SETS = {"iphone": iphone, "ipad": ipad, "watch": watch, "duo": duo, "duo_outer": duo_outer, "tv": tv}
+SETS = {"iphone": iphone, "ipad": ipad, "watch": watch, "duo": duo, "duo_outer": duo_outer, "duo_mixed": duo_mixed, "tv": tv}
 
 if __name__ == "__main__":
     for key in sys.argv[1:] or SETS:
