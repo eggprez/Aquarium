@@ -332,6 +332,33 @@ final class WatchLink: NSObject {
         return true
     }
 
+    /// Sync Now, from the phone: the plan goes over again with every kept
+    /// list and every want's contents, whatever was sent before; the watch
+    /// is asked what it holds; anything left failed or stuck here is
+    /// started again; and listening waiting for the server goes on.
+    func syncNow() {
+        sentPlaylists = [:]
+        sentBooks = nil
+        for i in wants.indices { wants[i].lastSentAt = nil }
+        persistWants()
+        inventoryAskedAt = Date()
+        sendContext(now: true)
+        requestInventory()
+        let again = wants
+        Task {
+            for want in again { await sendDownload(want.request) }
+        }
+        for r in relayItems where r.stage == .failed || (r.stage == .sending && !transferring.contains(r.id)) {
+            Self.log.notice("sync now: \(r.id, privacy: .public) was \(r.stage.rawValue, privacy: .public); asking again")
+            relayItems.removeAll { $0.id == r.id }
+            enqueueFetch(r.id, pumping: false)
+        }
+        persistFetches()
+        pumpFetches()
+        forward()
+        Self.log.notice("sync now: \(self.wants.count) wants, \(Preferences.shared.watchPlaylistIds.count) playlists sent again")
+    }
+
     /// The sign-in and the plan as they stand.
     private func buildContext() async -> PhoneContext {
         let client = JellyfinClient.shared

@@ -12,6 +12,7 @@
 import SwiftUI
 
 struct WatchSettingsView: View {
+    @Environment(AppModel.self) private var app
     @Environment(JellyfinClient.self) private var client
     @State private var link = WatchLink.shared
     @State private var playlists = PlaylistStore.shared
@@ -48,10 +49,16 @@ struct WatchSettingsView: View {
                             LabeledContent("Transfers", value: transfersSummary)
                         }
                     }
+                    Button {
+                        link.syncNow()
+                        app.toast("Checking the watch against what it should have", tone: .ok)
+                    } label: {
+                        Label("Sync the Watch Now", systemImage: "arrow.triangle.2.circlepath")
+                    }
                 } header: {
                     Text("Content")
                 } footer: {
-                    Text("Playlists on the watch follow the server. The phone fetches what the watch asks for and hands it across over Bluetooth.")
+                    Text("Playlists on the watch follow the server. The phone fetches what the watch asks for and hands it across over Bluetooth. Sync sends the kept lists and everything on the Sent list again, asks the watch what it holds, and restarts anything stuck here; it also happens on its own whenever this app or the watch app opens.")
                 }
 
                 Section {
@@ -208,6 +215,12 @@ private struct WatchKeptPage: View {
                                 Label("Remove", systemImage: "trash")
                             }
                         }
+                    }
+                    Button {
+                        link.syncNow()
+                        app.toast("Checking the watch against this list", tone: .ok)
+                    } label: {
+                        Label("Sync the Watch Now", systemImage: "arrow.triangle.2.circlepath")
                     }
                 } header: {
                     Text("Sent to the watch")

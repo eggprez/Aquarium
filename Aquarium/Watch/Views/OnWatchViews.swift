@@ -483,8 +483,9 @@ struct WatchSettingsView: View {
                     syncing = true
                     Task {
                         await client.checkOnline()
+                        WatchLink.shared.requestContext()
                         await sync.flush()
-                        downloads.mirror(force: true)
+                        downloads.syncNow()
                         await WatchActions.refreshBookPositions()
                         syncing = false
                     }

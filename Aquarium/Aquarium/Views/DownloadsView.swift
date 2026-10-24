@@ -386,36 +386,49 @@ struct DownloadsView: View {
         }
     }
 
-    /// What is on the Apple Watch, and the page that manages it.
+    /// What is on the Apple Watch, the page that manages it, and a Sync
+    /// button that checks the watch against everything it should have.
     @ViewBuilder
     private var watchDoor: some View {
         let link = WatchLink.shared
         if link.isAvailable {
-            NavigationLink {
-                WatchSettingsView()
-                    .clearsBottomChrome()
-            } label: {
-                HStack(spacing: 14) {
-                    Image(systemName: "applewatch")
-                        .font(.title3)
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 30)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Apple Watch").font(.body.weight(.medium)).foregroundStyle(Theme.text)
-                        Text(watchDetail(link))
-                            .font(.caption).foregroundStyle(Theme.textDim)
+            HStack(spacing: 12) {
+                NavigationLink {
+                    WatchSettingsView()
+                        .clearsBottomChrome()
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: "applewatch")
+                            .font(.title3)
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 30)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Apple Watch").font(.body.weight(.medium)).foregroundStyle(Theme.text)
+                            Text(watchDetail(link))
+                                .font(.caption).foregroundStyle(Theme.textDim)
+                        }
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.textDim)
                     }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.textDim)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                Button {
+                    link.syncNow()
+                    app.toast("Checking the watch against what it should have", tone: .ok)
+                } label: {
+                    Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                        .labelStyle(.iconOnly)
+                        .font(.body.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Sync the watch now")
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .padding(.horizontal, Metrics.gutter)
         }
     }

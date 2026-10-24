@@ -234,10 +234,11 @@ final class WatchDownloads: NSObject {
     /// sent them.
     private var phoneLists: [String: WatchPlaylistContents] = [:]
     private var phoneBooks: [String: BaseItem] = [:]
-    /// Items this watch failed to fetch for itself: asked of the phone next,
-    /// even on Wi‑Fi. A watch on a network that can't reach the server
-    /// (a TLS failure, a timeout) otherwise retries the same dead route.
-    private var viaPhone: Set<String> = []
+    /// Items the phone gave up on, and when: fetched by this watch itself
+    /// while it has a network, and asked of the phone again once that
+    /// fails too, or after an hour.
+    private var phoneGaveUp: [String: Date] = [:]
+    private static let phoneGaveUpFor: TimeInterval = 60 * 60
     /// Items the phone has shown progress on since launch: asked for and
     /// under way, not merely asked for.
     private var phoneWorking: Set<String> = []
@@ -940,9 +941,6 @@ final class WatchDownloads: NSObject {
     /// How long a phone is given, from its last word, before the watch
     /// tries by itself.
     private static let relayPatience: TimeInterval = 20 * 60
-    /// A phone heard from this recently is well into an item: the watch
-    /// finding Wi‑Fi of its own doesn't take that one back.
-    private static let phoneBusyWindow: TimeInterval = 10 * 60
     /// How long the phone may be silent on an item before it is asked
     /// again, doubling with each ask up to the longest. The phone can lose
     /// an ask — killed with a send half queued — and a real watch, whose
@@ -955,45 +953,48 @@ final class WatchDownloads: NSObject {
 
     /// Start the next transfer, if there is one and something can carry it.
     ///
-    /// On Wi‑Fi of its own the watch fetches for itself. Through the
-    /// phone's Bluetooth link a background download session is throttled to
-    /// a crawl, so there the item is asked of the phone, which fetches it on
-    /// its own connection and hands the file across — a transfer that runs
-    /// in the background on both ends, in reach or not. Cellular carries
-    /// what was asked for by hand, never the mirror's things; and the phone
-    /// gets a long while before the watch takes an item back.
+    /// With a phone app to ask, everything is asked of the phone: it
+    /// fetches on its own connection and hands the file across, a transfer
+    /// that runs in the background on both ends, in reach or not. The
+    /// watch's own session fetches one item at a time and only while the
+    /// app is awake, which watchOS allows now and then; and on a real watch
+    /// the path monitor says "down" all day and its requests to the server
+    /// fail for hours at a stretch. It used to fetch for itself whenever
+    /// the monitor said Wi‑Fi, and on a relaunch took back everything the
+    /// phone was carrying to do so: the phone's queue emptied, and the
+    /// items waited on the watch for wakes that never came. Now an item is
+    /// taken back only when the phone has been away past its patience, or
+    /// has given up on it, and only while this watch has a network.
+    /// Without a phone app at all the watch fetches for itself as before:
+    /// cellular carries what was asked for by hand, never the mirror's.
     func pump() {
-        guard JellyfinClient.shared.isSignedIn, pathKnown else { return }
+        guard JellyfinClient.shared.isSignedIn else { return }
         let link = WatchLink.shared
-        let phone = link.hasCompanion && !isOnWiFi
-        // Anything the phone was asked for is taken back only when this
-        // watch will fetch it itself: on Wi‑Fi of its own, or with no phone
-        // app to ask. Taken back anywhere else, it went straight back to the
-        // phone, which started the whole book again. On Wi‑Fi, an item the
-        // phone is well into stays the phone's unless it has gone quiet.
-        if hasNetwork {
+        let canFetchItself = pathKnown && hasNetwork
+        if canFetchItself {
             for var r in records where r.status == .downloading && r.relayAskedAt != nil && active != r.itemId {
                 let quiet = Date().timeIntervalSince(r.relayAskedAt!)
-                let overdue = quiet > Self.relayPatience && !link.isPhoneReachable
-                let busy = phoneWorking.contains(r.itemId) && quiet < Self.phoneBusyWindow
-                let fetchesItself = isOnWiFi || (!link.hasCompanion && !r.automatic)
-                if fetchesItself, (!viaPhone.contains(r.itemId) && !busy) || overdue {
-                    link.send(.cancelFetch(itemId: r.itemId))
-                    r.status = .queued
-                    r.relayAskedAt = nil
-                    save(r)
-                }
+                guard quiet > Self.relayPatience && !link.isPhoneReachable else { continue }
+                WatchLog.note("downloads", "\(r.itemId): the phone has been away \(Int(quiet / 60)) min; fetching it here")
+                link.send(.cancelFetch(itemId: r.itemId))
+                phoneGaveUp[r.itemId] = Date()
+                r.status = .queued
+                r.relayAskedAt = nil
+                save(r)
             }
         }
         reaskPhone()
-        // Asked-for things first; the mirror's things only when a phone
-        // will carry them or the watch is on Wi‑Fi.
+        // Asked-for things first, then the mirror's, oldest ask first.
         let candidates = makeRoom(for: records.filter { $0.status == .queued || ($0.status == .error && $0.lackedSpace) }
             .sorted { a, b in
                 if a.automatic != b.automatic { return !a.automatic }
                 return a.createdAt < b.createdAt
             })
-        let forPhone = phone ? candidates : link.hasCompanion ? candidates.filter { viaPhone.contains($0.itemId) } : []
+        let now = Date()
+        func phoneGaveUpOn(_ id: String) -> Bool {
+            phoneGaveUp[id].map { now.timeIntervalSince($0) < Self.phoneGaveUpFor } ?? false
+        }
+        let forPhone = link.hasCompanion ? candidates.filter { !phoneGaveUpOn($0.itemId) } : []
         if !forPhone.isEmpty {
             // Every queued item goes to the phone at once: its queue is the
             // reliable one, and it downloads a few at a time on its own. One
@@ -1018,15 +1019,36 @@ final class WatchDownloads: NSObject {
                 }
                 WatchLog.note("downloads", "asked the phone for \(ids.count) items")
             }
-            if phone { return }
         }
-        guard active == nil, hasNetwork else { return }
-        guard let next = candidates.first(where: { (!$0.automatic || isOnWiFi) && !viaPhone.contains($0.itemId) }) else { return }
+        // What is left for this watch: with no phone app to ask, or given
+        // up on by the phone.
+        guard canFetchItself, active == nil else { return }
+        guard let next = candidates.first(where: { r in
+            (!link.hasCompanion || phoneGaveUpOn(r.itemId)) && (!r.automatic || isOnWiFi || link.hasCompanion)
+        }) else { return }
         settling += 1
         Task {
             await start(next)
             settling -= 1
         }
+    }
+
+    /// Sync Now on the watch: everything the phone was asked for is asked
+    /// for again this minute, whatever the back-off says, and anything the
+    /// phone gave up on goes back to it.
+    func syncNow() {
+        relayReasks = [:]
+        phoneGaveUp = [:]
+        let link = WatchLink.shared
+        let awaiting = awaitingPhone
+        if link.hasCompanion, !awaiting.isEmpty {
+            for start in stride(from: 0, to: awaiting.count, by: 200) {
+                link.send(.fetchMany(itemIds: Array(awaiting[start..<min(start + 200, awaiting.count)])))
+            }
+            WatchLog.note("downloads", "sync now: asked the phone again for \(awaiting.count) items")
+        }
+        pump()
+        mirror(force: true)
     }
 
     /// Items the phone has gone quiet on are asked for again, whatever the
@@ -1060,18 +1082,10 @@ final class WatchDownloads: NSObject {
         WatchLog.note("downloads", "asked the phone again for \(again.count) items it has gone quiet on")
     }
 
-    /// The app is being put away. The watch's own session fetches one item
-    /// at a time and needs the app woken between them, which watchOS allows
-    /// only now and then; the phone's downloads and file transfers carry on
-    /// in the background by themselves. So with the phone in reach, what is
-    /// still waiting goes to it, and stays its for as long as the app runs.
+    /// The app is being put away. Everything waiting is already the
+    /// phone's when there is one; a pump now catches anything queued since
+    /// the last.
     func handOffToPhone() {
-        let link = WatchLink.shared
-        guard link.hasCompanion, link.isPhoneReachable else { return }
-        let waiting = records.filter { $0.status == .queued && $0.itemId != active }.map(\.itemId)
-        guard !waiting.isEmpty else { return }
-        viaPhone.formUnion(waiting)
-        WatchLog.note("downloads", "put away: handing \(waiting.count) waiting items to the phone")
         pump()
     }
 
@@ -1136,15 +1150,17 @@ final class WatchDownloads: NSObject {
         save(r)
     }
 
-    /// The phone gave up on an item. The watch tries itself when it can,
-    /// and otherwise says why.
+    /// The phone gave up on an item. The watch tries itself when it has a
+    /// network, and otherwise says why; the phone is asked again after an
+    /// hour, or on the next Sync Now.
     func phoneFailed(itemId: String, reason: String) {
         WatchLog.error("downloads", "phone gave up on \(itemId): \(reason)")
         guard var r = record(for: itemId), r.relayAskedAt != nil else { return }
         r.relayAskedAt = nil
         liveBytes[itemId] = nil
         lastReported.withLock { $0[itemId] = nil }
-        if hasNetwork, isOnWiFi || !r.automatic {
+        phoneGaveUp[itemId] = Date()
+        if pathKnown, hasNetwork, isOnWiFi || !r.automatic {
             r.status = .queued
             save(r)
             pump()
@@ -1317,7 +1333,7 @@ final class WatchDownloads: NSObject {
             return
         }
         WatchLog.note("downloads", "\(itemId) landed: \(Int(seconds))s, \(bytes / 1024)KB")
-        viaPhone.remove(itemId)
+        phoneGaveUp[itemId] = nil
         rec.fileName = url.lastPathComponent
         rec.status = .complete
         rec.bytes = bytes
@@ -1338,12 +1354,12 @@ final class WatchDownloads: NSObject {
         guard var rec = record(for: itemId) else { finishActive(itemId); return }
         WatchLog.error("downloads", "\(itemId) failed (attempt \(rec.attempts + 1)): \(message)")
         rec.attempts += 1
-        if WatchLink.shared.hasCompanion, !viaPhone.contains(itemId) {
+        if WatchLink.shared.hasCompanion {
             // This watch couldn't fetch it; the phone gets the next try.
-            viaPhone.insert(itemId)
+            phoneGaveUp[itemId] = nil
             WatchLog.note("downloads", "\(itemId): asking the phone next")
         }
-        if rec.attempts < 3, hasNetwork {
+        if rec.attempts < 3, hasNetwork || WatchLink.shared.hasCompanion {
             rec.status = .queued
         } else {
             rec.status = .error
