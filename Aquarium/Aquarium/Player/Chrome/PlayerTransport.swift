@@ -295,27 +295,49 @@ struct PlayerTransport: View {
             moreButton
                 .panelPopover(isPresented: popover(for: .more), arrowEdge: .top) { panelPopover }
         }
-        .padding(.top, (compact ? 2 : 8) - Self.foldableTopReclaim)
+        .padding(.top, titleRowTop)
         // Clear of the window's close, minimise and zoom buttons, which sit
         // over the picture in a window with no title bar.
         .padding(.leading, PlayerMetrics.titleLeadingInset(fullScreen: PlayerMetrics.isFullScreen))
-        // Nothing extra on the trailing side. A foldable keeps its clock,
-        // its camera and the Control Centre grab in a column down the
-        // trailing edge, and the safe area already says so (`PlayerScreen`
-        // hands it to the chrome); the buttons stop at that column the way
-        // they stop at any phone's edge. A 92-point clearance on top of it
-        // once pushed them nearly 180 points in and squeezed the title to
-        // nothing on the front screen.
+        .padding(.trailing, titleRowTrailing)
     }
 
-    /// How far the title row rises into a foldable's deep status strip —
-    /// see `FoldState.topReclaim`. Zero everywhere else.
-    static var foldableTopReclaim: CGFloat {
+    /// The row's buttons are 40 points tall.
+    private static let titleRowHalf: CGFloat = 20
+
+    /// Where the row sits. On a foldable's inside screen it goes next to the
+    /// system's clock: held upright, up onto the status strip and onto the
+    /// pill's line (`FoldState.statusStrip`); held sideways, down to the
+    /// line the time reads on in the trailing column. Elsewhere, under the
+    /// status bar as Apple's player has it.
+    private var titleRowTop: CGFloat {
         #if os(iOS)
-        MainActor.assumeIsolated { FoldState.shared.topReclaim }
-        #else
-        0
+        if let strip = FoldState.shared.statusStrip {
+            return FoldState.statusPillLine - Self.titleRowHalf - strip
+        }
+        if FoldState.shared.innerSideways {
+            return FoldState.columnClockLine - Self.titleRowHalf
+        }
         #endif
+        return compact ? 2 : 8
+    }
+
+    /// What the row keeps clear on the trailing side beyond the chrome's
+    /// edge inset. On the strip: the pill, and a little air before it.
+    /// Sideways: nothing — the column is the safe area, and the buttons go
+    /// right up to it rather than stopping a full inset short. Nothing
+    /// elsewhere; a 92-point clearance here once pushed the buttons nearly
+    /// 180 points in and squeezed the title to nothing on the front screen.
+    private var titleRowTrailing: CGFloat {
+        #if os(iOS)
+        if FoldState.shared.statusStrip != nil {
+            return max(0, FoldState.statusPillReach + 10 - edge)
+        }
+        if FoldState.shared.innerSideways {
+            return -(edge - 8)
+        }
+        #endif
+        return 0
     }
 
     private var showsBackButton: Bool {

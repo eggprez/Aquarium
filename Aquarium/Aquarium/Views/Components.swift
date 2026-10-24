@@ -2535,16 +2535,22 @@ struct AppTopBar<Content: View>: View {
     /// everywhere else.
     @Environment(\.showSidebar) private var showSidebar
 
-    /// Zero but on a foldable's inside screen held upright, whose status
-    /// strip is deeper than a phone's and mostly empty — see
-    /// `FoldState.topReclaim`. The bar rises into it. It used to keep its
-    /// trailing end clear of the status pill as well, the way the player's
-    /// title row does; seen on the device (2026-10-24) the pill sits wholly
-    /// above the risen bar's buttons, so the clearance only pushed Search
-    /// and Refresh in from the edge and left a hole beside them.
-    private var reclaim: CGFloat { FoldState.shared.topReclaim }
+    /// A foldable's inside screen held upright has a status strip deeper
+    /// than a phone's and empty but for the pill in its trailing corner —
+    /// see `FoldState.statusStrip`. There the bar *is* the strip: it rises
+    /// to the top of the screen, its content sits on the pill's line with
+    /// the buttons stopping just short of the pill, and the page starts
+    /// where the strip ends. Nil everywhere else, where the bar is fitted
+    /// below the status bar as usual.
+    private var strip: CGFloat? { FoldState.shared.statusStrip }
+
+    /// The bar's content is 36 points tall (the button discs).
+    private static var contentHalf: CGFloat { 18 }
+    /// Breathing room between the last button and the pill.
+    private static var pillGap: CGFloat { 10 }
 
     var body: some View {
+        let side = Metrics.gutter + Metrics.cornerClearance
         HStack(spacing: 8) {
             if let showSidebar {
                 SidebarToggleButton(action: showSidebar)
@@ -2552,10 +2558,11 @@ struct AppTopBar<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Metrics.gutter + Metrics.cornerClearance)
-        .padding(.bottom, 9)
-        .frame(height: height, alignment: .bottom)
-        .padding(.top, -reclaim)
+        .padding(.horizontal, side)
+        .padding(.trailing, strip == nil ? 0 : max(0, FoldState.statusPillReach + Self.pillGap - side))
+        .padding(.bottom, strip.map { $0 - FoldState.statusPillLine - Self.contentHalf } ?? 9)
+        .frame(height: strip ?? height, alignment: .bottom)
+        .padding(.top, -(strip ?? 0))
         // The bar is fitted below the status bar and its fill is what
         // reaches up past it. Measuring the inset instead — a
         // GeometryReader inside an `ignoresSafeArea`, which is the usual

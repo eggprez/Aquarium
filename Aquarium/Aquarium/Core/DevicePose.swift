@@ -176,20 +176,31 @@ final class FoldState {
     /// the root by the pose provider; false where no crease is reported.
     private(set) var creaseIsVertical = false
 
-    /// How far a page's own top bar may rise into the status strip — zero
-    /// everywhere but the inside screen held upright.
+    /// The status strip across the top of the inside screen held upright —
+    /// its depth, about 82 points — and nil everywhere else.
     ///
     /// Held sideways the inside screen keeps its clock and battery in a pill
     /// down the trailing edge, an 84-point column. Turned upright that column
-    /// becomes an 84-point strip across the top, empty but for the pill in
-    /// its trailing corner, and a bar fitted under it stood a good 20 points
+    /// becomes a strip across the top, empty but for the pill in its
+    /// trailing corner, and a bar fitted under it stood a good 20 points
     /// taller than the same bar on any other iPhone. So the bars that draw
-    /// themselves (`AppTopBar`, the player's title row) rise until their
-    /// content sits where a phone's would. Seen upright on the device: the
-    /// pill is in the top trailing corner and ends above the risen bar's
-    /// content, so neither `AppTopBar` nor the player's title row keeps any
-    /// trailing clearance beyond the safe area.
-    private(set) var topReclaim: CGFloat = 0
+    /// themselves (`AppTopBar`, the player's title row) go *onto* the strip
+    /// instead: their content on the pill's own line, their buttons stopping
+    /// just short of the pill, and the page starting where the strip ends.
+    private(set) var statusStrip: CGFloat?
+
+    /// The inside screen held sideways: the clock is in the trailing column.
+    private(set) var innerSideways = false
+
+    /// Where the pill sits on the strip, measured on the simulator and the
+    /// device (669 points across): centred 48 down, reaching 127 in from
+    /// the trailing edge. Neither is reported by the system — the status
+    /// bar frame comes back as a 2-point sliver.
+    static let statusPillLine: CGFloat = 48
+    static let statusPillReach: CGFloat = 127
+    /// Sideways, the pill stands at the top of the 84-point column and its
+    /// time reads 40 points down. The column itself is the safe area.
+    static let columnClockLine: CGFloat = 40
 
     /// Where a phone's top bar content starts: below a Dynamic Island.
     private static let phoneStatusHeight: CGFloat = 59
@@ -198,11 +209,12 @@ final class FoldState {
 
     func safeAreaResolved(top: CGFloat, size: CGSize) {
         let upright = size.height > size.width
-        let reclaim = usesInnerDisplay && upright && top > Self.phoneStatusHeight + 10
-            ? top - Self.phoneStatusHeight : 0
-        guard reclaim != topReclaim else { return }
-        Self.log.debug("top strip \(top, format: .fixed(precision: 0)) in \(size.width, format: .fixed(precision: 0))×\(size.height, format: .fixed(precision: 0)): bars rise \(reclaim, format: .fixed(precision: 0))")
-        topReclaim = reclaim
+        let strip: CGFloat? = usesInnerDisplay && upright && top > Self.phoneStatusHeight + 10 ? top : nil
+        let sideways = usesInnerDisplay && !upright
+        guard strip != statusStrip || sideways != innerSideways else { return }
+        Self.log.debug("top strip \(strip ?? 0, format: .fixed(precision: 0)) in \(size.width, format: .fixed(precision: 0))×\(size.height, format: .fixed(precision: 0)); sideways \(sideways)")
+        statusStrip = strip
+        innerSideways = sideways
     }
 
     /// A hinge has been seen, or the developer is pretending one has.
@@ -381,7 +393,7 @@ private struct CreaseObserver: View {
     }
 }
 
-/// The window's top inset and shape, for `FoldState.topReclaim`. Read where
+/// The window's top inset and shape, for `FoldState.statusStrip`. Read where
 /// the safe area is respected, which is the only place it is reported.
 private struct SafeAreaObserver: View {
     var body: some View {

@@ -87,7 +87,7 @@ struct PlayerScreen: View {
     /// ignores the safe area — which left the chrome inside it with none:
     /// the title row sat under the status bar on the front screen, where
     /// its taps went to the status bar, and half-folded it rose off the top
-    /// of the screen once `FoldState.topReclaim` lifted it further. So the
+    /// of the screen once the status-strip rise lifted it further. So the
     /// window's insets are read out here and given back by hand. The
     /// picture's half keeps the top and the sides, and the bottom only
     /// while it is the whole screen; the flat half below the crease keeps
