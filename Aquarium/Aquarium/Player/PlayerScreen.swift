@@ -78,17 +78,35 @@ struct PlayerScreen: View {
     /// and `PlayerFoldPanel` below it. The stage is the first child of the
     /// same stack either way, so the surface and its layer are never remade
     /// by the fold: `FoldSplit` only changes the frame.
+    ///
+    /// The split is measured against the whole screen, so the container
+    /// ignores the safe area — which left the chrome inside it with none:
+    /// the title row sat under the status bar on the front screen, where
+    /// its taps went to the status bar, and half-folded it rose off the top
+    /// of the screen once `FoldState.topReclaim` lifted it further. So the
+    /// window's insets are read out here and given back by hand. The
+    /// picture's half keeps the top and the sides, and the bottom only
+    /// while it is the whole screen; the flat half below the crease keeps
+    /// the bottom, for the home indicator. The picture and the scrims still
+    /// ignore them and fill the screen.
     @ViewBuilder
     private var framed: some View {
         #if os(iOS)
         if FoldState.shared.isFoldable {
-            FoldSplit(split: foldsBelow, crease: .black) {
-                stage
-            } lower: {
-                PlayerFoldPanel(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork)
+            GeometryReader { geo in
+                let insets = geo.safeAreaInsets
+                FoldSplit(split: foldsBelow, crease: .black) {
+                    stage
+                        .safeAreaPadding(EdgeInsets(top: insets.top, leading: insets.leading,
+                                                    bottom: foldsBelow ? 0 : insets.bottom,
+                                                    trailing: insets.trailing))
+                } lower: {
+                    PlayerFoldPanel(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork)
+                        .safeAreaPadding(.bottom, insets.bottom)
+                }
+                .background(Color.black)
+                .ignoresSafeArea()
             }
-            .background(Color.black)
-            .ignoresSafeArea()
         } else {
             stage
         }
