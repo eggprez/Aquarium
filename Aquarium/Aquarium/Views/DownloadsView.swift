@@ -986,8 +986,27 @@ struct TransferRow: View {
                 )
                 .font(.caption)
                 .foregroundStyle(Theme.warn)
+            } else if awaitingEncode {
+                // A transcode at 0% is the server encoding, not the app
+                // stuck: Jellyfin starts ffmpeg on the first request and the
+                // first segment of a 1080p encode can be a minute coming —
+                // longer after a force quit, which throws the encode away
+                // and starts it again. Unexplained, that minute is exactly
+                // when people force-quit the app, which starts it over.
+                Label("Waiting for the server to encode the start — this can take a minute", systemImage: "hourglass")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textDim)
             }
         }
+    }
+
+    /// A stream with no segment yet: the only bytes are its playlists. By
+    /// bytes as well as by the loaded share, because the share is what the
+    /// task has reported, and after a relaunch or a trip to the background
+    /// it has reported nothing while the package on disk is nearly whole —
+    /// the row read 96% over "waiting for the server to encode the start".
+    private var awaitingEncode: Bool {
+        record.transport == .hls && (record.loadedFraction ?? 0) == 0 && record.receivedBytes < 512 << 10
     }
 
     private var progressText: String {

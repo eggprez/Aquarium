@@ -3225,6 +3225,7 @@ final class DownloadManager: NSObject {
         // that had been running happily all along. The byte count on the task
         // itself is kept up to date whether this process was listening or not.
         var live: [String: Int64] = [:]
+        var fileMoving = false
         for (session, task) in await liveTasks() {
             guard let itemId = itemId(
                 forTask: DownloadTaskKey(session, task),
@@ -3233,10 +3234,20 @@ final class DownloadManager: NSObject {
                 // answering on a stream download.
                 url: task is AVAssetDownloadTask ? nil : task.originalRequest?.url?.absoluteString
             ) else { continue }
-            live[itemId] = task.countOfBytesReceived
+            let bytes = task.countOfBytesReceived
+            live[itemId] = bytes
+            if !(task is AVAssetDownloadTask), bytes != lastSeenBytes[itemId] ?? 0 { fileMoving = true }
         }
         stalled.removeAll { rec in
             guard let bytes = live[rec.itemId] else { return false }
+            // A file transfer that hasn't begun while others are moving is
+            // waiting its turn, not stuck: the file session runs a few at a
+            // time (see `session`) and the system holds the rest, at zero,
+            // until a connection frees. Judged by the clock alone, a season
+            // of songs handed over together was called stalled twenty-five
+            // at a time, every three minutes, each cancel counting against
+            // the song's five goes.
+            if rec.transport == .file, bytes == 0, fileMoving { return true }
             guard bytes != lastSeenBytes[rec.itemId] else { return false }
             // It moved. Put the clock back where the transfer actually is.
             lastSeenBytes[rec.itemId] = bytes
