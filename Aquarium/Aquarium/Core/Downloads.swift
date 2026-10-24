@@ -97,6 +97,12 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
     /// `verifyAndComplete` — one such arrival is worth another try, two is a
     /// fault worth reporting.
     var verifyFailures: Int = 0
+    /// The file arrived whole — every byte the server said it had — and
+    /// AVFoundation still would not open it: a picture or a sound it does not
+    /// decode, in a container the server called plain MP4. Kept, and played
+    /// with mpv, which reads what AVFoundation won't. See `verifyAndComplete`
+    /// and `PlayerModel.chooseEngine(forLocal:)`. Nil on older records.
+    var needsMPV: Bool?
     /// How many times in a row this has been put back in the queue by the app
     /// itself rather than by a tap — after a dropped connection, a stall, a
     /// server that went away mid-transfer. Reset whenever an attempt actually
@@ -410,6 +416,10 @@ struct QueuedDownload: Codable, Hashable, Sendable, Identifiable {
     /// Audiobooks tabs can say how much of the queue is theirs without
     /// looking every entry up. Nil on entries queued before this was kept.
     var type: String?
+    /// Fetch this as a stream even where the original file would do: the
+    /// file was tried and wouldn't open. See `verifyAndComplete`. Nil on
+    /// entries queued before this was kept.
+    var asStream: Bool?
     var id: String { itemId }
 
     /// Whether the pump may start this yet.
@@ -2164,7 +2174,7 @@ final class DownloadManager: NSObject {
             record = existing
             url = u
         } else if let item = pendingItems[entry.itemId],
-                  let built = JellyfinClient.shared.downloadURL(item: item, quality: quality) {
+                  let built = JellyfinClient.shared.downloadURL(item: item, quality: quality, asStream: entry.asStream ?? false) {
             // A fresh start over an old failure: whatever the old one had
             // fetched into a package is not being resumed, so it goes now
             // rather than sitting on disk with nothing pointing at it.
@@ -2734,12 +2744,59 @@ final class DownloadManager: NSObject {
             return
         }
 
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? -1
+        Self.log.error(
+            "\(itemId, privacy: .public) arrived as \(size) bytes of \(url.pathExtension, privacy: .public) that AVFoundation won't open (failure \(rec.verifyFailures + 1))"
+        )
+        // Whole, by the one measure that settles it: the server said how big
+        // the file is, and that is how big it is. Then nothing was lost on the
+        // way, and what AVFoundation objects to is the file itself — 10-bit
+        // H.264, say, which it has never decoded, in an MP4 the server calls
+        // playable. A season came down this way, twice over, and was thrown
+        // away as "incomplete" each time. mpv plays it; the record says so.
+        if !isAudio, size > 0, size == rec.estimatedBytes, PlayerModel.mpvAvailable {
+            Self.log.notice("\(itemId, privacy: .public) is whole at \(size) bytes; kept for mpv")
+            var noBackup = URLResourceValues()
+            noBackup.isExcludedFromBackup = true
+            var mutable = url
+            try? mutable.setResourceValues(noBackup)
+            rec.receivedBytes = size
+            rec.totalBytes = size
+            rec.status = .complete
+            rec.errorMessage = nil
+            rec.verifyFailures = 0
+            rec.needsMPV = true
+            save(rec)
+            Task { await DownloadSubtitles.fetch(itemId: itemId, into: Self.folder(for: itemId)) }
+            return
+        }
         try? FileManager.default.removeItem(at: url)
         rec.receivedBytes = 0
         rec.totalBytes = 0
         rec.verifyFailures += 1
         rec.status = .error
         save(rec)
+
+        // The same file a second time will not open either. A film or an
+        // episode has another way down: the same bytes rewrapped by the
+        // server into a stream, which is what every transcoded download
+        // already is and which AVFoundation opens from disk. Ten episodes
+        // of a season came down whole twice each as MP4s the server called
+        // playable, were refused twice, and ended in the failed list.
+        if rec.verifyFailures == 2, !isAudio, rec.transport == .file {
+            Self.log.notice("\(itemId, privacy: .public): the original file won't open; fetching it rewrapped as a stream")
+            rec.status = .queued
+            rec.errorMessage = "The original file wouldn't open — fetching it rewrapped"
+            save(rec)
+            queue.insert(QueuedDownload(
+                itemId: itemId, title: rec.title, series: rec.series,
+                season: rec.season, episode: rec.episode,
+                quality: rec.quality, type: rec.type, asStream: true
+            ), at: 0)
+            persistQueue()
+            pump()
+            return
+        }
 
         if rec.verifyFailures <= 1 {
             // `retry` clears the message, which is right for a retry someone

@@ -89,6 +89,9 @@ extension PlayerModel {
     func chooseEngine(forLocal record: DownloadRecord) -> PlaybackEngineKind {
         var request = baseRequest()
         request.isDownload = true
+        // A file AVFoundation refused when it arrived — see
+        // `DownloadRecord.needsMPV`. Kept on that understanding.
+        if record.needsMPV == true { request.preference = .mpv }
         if record.hlsPath != nil {
             request.isHLS = true
         } else {

@@ -2150,7 +2150,7 @@ final class JellyfinClient {
     /// writes that last. There is nothing on the wire to tell the two apart.
     /// Jellyfin's own maintainers say the same: download the HLS stream, which
     /// is built to be consumed as it is produced.
-    func downloadURL(item: BaseItem, quality: DownloadQuality)
+    func downloadURL(item: BaseItem, quality: DownloadQuality, asStream: Bool = false)
         -> (url: URL, fileName: String, transport: DownloadTransport)?
     {
         guard let s = prefs.session else { return nil }
@@ -2187,8 +2187,11 @@ final class JellyfinClient {
         let quality = Self.effectiveQuality(item: item, quality: quality)
 
         // The one case with nothing to encode and nothing to race: the file the
-        // server already holds, sent as it sits on disk.
-        if quality.original, DeviceProfile.canPlayAsFile(source) {
+        // server already holds, sent as it sits on disk. Unless the caller has
+        // already had that file and found it wouldn't open — see
+        // `DownloadManager.verifyAndComplete` — in which case the same bytes
+        // come rewrapped as a stream instead.
+        if quality.original, !asStream, DeviceProfile.canPlayAsFile(source) {
             let container = DeviceProfile.fileExtension(forContainer: source?.Container ?? item.Container, audio: false)
             guard let url = URL(string: "\(s.server)/Items/\(Self.pathId(item.Id))/Download") else { return nil }
             return (url, "\(safe).\(container)", .file)
