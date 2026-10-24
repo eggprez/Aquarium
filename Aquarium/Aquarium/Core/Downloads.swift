@@ -2578,6 +2578,13 @@ final class DownloadManager: NSObject {
             ) else { continue }
             live.insert(itemId)
             active.insert(itemId)
+            // Whether the process that started this was in front at the time
+            // is unknowable now, and the one that matters is the one that
+            // wasn't: an episode started from the background by a run the
+            // system then ended, demoted and sitting at its playlist. Marked
+            // as started behind, it gets the same look when the app comes
+            // forward — and one that is moving is left alone there.
+            startedBehind.insert(itemId)
         }
         // Cancelled downloads left by earlier builds, which kept them as
         // records no list shows, with their partial files still on disk.
