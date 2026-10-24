@@ -2578,6 +2578,14 @@ final class DownloadManager: NSObject {
             ) else { continue }
             live.insert(itemId)
             active.insert(itemId)
+            // What it is, for the one-transcode-at-a-time rule: that set is
+            // memory, and an encode adopted after a relaunch was invisible to
+            // it, so the pump started a second transcode beside it — two
+            // encodes on the server for one device, each getting in the
+            // other's way.
+            if let rec = record(for: itemId), Self.isTranscode(quality: rec.quality, type: rec.type) {
+                startedAsTranscode.insert(itemId)
+            }
             // Whether the process that started this was in front at the time
             // is unknowable now, and the one that matters is the one that
             // wasn't: an episode started from the background by a run the
@@ -2937,8 +2945,14 @@ final class DownloadManager: NSObject {
         let now = Date()
         // Bytes landing on disk is the transfer alive, whether or not this
         // process heard a callback about it — see `sweepStalledTransfers`.
-        if let before, bytes > before { activityAt[itemId] = now }
+        if let before, bytes > before {
+            activityAt[itemId] = now
+            idleInFront[itemId] = nil
+        } else if before != nil {
+            idleInFront[itemId, default: 0] += Self.streamMeasureInterval
+        }
         checkHearing(itemId, measured: bytes, at: now)
+        if judgeIdle(itemId, rec: rec) { return }
         rec = live(rec)
         guard rec.receivedBytes != bytes else { return }
         rec.receivedBytes = bytes
@@ -3049,6 +3063,9 @@ final class DownloadManager: NSObject {
     /// after a segment whose callback was throttled is not mistaken for this.
     private static let deafMargin: Int64 = 8 << 20
     private static let reconnectReason = "Reconnecting"
+    /// What a transfer that stopped moving says when it is put back, from
+    /// the stall sweep or from `judgeIdle`.
+    private static let stalledReason = "Stalled"
 
     /// A stream whose package keeps growing while its task says nothing.
     ///
@@ -3079,8 +3096,85 @@ final class DownloadManager: NSObject {
         cancelTasks(for: itemId, keepingProgress: true)
     }
 
+    /// How long each running stream's package has gone without growing
+    /// while the app was in front to measure it, added up across trips to
+    /// the background. The stall sweep's clock is put back every time the
+    /// app comes forward (`appBecameActive`), which is right for a transfer
+    /// the system ran while the app was away and wrong for one that has
+    /// stopped: someone opening the app for half a minute at a time, as
+    /// people do, kept that clock from ever reaching three minutes, and a
+    /// download at 0% or 99% sat there for hours. This counts only the time
+    /// the package was watched and found still, so it reaches the limit
+    /// however the watching is split up.
+    @ObservationIgnored
+    private var idleInFront: [String: TimeInterval] = [:]
+
+    /// How much of a stream's running time may be missing for it to count
+    /// as finished when nothing more is coming, and how long nothing must
+    /// have come. A Rick and Morty episode sat at 99.96% with 447 segments
+    /// on disk, half a second short of its stated length: the server's
+    /// playlist promised a sliver past where the encode ended, and the task
+    /// asked for it for ever. Half a second of credits is not a download.
+    private static let tailTolerance: TimeInterval = 2
+    private static let tailIdleLimit: TimeInterval = 90
+
+    /// A stream whose package has been still for long enough, in front, to
+    /// be judged — see `idleInFront`. True when it was acted on.
+    private func judgeIdle(_ itemId: String, rec: DownloadRecord) -> Bool {
+        #if canImport(UIKit)
+        guard UIApplication.shared.applicationState == .active else { return false }
+        #endif
+        guard let idle = idleInFront[itemId], tasks.values.contains(itemId), retryingAfterCancel[itemId] == nil,
+              !finishing.contains(itemId)
+        else { return false }
+        let fraction = liveProgress[itemId]?.fraction ?? rec.loadedFraction ?? 0
+        let runtime = Double(rec.runTimeTicks) / 10_000_000
+        let missing = runtime > 0 && fraction > 0 ? (1 - fraction) * runtime : .infinity
+        if missing <= Self.tailTolerance, idle >= Self.tailIdleLimit {
+            Self.log.notice(
+                "\(itemId, privacy: .public) has all but \(missing, format: .fixed(precision: 2)) s of its running time and nothing more has come for \(Int(idle)) s; keeping it as finished"
+            )
+            finishShort(itemId)
+            return true
+        }
+        if idle >= Self.stallLimit {
+            // The stall sweep's own verdict, by the same name, so it counts
+            // against the same five goes: a package that will not grow
+            // however often it is started again ends as a failure with a
+            // Retry on it, not as a transfer restarted every three minutes
+            // for ever.
+            Self.log.notice("\(itemId, privacy: .public) has not grown in \(Int(idle)) s of watching; starting it again")
+            idleInFront[itemId] = nil
+            retryingAfterCancel[itemId] = Self.stalledReason
+            cancelTasks(for: itemId, keepingProgress: true)
+            return true
+        }
+        return false
+    }
+
+    /// Keep a stream that is all but a sliver complete as a finished
+    /// download. Its task is retired, so its cancel is nobody's failure and
+    /// puts nothing back in the queue, and the package it leaves is recorded
+    /// the way a package AVFoundation reported finished would be.
+    private func finishShort(_ itemId: String) {
+        guard var rec = record(for: itemId) else { return }
+        idleInFront[itemId] = nil
+        if rec.hlsPath == nil, let partial = rec.partialPath {
+            rec.hlsPath = partial
+            save(rec)
+        }
+        cancelTasks(for: itemId, keepingProgress: false)
+        active.remove(itemId)
+        forgetProgressThrottle(itemId)
+        Task {
+            await settle(itemId) { await finishStream(itemId) }
+            pump()
+        }
+    }
+
     private func forgetProgressThrottle(_ itemId: String) {
         startedBehind.remove(itemId)
+        idleInFront[itemId] = nil
         attemptBaseBytes[itemId] = nil
         liveProgress[itemId] = nil
         lastPersistAt[itemId] = nil
@@ -3157,7 +3251,7 @@ final class DownloadManager: NSObject {
         // that is where the transfer is put back in the queue — after the
         // cancel has landed, so a resume has something to resume from. A
         // transfer with no task to cancel is requeued straight away.
-        let reason = "Stalled"
+        let reason = Self.stalledReason
         for rec in stalled {
             // `stalled` was read before `await everyTask()` above; the item
             // may have finished, failed or been removed in that gap. Acting
