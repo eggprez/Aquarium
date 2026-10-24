@@ -187,9 +187,8 @@ final class FoldState {
     /// themselves (`AppTopBar`, the player's title row) rise until their
     /// content sits where a phone's would. Seen upright on the device: the
     /// pill is in the top trailing corner and ends above the risen bar's
-    /// content, so `AppTopBar` needs no trailing clearance; the player's
-    /// title row keeps its own (`PlayerTransport.foldableCornerClearance`),
-    /// which is for the Control Centre grab, not the pill.
+    /// content, so neither `AppTopBar` nor the player's title row keeps any
+    /// trailing clearance beyond the safe area.
     private(set) var topReclaim: CGFloat = 0
 
     /// Where a phone's top bar content starts: below a Dynamic Island.

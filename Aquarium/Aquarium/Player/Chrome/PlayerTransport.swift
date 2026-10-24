@@ -299,29 +299,20 @@ struct PlayerTransport: View {
         // Clear of the window's close, minimise and zoom buttons, which sit
         // over the picture in a window with no title bar.
         .padding(.leading, PlayerMetrics.titleLeadingInset(fullScreen: PlayerMetrics.isFullScreen))
-        // Clear of what a foldable keeps in its top trailing corner, which
-        // the safe area does not say: the camera's pill on the front screen,
-        // the Control Centre grab on the inside one. Both sat on AirPlay and
-        // the "…" button.
-        .padding(.trailing, Self.foldableCornerClearance)
+        // Nothing extra on the trailing side. A foldable keeps its clock,
+        // its camera and the Control Centre grab in a column down the
+        // trailing edge, and the safe area already says so (`PlayerScreen`
+        // hands it to the chrome); the buttons stop at that column the way
+        // they stop at any phone's edge. A 92-point clearance on top of it
+        // once pushed them nearly 180 points in and squeezed the title to
+        // nothing on the front screen.
     }
 
-    /// How far in from the trailing edge the title row's buttons stop on a
-    /// foldable — see `titleRow`. The strip it leaves is where the
-    /// brightness rail goes (`BrightnessRail`).
     /// How far the title row rises into a foldable's deep status strip —
     /// see `FoldState.topReclaim`. Zero everywhere else.
     static var foldableTopReclaim: CGFloat {
         #if os(iOS)
         MainActor.assumeIsolated { FoldState.shared.topReclaim }
-        #else
-        0
-        #endif
-    }
-
-    static var foldableCornerClearance: CGFloat {
-        #if os(iOS)
-        MainActor.assumeIsolated { FoldState.shared.isFoldable } ? 92 : 0
         #else
         0
         #endif
@@ -342,6 +333,9 @@ struct PlayerTransport: View {
             .padding(.vertical, PlayerMetrics.television ? 4 : 3)
             .background(Capsule().fill(Theme.danger))
             .foregroundStyle(.white)
+            // Never wrapped: squeezed, the badge once ran its letters down
+            // the screen rather than give the title the width.
+            .fixedSize()
             .accessibilityLabel("Live")
     }
 

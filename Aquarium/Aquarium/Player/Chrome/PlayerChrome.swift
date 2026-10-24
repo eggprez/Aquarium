@@ -350,13 +350,18 @@ struct PlayerChrome: View {
             momentOverlays
 
             #if os(iOS)
-            // On a foldable the trailing column the title row leaves clear
-            // (`PlayerTransport.foldableCornerClearance`) holds the brightness
-            // rail, with the controls and gone with them.
+            // On a foldable the brightness rail stands in the 84-point column
+            // the system keeps down the trailing edge for its clock and
+            // battery — the safe area the rest of the chrome respects. The
+            // clock sits at the top of that column in every pose and the
+            // rail is centred in its height, well below it; 24 points in
+            // centres the rail's 36 in the column's 84. With the controls
+            // and gone with them.
             if showsControls, !belowFold, FoldState.shared.isFoldable {
                 BrightnessRail(onInteract: interact)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                     .padding(.trailing, 24)
+                    .ignoresSafeArea(.container, edges: .trailing)
                     .transition(.opacity)
             }
             #endif
