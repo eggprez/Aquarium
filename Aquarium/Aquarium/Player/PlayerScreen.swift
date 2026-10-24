@@ -40,6 +40,10 @@ struct PlayerScreen: View {
     @Environment(\.devicePose) private var pose
     #endif
 
+    /// How far down a foldable's front screen the status bar still takes
+    /// touches, though the safe area says nothing is there — see `framed`.
+    private static let frontStatusStrip: CGFloat = 24
+
     /// Half-folded: the transport is split at the crease.
     private var foldsBelow: Bool {
         #if os(iOS)
@@ -95,9 +99,18 @@ struct PlayerScreen: View {
         if FoldState.shared.isFoldable {
             GeometryReader { geo in
                 let insets = geo.safeAreaInsets
+                // The front screen reports no top inset — its clock is in
+                // the column down the trailing edge — yet the top 24 points
+                // still belong to the status bar's touch strip: measured on
+                // the simulator, a tap on the "…" button 22 points down
+                // dies and one 26 points down lands. The title row's
+                // buttons were centred in that strip, which is why they
+                // rarely worked. So the chrome keeps at least the strip
+                // clear on the front screen.
+                let top = pose == .front ? max(insets.top, Self.frontStatusStrip) : insets.top
                 FoldSplit(split: foldsBelow, crease: .black) {
                     stage
-                        .safeAreaPadding(EdgeInsets(top: insets.top, leading: insets.leading,
+                        .safeAreaPadding(EdgeInsets(top: top, leading: insets.leading,
                                                     bottom: foldsBelow ? 0 : insets.bottom,
                                                     trailing: insets.trailing))
                 } lower: {
