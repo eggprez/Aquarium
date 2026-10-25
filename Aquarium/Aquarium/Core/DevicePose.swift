@@ -364,6 +364,15 @@ private struct DevicePoseProvider: ViewModifier {
             .onChange(of: pose, initial: true) { _, now in
                 FoldState.shared.poseResolved(now)
             }
+            // Settings › Layout is a hinge that moves without moving: the
+            // mask means something else now (the inside screen's `.all`,
+            // the front's portrait lock), and only a real hinge change used
+            // to say so. Without this the phone kept whatever orientation
+            // the old mode had left it in — sideways on a front layout, or
+            // a locked inside screen — until it was physically turned.
+            .onChange(of: Preferences.shared.layoutOverride) { _, _ in
+                OrientationLock.shared.hingeChanged()
+            }
     }
 }
 

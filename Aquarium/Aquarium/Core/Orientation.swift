@@ -65,7 +65,8 @@ final class OrientationLock {
         }
     }
 
-    /// The hinge has moved between closed, part-open and open. The last
+    /// The hinge has moved between closed, part-open and open — or Settings ›
+    /// Layout has said it did (`DevicePoseProvider`). The last
     /// answer may now be stale — a change of display is a change of what the
     /// mask means — so it is forgotten and UIKit is asked again, deferred like
     /// every other request here: a fold is a burst of hinge and trait changes
