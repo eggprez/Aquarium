@@ -202,6 +202,7 @@ struct AquariumApp: App {
 
 #if os(iOS)
 import BackgroundTasks
+import os
 import UIKit
 
 /// What UIKit still has to answer for itself: the completion handler the
@@ -284,7 +285,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?
     ) -> UIInterfaceOrientationMask {
-        MainActor.assumeIsolated { OrientationLock.shared.mask }
+        MainActor.assumeIsolated {
+            let mask = OrientationLock.shared.mask
+            let scene = window?.windowScene
+            FoldState.log.debug("orientation asked by UIKit → mask=\(mask.rawValue) now=\(scene?.effectiveGeometry.interfaceOrientation.rawValue ?? -1) bounds=\(Double(scene?.coordinateSpace.bounds.width ?? 0), format: .fixed(precision: 0))×\(Double(scene?.coordinateSpace.bounds.height ?? 0), format: .fixed(precision: 0)) hinge=\(String(describing: FoldState.shared.effectiveHinge))")
+            return mask
+        }
     }
 
     /// The scene delegate below is how a home screen quick action reaches
