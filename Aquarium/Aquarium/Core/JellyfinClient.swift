@@ -1203,38 +1203,18 @@ final class JellyfinClient {
     /// travel between devices — are the whole of what makes the list, and an
     /// iPhone, an Apple TV and a Mac signed in to one account get one list.
     /// See `Preferences.nextUpDays`.
-    ///
-    /// A show you are up to date on comes back, at the front, when a new
-    /// episode of it arrives, however long ago you last watched it. The
-    /// server can't be asked for that — its cutoff and its order both go by
-    /// when the show was last watched — so a second, wider question finds
-    /// them. See `HomeRows.isNewArrival`. Should that one fail the row is
-    /// still the server's own.
     func nextUp() async throws -> [BaseItem] {
-        let days = prefs.nextUpDays
-        let cutoff = days > 0 ? Date().addingTimeInterval(-Double(days) * 24 * 60 * 60) : nil
-        async let row = nextUpQuery(limit: 16, cutoff: cutoff)
-        async let everything = try? nextUpQuery(limit: 100, cutoff: nil)
-        let shown = try await row
-        return HomeRows.mergedNextUp(
-            row: shown, everything: await everything ?? [],
-            window: HomeRows.nextUpNewWindow(days: days), limit: 16
-        )
-    }
-
-    private func nextUpQuery(limit: Int, cutoff: Date?) async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
         var query: [URLQueryItem] = [
             .init(name: "userId", value: s.userId),
-            .init(name: "Limit", value: String(limit)),
-            // `DateCreated` and `PremiereDate` are what tell a new episode —
-            // see `HomeRows.isNewArrival`.
-            .init(name: "Fields", value: Self.itemFields + ",DateCreated,PremiereDate"),
+            .init(name: "Limit", value: "16"),
+            .init(name: "Fields", value: Self.itemFields),
             .init(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb,Logo"),
             .init(name: "enableResumable", value: prefs.nextUpIncludesInProgress ? "true" : "false"),
             .init(name: "enableRewatching", value: prefs.nextUpRewatching ? "true" : "false"),
         ]
-        if let cutoff {
+        if prefs.nextUpDays > 0 {
+            let cutoff = Date().addingTimeInterval(-Double(prefs.nextUpDays) * 24 * 60 * 60)
             query.append(.init(name: "nextUpDateCutoff", value: ISO8601DateFormatter().string(from: cutoff)))
         }
         return try await get(ItemsResponse.self, "/Shows/NextUp?\(Self.encode(query))").items

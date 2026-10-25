@@ -75,56 +75,6 @@ enum HomeRows {
         return rest.first { !$0.userData.played }
     }
 
-    /// How long an episode counts as new once it is in the library, when
-    /// Next Up keeps shows forever. With a limit set, the limit is the window
-    /// — see `nextUpNewWindow`.
-    static let newEpisodeWindow: TimeInterval = 30 * 24 * 60 * 60
-
-    /// How long a newly added episode brings its show back to the front of
-    /// Next Up: as long as the show would have stayed had it just been
-    /// watched, or `newEpisodeWindow` when it stays forever.
-    static func nextUpNewWindow(days: Int) -> TimeInterval {
-        days > 0 ? Double(days) * 24 * 60 * 60 : newEpisodeWindow
-    }
-
-    /// Whether Next Up is offering this episode because it is new: added to
-    /// the library inside `window`, so the show was caught up until it came.
-    ///
-    /// Next Up is the server's, measured from when the show was last watched,
-    /// which is the wrong clock for a show you are up to date on: finished
-    /// two months ago, its new episode is past a one-month cutoff before it
-    /// exists, and with no cutoff it is sorted behind every show watched
-    /// since. So these are found separately and put first — see
-    /// `mergedNextUp`.
-    ///
-    /// Added *and aired* recently, where the server knows when it aired: a
-    /// library imported again, or a whole old series added today, has
-    /// nothing but recently added episodes, and none of them is new.
-    static func isNewArrival(_ item: BaseItem, window: TimeInterval, now: Date = Date()) -> Bool {
-        guard item.isEpisode, let added = Format.parseDate(item.DateCreated) else { return false }
-        guard now.timeIntervalSince(added) < window else { return false }
-        guard let aired = Format.parseDate(item.PremiereDate) else { return true }
-        return added.timeIntervalSince(aired) < newEpisodeWindow
-    }
-
-    /// The Next Up row: the episodes that are new (see `isNewArrival`) first,
-    /// newest first, then the row as the server ordered it, one card per
-    /// show and no more than `limit`.
-    static func mergedNextUp(row: [BaseItem], everything: [BaseItem], window: TimeInterval,
-                             limit: Int, now: Date = Date()) -> [BaseItem] {
-        let arrivals = everything
-            .filter { isNewArrival($0, window: window, now: now) }
-            .sorted { (Format.parseDate($0.DateCreated) ?? .distantPast) > (Format.parseDate($1.DateCreated) ?? .distantPast) }
-        var seen = Set<String>()
-        var out: [BaseItem] = []
-        for item in arrivals + row where out.count < limit {
-            let key = item.SeriesId ?? item.Id
-            guard seen.insert(key).inserted else { continue }
-            out.append(item)
-        }
-        return out
-    }
-
     /// `row` without the shows removed from Next Up by hand.
     ///
     /// A show was removed while a particular episode was its card — see

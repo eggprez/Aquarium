@@ -2345,7 +2345,7 @@ enum SettingsCopy {
     )
     static let nextUpDays = SettingNote(
         name: "Keep shows on Next Up",
-        text: "How long a show stays on Next Up after you last watched anything in it. Forever keeps it there for as long as it has an episode left. Adding a show to Next Up counts as watching it today. A show you're up to date on comes back to the front when a new episode arrives, however long ago you watched it, and stays there this long — a month, when this is Forever. Like the two settings below, this goes to the server with the question, so every Apple device signed in to this account shows the same Next Up."
+        text: "How long a show stays on Next Up after you last watched anything in it. Forever keeps it there for as long as it has an episode left. A show you're up to date on comes back when a new episode arrives, but only if you watched it within this limit. Adding a show to Next Up counts as watching it today. Like the two settings below, this goes to the server with the question, so every Apple device signed in to this account shows the same Next Up."
     )
     static let nextUpInProgress = SettingNote(
         name: "Include episodes in progress",
