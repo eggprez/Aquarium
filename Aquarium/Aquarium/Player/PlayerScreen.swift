@@ -42,7 +42,7 @@ struct PlayerScreen: View {
 
     /// How far down a foldable's front screen the status bar still takes
     /// touches, though the safe area says nothing is there — see `framed`.
-    private static let frontStatusStrip: CGFloat = 24
+    private static var frontStatusStrip: CGFloat { FoldState.frontStatusStrip }
 
     /// Half-folded: the transport is split at the crease.
     private var foldsBelow: Bool {

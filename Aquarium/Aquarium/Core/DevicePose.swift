@@ -192,6 +192,17 @@ final class FoldState {
     /// The inside screen held sideways: the clock is in the trailing column.
     private(set) var innerSideways = false
 
+    /// How far down the front screen held upright the status bar still takes
+    /// touches though the safe area says nothing is there — zero everywhere
+    /// else. Measured on the simulator (2026-10-24): taps at 22 points die,
+    /// at 26 they land. The bars that draw themselves (`AppTopBar`, the
+    /// player's title row) keep it clear; before that a title page's back
+    /// button stood half in the strip and worked by luck. Not the safe
+    /// area: padding that at the root never reached the pages inside the
+    /// tab view.
+    private(set) var frontTouchStrip: CGFloat = 0
+    static let frontStatusStrip: CGFloat = 24
+
     /// Where the pill sits on the strip, measured on the simulator and the
     /// device (669 points across): centred 48 down, reaching 127 in from
     /// the trailing edge. Neither is reported by the system — the status
@@ -211,10 +222,13 @@ final class FoldState {
         let upright = size.height > size.width
         let strip: CGFloat? = usesInnerDisplay && upright && top > Self.phoneStatusHeight + 10 ? top : nil
         let sideways = usesInnerDisplay && !upright
-        guard strip != statusStrip || sideways != innerSideways else { return }
-        Self.log.debug("top strip \(strip ?? 0, format: .fixed(precision: 0)) in \(size.width, format: .fixed(precision: 0))×\(size.height, format: .fixed(precision: 0)); sideways \(sideways)")
+        let touch: CGFloat = isFoldable && !usesInnerDisplay && upright && top < Self.frontStatusStrip
+            ? Self.frontStatusStrip - top : 0
+        guard strip != statusStrip || sideways != innerSideways || touch != frontTouchStrip else { return }
+        Self.log.debug("top strip \(strip ?? 0, format: .fixed(precision: 0)) touch \(touch, format: .fixed(precision: 0)) in \(size.width, format: .fixed(precision: 0))×\(size.height, format: .fixed(precision: 0)); sideways \(sideways)")
         statusStrip = strip
         innerSideways = sideways
+        frontTouchStrip = touch
     }
 
     /// A hinge has been seen, or the developer is pretending one has.
@@ -413,8 +427,11 @@ private struct SafeAreaObserver: View {
             // Read again when the display changes, too: the inset alone can
             // stay the same across a fold while what it means does not.
             let inner = FoldState.shared.usesInnerDisplay
+            // And when a hinge first reports: the touch strip is a
+            // foldable's alone.
+            let foldable = FoldState.shared.isFoldable
             Color.clear
-                .onChange(of: [top, size.width, size.height, inner ? 1 : 0], initial: true) { _, _ in
+                .onChange(of: [top, size.width, size.height, inner ? 1 : 0, foldable ? 1 : 0], initial: true) { _, _ in
                     FoldState.shared.safeAreaResolved(top: top, size: size)
                 }
         }

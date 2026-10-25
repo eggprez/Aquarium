@@ -2544,6 +2544,12 @@ struct AppTopBar<Content: View>: View {
     /// below the status bar as usual.
     private var strip: CGFloat? { FoldState.shared.statusStrip }
 
+    /// The front screen held upright: the safe area says the top is free,
+    /// and the status bar still takes the first 24 points of taps — see
+    /// `FoldState.frontTouchStrip`. The bar grows by that much and its
+    /// content keeps to the bottom, below the strip. Zero elsewhere.
+    private var touch: CGFloat { FoldState.shared.frontTouchStrip }
+
     /// The bar's content is 36 points tall (the button discs).
     private static var contentHalf: CGFloat { 18 }
     /// Breathing room between the last button and the pill.
@@ -2561,7 +2567,7 @@ struct AppTopBar<Content: View>: View {
         .padding(.horizontal, side)
         .padding(.trailing, strip == nil ? 0 : max(0, FoldState.statusPillReach + Self.pillGap - side))
         .padding(.bottom, strip.map { $0 - FoldState.statusPillLine - Self.contentHalf } ?? 9)
-        .frame(height: strip ?? height, alignment: .bottom)
+        .frame(height: strip ?? (height + touch), alignment: .bottom)
         .padding(.top, -(strip ?? 0))
         // The bar is fitted below the status bar and its fill is what
         // reaches up past it. Measuring the inset instead — a
@@ -2596,6 +2602,20 @@ struct AppTopBar<Content: View>: View {
 /// the sidebar is showing, and on anything that has no sidebar.
 private struct ShowSidebarKey: EnvironmentKey {
     static let defaultValue: (() -> Void)? = nil
+}
+
+/// The way back from a page a section's stack pushed: that stack's path,
+/// one shorter. Handed down by `RootView` with each stack; nil in a page
+/// shown any other way, where `BarBackButton` uses `dismiss`.
+private struct PopPageKey: EnvironmentKey {
+    static let defaultValue: (() -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var popPage: (() -> Void)? {
+        get { self[PopPageKey.self] }
+        set { self[PopPageKey.self] = newValue }
+    }
 }
 
 extension EnvironmentValues {
@@ -2789,11 +2809,16 @@ extension View {
 /// The way back, for a page that draws its own bar. The system's back button
 /// comes with the system's navigation bar, and that bar is the thing these
 /// pages are doing without.
+///
+/// Pops the section's own path where the shell hands one down (`popPage`),
+/// and only falls back to `dismiss` where it does not — see `AppModel.pop`
+/// for why the path and not `dismiss`.
 struct BarBackButton: View {
-    var action: () -> Void
+    @Environment(\.popPage) private var popPage
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        Button(action: action) {
+        Button(action: { if let popPage { popPage() } else { dismiss() } }) {
             if #available(iOS 26.0, *) {
                 // The system's back button on this OS — see `barButtonDisc`.
                 Image(systemName: "chevron.backward")

@@ -35,7 +35,11 @@ final class OrientationLock {
     /// Waiting for a scene to become active — see `apply`.
     private var activationObserver: NSObjectProtocol?
 
-    private init() {}
+    private init() {
+        // So `UIDevice.orientation` says which way the phone is actually
+        // held — see `apply`.
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+    }
 
     /// What UIKit is told when it asks the delegate. A phone is portrait unless
     /// something on screen has asked otherwise; anything larger was never
@@ -46,7 +50,7 @@ final class OrientationLock {
     /// recognised by the front screen being landscape, and the front screen
     /// can only be landscape if landscape was allowed first. So any part-open
     /// hinge frees the phone to turn, and the pose follows the turn. Fully
-    /// open is the inside screen, which ignores this mask anyway.
+    /// open is the inside screen, free to turn every way the system allows.
     var mask: UIInterfaceOrientationMask {
         guard UIDevice.current.userInterfaceIdiom == .phone else { return .all }
         // Upright as well as sideways, even for a wide film: the player used
@@ -55,7 +59,11 @@ final class OrientationLock {
         // the picture (`PlayerChrome.letterbox`).
         switch FoldState.shared.effectiveHinge {
         case .fullyOpen:
-            return .all
+            // Not `.all`: the inside screen never turns power button down
+            // (the system refuses it there), and asking for an orientation
+            // the system will not give is one more way to be left where
+            // the phone was.
+            return .allButUpsideDown
         case .partiallyOpen:
             // Free to turn, so the tent can be recognised.
             return .allButUpsideDown
@@ -133,7 +141,29 @@ final class OrientationLock {
         }
         lastRequested = wanted
         scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-        scene.requestGeometryUpdate(.iOS(interfaceOrientations: wanted))
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: Self.preferred(within: wanted)))
+    }
+
+    /// The one orientation to ask for out of a mask that allows several: the
+    /// way the phone is actually being held, when the mask allows it.
+    ///
+    /// Handed the whole mask, UIKit keeps the orientation it is in if that
+    /// is still allowed, and only moves when the phone next moves. Freed
+    /// while already sideways — Settings › Layout from Front to Inside with
+    /// the phone on its side, or a part-open hinge — the screen stayed
+    /// upright until the phone was picked up and turned. Naming the held
+    /// orientation turns it now. Flat on a table, or not yet known, the
+    /// whole mask goes through as before.
+    private static func preferred(within mask: UIInterfaceOrientationMask) -> UIInterfaceOrientationMask {
+        // The device turning one way is the interface turning the other.
+        let held: UIInterfaceOrientationMask? = switch UIDevice.current.orientation {
+        case .portrait: .portrait
+        case .landscapeLeft: .landscapeRight
+        case .landscapeRight: .landscapeLeft
+        default: nil
+        }
+        guard let held, mask.contains(held) else { return mask }
+        return held
     }
 
     /// Try again the next time a scene is activated. Once: the observer goes

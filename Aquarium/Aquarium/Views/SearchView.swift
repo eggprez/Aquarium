@@ -278,7 +278,7 @@ struct SearchView: View {
     private var searchBar: some View {
         AppTopBar {
             HStack(spacing: 10) {
-                BarBackButton { dismiss() }
+                BarBackButton()
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(Theme.textDim)

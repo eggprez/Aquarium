@@ -287,7 +287,7 @@ struct ItemDetailView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Show sidebar")
             }
-            BarBackButton { dismiss() }
+            BarBackButton()
             if scrolledPastHero {
                 Text(navigationTitle)
                     .font(.headline)
@@ -309,7 +309,7 @@ struct ItemDetailView: View {
     private var topBar: some View {
         AppTopBar {
             HStack(spacing: 4) {
-                BarBackButton { dismiss() }
+                BarBackButton()
                 if scrolledPastHero {
                     Text(navigationTitle)
                         .font(.headline)

@@ -483,6 +483,9 @@ struct RootView: View {
                     // A stack per section, not one stack handed each
                     // section's path in turn — see `stackPath`.
                     .id(app.shownSelection)
+                    #if os(iOS)
+                    .environment(\.popPage) { [section = app.shownSelection] in app.pop(section) }
+                    #endif
                     .measuresBottomChrome()
                 )
                 .withShellMusic(sidebarShowing: !sidebarHidden)
@@ -601,6 +604,9 @@ struct RootView: View {
                         .clearsBottomChrome()
                         .navigationDestination(for: Route.self) { destination($0).clearsBottomChrome() }
                 }
+                // The way back for the pages with a bar of their own — see
+                // `BarBackButton`.
+                .environment(\.popPage) { app.pop(section) }
                 .measuresBottomChrome()
             )
             .withMiniPlayer()

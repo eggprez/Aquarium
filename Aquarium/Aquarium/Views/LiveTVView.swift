@@ -133,7 +133,7 @@ struct LiveTVView: View {
             // only way out.
             HStack(spacing: 4) {
                 if isPushed {
-                    BarBackButton { dismiss() }
+                    BarBackButton()
                 }
                 Text("Live TV")
                     .font(roomy ? .largeTitle.weight(.bold) : .headline)

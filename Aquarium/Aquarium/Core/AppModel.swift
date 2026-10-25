@@ -1019,10 +1019,35 @@ final class AppModel {
             break
         }
         #endif
+        // The page already on top: a second tap on a poster while the
+        // first was still zooming in pushed the page twice, and Back from
+        // it then "did nothing" — it went to the copy underneath.
+        if routeStacks[selection.id]?.last == route { return }
         var path = paths[selection.id] ?? NavigationPath()
         path.append(route)
         paths[selection.id] = path
         routeStacks[selection.id, default: []].append(route)
+    }
+
+    /// One page back on a section's stack, through the path itself.
+    ///
+    /// What the pages that draw their own bar do for Back (`BarBackButton`)
+    /// instead of `dismiss`. The path is the stack's truth and a shorter
+    /// path is a pop that SwiftUI owes, whatever UIKit is in the middle of;
+    /// `dismiss` was a request UIKit could drop — and did, on a foldable's
+    /// inside screen, where a palm on the left edge of the big screen had
+    /// quietly begun the back-swipe (`BackSwipe`), so the button's press
+    /// landed during an interactive pop that then cancelled. The button
+    /// lit, and the page stayed.
+    func pop(_ section: AppSection) {
+        let key = section.id
+        guard var path = paths[key], !path.isEmpty else { return }
+        path.removeLast()
+        paths[key] = path
+        if var routes = routeStacks[key], !routes.isEmpty {
+            routes.removeLast()
+            routeStacks[key] = routes
+        }
     }
 
     /// Open a page, or go back to it where it is already behind you.
