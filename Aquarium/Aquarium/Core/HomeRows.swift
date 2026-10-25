@@ -59,6 +59,22 @@ enum HomeRows {
         (item.ParentIndexNumber ?? 0, item.IndexNumber ?? 0)
     }
 
+    /// The episode Next Up will offer for a show, from its episodes in order:
+    /// the first unwatched one after the last one watched, or the first
+    /// unwatched one when nothing is. Nil when everything after the last
+    /// watched episode has been watched too. What "Add to Next Up" puts its
+    /// date on — see `JellyfinClient.addToNextUp`.
+    ///
+    /// Specials are season zero and sit outside the order Next Up walks,
+    /// unless a show is nothing but.
+    static func nextUpTarget(_ all: [BaseItem]) -> BaseItem? {
+        let regular = all.filter { ($0.ParentIndexNumber ?? 1) != 0 }
+        let episodes = regular.isEmpty ? all : regular
+        let lastWatched = episodes.lastIndex { $0.userData.played }
+        let rest = lastWatched.map { episodes[($0 + 1)...] } ?? episodes[...]
+        return rest.first { !$0.userData.played }
+    }
+
     /// `row` without the shows removed from Next Up by hand.
     ///
     /// A show was removed while a particular episode was its card — see

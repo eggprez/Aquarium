@@ -1198,12 +1198,61 @@ final class JellyfinClient {
         ).items
     }
 
+    /// The Next Up row, as the account's Next Up settings shape it. Every
+    /// place that shows the row asks through here, so the settings — which
+    /// travel between devices — are the whole of what makes the list, and an
+    /// iPhone, an Apple TV and a Mac signed in to one account get one list.
+    /// See `Preferences.nextUpDays`.
     func nextUp() async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        return try await get(
+        var query: [URLQueryItem] = [
+            .init(name: "userId", value: s.userId),
+            .init(name: "Limit", value: "16"),
+            .init(name: "Fields", value: Self.itemFields),
+            .init(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb,Logo"),
+            .init(name: "enableResumable", value: prefs.nextUpIncludesInProgress ? "true" : "false"),
+            .init(name: "enableRewatching", value: prefs.nextUpRewatching ? "true" : "false"),
+        ]
+        if prefs.nextUpDays > 0 {
+            let cutoff = Date().addingTimeInterval(-Double(prefs.nextUpDays) * 24 * 60 * 60)
+            query.append(.init(name: "nextUpDateCutoff", value: ISO8601DateFormatter().string(from: cutoff)))
+        }
+        return try await get(ItemsResponse.self, "/Shows/NextUp?\(Self.encode(query))").items
+    }
+
+    /// Put a show on Next Up, on the server, so every app signed in to the
+    /// account — this one on other devices, Jellyfin's own, the Linux one —
+    /// shows it there. Returns the episode it will be offered at, or nil when
+    /// every episode has been watched and there is nothing to offer.
+    ///
+    /// Jellyfin has no call for this. What it builds Next Up from is the
+    /// shows with an episode that has a last-played date — played or not —
+    /// and the episode it offers is the first one unwatched after the last
+    /// one *watched*. So the episode that will be offered gets today as its
+    /// last-played date, and nothing else: not marked watched, no position,
+    /// no play counted, nothing in Continue Watching. It also brings a show
+    /// back that the Next Up cutoff (`Preferences.nextUpDays`) has dropped,
+    /// and it goes to the front of the row, which is sorted by that date.
+    ///
+    /// Servers before 10.9 have no way to write a date on its own and answer
+    /// 404, which is thrown.
+    func addToNextUp(seriesId: String) async throws -> BaseItem? {
+        guard let s = prefs.session else { throw APIError.notConfigured }
+        // From the server, not the library copy: which episodes are watched
+        // is the whole question, and the copy can be behind on it.
+        let all = try await get(
             ItemsResponse.self,
-            "/Shows/NextUp?userId=\(s.userId)&Limit=16&Fields=\(Self.itemFields)&EnableImageTypes=Primary,Backdrop,Thumb,Logo"
+            "/Shows/\(Self.pathId(seriesId))/Episodes?userId=\(s.userId)&Fields=\(Self.itemFields)"
         ).items
+        guard let target = HomeRows.nextUpTarget(all) else { return nil }
+        let now = ISO8601DateFormatter().string(from: Date())
+        try await request(
+            "/UserItems/\(Self.pathId(target.Id))/UserData?userId=\(s.userId)", method: "POST",
+            body: ["LastPlayedDate": now]
+        )
+        LibraryIndex.shared.patchUserData(target.Id) { $0.LastPlayedDate = now }
+        prefs.unhideFromNextUp(seriesId: seriesId)
+        return target
     }
 
     /// The one episode the user should watch next in a series — the in-progress

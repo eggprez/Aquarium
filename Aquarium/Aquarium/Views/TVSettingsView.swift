@@ -69,6 +69,10 @@ struct SettingsView: View {
                 }
                 SettingToggle(Copy.hideContinueWatching, isOn: $prefs.hidesContinueWatching)
                 SettingToggle(Copy.clearAbandoned, isOn: $prefs.clearsAbandonedEpisodes)
+                SettingChoice(Copy.nextUpDays, selection: $prefs.nextUpDays,
+                              options: Preferences.nextUpDayChoices.map { ($0, Preferences.nextUpDaysLabel($0)) })
+                SettingToggle(Copy.nextUpInProgress, isOn: $prefs.nextUpIncludesInProgress)
+                SettingToggle(Copy.nextUpRewatching, isOn: $prefs.nextUpRewatching)
                 if prefs.cloudIsAvailable {
                     SettingToggle(Copy.cloudSync, isOn: $prefs.syncsAcrossDevices)
                 } else {

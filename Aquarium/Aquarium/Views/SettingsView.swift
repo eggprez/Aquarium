@@ -162,6 +162,7 @@ struct SettingsView: View {
             if shows(.general) {
                 appearanceSection
                 homeSection
+                nextUpSection
                 cloudSection
             }
 
@@ -269,6 +270,26 @@ struct SettingsView: View {
             Text("Home")
         } footer: {
             MacSettingFooter(Copy.hideContinueWatching, Copy.clearAbandoned)
+        }
+    }
+
+    private var nextUpSection: some View {
+        @Bindable var prefs = prefs
+        return Section {
+            Picker(selection: $prefs.nextUpDays) {
+                ForEach(Preferences.nextUpDayChoices, id: \.self) { Text(Preferences.nextUpDaysLabel($0)).tag($0) }
+            } label: {
+                MacSettingLabel(Copy.nextUpDays)
+            }
+            .note(Copy.nextUpDays)
+            Toggle(isOn: $prefs.nextUpIncludesInProgress) { MacSettingLabel(Copy.nextUpInProgress) }
+                .note(Copy.nextUpInProgress)
+            Toggle(isOn: $prefs.nextUpRewatching) { MacSettingLabel(Copy.nextUpRewatching) }
+                .note(Copy.nextUpRewatching)
+        } header: {
+            Text("Next Up")
+        } footer: {
+            MacSettingFooter(Copy.nextUpDays, Copy.nextUpInProgress, Copy.nextUpRewatching)
         }
     }
 
@@ -1228,6 +1249,18 @@ private struct AppearanceSettingsPage: View {
                 Text("Home")
             } footer: {
                 SettingsFooter(Copy.hideContinueWatching, Copy.clearAbandoned)
+            }
+
+            Section {
+                Picker(Copy.nextUpDays.name ?? "", selection: $prefs.nextUpDays) {
+                    ForEach(Preferences.nextUpDayChoices, id: \.self) { Text(Preferences.nextUpDaysLabel($0)).tag($0) }
+                }
+                Toggle(Copy.nextUpInProgress.name ?? "", isOn: $prefs.nextUpIncludesInProgress)
+                Toggle(Copy.nextUpRewatching.name ?? "", isOn: $prefs.nextUpRewatching)
+            } header: {
+                Text("Next Up")
+            } footer: {
+                SettingsFooter(Copy.nextUpDays, Copy.nextUpInProgress, Copy.nextUpRewatching)
             }
         }
         .formStyle(.grouped)
@@ -2309,6 +2342,18 @@ enum SettingsCopy {
     static let clearAbandoned = SettingNote(
         name: "Clear abandoned episodes",
         text: "Each time Home loads, an episode you left partway through that Next Up has since moved well past — more than one episode behind, and untouched for a month — has its saved position cleared on the server, so it leaves Continue Watching here and in every other Jellyfin app. The episode stays unwatched; nothing is marked played and Next Up does not move."
+    )
+    static let nextUpDays = SettingNote(
+        name: "Keep shows on Next Up",
+        text: "How long a show stays on Next Up after you last watched anything in it. Forever keeps it there for as long as it has an episode left. Adding a show to Next Up counts as watching it today. Like the two settings below, this goes to the server with the question, so every Apple device signed in to this account shows the same Next Up."
+    )
+    static let nextUpInProgress = SettingNote(
+        name: "Include episodes in progress",
+        text: "Lets Next Up offer an episode you're partway through, as Continue Watching does. Off, a show whose next episode you've started is left to Continue Watching until you finish it."
+    )
+    static let nextUpRewatching = SettingNote(
+        name: "Include shows you're rewatching",
+        text: "Keeps a show you're watching again on Next Up: after an episode you've already seen, it offers the one after it, watched or not."
     )
     static let autoplayNext = SettingNote(
         name: "Play the next episode automatically",

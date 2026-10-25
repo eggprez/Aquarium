@@ -45,6 +45,39 @@ final class ItemMutations {
     private init() {}
 }
 
+/// "Add to Next Up", wherever it is offered — the press-and-hold menu and a
+/// show's own page — so the two say the same thing when it works and when
+/// it doesn't. See `JellyfinClient.addToNextUp`.
+@MainActor
+enum NextUpAdding {
+    /// The show an item stands for: itself, or the one a season or an
+    /// episode is part of. Nil for anything that isn't television.
+    static func seriesId(of item: BaseItem) -> String? {
+        if item.isSeries { return item.Id }
+        guard item.isSeason || item.isEpisode else { return nil }
+        let id = item.SeriesId ?? (item.isSeason ? item.ParentId : nil)
+        return id?.isEmpty == false ? id : nil
+    }
+
+    static func add(_ item: BaseItem, client: JellyfinClient, app: AppModel) async {
+        guard let seriesId = seriesId(of: item) else { return }
+        let name = item.isSeries ? item.title : (item.SeriesName ?? item.title)
+        do {
+            if let episode = try await client.addToNextUp(seriesId: seriesId) {
+                let at = episode.episodeLabel.map { " at \($0)" } ?? ""
+                app.toast("Added \(name) to Next Up\(at)", tone: .ok)
+                ItemMutations.shared.changed()
+            } else {
+                app.toast("Every episode of \(name) has been watched", tone: .error)
+            }
+        } catch APIError.server(let status, _) where status == 404 {
+            app.toast("This server is too old to add shows to Next Up", tone: .error)
+        } catch {
+            app.toast("Couldn't add \(name) to Next Up", tone: .error)
+        }
+    }
+}
+
 /// Reloads a page when something changes — at once if the page is on
 /// screen, otherwise the next time it is.
 ///
@@ -389,6 +422,17 @@ struct ItemMenu: View {
                 app.toast("Removed \(item.SeriesName ?? item.title) from Next Up", tone: .ok)
             } label: {
                 Label("Remove from Next Up", systemImage: "eye.slash")
+            }
+        }
+
+        // The other way: a show onto Next Up, on the server — see
+        // `JellyfinClient.addToNextUp`. Not on the Next Up row itself, where
+        // the show already is.
+        if !removesFromNextUp, NextUpAdding.seriesId(of: item) != nil {
+            Button {
+                Task { await NextUpAdding.add(item, client: client, app: app) }
+            } label: {
+                Label(item.isSeries ? "Add to Next Up" : "Add Show to Next Up", systemImage: "text.badge.plus")
             }
         }
     }

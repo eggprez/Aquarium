@@ -471,6 +471,50 @@ final class Preferences {
         return nextUpHidden[key]
     }
 
+    /// Put a show taken off Next Up by hand back on it — what "Add to Next
+    /// Up" does first, so a show removed here doesn't stay hidden from the
+    /// row it was just added to.
+    func unhideFromNextUp(seriesId: String) {
+        guard let key = nextUpHiddenKey(seriesId: seriesId), nextUpHidden[key] != nil else { return }
+        nextUpHidden[key] = nil
+    }
+
+    /// How many days a show stays on Next Up after anything in it was last
+    /// played, or 0 for as long as it has an episode to offer. Sent to the
+    /// server as the cutoff, so the row is cut there rather than here and
+    /// every surface that asks — Home, the top shelf, CarPlay, Siri — gets
+    /// the same list.
+    var nextUpDays: Int {
+        didSet { write(nextUpDays, forKey: "next_up_days") }
+    }
+
+    static let nextUpDayChoices = [0, 7, 14, 30, 90, 180, 365]
+
+    static func nextUpDaysLabel(_ days: Int) -> String {
+        switch days {
+        case 0: "Forever"
+        case 7: "1 week"
+        case 14: "2 weeks"
+        case 30: "1 month"
+        case 365: "1 year"
+        default: "\(days / 30) months"
+        }
+    }
+
+    /// Whether Next Up offers the episode you are partway through, as well
+    /// as Continue Watching does. On by default, which is what the server
+    /// does when it isn't told.
+    var nextUpIncludesInProgress: Bool {
+        didSet { write(nextUpIncludesInProgress, forKey: "next_up_in_progress") }
+    }
+
+    /// Whether a show watched to the end comes back on Next Up at its first
+    /// episode, for anyone working through it again. Off by default, as on
+    /// the server.
+    var nextUpRewatching: Bool {
+        didSet { write(nextUpRewatching, forKey: "next_up_rewatching") }
+    }
+
     /// The rung picked in the player, for the next stream to open at while
     /// the quality isn't Auto (`openingBitrate`). `nil` is direct play. This device's
     /// own, not synced: what a stream can carry depends on the network and
@@ -986,6 +1030,9 @@ final class Preferences {
         hidesContinueWatching = d.bool(forKey: "home_hide_continue_watching")
         clearsAbandonedEpisodes = d.bool(forKey: "home_clear_abandoned")
         nextUpHidden = (d.dictionary(forKey: "next_up_hidden") as? [String: String]) ?? [:]
+        nextUpDays = Self.nextUpDayChoices.contains(d.integer(forKey: "next_up_days")) ? d.integer(forKey: "next_up_days") : 0
+        nextUpIncludesInProgress = d.object(forKey: "next_up_in_progress") == nil ? true : d.bool(forKey: "next_up_in_progress")
+        nextUpRewatching = d.bool(forKey: "next_up_rewatching")
         defaultBitrate = Quality.snapped(d.object(forKey: "default_bitrate") as? Int)
         stereoDownmix = d.bool(forKey: "stereo_downmix")
         decodeAudioLocally = d.bool(forKey: "decode_audio_locally")
@@ -1101,6 +1148,9 @@ final class Preferences {
         CloudSync.set(hidesContinueWatching, forKey: "home_hide_continue_watching")
         CloudSync.set(clearsAbandonedEpisodes, forKey: "home_clear_abandoned")
         CloudSync.set(nextUpHidden, forKey: "next_up_hidden")
+        CloudSync.set(nextUpDays, forKey: "next_up_days")
+        CloudSync.set(nextUpIncludesInProgress, forKey: "next_up_in_progress")
+        CloudSync.set(nextUpRewatching, forKey: "next_up_rewatching")
         CloudSync.set(stereoDownmix, forKey: "stereo_downmix")
         CloudSync.set(resumePlayback, forKey: "resume_playback")
         CloudSync.set(audioLanguage, forKey: "audio_lang")
@@ -1191,6 +1241,10 @@ final class Preferences {
         if let v = CloudSync.object(forKey: "home_hide_continue_watching") as? Bool, v != hidesContinueWatching { hidesContinueWatching = v }
         if let v = CloudSync.object(forKey: "home_clear_abandoned") as? Bool, v != clearsAbandonedEpisodes { clearsAbandonedEpisodes = v }
         if let v = CloudSync.object(forKey: "next_up_hidden") as? [String: String], v != nextUpHidden { nextUpHidden = v }
+        if let v = (CloudSync.object(forKey: "next_up_days") as? NSNumber)?.intValue,
+           Self.nextUpDayChoices.contains(v), v != nextUpDays { nextUpDays = v }
+        if let v = CloudSync.object(forKey: "next_up_in_progress") as? Bool, v != nextUpIncludesInProgress { nextUpIncludesInProgress = v }
+        if let v = CloudSync.object(forKey: "next_up_rewatching") as? Bool, v != nextUpRewatching { nextUpRewatching = v }
         if let v = CloudSync.object(forKey: "stereo_downmix") as? Bool, v != stereoDownmix { stereoDownmix = v }
         if let v = CloudSync.object(forKey: "resume_playback") as? Bool, v != resumePlayback { resumePlayback = v }
         if let v = CloudSync.object(forKey: "audio_lang") as? String, v != audioLanguage { audioLanguage = v }

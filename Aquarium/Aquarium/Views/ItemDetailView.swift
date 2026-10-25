@@ -1042,6 +1042,17 @@ struct ItemDetailView: View {
                 .labelStyle(IconDiscLabelStyle(tint: item.userData.played ? Theme.accent : nil))
                 .buttonStyle(.plain)
                 .help(item.userData.played ? "Mark as Unwatched (⇧⌘U)" : "Mark as Watched (⇧⌘U)")
+            } else {
+                // A show is put on Next Up rather than marked watched — see
+                // `JellyfinClient.addToNextUp`.
+                Button {
+                    Task { await NextUpAdding.add(item, client: client, app: app) }
+                } label: {
+                    Label("Add to Next Up", systemImage: "text.badge.plus")
+                }
+                .labelStyle(IconDiscLabelStyle())
+                .buttonStyle(.plain)
+                .help("Add to Next Up")
             }
 
             downloadMenu(item)
@@ -1458,6 +1469,17 @@ struct ItemDetailView: View {
             #endif
         }
 
+        // A show is put on Next Up rather than marked watched — see
+        // `JellyfinClient.addToNextUp`.
+        if item.isSeries {
+            Button {
+                Task { await NextUpAdding.add(item, client: client, app: app) }
+            } label: {
+                Label("Add to Next Up", systemImage: "text.badge.plus")
+            }
+            .appButtonStyle()
+        }
+
         if Trailers.has(item) {
             Button {
                 Task { await playTrailer(item) }
@@ -1512,50 +1534,54 @@ struct ItemDetailView: View {
         }
         #endif
 
-        // Nothing to put behind the glyph on a series whose next episode the
-        // server hasn't told us about yet.
-        if playable != nil || !item.isSeries || Trailers.has(item) {
-            Menu {
-                if Trailers.has(item) {
-                    Button {
-                        Task { await playTrailer(item) }
-                    } label: {
-                        Label("Watch trailer", systemImage: "film")
-                    }
+        // Never empty: a show always has Add to Next Up behind it, and
+        // anything else can be marked watched.
+        Menu {
+            if Trailers.has(item) {
+                Button {
+                    Task { await playTrailer(item) }
+                } label: {
+                    Label("Watch trailer", systemImage: "film")
                 }
-                if let playable {
-                    Menu {
-                        qualityMenu(playable)
-                    } label: {
-                        Label("Play at a set quality", systemImage: "slider.horizontal.3")
-                    }
-                }
-                if !item.isSeries {
-                    Button {
-                        Task { await toggleWatched(item) }
-                    } label: {
-                        Label(
-                            item.userData.played ? "Mark unwatched" : "Mark watched",
-                            systemImage: item.userData.played ? "arrow.uturn.backward.circle" : "checkmark.circle"
-                        )
-                    }
-                }
-            } label: {
-                // Sized by a star it doesn't show. A button is as tall as its
-                // glyph, and an ellipsis is three dots on the baseline — a
-                // third the height of the star and the arrow beside it — so
-                // this was visibly the runt of the row.
-                Label {
-                    Text("More")
-                } icon: {
-                    Image(systemName: "star")
-                        .hidden()
-                        .overlay { Image(systemName: "ellipsis") }
-                }
-                .labelStyle(.iconOnly)
             }
-            .buttonStyle(.bordered)
+            if let playable {
+                Menu {
+                    qualityMenu(playable)
+                } label: {
+                    Label("Play at a set quality", systemImage: "slider.horizontal.3")
+                }
+            }
+            if !item.isSeries {
+                Button {
+                    Task { await toggleWatched(item) }
+                } label: {
+                    Label(
+                        item.userData.played ? "Mark unwatched" : "Mark watched",
+                        systemImage: item.userData.played ? "arrow.uturn.backward.circle" : "checkmark.circle"
+                    )
+                }
+            } else {
+                Button {
+                    Task { await NextUpAdding.add(item, client: client, app: app) }
+                } label: {
+                    Label("Add to Next Up", systemImage: "text.badge.plus")
+                }
+            }
+        } label: {
+            // Sized by a star it doesn't show. A button is as tall as its
+            // glyph, and an ellipsis is three dots on the baseline — a
+            // third the height of the star and the arrow beside it — so
+            // this was visibly the runt of the row.
+            Label {
+                Text("More")
+            } icon: {
+                Image(systemName: "star")
+                    .hidden()
+                    .overlay { Image(systemName: "ellipsis") }
+            }
+            .labelStyle(.iconOnly)
         }
+        .buttonStyle(.bordered)
     }
     #endif
 

@@ -78,6 +78,11 @@ struct HomeView: View {
         HomeRows.visible(nextUp, nextUp: nextUp) { prefs.nextUpHiddenEpisode(seriesId: $0) }
     }
 
+    /// What `onChange` watches for the Next Up settings, as one value.
+    private var nextUpSettings: String {
+        "\(prefs.nextUpDays)|\(prefs.nextUpIncludesInProgress)|\(prefs.nextUpRewatching)"
+    }
+
     private var isBare: Bool {
         resume.isEmpty && nextUp.isEmpty && latest.isEmpty && heroItems.isEmpty
             && !(sections.contains(.libraries) && !app.libraries.isEmpty)
@@ -525,6 +530,12 @@ struct HomeView: View {
         // anyway (see `isFrontmost` below), so a change made while it was
         // covered is picked up then, once, instead of twice.
         .reloadWhenItemsChange { if isFrontmost { await reload() } }
+        // The Next Up settings are the row's query (see `JellyfinClient.nextUp`),
+        // so changing one — here, in a Mac's Settings window beside this one,
+        // or on another device through iCloud — asks for the row again.
+        .onChange(of: nextUpSettings) { _, _ in
+            if isFrontmost { Task { await reload() } }
+        }
         .task { await reload() }
         .task(id: app.libraries.map(\.Id)) { await loadLatest() }
         .onDisappear { rememberPage() }
