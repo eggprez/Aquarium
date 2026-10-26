@@ -1187,18 +1187,6 @@ private struct AppearanceSettingsPage: View {
                 SettingsFooter(Copy.theme)
             }
 
-            // Only a foldable has poses to choose between. The row stays while
-            // an override is set, so one can always be cleared.
-            if FoldState.shared.isFoldable || prefs.layoutOverride != .automatic {
-                Section {
-                    Picker(Copy.layout.name ?? "", selection: $prefs.layoutOverride) {
-                        ForEach(LayoutOverride.allCases, id: \.self) { Text($0.label).tag($0) }
-                    }
-                } footer: {
-                    SettingsFooter(Copy.layout)
-                }
-            }
-
             Section {
                 if UIApplication.shared.supportsAlternateIcons {
                     NavigationLink {
@@ -1223,11 +1211,10 @@ private struct AppearanceSettingsPage: View {
 
             Section {
                 Toggle(Copy.hideContinueWatching.name ?? "", isOn: $prefs.hidesContinueWatching)
-                Toggle(Copy.clearAbandoned.name ?? "", isOn: $prefs.clearsAbandonedEpisodes)
             } header: {
                 Text("Home")
             } footer: {
-                SettingsFooter(Copy.hideContinueWatching, Copy.clearAbandoned)
+                SettingsFooter(Copy.hideContinueWatching)
             }
         }
         .formStyle(.grouped)
@@ -1237,70 +1224,21 @@ private struct AppearanceSettingsPage: View {
 
 private struct VideoSettingsPage: View {
     @Environment(Preferences.self) private var prefs
-    @Environment(PlayerModel.self) private var player
 
     var body: some View {
         @Bindable var prefs = prefs
         Form {
-            // The quality itself — Auto or a rung held — is picked in the
-            // player, and only there.
+            // The same choice as the player's Quality card, and the same
+            // place it is kept: Auto, or one rung held for every stream.
             Section {
-                Toggle(Copy.powerAwareQuality.name ?? "", isOn: $prefs.powerAwareQuality)
-                    .disabled(!prefs.adaptiveQuality)
+                Picker(Copy.defaultQuality.name ?? "", selection: Self.qualityBinding) {
+                    Text("Auto").tag(PlayerModel.QualitySelection.auto)
+                    ForEach(Quality.choices, id: \.label) { Text($0.label).tag(PlayerModel.QualitySelection.stream($0.maxBitrate)) }
+                }
             } header: {
                 Text("Quality")
             } footer: {
-                SettingsFooter(Copy.powerAwareQuality)
-            }
-
-            Section {
-                // The segments beside the name: a segmented picker on its own
-                // in a form row drops its label, and "Fit | Fill" with nothing
-                // to say what they are of is a puzzle.
-                HStack {
-                    Text(Copy.framing.name ?? "")
-                    Spacer(minLength: 16)
-                    Picker(Copy.framing.name ?? "", selection: $prefs.fillScreen) {
-                        Text("Fit").tag(false)
-                        Text("Fill").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
-                }
-                .onChange(of: prefs.fillScreen) { _, _ in player.applyFraming(switchingIfNeeded: true) }
-                PictureAdjustRows()
-                Toggle(Copy.nightMode.name ?? "", isOn: $prefs.nightMode)
-                    .onChange(of: prefs.nightMode) { _, _ in player.applyNightMode() }
-            } header: {
-                Text("Picture")
-            } footer: {
-                SettingsFooter(Copy.framing, Copy.pictureControls, Copy.pictureZoom, Copy.aspectOverride, Copy.nightMode)
-            }
-
-            Section {
-                Picker(Copy.playbackEngineChoice.name ?? "", selection: $prefs.playbackEngine) {
-                    ForEach(EnginePolicy.Preference.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                Picker(Copy.batterySaver.name ?? "", selection: $prefs.batterySaver) {
-                    ForEach(EnginePolicy.BatterySaver.allCases, id: \.self) { Text($0.title).tag($0) }
-                }
-                .onChange(of: prefs.batterySaver) { _, _ in player.refreshPowerProfile() }
-                Picker(Copy.skipInterval.name ?? "", selection: $prefs.skipInterval) {
-                    ForEach(Preferences.skipIntervals, id: \.self) { Text("\($0) seconds").tag($0) }
-                }
-                Picker(Copy.hideControlsAfter.name ?? "", selection: $prefs.hideControlsAfter) {
-                    ForEach(Preferences.hideControlsChoices, id: \.self) { Text("\(Int($0)) seconds").tag($0) }
-                }
-                Toggle(Copy.showsRemainingTime.name ?? "", isOn: $prefs.showsRemainingTime)
-                Toggle(Copy.holdForDoubleSpeed.name ?? "", isOn: $prefs.holdForDoubleSpeed)
-                Toggle(Copy.edgeGestures.name ?? "", isOn: $prefs.edgeGestures)
-            } header: {
-                Text("Player")
-            } footer: {
-                SettingsFooter(Copy.playbackEngineChoice, Copy.batterySaver,
-                               Copy.skipInterval, Copy.hideControlsAfter, Copy.showsRemainingTime,
-                               Copy.holdForDoubleSpeed, Copy.edgeGestures)
+                SettingsFooter(Copy.defaultQualityAuto)
             }
 
             Section {
@@ -1311,19 +1249,29 @@ private struct VideoSettingsPage: View {
             } footer: {
                 SettingsFooter(Copy.resume, Copy.autoplayNext)
             }
-
-            Section {
-                Picker(Copy.audioLanguage.name ?? "", selection: $prefs.audioLanguage) {
-                    Text("File's choice").tag("")
-                    ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
-                }
-            } header: {
-                Text("Language")
-            } footer: {
-                SettingsFooter(Copy.audioLanguage)
-            }
         }
         .formStyle(.grouped)
+    }
+
+    /// Auto, or the rung kept in `defaultBitrate`.
+    private static var qualityBinding: Binding<PlayerModel.QualitySelection> {
+        Binding(
+            get: {
+                let prefs = Preferences.shared
+                return prefs.adaptiveQuality ? .auto : .stream(prefs.defaultBitrate)
+            },
+            set: { selection in
+                let prefs = Preferences.shared
+                switch selection {
+                case .stream(let bitrate):
+                    prefs.adaptiveQuality = false
+                    prefs.defaultBitrate = bitrate
+                default:
+                    prefs.adaptiveQuality = true
+                    prefs.defaultBitrate = nil
+                }
+            }
+        )
     }
 }
 
@@ -1334,15 +1282,18 @@ private struct AudioSettingsPage: View {
         @Bindable var prefs = prefs
         Form {
             Section {
-                Toggle(Copy.downmix.name ?? "", isOn: $prefs.stereoDownmix)
-                // No audio delay here: a phone has nothing between it and
-                // its own speaker to lag. The Apple TV is where the delay
-                // is measured and set; the row below is how.
+                Picker(Copy.audioLanguage.name ?? "", selection: $prefs.audioLanguage) {
+                    Text("File's choice").tag("")
+                    ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
+                }
             } header: {
-                Text("Output")
+                Text("Language")
             } footer: {
-                SettingsFooter(Copy.downmix)
+                SettingsFooter(Copy.audioLanguage)
             }
+            // No audio delay here: a phone has nothing between it and its
+            // own speaker to lag. The Apple TV is where the delay is
+            // measured and set; the row below is how.
             #if os(iOS)
             Section {
                 NavigationLink {
@@ -1364,7 +1315,6 @@ private struct AudioSettingsPage: View {
 
 private struct SubtitlesSettingsPage: View {
     @Environment(Preferences.self) private var prefs
-    @Environment(PlayerModel.self) private var player
 
     var body: some View {
         @Bindable var prefs = prefs
@@ -1376,33 +1326,10 @@ private struct SubtitlesSettingsPage: View {
                     Text("Forced only").tag(TrackPreference.forcedOnly)
                     ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
                 }
-                Toggle(Copy.forcedOnly.name ?? "", isOn: $prefs.forcedSubtitlesOnly)
             } header: {
                 Text("Language")
             } footer: {
-                SettingsFooter(Copy.subtitleLanguage, Copy.forcedOnly, Copy.trackMemory)
-            }
-
-            Section {
-                VStack(alignment: .leading) {
-                    HStack {
-                        Text(Copy.subtitleSize.name ?? "")
-                        Spacer()
-                        Text("\(Int(prefs.subtitleSize))%")
-                            .foregroundStyle(Theme.textDim)
-                            .monospacedDigit()
-                    }
-                    Slider(value: $prefs.subtitleSize, in: 60...180, step: 5)
-                        .onChange(of: prefs.subtitleSize) { _, _ in player.refreshSubtitleStyling() }
-                }
-                Picker(Copy.subtitleBackground.name ?? "", selection: $prefs.subtitleBackground) {
-                    ForEach(SubtitleBackground.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                .onChange(of: prefs.subtitleBackground) { _, _ in player.refreshSubtitleStyling() }
-            } header: {
-                Text("Appearance")
-            } footer: {
-                SettingsFooter(Copy.subtitleSize, Copy.subtitleBackground)
+                SettingsFooter(Copy.subtitleLanguage, Copy.trackMemory)
             }
         }
         .formStyle(.grouped)
@@ -2294,6 +2221,9 @@ enum SettingsCopy {
         name: "Ease off when the device is struggling",
         text: "Holds the stream to 1080p at 10 Mbps while the device is running hot or in Low Power Mode, and to 720p when it is at its thermal limit — before the picture starts to stutter rather than after. It climbs back the usual way once things settle. Only while the player's Quality is Auto; picking a quality there is choosing it yourself."
     )
+    static let defaultQualityAuto = SettingNote(
+        text: "What a stream opens at. Auto starts at the best the connection allows and steps down by itself when it keeps stalling; a rung holds every stream there until you pick another, here or in the player's Quality card."
+    )
     static let defaultQuality = SettingNote(
         name: "Default quality",
         text: "What a stream opens at before you change it. Direct Play sends the original file when this device can open it, and asks the server to remux or transcode when it can't."
@@ -2612,11 +2542,18 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         #if os(tvOS)
         // No adaptive quality on the Apple TV's player — see `VideoSettingsPage`.
         case .video: "The quality a stream opens at, how a wide picture is framed, what happens at the end of an episode, and the spoken language a video opens with."
+        #elseif os(iOS)
+        case .video: "The quality a stream opens at, and what happens at the end of an episode."
         #else
         case .video: "Easing the stream off when the device is struggling, how a wide picture is framed, what happens at the end of an episode, and the spoken language a video opens with."
         #endif
+        #if os(iOS)
+        case .audio: "The spoken language a video opens with, and measuring the Apple TV's delay."
+        case .subtitles: "Which subtitles a video opens with: a language, the forced track only, or none."
+        #else
         case .audio: "The delay that keeps sound and picture together, and downmixing surround for a stereo setup."
         case .subtitles: "Which subtitles a video opens with, whether only the forced track shows, and how large they are drawn and on what."
+        #endif
         case .music: "Keeping the music going, levelling quiet albums against loud ones, lossless over cellular, and how stations choose."
         case .liveTV: "Where channels and the guide come from — Jellyfin's own Live TV, or an M3U playlist and XMLTV guide of your own."
         case .downloads: "The quality a download is asked for, how many run at once, and whether they wait for Wi‑Fi."
@@ -2648,9 +2585,14 @@ enum SettingsSummary {
     }
 
     static func audio(_ prefs: Preferences) -> String {
+        #if os(iOS)
+        // The language is all an iPhone or an iPad sets here.
+        return language(prefs.audioLanguage, none: "File's choice")
+        #else
         var parts = [prefs.audioDelay == 0 ? "In step" : PlayerModel.audioDelayShortName(Int((prefs.audioDelay * 1000).rounded()))]
         if prefs.stereoDownmix { parts.append("Stereo") }
         return parts.joined(separator: " · ")
+        #endif
     }
 
     static func subtitles(_ prefs: Preferences) -> String {
