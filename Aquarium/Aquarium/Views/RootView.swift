@@ -94,12 +94,14 @@ struct RootView: View {
             // so it goes ahead of the guard.
             LiveTVStore.shared.warm()
             guard client.isSignedIn else { return }
-            // Read the saved library copy first, so the libraries can be shown
-            // from it if the server turns out not to answer.
-            await LibraryIndex.shared.prepare()
             // With a saved Home there is something to show while the server is
-            // asked, so the shell doesn't wait for the answer.
+            // asked, so the shell doesn't wait for the answer. Read on its own,
+            // ahead of the rest of the copy, which can take seconds.
+            await LibraryIndex.shared.prepareHome()
             if LibraryIndex.shared.homeCopy() != nil { app.settleLaunchFromCopy() }
+            // Then the rest, so the libraries can be shown from it if the
+            // server turns out not to answer.
+            await LibraryIndex.shared.prepare()
             await app.refreshConnectivity()
             await app.loadLibraries()
             Task { await LibraryIndex.shared.sync(force: true) }
