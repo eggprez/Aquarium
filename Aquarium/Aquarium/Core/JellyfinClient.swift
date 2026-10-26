@@ -10,6 +10,7 @@
 import Foundation
 import Network
 import Observation
+import os
 
 /// The kinds of failure that have to be told apart upstream: "the network is
 /// down" reads as offline mode, "that is not the server you signed in to" stops
@@ -1202,22 +1203,107 @@ final class JellyfinClient {
     /// place that shows the row asks through here, so the settings — which
     /// travel between devices — are the whole of what makes the list, and an
     /// iPhone, an Apple TV and a Mac signed in to one account get one list.
-    /// See `Preferences.nextUpDays`.
+    ///
+    /// With a day limit set (`Preferences.nextUpDays`), the app is what
+    /// enforces it: the row is the server's Next Up cut at the limit, and a
+    /// show the server still has past it is taken off Next Up *on the
+    /// server* (`removeFromNextUp`), so Jellyfin's own apps and the Linux
+    /// one stop offering it too. Both questions go out with the same
+    /// settings, so the only thing between their answers is the limit. The
+    /// wider one failing, or a server that ignores the cutoff, leaves
+    /// nothing to remove — this never takes off a show it hasn't seen
+    /// fall outside the limit.
     func nextUp() async throws -> [BaseItem] {
+        let days = prefs.nextUpDays
+        guard days > 0 else { return try await nextUpQuery(limit: 16, cutoff: nil) }
+        let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 60 * 60)
+        // Both at the server's own most, not the row's 16: a show inside the
+        // limit but past the 16th is not one to remove.
+        async let within = nextUpQuery(limit: 100, cutoff: cutoff)
+        async let everything = try? nextUpQuery(limit: 100, cutoff: nil, light: true)
+        let kept = try await within
+        if let everything = await everything {
+            reportExpired(HomeRows.expiredFromNextUp(everything: everything, kept: kept))
+        }
+        return Array(kept.prefix(16))
+    }
+
+    /// `light` asks for the ids alone — what the wider question above needs.
+    private func nextUpQuery(limit: Int, cutoff: Date?, light: Bool = false) async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
         var query: [URLQueryItem] = [
             .init(name: "userId", value: s.userId),
-            .init(name: "Limit", value: "16"),
-            .init(name: "Fields", value: Self.itemFields),
-            .init(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb,Logo"),
+            .init(name: "Limit", value: String(limit)),
             .init(name: "enableResumable", value: prefs.nextUpIncludesInProgress ? "true" : "false"),
             .init(name: "enableRewatching", value: prefs.nextUpRewatching ? "true" : "false"),
         ]
-        if prefs.nextUpDays > 0 {
-            let cutoff = Date().addingTimeInterval(-Double(prefs.nextUpDays) * 24 * 60 * 60)
+        if light {
+            query += [.init(name: "enableImages", value: "false"), .init(name: "enableUserData", value: "false")]
+        } else {
+            query += [
+                .init(name: "Fields", value: Self.itemFields),
+                .init(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb,Logo"),
+            ]
+        }
+        if let cutoff {
             query.append(.init(name: "nextUpDateCutoff", value: ISO8601DateFormatter().string(from: cutoff)))
         }
         return try await get(ItemsResponse.self, "/Shows/NextUp?\(Self.encode(query))").items
+    }
+
+    /// Shows being taken off Next Up for having run past the day limit, so
+    /// that two surfaces asking at once — Home and the top shelf, say — don't
+    /// both write the same dates.
+    @ObservationIgnored private var expiring: Set<String> = []
+
+    /// Take the shows past the day limit off Next Up on the server, one after
+    /// another and without holding up the row, which already leaves them out.
+    /// A failure is left for the next time the row is asked for.
+    private func reportExpired(_ seriesIds: [String]) {
+        let fresh = seriesIds.filter { !expiring.contains($0) }
+        guard !fresh.isEmpty else { return }
+        expiring.formUnion(fresh)
+        Task {
+            for id in fresh {
+                do {
+                    try await removeFromNextUp(seriesId: id)
+                } catch {
+                    Self.nextUpLog.error("Couldn't take \(id, privacy: .public) off Next Up: \(error.localizedDescription, privacy: .public)")
+                }
+                expiring.remove(id)
+            }
+        }
+    }
+
+    nonisolated static let nextUpLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Aquarium", category: "nextup")
+
+    /// Take a show off Next Up, on the server, without touching what has been
+    /// watched. Next Up is built from the episodes with a last-played date;
+    /// Jellyfin reads the earliest date there is as none, so each of the
+    /// show's dated episodes is given that one (`HomeRows.notPlayedDate`).
+    /// Watched marks, play counts and positions stay as they were — an
+    /// episode left partway is still in Continue Watching, at the end of it.
+    ///
+    /// The show comes back when an episode of it is played, or when it is
+    /// added to Next Up again. Not for a new episode — nothing of it counts
+    /// as watched lately — and not for an episode marked watched by hand,
+    /// which keeps the date it had.
+    ///
+    /// Servers before 10.9 have no way to write a date on its own and answer
+    /// 404, which is thrown.
+    func removeFromNextUp(seriesId: String) async throws {
+        guard let s = prefs.session else { throw APIError.notConfigured }
+        let episodes = try await get(
+            ItemsResponse.self,
+            "/Shows/\(Self.pathId(seriesId))/Episodes?userId=\(s.userId)&Fields=\(Self.itemFields)"
+        ).items
+        for episode in episodes where HomeRows.hasPlayedDate(episode) {
+            try await request(
+                "/UserItems/\(Self.pathId(episode.Id))/UserData?userId=\(s.userId)", method: "POST",
+                body: ["LastPlayedDate": HomeRows.notPlayedDate]
+            )
+            LibraryIndex.shared.patchUserData(episode.Id) { $0.LastPlayedDate = HomeRows.notPlayedDate }
+        }
     }
 
     /// Put a show on Next Up, on the server, so every app signed in to the

@@ -75,6 +75,33 @@ enum HomeRows {
         return rest.first { !$0.userData.played }
     }
 
+    /// The last-played date that takes an episode out of what Next Up is
+    /// built from: Jellyfin's earliest date, which it reads as never. See
+    /// `JellyfinClient.removeFromNextUp`.
+    static let notPlayedDate = "0001-01-01T00:00:00Z"
+
+    /// Whether the server has a real last-played date for an episode —
+    /// what puts its show on Next Up. Not one `notPlayedDate` has replaced.
+    static func hasPlayedDate(_ item: BaseItem) -> Bool {
+        guard let date = Format.parseDate(item.UserData?.LastPlayedDate) else { return false }
+        return Calendar(identifier: .gregorian).component(.year, from: date) > 1
+    }
+
+    /// The shows Next Up still has that are past the day limit: in the
+    /// server's whole answer, not in the one cut at the limit. Nothing when
+    /// the cut answer is as long as the whole one, which is either a server
+    /// that ignored the cutoff or two answers both at their length limit —
+    /// neither says anything was left out for its date. See
+    /// `JellyfinClient.nextUp`.
+    static func expiredFromNextUp(everything: [BaseItem], kept: [BaseItem]) -> [String] {
+        guard kept.count < everything.count else { return [] }
+        let keptSeries = Set(kept.compactMap(\.SeriesId))
+        var seen = Set<String>()
+        return everything.compactMap(\.SeriesId).filter {
+            !keptSeries.contains($0) && seen.insert($0).inserted
+        }
+    }
+
     /// `row` without the shows removed from Next Up by hand.
     ///
     /// A show was removed while a particular episode was its card — see

@@ -436,10 +436,10 @@ final class Preferences {
         didSet { write(clearsAbandonedEpisodes, forKey: "home_clear_abandoned") }
     }
 
-    /// Shows taken out of Next Up by hand — see `ItemMenu`'s "Remove from
-    /// Next Up". Jellyfin has no way to hide a show from Next Up without
-    /// marking something watched, so the list is this app's, and it travels
-    /// with the account's other preferences.
+    /// Shows taken out of Next Up by hand on a server too old for "Remove
+    /// from Next Up" to reach (before 10.9, which can't write a last-played
+    /// date on its own — see `JellyfinClient.removeFromNextUp`). The list
+    /// is this app's, and it travels with the account's other preferences.
     ///
     /// Keyed by account and series (see `nextUpHiddenKey`), the value being
     /// the episode the row was showing when the show was removed. A show
@@ -480,10 +480,10 @@ final class Preferences {
     }
 
     /// How many days a show stays on Next Up after anything in it was last
-    /// played, or 0 for as long as it has an episode to offer. Sent to the
-    /// server as the cutoff, so the row is cut there rather than here and
-    /// every surface that asks — Home, the top shelf, CarPlay, Siri — gets
-    /// the same list.
+    /// played, or 0 for as long as it has an episode to offer. Enforced by
+    /// the app, and a show past it taken off Next Up on the server — see
+    /// `JellyfinClient.nextUp` — so every surface that asks (Home, the top
+    /// shelf, CarPlay, Siri) and every other app on the account agree.
     var nextUpDays: Int {
         didSet { write(nextUpDays, forKey: "next_up_days") }
     }

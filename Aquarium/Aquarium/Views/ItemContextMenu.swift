@@ -47,9 +47,27 @@ final class ItemMutations {
 
 /// "Add to Next Up", wherever it is offered — the press-and-hold menu and a
 /// show's own page — so the two say the same thing when it works and when
-/// it doesn't. See `JellyfinClient.addToNextUp`.
+/// it doesn't, and "Remove from Next Up" beside it. See
+/// `JellyfinClient.addToNextUp` and `removeFromNextUp`.
 @MainActor
 enum NextUpAdding {
+    /// On the server; on one too old to write the dates, the app's own list
+    /// instead (`Preferences.nextUpHidden`), which only this account's Apple
+    /// devices read.
+    static func remove(_ item: BaseItem, seriesId: String, client: JellyfinClient, app: AppModel, prefs: Preferences) async {
+        let name = item.SeriesName ?? item.title
+        do {
+            try await client.removeFromNextUp(seriesId: seriesId)
+            app.toast("Removed \(name) from Next Up", tone: .ok)
+            ItemMutations.shared.changed()
+        } catch APIError.server(let status, _) where status == 404 {
+            prefs.hideFromNextUp(seriesId: seriesId, episodeId: item.Id)
+            app.toast("Removed \(name) from Next Up here", tone: .ok)
+        } catch {
+            app.toast("Couldn't remove \(name) from Next Up", tone: .error)
+        }
+    }
+
     /// The show an item stands for: itself, or the one a season or an
     /// episode is part of. Nil for anything that isn't television.
     static func seriesId(of item: BaseItem) -> String? {
@@ -411,15 +429,11 @@ struct ItemMenu: View {
         }
         .macShortcut("u", modifiers: [.command, .shift])
 
-        // Taking a show off Next Up without touching what the server thinks
-        // of it. Jellyfin has no such switch — the only way it offers is to
-        // mark episodes watched, which is a different thing — so this is the
-        // app's own list, and the show comes back on its own once a later
-        // episode has been watched. See `Preferences.nextUpHidden`.
+        // Taking a show off Next Up, on the server, without marking anything
+        // watched — see `JellyfinClient.removeFromNextUp`.
         if removesFromNextUp, item.isEpisode, let seriesId = item.SeriesId, !seriesId.isEmpty {
             Button {
-                prefs.hideFromNextUp(seriesId: seriesId, episodeId: item.Id)
-                app.toast("Removed \(item.SeriesName ?? item.title) from Next Up", tone: .ok)
+                Task { await NextUpAdding.remove(item, seriesId: seriesId, client: client, app: app, prefs: prefs) }
             } label: {
                 Label("Remove from Next Up", systemImage: "eye.slash")
             }

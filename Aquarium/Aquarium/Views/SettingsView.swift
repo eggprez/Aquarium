@@ -2345,7 +2345,7 @@ enum SettingsCopy {
     )
     static let nextUpDays = SettingNote(
         name: "Keep shows on Next Up",
-        text: "How long a show stays on Next Up after you last watched anything in it. Forever keeps it there for as long as it has an episode left. A show you're up to date on comes back when a new episode arrives, but only if you watched it within this limit. Adding a show to Next Up counts as watching it today. Like the two settings below, this goes to the server with the question, so every Apple device signed in to this account shows the same Next Up."
+        text: "How long a show stays on Next Up after you last watched anything in it. Past that, the app takes it off Next Up on the server as well, so Jellyfin's other apps stop showing it too; nothing is marked watched. A show you're up to date on comes back when a new episode arrives, but only if you watched it within this limit. Playing an episode or adding the show to Next Up brings any show back, and adding counts as watching it today. Forever keeps a show for as long as it has an episode left and never takes one off. Like the two settings below, this follows you to every Apple device signed in to this account."
     )
     static let nextUpInProgress = SettingNote(
         name: "Include episodes in progress",
