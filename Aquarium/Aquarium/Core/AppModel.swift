@@ -502,7 +502,21 @@ final class AppModel {
     /// with Home failing to load — the same tabs, reached the same way, as an
     /// app that loses the server while open. Once per launch: a later sign-in
     /// doesn't wait again.
+    ///
+    /// Unless there is a saved Home to open on (see `settleLaunchFromCopy`):
+    /// then the shell comes up at once and the probe answers behind it.
     private(set) var launchSettled = false
+
+    /// The library copy has a Home to show, so the shell stops waiting for the
+    /// server. Against a server that is slow to wake, waiting held a bare
+    /// spinner on screen for as long as the probe took — up to its whole
+    /// timeout — while the page it was waiting to draw was already on disk.
+    /// The cost is the case the wait was for: opened with the server truly
+    /// gone, the online tabs show the saved Home until the probe says so, and
+    /// then give way to the offline ones.
+    func settleLaunchFromCopy() {
+        launchSettled = true
+    }
 
     private init() {
         // The network changing under the app, or a page's request finding

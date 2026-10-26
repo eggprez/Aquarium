@@ -53,7 +53,8 @@ struct RootView: View {
                     // The launch's first question to the server — see
                     // `AppModel.launchSettled`. Under a second against a
                     // server that answers or refuses; the probe's own timeout
-                    // (5 s) against one that never replies.
+                    // (5 s) against one that never replies. Only a moment when
+                    // the library copy has a Home to open on.
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -96,6 +97,9 @@ struct RootView: View {
             // Read the saved library copy first, so the libraries can be shown
             // from it if the server turns out not to answer.
             await LibraryIndex.shared.prepare()
+            // With a saved Home there is something to show while the server is
+            // asked, so the shell doesn't wait for the answer.
+            if LibraryIndex.shared.homeCopy() != nil { app.settleLaunchFromCopy() }
             await app.refreshConnectivity()
             await app.loadLibraries()
             Task { await LibraryIndex.shared.sync(force: true) }

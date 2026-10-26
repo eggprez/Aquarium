@@ -433,8 +433,11 @@ struct DownloadsView: View {
         }
     }
 
-    /// What is on the watch, and how the things sent to it are getting on:
-    /// "3 of 5 sent are on the watch" until all of them are.
+    /// What is on the watch, and what is still on its way there, both in
+    /// files: "12 items · 340 MB · 4 on the way". The second number is the
+    /// Transfers page's row count. It used to be "3 of 5 sent are on the
+    /// watch", which counted albums and playlists, and no page lists those
+    /// beside the files they come to, so it never matched anything.
     private func watchDetail(_ link: WatchLink) -> String {
         var parts: [String] = []
         if let inventory = link.inventory {
@@ -442,12 +445,7 @@ struct DownloadsView: View {
         } else {
             parts.append("Waiting for the watch")
         }
-        if !link.wants.isEmpty {
-            let done = link.wants.filter { $0.status(link.wantStates[$0.id]).done }.count
-            parts.append(done == link.wants.count
-                ? "\(done) sent, all on the watch"
-                : "\(done) of \(link.wants.count) sent are on the watch")
-        }
+        if let transfers = link.transfersSummary { parts.append(transfers) }
         return parts.joined(separator: " · ")
     }
 
