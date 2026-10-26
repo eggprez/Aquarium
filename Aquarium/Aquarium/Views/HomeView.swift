@@ -790,10 +790,12 @@ struct HomeView: View {
         // server out of reach, that is the page.
         let index = LibraryIndex.shared
         // At launch this page starts loading alongside the shell, which is
-        // still reading the copy off disk; waiting for that is what makes the
-        // first frame of Home the saved one rather than an empty one. Returns
+        // still reading the copy off disk; waiting for the saved Home is what
+        // makes the first frame of Home the saved one rather than an empty
+        // one. Only the saved Home: the rest of the copy is the whole library,
+        // and it is waited for below, after the page has been drawn. Returns
         // at once when the copy is off or already read.
-        await index.prepare()
+        await index.prepareHome()
         var drewFromCopy = false
         if isBare, let saved = index.homeCopy() {
             let savedSections = saved.sections.compactMap(HomeSection.init(rawValue:))
@@ -811,6 +813,9 @@ struct HomeView: View {
 
         async let resumeTask = client.resume()
         async let nextUpTask = client.nextUp()
+        // The rest of the copy, now the page is drawn and its requests are out:
+        // the media bar's draw below comes from it.
+        await index.prepare()
         // The media bar's random draw comes from the copy when there is one:
         // it is the same draw, without a request.
         //

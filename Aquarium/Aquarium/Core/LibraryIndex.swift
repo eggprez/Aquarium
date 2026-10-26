@@ -170,6 +170,22 @@ final class LibraryIndex {
 
     // MARK: - Loading
 
+    /// Read the saved Home on its own: a few dozen items, where the snapshot
+    /// is the whole library. The launch draws its first frame from this
+    /// while `prepare` is still decoding and indexing everything else, which
+    /// on a large library is seconds the shell used to spend on a spinner.
+    /// Cheap to call again.
+    func prepareHome() async {
+        guard isEnabled, let owner = currentOwner, home == nil else { return }
+        await ImageLoader.shared.setDiskEnabled(true)
+        let saved = await Task.detached(priority: .userInitiated) {
+            LibraryIndex.read(HomeCopy.self, from: LibraryIndex.homeURL)
+        }.value
+        guard isEnabled, currentOwner == owner, home == nil, let saved, saved.owner == owner else { return }
+        home = saved
+        hasHomeCopy = true
+    }
+
     /// Read the saved copy, once per launch. Cheap to call again.
     func prepare() async {
         guard isEnabled, let owner = currentOwner else { return }
@@ -177,11 +193,12 @@ final class LibraryIndex {
         if isReady, self.owner == owner { return }
         if let loadTask { return await loadTask.value }
         let task = Task {
+            await prepareHome()
             // The table by id and the season and episode orderings are built
             // here too, beside the decode, rather than on the main actor once
             // it lands: every item hashed into a dictionary and every show's
             // episodes sorted, before Home could draw.
-            let (loaded, savedHome) = await Task.detached(priority: .userInitiated) {
+            let loaded = await Task.detached(priority: .userInitiated) {
                 var snapshot = LibraryIndex.readSnapshot()
                 // A sync that found nothing new moved the cursor on without
                 // rewriting the snapshot; the newer of the two wins.
@@ -191,20 +208,15 @@ final class LibraryIndex {
                     snapshot?.cursor = progress.cursor
                     snapshot?.syncedAt = progress.syncedAt
                 }
-                let loaded = snapshot.map { snapshot in
+                return snapshot.map { snapshot in
                     let table = Dictionary(snapshot.items.map { ($0.Id, $0) }, uniquingKeysWith: { _, new in new })
                     return (snapshot, table, LibraryIndex.derive(table))
                 }
-                return (loaded, LibraryIndex.read(HomeCopy.self, from: LibraryIndex.homeURL))
             }.value
             guard !Task.isCancelled, isEnabled, currentOwner == owner else { return }
             if case let (snapshot, table, derived)? = loaded, snapshot.version == Snapshot.currentVersion,
                snapshot.owner == owner, !isReady {
                 apply(snapshot, items: table, derived: derived)
-            }
-            if home == nil, let savedHome, savedHome.owner == owner {
-                home = savedHome
-                hasHomeCopy = true
             }
             artworkBytes = await ImageLoader.shared.diskUsage()
         }
@@ -641,9 +653,11 @@ final class LibraryIndex {
     /// What Home last showed, brought up to date with the copy's watched
     /// state: something finished since is no longer in Continue Watching, and
     /// something further along says so. Nil until Home has loaded once from
-    /// the server with the copy on.
+    /// the server with the copy on. Before the rest of the copy has been read
+    /// (see `prepareHome`), exactly as it was saved.
     func homeCopy() -> HomeCopy? {
-        guard isReady, var copy = home else { return nil }
+        guard var copy = home else { return nil }
+        guard isReady else { return copy }
         // Which of the two is newer isn't recorded, so the copy only wins where
         // it has something to say: finished, or further along. A copy that
         // simply holds no position for an item hasn't heard less than Home did

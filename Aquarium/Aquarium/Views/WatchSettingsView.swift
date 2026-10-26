@@ -46,7 +46,7 @@ struct WatchSettingsView: View {
                             WatchTransfersPage()
                                 .clearsBottomChrome()
                         } label: {
-                            LabeledContent("Transfers", value: transfersSummary)
+                            LabeledContent("Transfers", value: link.transfersSummary ?? "")
                         }
                     }
                     Button {
@@ -163,14 +163,6 @@ struct WatchSettingsView: View {
         var parts = [Format.bytes(inventory.totalBytes)]
         if let free = inventory.freeBytes { parts.append("\(Format.bytes(free)) free") }
         return parts.joined(separator: " · ")
-    }
-
-    private var transfersSummary: String {
-        let moving = link.relayItems.filter { $0.stage == .downloading || $0.stage == .sending }.count
-        let failed = link.relayItems.filter { $0.stage == .failed }.count
-        if moving > 0 { return "\(moving) in progress" }
-        if failed > 0 { return "\(failed) failed" }
-        return "\(link.relayItems.count) waiting"
     }
 }
 

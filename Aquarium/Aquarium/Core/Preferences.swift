@@ -1107,10 +1107,51 @@ final class Preferences {
 
         observeCloud()
         adoptCloudChanges()
+        #if os(iOS)
+        pinSettingsNotOfferedHere()
+        #endif
         #if os(tvOS)
         shareWithHousehold()
         #endif
     }
+
+    #if os(iOS)
+    /// The settings an iPhone or an iPad has no row for, in the app's
+    /// Settings or in the player, and so keeps at their defaults: the layout
+    /// follows the hinge, the player's own behaviour is the default one, and
+    /// subtitles are drawn the one way. Another device's choices for them
+    /// arrive through iCloud and are set back here, locally only, so a Mac
+    /// or an Apple TV keeps what it was set to — see `publishEverythingToCloud`.
+    static let keysNotOfferedHere: Set<String> = [
+        "home_clear_abandoned", "power_aware_quality", "stereo_downmix",
+        "subs_forced_only", "sub_font_size", "sub_bg",
+        "picture_brightness", "picture_contrast", "picture_saturation", "picture_gamma",
+        "picture_zoom", "picture_aspect", "player_night_mode",
+        "player_engine", "player_battery_saver", "player_skip_interval",
+        "player_hide_after", "player_hold_2x", "player_edge_gestures",
+    ]
+
+    private func pinSettingsNotOfferedHere() {
+        let wasAdopting = isAdoptingRemote
+        isAdoptingRemote = true
+        defer { isAdoptingRemote = wasAdopting }
+        if layoutOverride != .automatic { layoutOverride = .automatic }
+        if clearsAbandonedEpisodes { clearsAbandonedEpisodes = false }
+        if !powerAwareQuality { powerAwareQuality = true }
+        if stereoDownmix { stereoDownmix = false }
+        if forcedSubtitlesOnly { forcedSubtitlesOnly = false }
+        if subtitleSize != 100 { subtitleSize = 100 }
+        if subtitleBackground != .outline { subtitleBackground = .outline }
+        if pictureIsAdjusted { resetPicture() }
+        if nightMode { nightMode = false }
+        if playbackEngine != .automatic { playbackEngine = .automatic }
+        if batterySaver != .automatic { batterySaver = .automatic }
+        if skipInterval != 10 { skipInterval = 10 }
+        if hideControlsAfter != Self.defaultHideControlsAfter { hideControlsAfter = Self.defaultHideControlsAfter }
+        if !holdForDoubleSpeed { holdForDoubleSpeed = true }
+        if edgeGestures { edgeGestures = false }
+    }
+    #endif
 
     // MARK: - iCloud
 
@@ -1141,52 +1182,60 @@ final class Preferences {
     /// the second one copies rather than the other way round.
     private func publishEverythingToCloud() {
         guard CloudSync.isAvailable else { return }
-        CloudSync.set(theme.rawValue, forKey: "theme")
-        CloudSync.set(adaptiveQuality, forKey: "adaptive")
-        CloudSync.set(powerAwareQuality, forKey: "power_aware_quality")
-        CloudSync.set(autoplayNext, forKey: "autoplay_next")
-        CloudSync.set(hidesContinueWatching, forKey: "home_hide_continue_watching")
-        CloudSync.set(clearsAbandonedEpisodes, forKey: "home_clear_abandoned")
-        CloudSync.set(nextUpHidden, forKey: "next_up_hidden")
-        CloudSync.set(nextUpDays, forKey: "next_up_days")
-        CloudSync.set(nextUpIncludesInProgress, forKey: "next_up_in_progress")
-        CloudSync.set(nextUpRewatching, forKey: "next_up_rewatching")
-        CloudSync.set(stereoDownmix, forKey: "stereo_downmix")
-        CloudSync.set(resumePlayback, forKey: "resume_playback")
-        CloudSync.set(audioLanguage, forKey: "audio_lang")
-        CloudSync.set(subtitleLanguage, forKey: "sub_lang")
-        CloudSync.set(forcedSubtitlesOnly, forKey: "subs_forced_only")
-        CloudSync.set(subtitleSize, forKey: "sub_font_size")
-        CloudSync.set(subtitleBackground.rawValue, forKey: "sub_bg")
-        CloudSync.set(losslessOnCellular, forKey: "music_lossless_cellular")
-        CloudSync.set(musicAutoplay, forKey: "music_autoplay")
-        CloudSync.set(normalizeVolume, forKey: "music_normalize")
-        CloudSync.set(musicRomanizeNames, forKey: "music_romanize")
-        CloudSync.set(mixPoints.stored, forKey: "music_mix_points")
-        CloudSync.set(audiobookSpeed, forKey: "audiobook_speed")
-        CloudSync.set(defaults.data(forKey: "smart_playlists"), forKey: "smart_playlists")
-        CloudSync.set(fillScreen, forKey: "fill_screen")
-        CloudSync.set(pictureBrightness, forKey: "picture_brightness")
-        CloudSync.set(pictureContrast, forKey: "picture_contrast")
-        CloudSync.set(pictureSaturation, forKey: "picture_saturation")
-        CloudSync.set(pictureGamma, forKey: "picture_gamma")
-        CloudSync.set(pictureZoom, forKey: "picture_zoom")
-        CloudSync.set(aspectOverride, forKey: "picture_aspect")
-        CloudSync.set(playbackEngine.rawValue, forKey: "player_engine")
-        CloudSync.set(batterySaver.rawValue, forKey: "player_battery_saver")
-        CloudSync.set(skipInterval, forKey: "player_skip_interval")
-        CloudSync.set(edgeGestures, forKey: "player_edge_gestures")
-        CloudSync.set(holdForDoubleSpeed, forKey: "player_hold_2x")
-        CloudSync.set(hideControlsAfter, forKey: "player_hide_after")
-        CloudSync.set(showsRemainingTime, forKey: "player_show_remaining")
-        CloudSync.set(liveTVSource.rawValue, forKey: "livetv_source")
-        CloudSync.set(iptvPlaylistURL, forKey: "iptv_playlist_url")
-        CloudSync.set(iptvGuideURL, forKey: "iptv_guide_url")
-        CloudSync.set(iptvUserAgent, forKey: "iptv_user_agent")
-        CloudSync.set(iptvRefreshMinutes, forKey: "iptv_refresh_minutes")
-        CloudSync.set(downloadQuality, forKey: "download_quality")
-        CloudSync.set(downloadsWiFiOnly, forKey: "downloads_wifi_only")
-        CloudSync.set(tabBarOrder, forKey: "tab_bar_order")
+        // What this device has no row for is only its default, not a choice
+        // to hand to the others.
+        func publish(_ value: Any?, forKey key: String) {
+            #if os(iOS)
+            guard !Self.keysNotOfferedHere.contains(key) else { return }
+            #endif
+            CloudSync.set(value, forKey: key)
+        }
+        publish(theme.rawValue, forKey: "theme")
+        publish(adaptiveQuality, forKey: "adaptive")
+        publish(powerAwareQuality, forKey: "power_aware_quality")
+        publish(autoplayNext, forKey: "autoplay_next")
+        publish(hidesContinueWatching, forKey: "home_hide_continue_watching")
+        publish(clearsAbandonedEpisodes, forKey: "home_clear_abandoned")
+        publish(nextUpHidden, forKey: "next_up_hidden")
+        publish(nextUpDays, forKey: "next_up_days")
+        publish(nextUpIncludesInProgress, forKey: "next_up_in_progress")
+        publish(nextUpRewatching, forKey: "next_up_rewatching")
+        publish(stereoDownmix, forKey: "stereo_downmix")
+        publish(resumePlayback, forKey: "resume_playback")
+        publish(audioLanguage, forKey: "audio_lang")
+        publish(subtitleLanguage, forKey: "sub_lang")
+        publish(forcedSubtitlesOnly, forKey: "subs_forced_only")
+        publish(subtitleSize, forKey: "sub_font_size")
+        publish(subtitleBackground.rawValue, forKey: "sub_bg")
+        publish(losslessOnCellular, forKey: "music_lossless_cellular")
+        publish(musicAutoplay, forKey: "music_autoplay")
+        publish(normalizeVolume, forKey: "music_normalize")
+        publish(musicRomanizeNames, forKey: "music_romanize")
+        publish(mixPoints.stored, forKey: "music_mix_points")
+        publish(audiobookSpeed, forKey: "audiobook_speed")
+        publish(defaults.data(forKey: "smart_playlists"), forKey: "smart_playlists")
+        publish(fillScreen, forKey: "fill_screen")
+        publish(pictureBrightness, forKey: "picture_brightness")
+        publish(pictureContrast, forKey: "picture_contrast")
+        publish(pictureSaturation, forKey: "picture_saturation")
+        publish(pictureGamma, forKey: "picture_gamma")
+        publish(pictureZoom, forKey: "picture_zoom")
+        publish(aspectOverride, forKey: "picture_aspect")
+        publish(playbackEngine.rawValue, forKey: "player_engine")
+        publish(batterySaver.rawValue, forKey: "player_battery_saver")
+        publish(skipInterval, forKey: "player_skip_interval")
+        publish(edgeGestures, forKey: "player_edge_gestures")
+        publish(holdForDoubleSpeed, forKey: "player_hold_2x")
+        publish(hideControlsAfter, forKey: "player_hide_after")
+        publish(showsRemainingTime, forKey: "player_show_remaining")
+        publish(liveTVSource.rawValue, forKey: "livetv_source")
+        publish(iptvPlaylistURL, forKey: "iptv_playlist_url")
+        publish(iptvGuideURL, forKey: "iptv_guide_url")
+        publish(iptvUserAgent, forKey: "iptv_user_agent")
+        publish(iptvRefreshMinutes, forKey: "iptv_refresh_minutes")
+        publish(downloadQuality, forKey: "download_quality")
+        publish(downloadsWiFiOnly, forKey: "downloads_wifi_only")
+        publish(tabBarOrder, forKey: "tab_bar_order")
         publishSessionToCloud()
         CloudSync.flush()
     }
@@ -1313,6 +1362,9 @@ final class Preferences {
         if let v = CloudSync.object(forKey: "tab_bar_order") as? [String], v != tabBarOrder {
             tabBarOrder = v
         }
+        #if os(iOS)
+        pinSettingsNotOfferedHere()
+        #endif
         adoptCloudSession()
     }
 

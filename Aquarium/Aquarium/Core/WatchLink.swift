@@ -74,6 +74,19 @@ final class WatchLink: NSObject {
     /// launches; finished rows go after a day.
     private(set) var relayItems: [RelayItem] = []
 
+    /// The Transfers page in a line, counted in its rows: "4 on the way ·
+    /// 1 failed". Every place that sums up the watch says it this way, so
+    /// the number can be checked against the page it leads to. Nil when the
+    /// page would be empty.
+    var transfersSummary: String? {
+        let moving = relayItems.filter { !$0.stage.isFinished }.count
+        let failed = relayItems.filter { $0.stage == .failed }.count
+        var parts: [String] = []
+        if moving > 0 { parts.append("\(moving.formatted()) on the way") }
+        if failed > 0 { parts.append("\(failed.formatted()) failed") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     private var started = false
     /// Kept across launches, so the watch's log reads in the order sent.
     private var revision = UserDefaults.standard.integer(forKey: "watch_context_revision")
