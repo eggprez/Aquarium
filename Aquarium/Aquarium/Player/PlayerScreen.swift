@@ -108,11 +108,33 @@ struct PlayerScreen: View {
                 // rarely worked. So the chrome keeps at least the strip
                 // clear on the front screen.
                 let top = pose == .front ? max(insets.top, Self.frontStatusStrip) : insets.top
+                // The front screen's side column (camera, then clock) comes
+                // back as a whole side of safe area, which held the progress
+                // bar and the title row's buttons 84 points short of that
+                // edge. Apple's guidance for an immersive screen that does
+                // not scroll is the full width, clear of the camera and the
+                // status bar, so there the chrome drops the sides and steps
+                // around the camera row by row instead — see
+                // `PlayerSideClearance`.
+                let clearance = pose == .front
+                    ? PlayerSideClearance(geo, titleRowFoot: top + PlayerSideClearance.titleRowDepth,
+                                          pillRowHead: insets.top + geo.size.height - PlayerSideClearance.pillRowDepth)
+                    : nil
                 FoldSplit(split: foldsBelow, crease: .black) {
                     stage
-                        .safeAreaPadding(EdgeInsets(top: top, leading: insets.leading,
+                        .safeAreaPadding(EdgeInsets(top: top, leading: clearance == nil ? insets.leading : 0,
                                                     bottom: foldsBelow ? 0 : insets.bottom,
-                                                    trailing: insets.trailing))
+                                                    trailing: clearance == nil ? insets.trailing : 0))
+                        .environment(\.playerSideClearance, clearance)
+                        .onChange(of: clearance, initial: true) { _, clearance in
+                            guard let clearance else { return }
+                            var regions = ""
+                            if #available(iOS 27.1, *) {
+                                regions = geo.reservedRegions(kind: .occlusion).map { "\($0.frame) active \($0.isActive)" }
+                                    .joined(separator: "; ")
+                            }
+                            FoldState.log.debug("player sides \(String(describing: clearance)) in \(geo.size.width, format: .fixed(precision: 0))×\(geo.size.height, format: .fixed(precision: 0)), insets \(String(describing: insets)); occlusion \(regions)")
+                        }
                 } lower: {
                     PlayerFoldPanel(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork)
                         .safeAreaPadding(.bottom, insets.bottom)
@@ -152,6 +174,85 @@ struct PlayerScreen: View {
         .contextMenu { PlayerContextMenu(player: player) }
         #endif
     }
+}
+
+// MARK: - The front screen's camera
+
+/// How far the title row and the pill row keep in from each side where
+/// the chrome spans the whole width: a foldable's front screen, whose side
+/// column the safe area reports as one solid side though only its top holds
+/// anything — the camera, then the clock. Apple's guidance for a full-screen
+/// interface that doesn't scroll is the full width as long as nothing runs
+/// into the camera or the status bar, and the camera comes back as an
+/// occlusion region (`ReservedRegion`). So each row clears only the regions
+/// level with it, from the edge they sit on: upright the title row's
+/// buttons stop at the camera and the band runs edge to edge; sideways the
+/// camera is at the head of one side or the foot of the other, and the back
+/// button or the pills stop at it while the timeline runs past.
+///
+/// Measured in the full screen's coordinates, the space `PlayerScreen.framed`
+/// reads. Each value is the region's reach in from its edge, margins and
+/// all; the rows already sit `PlayerMetrics.edge` in.
+struct PlayerSideClearance: Equatable {
+    var titleLeading: CGFloat = 0
+    var titleTrailing: CGFloat = 0
+    var pillsLeading: CGFloat = 0
+    var pillsTrailing: CGFloat = 0
+
+    /// The title row's foot below the top inset: its 8-point drop and its
+    /// 40-point buttons, and some air.
+    static let titleRowDepth: CGFloat = 56
+    /// The pill row's head above the bottom inset: its 40 points, the
+    /// band's 12 under it, and some air.
+    static let pillRowDepth: CGFloat = 64
+
+    #if os(iOS)
+    init(_ geo: GeometryProxy, titleRowFoot: CGFloat, pillRowHead: CGFloat) {
+        // The reader is the safe area's rectangle and the regions come back
+        // in its space, out past its edges; shifted here to the screen's.
+        let insets = geo.safeAreaInsets
+        var regions: [CGRect] = []
+        if #available(iOS 27.1, *) {
+            regions = geo.reservedRegions(kind: .occlusion).filter(\.isActive)
+                .map { $0.frame.offsetBy(dx: insets.leading, dy: insets.top) }
+        }
+        // No regions to go by: the title row and the pills keep the safe
+        // area's sides, as they did before, so neither can land on the
+        // camera; the timeline still runs edge to edge.
+        guard !regions.isEmpty else {
+            titleLeading = insets.leading
+            titleTrailing = insets.trailing
+            pillsLeading = insets.leading
+            pillsTrailing = insets.trailing
+            return
+        }
+        // The camera comes back twice: its lens, 37 points with margins,
+        // inside an 84-point square at the head of the column that the
+        // Dynamic Island grows into. Only the lens is in the way of a row
+        // across the top, so a region holding another is left out and the
+        // buttons stop at the camera itself.
+        let innermost = regions.filter { outer in
+            !regions.contains { $0 != outer && outer.contains($0) }
+        }
+        let width = geo.size.width + insets.leading + insets.trailing
+        for region in innermost {
+            let onLeading = region.midX < width / 2
+            let reach = onLeading ? region.maxX : width - region.minX
+            if region.minY < titleRowFoot {
+                if onLeading { titleLeading = max(titleLeading, reach) } else { titleTrailing = max(titleTrailing, reach) }
+            }
+            if region.maxY > pillRowHead {
+                if onLeading { pillsLeading = max(pillsLeading, reach) } else { pillsTrailing = max(pillsTrailing, reach) }
+            }
+        }
+    }
+    #endif
+}
+
+extension EnvironmentValues {
+    /// Set where the chrome spans the full width; nil where the safe area's
+    /// sides hold. See `PlayerSideClearance`.
+    @Entry var playerSideClearance: PlayerSideClearance? = nil
 }
 
 // MARK: - The stop the screen owes

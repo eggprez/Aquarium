@@ -25,6 +25,7 @@ import SwiftUI
 struct PlayerTransport: View {
     @Environment(PlayerModel.self) private var player
     @Environment(Preferences.self) private var prefs
+    @Environment(\.playerSideClearance) private var sides
 
     @Bindable var chrome: PlayerChromeState
     let trickplay: TrickplayStore
@@ -189,6 +190,8 @@ struct PlayerTransport: View {
             scrims
             VStack(spacing: 0) {
                 titleRow
+                    .padding(.leading, beyondEdge(sides?.titleLeading))
+                    .padding(.trailing, beyondEdge(sides?.titleTrailing))
                     .pointerHover { hoverTitle = $0 }
                 Spacer(minLength: 0)
                 if part == .whole {
@@ -214,6 +217,13 @@ struct PlayerTransport: View {
             chrome.pointerOnControls = on
         }
         .onDisappear { chrome.pointerOnControls = false }
+    }
+
+    /// What a row keeps clear beyond the edge inset it already has: the
+    /// camera's reach on the front screen (`PlayerSideClearance`), or
+    /// nothing.
+    private func beyondEdge(_ reach: CGFloat?) -> CGFloat {
+        max(0, (reach ?? 0) - edge)
     }
 
     // MARK: - Scrims
@@ -453,7 +463,11 @@ struct PlayerTransport: View {
                 PlayerTimeline(chrome: chrome, trickplay: trickplay, compact: compact, onInteract: onInteract)
                 times
             }
+            // Only the pills stand level with the front screen's camera
+            // when it is at the foot of the screen; the timeline runs past.
             pills
+                .padding(.leading, beyondEdge(sides?.pillsLeading))
+                .padding(.trailing, beyondEdge(sides?.pillsTrailing))
         }
         .padding(.bottom, compact ? 4 : 12)
     }
