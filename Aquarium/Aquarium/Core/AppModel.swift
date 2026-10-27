@@ -501,26 +501,47 @@ final class AppModel {
     /// `performConnectivityRefresh`.
     private var hasProbedOnce = false
 
-    /// False until the launch's first question to the server has an answer.
-    /// The shell waits for it (see `RootView`), so an app opened offline goes
-    /// straight to the offline tabs instead of first drawing the online ones
-    /// with Home failing to load — the same tabs, reached the same way, as an
-    /// app that loses the server while open. Once per launch: a later sign-in
-    /// doesn't wait again.
+    /// False until the launch has what it opens on — the saved Home and
+    /// library list, read off disk in a moment (see `restoreLaunchState`). The
+    /// shell is drawn as soon as they are, and the server is asked behind it.
     ///
-    /// Unless there is a saved Home to open on (see `settleLaunchFromCopy`):
-    /// then the shell comes up at once and the probe answers behind it.
+    /// It used to wait for the server: an app opened offline went straight to
+    /// the offline tabs rather than drawing the online ones first. But the wait
+    /// was a bare spinner for as long as the probe took — its whole timeout
+    /// against a server that never replies — and every launch paid it unless
+    /// the optional library copy happened to be on. Opened with the server
+    /// truly gone, the online tabs now show the saved Home until the probe
+    /// says so, and then give way to the offline ones.
     private(set) var launchSettled = false
 
-    /// The library copy has a Home to show, so the shell stops waiting for the
-    /// server. Against a server that is slow to wake, waiting held a bare
-    /// spinner on screen for as long as the probe took — up to its whole
-    /// timeout — while the page it was waiting to draw was already on disk.
-    /// The cost is the case the wait was for: opened with the server truly
-    /// gone, the online tabs show the saved Home until the probe says so, and
-    /// then give way to the offline ones.
-    func settleLaunchFromCopy() {
+    /// Whether the launch's own catch-up with the server — the probe, the
+    /// libraries, progress both ways, the library copy — has run. Until then
+    /// coming to the foreground (which a launch also is) leaves it alone
+    /// rather than starting a second round of the same requests beside it.
+    private(set) var launchCaughtUp = false
+
+    /// Whether the libraries on show came from the saved list rather than the
+    /// server — see `loadLibraries`.
+    @ObservationIgnored private var librariesFromSave = false
+
+    /// Read what the launch opens on and build the shell from it: the tab bar
+    /// as it was last time, and Home's rows (which Home reads for itself). A
+    /// small file or two, read off the main thread; then the shell is up.
+    func restoreLaunchState() async {
+        await LibraryIndex.shared.prepareHome()
+        if libraries.isEmpty, librariesUnknown, let saved = LibraryIndex.shared.savedLibraries {
+            libraries = saved.video
+            musicLibraries = saved.music
+            audiobookLibraries = saved.books
+            serverHasLiveTV = saved.liveTV
+            librariesUnknown = false
+            librariesFromSave = true
+        }
         launchSettled = true
+    }
+
+    func launchCatchUpFinished() {
+        launchCaughtUp = true
     }
 
     private init() {
@@ -1282,7 +1303,9 @@ final class AppModel {
         // once the server answers. (It is no longer browsed offline: see
         // `isOfflineShell`.)
         guard let views = (try? await client.views()) ?? LibraryIndex.shared.savedViews else {
-            librariesUnknown = true
+            // The saved list stays up rather than the bar falling back to
+            // guesses; it is what the server said last time.
+            if !librariesFromSave { librariesUnknown = true }
             return
         }
         // Music-type libraries are out of scope for this client, as on Linux.
@@ -1313,12 +1336,20 @@ final class AppModel {
         // library that was every launch, and the bar UIKit was left holding
         // showed Downloads' icon over Music's name from the next tap on.
         librariesUnknown = false
-        serverHasLiveTV = views.contains { $0.CollectionType == "livetv" }
-        libraries = video
+        librariesFromSave = false
+        // Assigned only where they differ: the bar is usually rebuilt from the
+        // saved list already, and an equal value assigned is still a change to
+        // everything that reads it.
+        let liveTV = views.contains { $0.CollectionType == "livetv" }
+        if serverHasLiveTV != liveTV { serverHasLiveTV = liveTV }
+        if libraries != video { libraries = video }
         // Music-type libraries are the Music tab's, not Library's. Jellyfin
         // files audiobooks under the `books` library type.
-        musicLibraries = views.filter { $0.CollectionType == "music" }
-        audiobookLibraries = views.filter { $0.CollectionType == "books" || $0.CollectionType == "audiobooks" }
+        let music = views.filter { $0.CollectionType == "music" }
+        let books = views.filter { $0.CollectionType == "books" || $0.CollectionType == "audiobooks" }
+        if musicLibraries != music { musicLibraries = music }
+        if audiobookLibraries != books { audiobookLibraries = books }
+        LibraryIndex.shared.keepLibraries(video: video, music: music, books: books, liveTV: liveTV)
         UserDefaults.standard.set(!musicLibraries.isEmpty, forKey: "had_music_library")
         UserDefaults.standard.set(!audiobookLibraries.isEmpty, forKey: "had_books_library")
         rememberedLiveTV = serverHasLiveTV
@@ -1379,7 +1410,6 @@ final class AppModel {
         let isLaunchProbe = !hasProbedOnce
         if hasProbedOnce, resettingConnections { client.resetConnections() }
         hasProbedOnce = true
-        defer { launchSettled = true }
         let wasOffline = client.isOffline
         // Coming back to a session that was already offline, the shell would
         // otherwise draw the offline screen in the first frame — before this
@@ -1391,9 +1421,9 @@ final class AppModel {
         // offline and one that lost the server while open used to reach the
         // offline shell by different rules and at very different speeds (3 s
         // against 27). Mid-session it takes a second opinion two seconds on,
-        // for a radio waking up. At launch it doesn't: the shell is waiting
-        // on this answer with nothing on screen (`launchSettled`), and a
-        // wrong one costs a single retry — the loop asks again after 5 s.
+        // for a radio waking up. At launch it doesn't: the saved Home is on
+        // screen looking like a working app until this answers, and a wrong
+        // one costs a single retry — the loop asks again after 5 s.
         if !online, !wasOffline, client.identityProblem == nil {
             if !isLaunchProbe {
                 try? await Task.sleep(for: .seconds(2))
@@ -1702,6 +1732,7 @@ final class AppModel {
         musicLibraries = []
         audiobookLibraries = []
         librariesUnknown = true
+        librariesFromSave = false
         serverHasLiveTV = false
         rememberedLiveTV = false
         UserDefaults.standard.removeObject(forKey: "had_music_library")

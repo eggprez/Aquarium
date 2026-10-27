@@ -64,6 +64,15 @@ final class OrientationLock {
         // to hold a wide picture to landscape, and a phone in bed or on a
         // stand wants it upright between the bars, with the controls against
         // the picture (`PlayerChrome.letterbox`).
+        //
+        // The inner screen turns every way, upside down included, as an iPad
+        // does; the front screen never upside down, as no phone does. Told by
+        // the screen rather than the hinge, which has not spoken yet when the
+        // app is launched open: it reports only once the root view is up, and
+        // UIKit asks this while it is still making the window. "Portrait"
+        // then put a portrait window on an inner screen held sideways —
+        // black, or stuck upright until the app was left and come back to.
+        if Self.innerDisplayIsOn { return .all }
         switch FoldState.shared.effectiveHinge {
         case .fullyOpen, .partiallyOpen:
             return .allButUpsideDown
@@ -71,6 +80,15 @@ final class OrientationLock {
             guard wanting > 0 else { return .portrait }
             return .allButUpsideDown
         }
+    }
+
+    /// Whether the app's screen is a foldable's inner one, told by its size
+    /// alone: no phone screen held upright is anywhere near 600 points across
+    /// (the largest is about 440), and the inner screen is 669. See `mask`.
+    private static var innerDisplayIsOn: Bool {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let screen = scenes.first?.screen else { return false }
+        return min(screen.bounds.width, screen.bounds.height) >= 600
     }
 
     /// The hinge has moved between closed, part-open and open — or Settings ›

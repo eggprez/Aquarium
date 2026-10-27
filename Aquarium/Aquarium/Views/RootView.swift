@@ -50,13 +50,11 @@ struct RootView: View {
                     shell
                         .id(client.session?.accountKey)
                 } else {
-                    // The launch's first question to the server — see
-                    // `AppModel.launchSettled`. Under a second against a
-                    // server that answers or refuses; the probe's own timeout
-                    // (5 s) against one that never replies. Only a moment when
-                    // the library copy has a Home to open on.
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // The saved Home and library list being read off disk —
+                    // see `AppModel.launchSettled`. A few milliseconds, so
+                    // nothing is drawn over the background: a spinner would
+                    // only flash.
+                    Color.clear
                 }
             } else {
                 #if DEBUG
@@ -94,21 +92,28 @@ struct RootView: View {
             // so it goes ahead of the guard.
             LiveTVStore.shared.warm()
             guard client.isSignedIn else { return }
-            // With a saved Home there is something to show while the server is
-            // asked, so the shell doesn't wait for the answer. Read on its own,
-            // ahead of the rest of the copy, which can take seconds.
-            await LibraryIndex.shared.prepareHome()
-            if LibraryIndex.shared.homeCopy() != nil { app.settleLaunchFromCopy() }
-            // Then the rest, so the libraries can be shown from it if the
-            // server turns out not to answer.
-            await LibraryIndex.shared.prepare()
+            // The shell first, from what was saved last time: the tab bar and
+            // Home's rows. Nothing below is waited for before it is drawn.
+            await app.restoreLaunchState()
+            // Then the server, behind the drawn shell: is it there, what are
+            // its libraries now, and progress both ways.
             await app.refreshConnectivity()
             await app.loadLibraries()
-            Task { await LibraryIndex.shared.sync(force: true) }
             #if !os(tvOS)
-            await OfflineProgress.sync()
-            await OfflineProgress.refreshFromServer()
+            if !client.isOffline {
+                await OfflineProgress.sync()
+                await OfflineProgress.refreshFromServer()
+            }
             #endif
+            app.launchCatchUpFinished()
+            // The library copy last, and a moment later. Decoding and
+            // re-syncing a whole library is the heaviest thing the launch
+            // does, and the first seconds are when someone is scrolling the
+            // page it would be competing with.
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await LibraryIndex.shared.prepare()
+            if !client.isOffline { await LibraryIndex.shared.sync(force: true) }
         }
         .onChange(of: scenePhase) { _, phase in
             // Coming back from the background is the moment to find out whether
@@ -127,7 +132,9 @@ struct RootView: View {
                 // they wrote — see `DownloadManager.appBecameActive`.
                 DownloadManager.shared.appBecameActive()
                 #endif
-                Task {
+                // A launch arrives here too, and its own catch-up (the
+                // shell's `task` above) is already doing all of this.
+                if app.launchCaughtUp { Task {
                     await app.refreshConnectivity()
                     #if !os(tvOS)
                     // Both ways, each time the app is come back to: what was
@@ -140,7 +147,7 @@ struct RootView: View {
                     }
                     #endif
                     await LibraryIndex.shared.sync()
-                }
+                } }
             } else {
                 client.enterBackground()
             }

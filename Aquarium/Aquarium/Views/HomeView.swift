@@ -38,6 +38,9 @@ struct HomeView: View {
     /// rather than worked out in `body`: the bar is not allowed to change what
     /// it is showing because the page redrew.
     @State private var heroItems: [BaseItem] = []
+    /// The saved Home was drawn as the page appeared, ahead of the first load
+    /// — which must then keep the media bar it drew rather than draw again.
+    @State private var drewSavedHome = false
     /// A fingerprint of the page as it was last saved and indexed. See `load`.
     @State private var lastPublished: Int?
     /// When the media bar last drew a new set. See `load`.
@@ -536,6 +539,10 @@ struct HomeView: View {
         .onChange(of: nextUpSettings) { _, _ in
             if isFrontmost { Task { await reload() } }
         }
+        // The saved Home before the first frame, not after it: `.task` starts
+        // only once the page is on screen, and the frame in between was the
+        // default layout — the libraries row alone — jumping to the saved one.
+        .onAppear { if drawSavedHome() { drewSavedHome = true } }
         .task { await reload() }
         .task(id: app.libraries.map(\.Id)) { await loadLatest() }
         .onDisappear { rememberPage() }
@@ -777,6 +784,29 @@ struct HomeView: View {
         open(item)
     }
 
+    /// Home as it was last drawn, onto a page that has none of its rows yet.
+    /// Returns whether it drew. With the server out of reach, that is the page.
+    ///
+    /// Not `isBare`: that is false as soon as the libraries are known, and at
+    /// launch they are known at once, from the saved list — so the saved rows
+    /// were never drawn and the page opened on the libraries row alone.
+    private func drawSavedHome() -> Bool {
+        guard resume.isEmpty, nextUp.isEmpty, latest.isEmpty, heroItems.isEmpty,
+              let saved = LibraryIndex.shared.homeCopy()
+        else { return false }
+        let savedSections = saved.sections.compactMap(HomeSection.init(rawValue:))
+        if !savedSections.isEmpty { sections = savedSections }
+        resume = saved.resume
+        nextUp = saved.nextUp
+        latest = saved.latest.map { (library: $0.library, items: $0.items) }
+        heroItems = client.isOffline
+            // Backdrops are saved as they are seen, so offline the bar
+            // shows the titles it showed before, whose pictures are here.
+            ? saved.hero
+            : (LibraryIndex.shared.spotlight(limit: 6) ?? saved.hero)
+        return true
+    }
+
     /// `fresh` is the Refresh button: everything is asked for again, the
     /// layout included (see `JellyfinClient.homeSections`).
     private func load(fresh: Bool = false) async {
@@ -784,8 +814,8 @@ struct HomeView: View {
         isLoading = true
         defer { isLoading = false }
 
-        // With the library copy on, Home opens on what it showed last time —
-        // brought up to date with what has been watched since — and the
+        // Home opens on what it showed last time — brought up to date with
+        // what has been watched since, where the library copy is on — and the
         // server's answers replace it row by row as they arrive. With the
         // server out of reach, that is the page.
         let index = LibraryIndex.shared
@@ -794,22 +824,11 @@ struct HomeView: View {
         // makes the first frame of Home the saved one rather than an empty
         // one. Only the saved Home: the rest of the copy is the whole library,
         // and it is waited for below, after the page has been drawn. Returns
-        // at once when the copy is off or already read.
+        // at once when it has already been read — the launch reads it before
+        // the shell is drawn (`AppModel.restoreLaunchState`).
         await index.prepareHome()
-        var drewFromCopy = false
-        if isBare, let saved = index.homeCopy() {
-            let savedSections = saved.sections.compactMap(HomeSection.init(rawValue:))
-            if !savedSections.isEmpty { sections = savedSections }
-            resume = saved.resume
-            nextUp = saved.nextUp
-            latest = saved.latest.map { (library: $0.library, items: $0.items) }
-            heroItems = client.isOffline
-                // Backdrops are saved as they are seen, so offline the bar
-                // shows the titles it showed before, whose pictures are here.
-                ? saved.hero
-                : (index.spotlight(limit: 6) ?? saved.hero)
-            drewFromCopy = true
-        }
+        let drewFromCopy = drawSavedHome() || drewSavedHome
+        drewSavedHome = false
 
         async let resumeTask = client.resume()
         async let nextUpTask = client.nextUp()
