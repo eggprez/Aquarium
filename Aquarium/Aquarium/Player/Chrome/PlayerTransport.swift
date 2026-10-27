@@ -334,8 +334,9 @@ struct PlayerTransport: View {
 
     /// What the row keeps clear on the trailing side beyond the chrome's
     /// edge inset. On the strip: the pill, and a little air before it.
-    /// Sideways: nothing — the column is the safe area, and the buttons go
-    /// right up to it rather than stopping a full inset short. Nothing
+    /// Sideways: 8 points of air past the column, which `PlayerSideClearance`
+    /// already keeps clear — the buttons go right up to it rather than
+    /// stopping a full inset short. Nothing
     /// elsewhere; a 92-point clearance here once pushed the buttons nearly
     /// 180 points in and squeezed the title to nothing on the front screen.
     private var titleRowTrailing: CGFloat {
@@ -344,7 +345,7 @@ struct PlayerTransport: View {
             return max(0, FoldState.statusPillReach + 10 - edge)
         }
         if FoldState.shared.innerSideways {
-            return -(edge - 8)
+            return 8
         }
         #endif
         return 0

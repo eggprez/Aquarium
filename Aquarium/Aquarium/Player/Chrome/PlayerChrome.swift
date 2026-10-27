@@ -208,9 +208,6 @@ struct PlayerChrome: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
-    #if os(iOS)
-    @Environment(\.playerSideClearance) private var sides
-    #endif
     #endif
 
     @Bindable var chrome: PlayerChromeState
@@ -351,26 +348,6 @@ struct PlayerChrome: View {
             }
 
             momentOverlays
-
-            #if os(iOS)
-            // On a foldable the brightness rail stands in the 84-point column
-            // the system keeps down the trailing edge for its clock and
-            // battery — the safe area the rest of the chrome respects. The
-            // clock sits at the top of that column in every pose and the
-            // rail is centred in its height, well below it; 24 points in
-            // centres the rail's 36 in the column's 84. With the controls
-            // and gone with them. On the front screen the chrome spans the
-            // column too (`PlayerSideClearance`), so a menu card or the panel
-            // reaches under the rail: it steps out while one is open.
-            if showsControls, !belowFold, FoldState.shared.isFoldable,
-               sides == nil || (chrome.menu == nil && !chrome.panelOpen) {
-                BrightnessRail(onInteract: interact)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                    .padding(.trailing, 24)
-                    .ignoresSafeArea(.container, edges: .trailing)
-                    .transition(.opacity)
-            }
-            #endif
 
             // Pops up as it is, no scale or spring on the number, and fades
             // quickly once the run is over.

@@ -115,11 +115,14 @@ struct PlayerScreen: View {
                 // not scroll is the full width, clear of the camera and the
                 // status bar, so there the chrome drops the sides and steps
                 // around the camera row by row instead — see
-                // `PlayerSideClearance`.
+                // `PlayerSideClearance`. The inside screen held sideways
+                // does the same with its clock column: only the pill at its
+                // head is in the way, so the timeline runs to the edge under
+                // it while the title row and the pills keep the column.
                 let clearance = pose == .front
                     ? PlayerSideClearance(geo, titleRowFoot: top + PlayerSideClearance.titleRowDepth,
                                           pillRowHead: insets.top + geo.size.height - PlayerSideClearance.pillRowDepth)
-                    : nil
+                    : FoldState.shared.innerSideways ? PlayerSideClearance(keeping: insets) : nil
                 FoldSplit(split: foldsBelow, crease: .black) {
                     stage
                         .safeAreaPadding(EdgeInsets(top: top, leading: clearance == nil ? insets.leading : 0,
@@ -205,6 +208,15 @@ struct PlayerSideClearance: Equatable {
     /// The pill row's head above the bottom inset: its 40 points, the
     /// band's 12 under it, and some air.
     static let pillRowDepth: CGFloat = 64
+
+    /// The title row and the pills keep the safe area's sides; only the
+    /// timeline spans them.
+    init(keeping insets: EdgeInsets) {
+        titleLeading = insets.leading
+        titleTrailing = insets.trailing
+        pillsLeading = insets.leading
+        pillsTrailing = insets.trailing
+    }
 
     #if os(iOS)
     init(_ geo: GeometryProxy, titleRowFoot: CGFloat, pillRowHead: CGFloat) {

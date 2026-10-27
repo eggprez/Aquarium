@@ -407,62 +407,6 @@ struct EdgeLevelIndicator: View {
     }
 }
 
-#if os(iOS)
-/// The screen's brightness as a control you can see, for a foldable: the
-/// column its camera or Control Centre pill keeps clear at the trailing edge
-/// is room nothing else uses, and a finger on a phone propped on a table
-/// finds a rail more easily than an edge to drag. The same level the left
-/// edge's drag sets (`ScreenLevels`), drawn like `EdgeLevelIndicator`.
-struct BrightnessRail: View {
-    var onInteract: () -> Void
-
-    @State private var level = ScreenLevels.brightness
-    @State private var dragStart: Double?
-    private let barHeight: CGFloat = 150
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: level < 0.5 ? "sun.min.fill" : "sun.max.fill")
-                .font(.subheadline.weight(.semibold))
-                .contentTransition(.symbolEffect(.replace))
-            ZStack(alignment: .bottom) {
-                Capsule().fill(.white.opacity(0.25))
-                Capsule().fill(.white)
-                    .frame(height: barHeight * level)
-            }
-            .frame(width: 6, height: barHeight)
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 15)
-        .padding(.vertical, 12)
-        .playerMaterial(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    if dragStart == nil { dragStart = level }
-                    let moved = -value.translation.height / barHeight
-                    let now = min(1, max(0, (dragStart ?? level) + moved))
-                    level = now
-                    ScreenLevels.setBrightness(now)
-                    onInteract()
-                }
-                .onEnded { _ in dragStart = nil }
-        )
-        .onAppear { level = ScreenLevels.brightness }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Brightness")
-        .accessibilityValue("\(Int((level * 100).rounded())) percent")
-        .accessibilityAdjustableAction { direction in
-            let step = direction == .increment ? 0.1 : -0.1
-            level = min(1, max(0, level + step))
-            ScreenLevels.setBrightness(level)
-            onInteract()
-        }
-    }
-}
-#endif
-
 // MARK: - Shared text and corners
 
 enum PlayerOverlayText {
