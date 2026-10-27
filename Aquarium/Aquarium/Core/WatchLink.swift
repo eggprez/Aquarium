@@ -93,7 +93,20 @@ final class WatchLink: NSObject {
     private var contextTask: Task<Void, Never>?
     private var forwardTask: Task<Void, Never>?
     @ObservationIgnored nonisolated private let taskMap = OSAllocatedUnfairLock(initialState: [Int: String]())
-    @ObservationIgnored private var fetchSession: URLSession!
+    /// Made when first asked for, not in init: a background session is a
+    /// round trip to the download daemon and the replay of every event it
+    /// held, and init runs inside the app's own. Every use is on the main
+    /// actor; the delegate callbacks are handed the session.
+    @ObservationIgnored private lazy var fetchSession: URLSession = {
+        // A background session: a ten-hour book is minutes of transcode,
+        // and the phone is in a pocket for most of them.
+        let config = URLSessionConfiguration.background(withIdentifier: Self.fetchSessionIdentifier)
+        config.isDiscretionary = false
+        config.sessionSendsLaunchEvents = true
+        config.timeoutIntervalForResource = 6 * 60 * 60
+        config.httpMaximumConnectionsPerHost = Self.fetchWindow
+        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
+    }()
     private var fetchCompletion: (() -> Void)?
     /// When each item's progress last went to the watch.
     private var lastProgressSentAt: [String: Date] = [:]
@@ -179,26 +192,26 @@ final class WatchLink: NSObject {
            let saved = try? JSONDecoder().decode([Int: String].self, from: data) {
             taskMap.withLock { $0 = saved }
         }
-        // A background session: a ten-hour book is minutes of transcode,
-        // and the phone is in a pocket for most of them.
-        let config = URLSessionConfiguration.background(withIdentifier: Self.fetchSessionIdentifier)
-        config.isDiscretionary = false
-        config.sessionSendsLaunchEvents = true
-        config.timeoutIntervalForResource = 6 * 60 * 60
-        config.httpMaximumConnectionsPerHost = Self.fetchWindow
-        fetchSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }
 
     /// Called once at launch.
     func start() {
         guard !started, WCSession.isSupported() else { return }
         started = true
+        Launch.mark("watch start")
         let session = WCSession.default
         session.delegate = self
         session.activate()
-        rejoinFetches()
+        // After the first frame — this is what makes the relay session, see
+        // `fetchSession`. A fetch the last run left is picked up a moment
+        // later than it was; the watch's own session is already activating.
+        Launch.afterFirstFrame { [self] in
+            Launch.mark("watch fetches rejoined")
+            rejoinFetches()
+        }
         // The watch's remote — see Core/WatchRemote.swift.
         WatchRemote.shared.start()
+        Launch.mark("watch started")
     }
 
     /// The system woke the app for the relay session's events.

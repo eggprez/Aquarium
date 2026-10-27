@@ -877,15 +877,27 @@ final class DownloadManager: NSObject {
 
     private override init() {
         super.init()
+        Launch.mark("downloads init")
         records = Self.loadRecords()
         rebuildRecordIndex()
         queue = Self.loadQueue()
         pendingItems = Self.loadPendingItems()
+        Launch.mark("downloads loaded: \(records.count) records")
         // Anything the last run left mid-transfer is picked back up; the
         // background session may already be doing it, in which case adopting it
         // here is what advances the queue when it lands.
-        Task { await self.reconcile() }
-        Task { await self.watchForStalls() }
+        //
+        // After the first frame. Asking the sessions what they hold is what
+        // makes them — three background sessions, which on a phone is a round
+        // trip each to the download daemon — and the moment they exist the
+        // system replays every callback it held while the app was away, on
+        // the main queue. Started from here, inside the app's `init`, all of
+        // that ran before anything was drawn.
+        Launch.afterFirstFrame { [weak self] in
+            guard let self else { return }
+            Task { await self.reconcile() }
+            Task { await self.watchForStalls() }
+        }
         watchConcurrency()
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
@@ -2578,6 +2590,7 @@ final class DownloadManager: NSObject {
     /// After a relaunch: adopt whatever the background session is still doing,
     /// and mark as failed anything that claimed to be running but isn't.
     private func reconcile() async {
+        Launch.mark("downloads reconcile")
         // Creating the session is what makes the system start replaying the
         // callbacks it held while the app was away, so this is also the moment
         // the backlog begins to arrive.
@@ -2621,13 +2634,19 @@ final class DownloadManager: NSObject {
         for (oldId, newId) in pendingRekeys { rekey(oldId, to: newId) }
         pendingRekeys = [:]
         // Streams finished by earlier builds, which never marked them to keep.
-        for rec in records where rec.status == .complete {
-            if let path = rec.hlsPath { Self.keepFromPurge(Self.hlsURL(forRelativePath: path)) }
+        // Off the main actor: a policy is a call into the storage manager
+        // per package, and this is every downloaded stream, every launch.
+        let kept = records.compactMap { rec in
+            rec.status == .complete ? rec.hlsPath.map(Self.hlsURL(forRelativePath:)) : nil
+        }
+        if !kept.isEmpty {
+            Task.detached(priority: .utility) { for url in kept { Self.keepFromPurge(url) } }
         }
         pump()
         // The streams that carried on while the app was gone have grown on
         // disk; count them now rather than at their next callback.
         measureStreamsSoon()
+        Launch.mark("downloads reconciled")
 
         // Anything still claiming to be running is either a transfer the last
         // run genuinely lost, or one that finished without the app there to be

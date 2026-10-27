@@ -545,6 +545,7 @@ final class AppModel {
     }
 
     private init() {
+        Launch.mark("app model init")
         // The network changing under the app, or a page's request finding
         // nothing there, is asked about at once, by the same probe a launch
         // uses — so "offline" means one thing however it came about.

@@ -1006,6 +1006,7 @@ final class Preferences {
     private var isAdoptingRemote = false
 
     private init() {
+        Launch.mark("preferences init")
         let d = UserDefaults.standard
         if let existing = d.string(forKey: "device_id"), !existing.isEmpty {
             deviceId = existing
@@ -1106,7 +1107,18 @@ final class Preferences {
         audiobookSpeed = bookSpeed > 0 ? bookSpeed : 1
 
         observeCloud()
-        adoptCloudChanges()
+        // After the first frame, and off the main thread: `CloudSync.isAvailable`
+        // is iCloud's first `synchronize()`, a round trip to the daemon that
+        // used to sit inside this init — which runs inside the app's `init`.
+        // Adopted on the main actor once it has answered, as every later
+        // change is.
+        Launch.afterFirstFrame {
+            Task.detached(priority: .utility) {
+                _ = CloudSync.isAvailable
+                await MainActor.run { Preferences.shared.adoptCloudChanges() }
+            }
+        }
+        Launch.mark("preferences loaded")
         #if os(iOS)
         pinSettingsNotOfferedHere()
         #endif

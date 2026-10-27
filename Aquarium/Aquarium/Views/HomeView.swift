@@ -542,7 +542,12 @@ struct HomeView: View {
         // The saved Home before the first frame, not after it: `.task` starts
         // only once the page is on screen, and the frame in between was the
         // default layout — the libraries row alone — jumping to the saved one.
-        .onAppear { if drawSavedHome() { drewSavedHome = true } }
+        .onAppear {
+            if drawSavedHome() {
+                drewSavedHome = true
+                Launch.mark("home from saved copy")
+            }
+        }
         .task { await reload() }
         .task(id: app.libraries.map(\.Id)) { await loadLatest() }
         .onDisappear { rememberPage() }

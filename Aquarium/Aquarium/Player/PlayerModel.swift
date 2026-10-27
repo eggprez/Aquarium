@@ -421,7 +421,14 @@ final class PlayerModel {
     var lastAwakeAssert: CFTimeInterval = 0
     #endif
 
+    /// Whether the audio session has been given this app's category. Set
+    /// after the first frame, or by the first playback — see
+    /// `reactivateAudioSession`. Setting it is a round trip to the audio
+    /// server, and it used to happen in this init, inside the app's own.
+    @ObservationIgnored var audioSessionConfigured = false
+
     private init() {
+        Launch.mark("player init")
         volume = prefs.volume
         #if !os(tvOS)
         // The Apple TV's engine is made per stream; the others have AVPlayer
@@ -433,9 +440,12 @@ final class PlayerModel {
         observeForeground()
         observePower()
         NowPlaying.shared.attach(to: self)
-        configureAudioSession(activate: false)
+        Launch.afterFirstFrame { [self] in
+            if !audioSessionConfigured { configureAudioSession(activate: false) }
+        }
         observeAudioRoute()
         observeLifecycle()
+        Launch.mark("player init done")
     }
 
     /// The engine of `kind`, made if it isn't there, with the event stream

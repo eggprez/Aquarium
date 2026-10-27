@@ -43,19 +43,24 @@ struct AquariumApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {
+        Launch.mark("app init")
         // Here rather than in a view: a button on a Live Activity can start
         // the app with no window at all — see Core/LiveActivities.swift.
         LiveActivityCenter.shared.start()
+        Launch.mark("live activities started")
         // And the watch, which may be sending listening to a phone in a
         // pocket — see Core/WatchLink.swift.
         WatchLink.shared.start()
+        Launch.mark("watch link started")
         #if DEBUG
         // URLs from a script, past the system's prompt — see Core/DebugLinkHook.swift.
         DebugLinkHook.start()
         #endif
         // A film shared over FaceTime can arrive the same way — see
-        // Core/SharePlay.swift.
-        SharePlayCoordinator.shared.start()
+        // Core/SharePlay.swift. After the first frame: joining the group
+        // session stream is a round trip to another process, and a share
+        // can wait the moment that takes.
+        Launch.afterFirstFrame { SharePlayCoordinator.shared.start() }
         // The Control Centre buttons' intents run in this process and reach
         // the players through here — see Shared/WidgetTypes.swift.
         ControlActions.handler = { action in
@@ -70,6 +75,7 @@ struct AquariumApp: App {
                 }
             }
         }
+        Launch.mark("app init done")
     }
     #endif
 
@@ -219,6 +225,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        Launch.mark("did finish launching")
         Self.forgetNewEpisodeAlerts()
         NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main

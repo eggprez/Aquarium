@@ -36,12 +36,20 @@ extension PlayerModel {
         // .moviePlayback keeps dialogue intelligible on a phone speaker and is
         // what lets AirPlay and the lock-screen transport work at all.
         try? session.setCategory(.playback, mode: .moviePlayback, options: [])
+        audioSessionConfigured = true
         if activate { try? session.setActive(true) }
         #endif
     }
 
+    /// Every start of playback comes through here, so a title started before
+    /// the first frame's deferred setup has run — from Siri, say — still
+    /// gets the category before the session goes active.
     func reactivateAudioSession() {
         #if os(iOS) || os(tvOS)
+        guard audioSessionConfigured else {
+            configureAudioSession(activate: true)
+            return
+        }
         try? AVAudioSession.sharedInstance().setActive(true)
         #endif
     }

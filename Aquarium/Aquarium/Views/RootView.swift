@@ -83,6 +83,8 @@ struct RootView: View {
         // iCloud after launch (see `Preferences.adoptCloudSession`) — gets the
         // same setup as a launch that found one already saved. Without it an
         // adopted session opened onto a shell with no libraries and no copy.
+        // The first frame is up — what was waiting for it can run. See `Launch`.
+        .onAppear { Launch.firstFrameDrawn() }
         .task(id: client.session) {
             // Live TV first, and without waiting for it. A custom playlist is
             // two downloads and an XML file that can run to tens of megabytes,
@@ -95,10 +97,13 @@ struct RootView: View {
             // The shell first, from what was saved last time: the tab bar and
             // Home's rows. Nothing below is waited for before it is drawn.
             await app.restoreLaunchState()
+            Launch.mark("shell from saved state")
             // Then the server, behind the drawn shell: is it there, what are
             // its libraries now, and progress both ways.
             await app.refreshConnectivity()
+            Launch.mark("server probed: \(client.isOffline ? "offline" : "online")")
             await app.loadLibraries()
+            Launch.mark("libraries loaded")
             #if !os(tvOS)
             if !client.isOffline {
                 await OfflineProgress.sync()
@@ -106,6 +111,7 @@ struct RootView: View {
             }
             #endif
             app.launchCatchUpFinished()
+            Launch.mark("launch caught up")
             // The library copy last, and a moment later. Decoding and
             // re-syncing a whole library is the heaviest thing the launch
             // does, and the first seconds are when someone is scrolling the
@@ -114,6 +120,7 @@ struct RootView: View {
             guard !Task.isCancelled else { return }
             await LibraryIndex.shared.prepare()
             if !client.isOffline { await LibraryIndex.shared.sync(force: true) }
+            Launch.mark("library copy synced")
         }
         .onChange(of: scenePhase) { _, phase in
             // Coming back from the background is the moment to find out whether

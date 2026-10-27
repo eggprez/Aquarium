@@ -222,6 +222,7 @@ final class JellyfinClient {
     private var recheckTask: Task<Void, Never>?
 
     private init() {
+        Launch.mark("client init")
         // tvOS suspends networking the moment the app leaves the foreground —
         // the screensaver, a Siri Remote press to Home, the system putting the
         // device to sleep — and the connections pooled in `urlSession` can come

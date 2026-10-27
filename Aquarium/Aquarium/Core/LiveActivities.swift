@@ -43,25 +43,35 @@ final class LiveActivityCenter {
     func start() {
         guard !started else { return }
         started = true
+        Launch.mark("live activities handler")
         LiveActivityActions.handler = { [weak self] in self?.perform($0) }
 
-        listening = Activity<Listening>.activities.first { Self.isLive($0) }
-        // Left over from a run that ended without saying so.
-        for extra in Activity<Listening>.activities where extra.id != listening?.id { end(extra) }
-        if let listening { watchForEnd(of: listening) }
+        // The rest waits for the first frame. The handler above is all a
+        // Live Activity button needs, and it is in place now; what follows
+        // asks the activity server what is live and reloads the widgets —
+        // round trips to other processes, from inside the app's `init`,
+        // before anything was on screen.
+        Launch.afterFirstFrame { [self] in
+            Launch.mark("live activities")
 
-        watchListening()
-        settleStaleNowPlaying()
-        watchNowPlaying()
+            listening = Activity<Listening>.activities.first { Self.isLive($0) }
+            // Left over from a run that ended without saying so.
+            for extra in Activity<Listening>.activities where extra.id != listening?.id { end(extra) }
+            if let listening { watchForEnd(of: listening) }
 
-        // A start refused because the app was behind is asked for again here.
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.dropEndedActivities()
-                self?.renewOldListening()
-                self?.refreshListening()
+            watchListening()
+            settleStaleNowPlaying()
+            watchNowPlaying()
+
+            // A start refused because the app was behind is asked for again here.
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.dropEndedActivities()
+                    self?.renewOldListening()
+                    self?.refreshListening()
+                }
             }
         }
     }

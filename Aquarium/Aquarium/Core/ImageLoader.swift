@@ -101,6 +101,7 @@ actor ImageLoader {
     #endif
 
     private init() {
+        Launch.mark("image loader init")
         #if canImport(UIKit)
         // `purge()` used to be defined and never called, so the cache relied on
         // NSCache trimming itself — which it does late, and a jetsam comes first

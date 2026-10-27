@@ -234,6 +234,7 @@ final class MusicPlayer {
     private static let reportInterval: TimeInterval = 10
 
     private init() {
+        Launch.mark("music player init")
         repeatMode = RepeatMode(rawValue: Preferences.shared.musicRepeat) ?? .off
         player.actionAtItemEnd = .advance
         player.allowsExternalPlayback = false
