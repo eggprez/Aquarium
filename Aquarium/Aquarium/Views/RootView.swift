@@ -227,6 +227,12 @@ struct RootView: View {
         } message: { alert in
             Text(alert.message)
         }
+        // On a television a title's own screen covers this one and asks there.
+        #if os(tvOS)
+        .nextUpChoiceDialog(isMine: takesAlerts && app.detailRoot == nil)
+        #else
+        .nextUpChoiceDialog(isMine: takesAlerts)
+        #endif
         // A title opens as its own screen on a television rather than as a page
         // pushed under the tab strip — see `AppModel.detailRoot`.
         #if os(tvOS)
@@ -291,6 +297,7 @@ struct RootView: View {
         }
         .background(Theme.background)
         .overlay(alignment: .bottom) { ToastOverlay() }
+        .nextUpChoiceDialog(isMine: true)
         .fullScreenCover(
             isPresented: Binding(
                 get: { player.isActive },

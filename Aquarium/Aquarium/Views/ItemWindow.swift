@@ -166,6 +166,7 @@ struct RouteWindow: View {
         } message: { alert in
             Text(alert.message)
         }
+        .nextUpChoiceDialog(isMine: app.isWorkingWindow(navigator))
         // Outermost, so the toasts' overlay and every page know which window
         // they are in.
         .environment(\.routeWindowNavigator, navigator)

@@ -481,6 +481,11 @@ final class AppModel {
     }
     #endif
 
+    /// The show "Add to Next Up" was chosen for, while the app asks where to
+    /// pick it up — see `NextUpAdding`. Held here rather than by the menu,
+    /// which is gone by the time the question is asked.
+    var addingToNextUp: BaseItem?
+
     /// Raised when something needs the whole screen to explain itself — a
     /// server identity change, an expired session.
     var blockingMessage: String?

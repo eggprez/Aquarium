@@ -1046,7 +1046,7 @@ struct ItemDetailView: View {
                 // A show is put on Next Up rather than marked watched — see
                 // `JellyfinClient.addToNextUp`.
                 Button {
-                    Task { await NextUpAdding.add(item, client: client, app: app) }
+                    NextUpAdding.ask(item, app: app)
                 } label: {
                     Label("Add to Next Up", systemImage: "text.badge.plus")
                 }
@@ -1473,7 +1473,7 @@ struct ItemDetailView: View {
         // `JellyfinClient.addToNextUp`.
         if item.isSeries {
             Button {
-                Task { await NextUpAdding.add(item, client: client, app: app) }
+                NextUpAdding.ask(item, app: app)
             } label: {
                 Label("Add to Next Up", systemImage: "text.badge.plus")
             }
@@ -1562,7 +1562,7 @@ struct ItemDetailView: View {
                 }
             } else {
                 Button {
-                    Task { await NextUpAdding.add(item, client: client, app: app) }
+                    NextUpAdding.ask(item, app: app)
                 } label: {
                     Label("Add to Next Up", systemImage: "text.badge.plus")
                 }

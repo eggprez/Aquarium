@@ -77,22 +77,83 @@ enum NextUpAdding {
         return id?.isEmpty == false ? id : nil
     }
 
-    static func add(_ item: BaseItem, client: JellyfinClient, app: AppModel) async {
+    /// The show's name, from whichever of its items was held.
+    static func showName(of item: BaseItem) -> String {
+        item.isSeries ? item.title : (item.SeriesName ?? item.title)
+    }
+
+    /// Every way in asks first: from the last watched episode, or from the
+    /// first with the show marked unwatched. See `NextUpChoiceDialog`.
+    static func ask(_ item: BaseItem, app: AppModel) {
+        guard seriesId(of: item) != nil else { return }
+        app.addingToNextUp = item
+    }
+
+    static func add(_ item: BaseItem, from start: JellyfinClient.NextUpStart, client: JellyfinClient, app: AppModel) async {
         guard let seriesId = seriesId(of: item) else { return }
-        let name = item.isSeries ? item.title : (item.SeriesName ?? item.title)
+        let name = showName(of: item)
         do {
-            if let episode = try await client.addToNextUp(seriesId: seriesId) {
+            if let episode = try await client.addToNextUp(seriesId: seriesId, from: start) {
                 let at = episode.episodeLabel.map { " at \($0)" } ?? ""
-                app.toast("Added \(name) to Next Up\(at)", tone: .ok)
+                // Started already, it's Continue Watching's to show unless
+                // Next Up is set to include episodes in progress.
+                if episode.userData.positionTicks > 0, !Preferences.shared.nextUpIncludesInProgress {
+                    app.toast("\(name) is partway through\(at), so it's in Continue Watching", tone: .ok)
+                } else {
+                    app.toast("Added \(name) to Next Up\(at)", tone: .ok)
+                }
                 ItemMutations.shared.changed()
+            } else if start == .lastWatched {
+                app.toast("Every episode of \(name) has been watched — add it from the first episode instead", tone: .error)
             } else {
-                app.toast("Every episode of \(name) has been watched", tone: .error)
+                app.toast("\(name) has no episodes to add", tone: .error)
             }
         } catch APIError.server(let status, _) where status == 404 {
             app.toast("This server is too old to add shows to Next Up", tone: .error)
         } catch {
             app.toast("Couldn't add \(name) to Next Up", tone: .error)
         }
+    }
+}
+
+/// The question every "Add to Next Up" asks: where to pick the show up.
+/// Starting over is the destructive choice — it wipes what has been watched
+/// on the server — so it is the red one. Shown by whichever window or screen
+/// is in front (`isMine`), as `AppModel.pendingAlert` is.
+struct NextUpChoiceDialog: ViewModifier {
+    var isMine: Bool
+
+    @Environment(AppModel.self) private var app
+    @Environment(JellyfinClient.self) private var client
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(
+            app.addingToNextUp.map { "Add \(NextUpAdding.showName(of: $0)) to Next Up" } ?? "",
+            isPresented: Binding(
+                get: { app.addingToNextUp != nil && isMine },
+                set: { if !$0 { app.addingToNextUp = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: app.addingToNextUp
+        ) { item in
+            Button("Add from Last Watched Episode") {
+                app.addingToNextUp = nil
+                Task { await NextUpAdding.add(item, from: .lastWatched, client: client, app: app) }
+            }
+            Button("Add from First Episode", role: .destructive) {
+                app.addingToNextUp = nil
+                Task { await NextUpAdding.add(item, from: .firstEpisode, client: client, app: app) }
+            }
+            Button("Cancel", role: .cancel) { app.addingToNextUp = nil }
+        } message: { _ in
+            Text("From the first episode marks every episode unwatched on the server, and clears play counts and saved positions.")
+        }
+    }
+}
+
+extension View {
+    func nextUpChoiceDialog(isMine: Bool) -> some View {
+        modifier(NextUpChoiceDialog(isMine: isMine))
     }
 }
 
@@ -444,7 +505,7 @@ struct ItemMenu: View {
         // the show already is.
         if !removesFromNextUp, NextUpAdding.seriesId(of: item) != nil {
             Button {
-                Task { await NextUpAdding.add(item, client: client, app: app) }
+                NextUpAdding.ask(item, app: app)
             } label: {
                 Label(item.isSeries ? "Add to Next Up" : "Add Show to Next Up", systemImage: "text.badge.plus")
             }

@@ -62,17 +62,54 @@ enum HomeRows {
     /// The episode Next Up will offer for a show, from its episodes in order:
     /// the first unwatched one after the last one watched, or the first
     /// unwatched one when nothing is. Nil when everything after the last
-    /// watched episode has been watched too. What "Add to Next Up" puts its
-    /// date on — see `JellyfinClient.addToNextUp`.
-    ///
-    /// Specials are season zero and sit outside the order Next Up walks,
-    /// unless a show is nothing but.
+    /// watched episode has been watched too. Where "Add to Next Up" from the
+    /// last watched episode picks a show up — see `JellyfinClient.addToNextUp`.
     static func nextUpTarget(_ all: [BaseItem]) -> BaseItem? {
-        let regular = all.filter { ($0.ParentIndexNumber ?? 1) != 0 }
-        let episodes = regular.isEmpty ? all : regular
+        let episodes = walked(all)
         let lastWatched = episodes.lastIndex { $0.userData.played }
         let rest = lastWatched.map { episodes[($0 + 1)...] } ?? episodes[...]
         return rest.first { !$0.userData.played }
+    }
+
+    /// The episodes Next Up walks: specials are season zero and sit outside
+    /// its order, unless a show is nothing but.
+    private static func walked(_ all: [BaseItem]) -> [BaseItem] {
+        let regular = all.filter { ($0.ParentIndexNumber ?? 1) != 0 }
+        return regular.isEmpty ? all : regular
+    }
+
+    /// The last episode watched, in the show's order: the one whose
+    /// last-played date places a show in Next Up. What "Add to Next Up" from
+    /// the last watched episode dates — see `JellyfinClient.addToNextUp`.
+    static func lastWatched(_ all: [BaseItem]) -> BaseItem? {
+        walked(all).last { $0.userData.played }
+    }
+
+    /// Where a show starts. What "Add to Next Up" from the first episode
+    /// dates, once everything has been marked unwatched.
+    static func firstEpisode(_ all: [BaseItem]) -> BaseItem? {
+        walked(all).first
+    }
+
+    /// Next Up with the shows added from their first episode at the front,
+    /// newest first. Jellyfin orders the row by when each show's last
+    /// watched episode was played, and a show with nothing watched has none,
+    /// so it puts those last — past the row's 16 cards on a busy account.
+    /// They are recognised by the episode offered carrying a last-played
+    /// date while unwatched and not started, which only "Add to Next Up"
+    /// writes. Everything else keeps the server's order.
+    static func newStartsFirst(_ row: [BaseItem]) -> [BaseItem] {
+        func addedAt(_ item: BaseItem) -> Date? {
+            guard item.isEpisode, !item.userData.played,
+                  (item.UserData?.PlaybackPositionTicks ?? 0) == 0,
+                  hasPlayedDate(item)
+            else { return nil }
+            return Format.parseDate(item.UserData?.LastPlayedDate)
+        }
+        let added = row.compactMap { item in addedAt(item).map { (item, $0) } }
+        guard !added.isEmpty else { return row }
+        let ids = Set(added.map(\.0.Id))
+        return added.sorted { $0.1 > $1.1 }.map(\.0) + row.filter { !ids.contains($0.Id) }
     }
 
     /// The last-played date that takes an episode out of what Next Up is

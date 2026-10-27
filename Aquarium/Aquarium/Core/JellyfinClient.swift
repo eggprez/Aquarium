@@ -1215,7 +1215,10 @@ final class JellyfinClient {
     /// fall outside the limit.
     func nextUp() async throws -> [BaseItem] {
         let days = prefs.nextUpDays
-        guard days > 0 else { return try await nextUpQuery(limit: 16, cutoff: nil) }
+        // At the server's most rather than the row's 16: a show started over
+        // from its first episode is at the end of the server's answer, and
+        // is brought to the front (`HomeRows.newStartsFirst`).
+        guard days > 0 else { return Array(HomeRows.newStartsFirst(try await nextUpQuery(limit: 100, cutoff: nil)).prefix(16)) }
         let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 60 * 60)
         // Both at the server's own most, not the row's 16: a show inside the
         // limit but past the 16th is not one to remove.
@@ -1225,7 +1228,7 @@ final class JellyfinClient {
         if let everything = await everything {
             reportExpired(HomeRows.expiredFromNextUp(everything: everything, kept: kept))
         }
-        return Array(kept.prefix(16))
+        return Array(HomeRows.newStartsFirst(kept).prefix(16))
     }
 
     /// `light` asks for the ids alone — what the wider question above needs.
@@ -1306,23 +1309,47 @@ final class JellyfinClient {
         }
     }
 
+    /// Where "Add to Next Up" picks a show up: after what has been watched,
+    /// or from its first episode with everything watched before forgotten.
+    enum NextUpStart: Sendable {
+        case lastWatched, firstEpisode
+    }
+
     /// Put a show on Next Up, on the server, so every app signed in to the
     /// account — this one on other devices, Jellyfin's own, the Linux one —
     /// shows it there. Returns the episode it will be offered at, or nil when
     /// every episode has been watched and there is nothing to offer.
     ///
-    /// Jellyfin has no call for this. What it builds Next Up from is the
-    /// shows with an episode that has a last-played date — played or not —
-    /// and the episode it offers is the first one unwatched after the last
-    /// one *watched*. So the episode that will be offered gets today as its
-    /// last-played date, and nothing else: not marked watched, no position,
-    /// no play counted, nothing in Continue Watching. It also brings a show
-    /// back that the Next Up cutoff (`Preferences.nextUpDays`) has dropped,
-    /// and it goes to the front of the row, which is sorted by that date.
+    /// Jellyfin has no call for this. It builds Next Up from the shows with
+    /// an episode that has a last-played date — played or not — offers the
+    /// first unwatched episode after the last one *watched*, and orders the
+    /// row by when that last watched episode was played. So:
+    ///
+    /// - `.lastWatched` gives today as the last-played date to the last
+    ///   watched episode. The show goes to the front of the row everywhere,
+    ///   and back inside the day limit (`Preferences.nextUpDays`). Writing
+    ///   the date on the episode to be offered instead, as this used to, got
+    ///   the show onto Next Up at wherever its old date put it — often past
+    ///   the row's 16 cards, so the add looked like it did nothing.
+    /// - `.firstEpisode` marks the whole show unwatched — play counts, saved
+    ///   positions and dates all go — and gives the first episode today. A
+    ///   show with nothing watched is one Jellyfin puts at the *end* of Next
+    ///   Up; `HomeRows.newStartsFirst` brings it to the front of this app's.
+    ///
+    /// Nothing is marked watched and nothing goes into Continue Watching: a
+    /// few seconds of progress would have, and Next Up leaves in-progress
+    /// episodes out unless asked for them.
     ///
     /// Servers before 10.9 have no way to write a date on its own and answer
     /// 404, which is thrown.
-    func addToNextUp(seriesId: String) async throws -> BaseItem? {
+    private struct NextUpDating: Encodable {
+        var LastPlayedDate: String
+        var Played: Bool
+        var PlayCount: Int
+        var PlaybackPositionTicks: Int64
+    }
+
+    func addToNextUp(seriesId: String, from start: NextUpStart) async throws -> BaseItem? {
         guard let s = prefs.session else { throw APIError.notConfigured }
         // From the server, not the library copy: which episodes are watched
         // is the whole question, and the copy can be behind on it.
@@ -1330,13 +1357,42 @@ final class JellyfinClient {
             ItemsResponse.self,
             "/Shows/\(Self.pathId(seriesId))/Episodes?userId=\(s.userId)&Fields=\(Self.itemFields)"
         ).items
-        guard let target = HomeRows.nextUpTarget(all) else { return nil }
-        let now = ISO8601DateFormatter().string(from: Date())
-        try await request(
-            "/UserItems/\(Self.pathId(target.Id))/UserData?userId=\(s.userId)", method: "POST",
-            body: ["LastPlayedDate": now]
+        let target: BaseItem
+        let dated: BaseItem
+        switch start {
+        case .lastWatched:
+            guard let next = HomeRows.nextUpTarget(all) else { return nil }
+            target = next
+            dated = HomeRows.lastWatched(all) ?? next
+        case .firstEpisode:
+            guard let first = HomeRows.firstEpisode(all) else { return nil }
+            try await request("/UserPlayedItems/\(Self.pathId(seriesId))?userId=\(s.userId)", method: "DELETE")
+            for episode in all {
+                LibraryIndex.shared.patchUserData(episode.Id) {
+                    $0.Played = false
+                    $0.PlaybackPositionTicks = 0
+                    $0.LastPlayedDate = nil
+                }
+            }
+            target = first
+            dated = first
+        }
+        // The episode's whole state goes with the date. Sent alone, the date
+        // is written over what the server last remembered of the episode —
+        // after the show was marked unwatched, that is the watched mark and
+        // play count it had a moment before.
+        let started = start == .lastWatched
+        let state = NextUpDating(
+            LastPlayedDate: ISO8601DateFormatter().string(from: Date()),
+            Played: started && dated.userData.played,
+            PlayCount: started ? dated.UserData?.PlayCount ?? 0 : 0,
+            PlaybackPositionTicks: started ? dated.userData.positionTicks : 0
         )
-        LibraryIndex.shared.patchUserData(target.Id) { $0.LastPlayedDate = now }
+        try await request(
+            "/UserItems/\(Self.pathId(dated.Id))/UserData?userId=\(s.userId)", method: "POST",
+            body: state
+        )
+        LibraryIndex.shared.patchUserData(dated.Id) { $0.LastPlayedDate = state.LastPlayedDate }
         prefs.unhideFromNextUp(seriesId: seriesId)
         return target
     }
