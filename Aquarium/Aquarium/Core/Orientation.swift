@@ -32,6 +32,10 @@ final class OrientationLock {
     /// The mask UIKit was last actually asked for, and whether a request is
     /// already queued. Both exist for the same reason — see `scheduleApply`.
     private var lastRequested: UIInterfaceOrientationMask?
+    /// The mask last put into effect, kept across hinge changes (which
+    /// forget `lastRequested` so the mask is asked for again) — so the lock
+    /// going back on can be told from the first answer of the process.
+    private var lastApplied: UIInterfaceOrientationMask?
     private var pendingApply: Task<Void, Never>?
     /// Whether the queued request came from a screen asking for the turn
     /// (or giving it back) rather than from the hinge — see `apply`.
@@ -162,6 +166,14 @@ final class OrientationLock {
     /// back on. A hinge opening gets no request at all: the outer display
     /// honours the mask and turns itself as the phone turns, and the inner
     /// display ignores both the mask and the request.
+    ///
+    /// Nor does the first answer of the process. Launched closed, the hinge's
+    /// first report ran the "lock going back on" path and requested portrait
+    /// — and a geometry request is a preference the scene keeps. Opened, the
+    /// window took that preference to the inner display with it and sat
+    /// upright, locked, until the scene was reactivated (Home and back),
+    /// which is what cleared it. Portrait is requested only when a wider
+    /// mask was in effect before it.
     private func apply(turn: Bool) {
         let wanted = mask
         guard wanted != lastRequested else { return }
@@ -177,8 +189,11 @@ final class OrientationLock {
             applyWhenActive(turn: turn)
             return
         }
+        let previous = lastApplied
+        lastApplied = wanted
         lastRequested = wanted
-        let request = turn || wanted == .portrait
+        let lockingBack = wanted == .portrait && previous != nil && previous != .portrait
+        let request = turn || lockingBack
         FoldState.log.debug("orientation mask=\(wanted.rawValue) request=\(request) turn=\(turn) now=\(scene.effectiveGeometry.interfaceOrientation.rawValue) bounds=\(scene.coordinateSpace.bounds.width, format: .fixed(precision: 0))×\(scene.coordinateSpace.bounds.height, format: .fixed(precision: 0)) hinge=\(String(describing: FoldState.shared.effectiveHinge))")
         scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
         if request {
