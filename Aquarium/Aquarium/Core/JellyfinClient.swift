@@ -2510,6 +2510,18 @@ final class JellyfinClient {
         return parts.url ?? url
     }
 
+    /// `url` with its `PlaySessionId`, if any, swapped for a new one: a
+    /// download starting over asks for an encode of its own rather than the
+    /// one it gave up on.
+    nonisolated static func withNewPlaySession(_ url: URL) -> URL {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        let kept = (parts.percentEncodedQuery ?? "").split(separator: "&").filter {
+            !$0.lowercased().hasPrefix("playsessionid=")
+        }
+        parts.percentEncodedQuery = kept.isEmpty ? nil : kept.joined(separator: "&")
+        return withPlaySession(parts.url ?? url)
+    }
+
     /// A title turned into something a file system will take. Trimmed by *bytes*
     /// rather than by characters: 120 characters of Japanese or emoji is 360
     /// bytes, well past the 255 a file name may be, and the move onto disk fails

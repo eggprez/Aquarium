@@ -1629,7 +1629,7 @@ final class DownloadManager: NSObject {
         } else {
             let attempt = max(0, min(rec.autoRetries - 1, Self.retryDelays.count - 1))
             delay = countsAsAttempt ? Self.retryDelays[attempt] : 2
-            words = countsAsAttempt ? "\(reason) — trying again in \(Self.describe(delay))" : reason
+            words = countsAsAttempt ? "\(reason) — trying again" : reason
         }
 
         rec.status = .queued
@@ -1644,10 +1644,6 @@ final class DownloadManager: NSObject {
         persistQueue()
         Self.log.notice("Requeued \(itemId, privacy: .public): \(words ?? reason, privacy: .public)")
         pump()
-    }
-
-    private static func describe(_ seconds: TimeInterval) -> String {
-        seconds < 60 ? "\(Int(seconds)) s" : "\(Int(seconds / 60)) min"
     }
 
     /// The radio came or went.
@@ -2358,6 +2354,19 @@ final class DownloadManager: NSObject {
         rec.receivedBytes = 0
         measuredStreamBytes[itemId] = nil
         save(rec)
+    }
+
+    /// Make a stream's next go what cancelling it and queueing it again does:
+    /// no package to resume, and a play session of its own. The session is
+    /// on the stored URL, so without a new one every retry asked the server
+    /// for the same encode the last one had given up on.
+    private func startOverClean(_ itemId: String) {
+        emptyResumes[itemId] = nil
+        discardPartialPackage(itemId)
+        guard var rec = record(for: itemId), let url = URL(string: rec.sourceURL) else { return }
+        rec.sourceURL = JellyfinClient.withNewPlaySession(url).absoluteString
+        save(rec)
+        Self.log.notice("\(itemId, privacy: .public) starts over clean on a new play session")
     }
 
     // The resume data of a file download that stopped, kept beside the
@@ -3850,6 +3859,25 @@ extension DownloadManager: URLSessionDownloadDelegate {
             // The stall sweep's own cancel, coming back round — or a pause's,
             // which is nobody's failure and is not counted as one.
             if let reason = self.retryingAfterCancel.removeValue(forKey: itemId) {
+                // A stall sweep's cancel says the package didn't grow in three
+                // minutes in front. On the phone (2026-10-27) an episode's
+                // segment requests were dropped twenty seconds in, over and
+                // over, while the episodes either side of it came down; every
+                // go resumed the same package under the same play session and
+                // got the same. Cancelled and queued again by hand — a new
+                // record, a new session — it came down first time. Nothing
+                // fetched at all, there is nothing to keep, so the next go
+                // starts clean at once; a resume over something fetched gets
+                // the same two strikes as the transient case below.
+                if reason == Self.stalledReason, isStream, rec.transport == .hls {
+                    let fetchedNothing = rec.receivedBytes == 0 && (self.measuredStreamBytes[itemId] ?? 0) == 0
+                    if fetchedNothing {
+                        self.startOverClean(itemId)
+                    } else if resumedHere {
+                        self.emptyResumes[itemId, default: 0] += 1
+                        if self.emptyResumes[itemId, default: 0] >= 2 { self.startOverClean(itemId) }
+                    }
+                }
                 self.scheduleAutomaticRetry(itemId, reason: reason, countsAsAttempt: ![Self.pausedReason, Self.yieldedReason, Self.reconnectReason].contains(reason))
                 return
             }
@@ -3912,10 +3940,7 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 if isStream, resumedHere, received == 0, (self.measuredStreamBytes[itemId] ?? 0) == 0,
                    rec.hlsPath != nil || rec.partialPath != nil, self.hasDownloadRoute, !failure.isConnectivity {
                     self.emptyResumes[itemId, default: 0] += 1
-                    if self.emptyResumes[itemId, default: 0] >= 2 {
-                        self.emptyResumes[itemId] = nil
-                        self.discardPartialPackage(itemId)
-                    }
+                    if self.emptyResumes[itemId, default: 0] >= 2 { self.startOverClean(itemId) }
                 } else {
                     self.emptyResumes[itemId] = nil
                 }
