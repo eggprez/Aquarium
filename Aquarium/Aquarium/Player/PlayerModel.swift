@@ -306,6 +306,13 @@ final class PlayerModel {
     @ObservationIgnored var stallCounted = false
     /// Times a stall that goes on. See `noteBuffering`.
     @ObservationIgnored var stallWatch: Task<Void, Never>?
+    /// The speed check is timing the connection before this stream opens;
+    /// the quality pill turns a wheel meanwhile.
+    var isCheckingSpeed = false
+    /// What the last stream learnt about the connection, for the episode
+    /// after it — see `SpeedMemory`. Outlives stopping, so the next episode
+    /// started by hand still finds it.
+    @ObservationIgnored var speedMemory: SpeedMemory?
     /// What Now Playing was last told, so its clock is only re-anchored when
     /// it would otherwise be wrong.
     var nowPlayingAnchor: (position: Double, rate: Double, at: Date, duration: Double)?

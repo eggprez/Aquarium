@@ -272,7 +272,7 @@ final class JellyfinClient {
     }
 
     @ObservationIgnored
-    private var lastInterface: NWInterface.InterfaceType?
+    private(set) var lastInterface: NWInterface.InterfaceType?
 
     /// The device's network went down, came back, or changed; `AppModel`
     /// probes the server on it.
@@ -646,6 +646,39 @@ final class JellyfinClient {
     /// being on the same actor, can only run before the session is read or
     /// after the task exists. A task already made is one
     /// `finishTasksAndInvalidate` lets finish.
+    /// Bits per second from the server to here, for the speed check: Jellyfin's
+    /// own test download, read for a second and a half at most or until its
+    /// 8 MB are in, timed from the first byte to the last. Pieces of a fixed
+    /// size either spend seconds on a slow link or judge a fast one on a
+    /// sliver (the first version took six seconds at 3 Mbps), and counting
+    /// the bytes one at a time as they arrive topped out at about 1.2 Mbps
+    /// whatever the link — so whole chunks are counted, by a delegate. Nil
+    /// when the server doesn't answer.
+    func measureThroughput() async -> Double? {
+        guard identityProblem == nil, let base = prefs.session?.server,
+              let url = URL(string: base + "/Playback/BitrateTest?size=8000000") else { return nil }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 5
+        req.setValue(authorizationHeader(token: token), forHTTPHeaderField: "Authorization")
+        let counter = ThroughputCounter()
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+        cfg.waitsForConnectivity = false
+        let session = URLSession(configuration: cfg, delegate: counter, delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        session.dataTask(with: req).resume()
+        let clock = ContinuousClock()
+        let started = clock.now
+        while clock.now - started < .seconds(5) {
+            try? await Task.sleep(for: .milliseconds(100))
+            let reading = counter.reading
+            if reading.done || reading.seconds >= 1.5 { break }
+        }
+        let reading = counter.reading
+        guard reading.bytes >= 65_536, reading.seconds > 0 else { return nil }
+        return Double(reading.bytes) * 8 / reading.seconds
+    }
+
     private func perform(_ req: URLRequest, patient: Bool) async throws -> (Data, URLResponse) {
         let session = patient ? patientSession : urlSession
         let handle = TaskHandle()
@@ -2786,3 +2819,44 @@ enum UIDeviceName {
     static var current: String { UIDevice.current.name }
 }
 #endif
+
+/// Counts what the speed check's test download brings in, chunk by chunk —
+/// see `JellyfinClient.measureThroughput`.
+private final class ThroughputCounter: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytes = 0
+    private var firstAt: ContinuousClock.Instant?
+    private var lastAt: ContinuousClock.Instant?
+    private var done = false
+
+    var reading: (bytes: Int, seconds: Double, done: Bool) {
+        lock.withLock {
+            let seconds = firstAt.flatMap { first in lastAt.map { ($0 - first) / .seconds(1) } } ?? 0
+            return (bytes, seconds, done)
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            lock.withLock { done = true }
+            completionHandler(.cancel)
+            return
+        }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        let now = ContinuousClock.now
+        lock.withLock {
+            // The first chunk starts the clock rather than counting: it is
+            // what arrived while the clock wasn't running.
+            if firstAt == nil { firstAt = now } else { bytes += data.count }
+            lastAt = now
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+        lock.withLock { done = true }
+    }
+}

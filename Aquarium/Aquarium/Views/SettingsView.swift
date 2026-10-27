@@ -391,10 +391,13 @@ struct SettingsView: View {
             Toggle(isOn: $prefs.powerAwareQuality) { MacSettingLabel(Copy.powerAwareQuality) }
                 .disabled(!prefs.adaptiveQuality)
                 .note(Copy.powerAwareQuality)
+            Toggle(isOn: $prefs.speedCheck) { MacSettingLabel(Copy.speedCheck) }
+                .disabled(!prefs.adaptiveQuality)
+                .note(Copy.speedCheck)
         } header: {
             Text("Quality")
         } footer: {
-            MacSettingFooter(Copy.powerAwareQuality)
+            MacSettingFooter(Copy.powerAwareQuality, Copy.speedCheck)
         }
     }
 
@@ -1268,10 +1271,12 @@ private struct VideoSettingsPage: View {
                     Text("Auto").tag(PlayerModel.QualitySelection.auto)
                     ForEach(Quality.choices, id: \.label) { Text($0.label).tag(PlayerModel.QualitySelection.stream($0.maxBitrate)) }
                 }
+                Toggle(Copy.speedCheck.name ?? "", isOn: $prefs.speedCheck)
+                    .disabled(!prefs.adaptiveQuality)
             } header: {
                 Text("Quality")
             } footer: {
-                SettingsFooter(Copy.defaultQualityAuto)
+                SettingsFooter(Copy.defaultQualityAuto, Copy.speedCheck)
             }
 
             Section {
@@ -2253,6 +2258,10 @@ enum SettingsCopy {
     static let powerAwareQuality = SettingNote(
         name: "Ease off when the device is struggling",
         text: "Holds the stream to 1080p at 10 Mbps while the device is running hot or in Low Power Mode, and to 720p when it is at its thermal limit — before the picture starts to stutter rather than after. It climbs back the usual way once things settle. Only while the player's Quality is Auto; picking a quality there is choosing it yourself."
+    )
+    static let speedCheck = SettingNote(
+        name: "Check the connection first",
+        text: "Away from home, times a short download from the server before a stream opens and starts at the quality the connection carries, rather than at the original and stepping down from there. A stream that stalls later steps straight to what fits. The next episode reuses what the last one learnt. Only while the player's Quality is Auto."
     )
     static let defaultQualityAuto = SettingNote(
         text: "What a stream opens at. Auto starts at the best the connection allows and steps down by itself when it keeps stalling; a rung holds every stream there until you pick another, here or in the player's Quality card."

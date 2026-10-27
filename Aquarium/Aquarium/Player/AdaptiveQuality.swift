@@ -24,6 +24,9 @@ final class AdaptiveQuality {
         var isDrop: Bool
         /// The cause in a few words, for the badge that announces a move.
         var reason: String
+        /// The connection speed a stall step-down was sized by, for the
+        /// next episode to remember.
+        var throughput: Double? = nil
     }
 
     /// Quality.choices runs best-first: index 0 is direct play, the last entry
@@ -338,7 +341,13 @@ final class AdaptiveQuality {
     /// The move the policy wants to make, or nil. Returns at most one decision
     /// per event, and starts the cooldown as it hands it over — the caller is
     /// expected to act on it.
-    func decide(currentBitrate: Int?) -> Decision? {
+    ///
+    /// `measured` is the connection's speed where the speed check is on and
+    /// knows it. A stall then steps straight down to the rung that speed
+    /// carries rather than one at a time: at 3 Mbps the original went to
+    /// 720p, took over a minute to show a picture, and stalled on to 480p.
+    /// Read only for that step — it is asked for on every tick.
+    func decide(currentBitrate: Int?, measured: @autoclosure () -> Double? = nil) -> Decision? {
         let index = effectiveIndex(currentBitrate)
 
         // The device's own limit comes first and waits for nothing — not the
@@ -377,7 +386,13 @@ final class AdaptiveQuality {
                     reason: "Lowest quality"
                 )
             }
-            let next = index + 1
+            var next = index + 1
+            var sizedBy: Double?
+            if !lastReasonWasDrop, let speed = measured() {
+                let fit = rungIndex(Quality.fitting(speed, source: nil))
+                if fit > next { next = fit }
+                sizedBy = speed
+            }
             // A stall straight after climbing means that rung is beyond this
             // connection. Pin the ceiling here so the policy doesn't spend the
             // evening rediscovering it every five minutes.
@@ -393,7 +408,8 @@ final class AdaptiveQuality {
                     ? "Playback can't keep up — switching to \(label)"
                     : "Buffering — switching to \(label)",
                 isDrop: true,
-                reason: lastReasonWasDrop ? "Playback couldn't keep up" : "Connection slowed"
+                reason: lastReasonWasDrop ? "Playback couldn't keep up" : "Connection slowed",
+                throughput: sizedBy
             )
         }
 

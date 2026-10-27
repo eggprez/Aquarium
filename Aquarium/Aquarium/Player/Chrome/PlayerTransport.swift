@@ -537,7 +537,9 @@ struct PlayerTransport: View {
             menuPill(.subtitles, symbol: "captions.bubble", title: plain ? "Subtitles" : nil, label: "Subtitles")
             if player.offersQualityChoice {
                 menuPill(.quality, symbol: "slider.horizontal.3",
-                         title: state ? qualityTitle : nil, label: "Quality, \(qualitySpoken)")
+                         title: state ? qualityTitle : nil,
+                         label: player.isCheckingSpeed ? "Quality, checking the connection speed" : "Quality, \(qualitySpoken)",
+                         busy: player.isCheckingSpeed)
             }
             if !player.isLive, player.upNextCount > 0 {
                 menuPill(.upNext, symbol: "text.line.first.and.arrowtriangle.forward",
@@ -599,13 +601,21 @@ struct PlayerTransport: View {
         .panelPopover(isPresented: popover(for: anchor), arrowEdge: .bottom) { panelPopover }
     }
 
-    /// A pill whose card drops from it; lit while the card is up.
-    private func menuPill(_ menu: PlayerChromeState.ChromeMenu, symbol: String, title: String?, label: String) -> some View {
+    /// A pill whose card drops from it; lit while the card is up. `busy`
+    /// turns a wheel where its symbol goes — the speed check, on Quality.
+    private func menuPill(_ menu: PlayerChromeState.ChromeMenu, symbol: String, title: String?, label: String,
+                          busy: Bool = false) -> some View {
         Button {
             toggleMenu(menu)
         } label: {
             PlayerPill(isOn: chrome.menu == menu) {
-                Image(systemName: symbol)
+                if busy {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(.white)
+                } else {
+                    Image(systemName: symbol)
+                }
                 if let title { Text(title) }
             }
         }

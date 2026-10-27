@@ -775,6 +775,9 @@ final class MPVEngine: @unchecked Sendable {
             facts.height = h
         }
         if let bitrate = getInt("video-bitrate"), bitrate > 0 { facts.indicatedBitrate = Double(bitrate) }
+        // Bytes a second the cache is reading in. Zero once it is full,
+        // which says nothing about the link, so only a reading counts.
+        if let speed = getInt("cache-speed"), speed > 0 { facts.observedBitrate = Double(speed) * 8 }
         facts.droppedFrames = getInt("frame-drop-count")
         facts.decoder = getString("hwdec-current")
         return facts

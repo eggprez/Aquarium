@@ -438,6 +438,14 @@ final class Preferences {
         didSet { write(powerAwareQuality, forKey: "power_aware_quality") }
     }
 
+    /// Time a short download from the server before a stream opens away
+    /// from home, and open at the quality that fits. Off unless turned on,
+    /// and kept to this device: a phone on cellular and a Mac on the home
+    /// network want different answers. See `SpeedCheck`.
+    var speedCheck: Bool {
+        didSet { write(speedCheck, forKey: "speed_check") }
+    }
+
     /// Start the next episode when one finishes.
     var autoplayNext: Bool {
         didSet { write(autoplayNext, forKey: "autoplay_next") }
@@ -1049,6 +1057,7 @@ final class Preferences {
         theme = ThemePref(rawValue: d.string(forKey: "theme") ?? "") ?? .auto
         adaptiveQuality = d.object(forKey: "adaptive") == nil ? true : d.bool(forKey: "adaptive")
         powerAwareQuality = d.object(forKey: "power_aware_quality") == nil ? true : d.bool(forKey: "power_aware_quality")
+        speedCheck = d.bool(forKey: "speed_check")
         autoplayNext = d.object(forKey: "autoplay_next") == nil ? true : d.bool(forKey: "autoplay_next")
         hidesContinueWatching = d.bool(forKey: "home_hide_continue_watching")
         clearsAbandonedEpisodes = d.bool(forKey: "home_clear_abandoned")

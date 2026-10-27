@@ -221,6 +221,25 @@ extension PlayerModel {
         let mine = generation
         resolvingGeneration = mine
 
+        // The speed check, with the player up and its quality pill turning.
+        // Not the ceiling: Auto may still climb past what it picked.
+        if let fit = await speedCheckedOpening(for: item, options: opts, meta: meta) {
+            guard generation == mine else { return }
+            var fitted = opts
+            fitted.maxBitrate = fit
+            if let cap = powerCapBitrate, Quality.rungIndex(fitted.maxBitrate) < Quality.rungIndex(cap) {
+                fitted.maxBitrate = cap
+            }
+            // The engine was picked for the stream as it stood. A fit that
+            // would have picked the other one is left alone rather than
+            // played on the wrong engine.
+            if chooseEngine(for: item, options: fitted) == kind {
+                opts = fitted
+                self.options = opts
+                self.currentBitrate = opts.maxBitrate
+            }
+        }
+
         let handoverTarget = startSeconds + Self.handoverLead
         let requestedStart = canHandOver ? handoverTarget : startSeconds
         let requestedTicks = Int64(requestedStart * 10_000_000)
@@ -739,7 +758,11 @@ extension PlayerModel {
 
     func maybeAdapt() {
         guard adaptsQuality, !isLocal, !isExternal, isActive else { return }
-        guard let decision = adaptive.decide(currentBitrate: currentBitrate) else { return }
+        guard let decision = adaptive.decide(currentBitrate: currentBitrate, measured: knownThroughput) else { return }
+        // What the stall showed of the connection, for the next episode.
+        if let speed = decision.throughput, let item {
+            speedMemory = SpeedMemory(item: item, bitsPerSecond: speed, interface: client.lastInterface)
+        }
         // Auto's first choice is the copy on this device, so a stream that
         // has to give ground goes there before it goes to a smaller stream:
         // a download that finished while this played. The notice goes up

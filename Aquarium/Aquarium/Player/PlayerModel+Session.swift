@@ -262,6 +262,55 @@ extension PlayerModel {
         #endif
     }
 
+    /// What the speed check opens a fresh stream at: nil to leave the opening
+    /// as it was, or the rung (nil inside, the original) that fits. Only for a
+    /// title nobody chose a quality for, under Auto, with the setting on.
+    /// Autoplay's next episode inherits the rung the last one ended on and
+    /// carries its memory forward; the next episode started by hand reuses
+    /// that memory; a server on the home network is opened as it always was.
+    /// Everything else is timed, with the quality pill turning meanwhile.
+    func speedCheckedOpening(for item: BaseItem, options opts: StreamOptions, meta: StartMeta) async -> Int?? {
+        guard adaptsQuality, prefs.speedCheck, !opts.live else { return nil }
+        let interface = client.lastInterface
+        if meta.inherited {
+            if let memory = speedMemory, memory.itemId != item.Id, memory.isFollowed(by: item, interface: interface) {
+                speedMemory = memory.carried(to: item)
+            }
+            return nil
+        }
+        guard opts.maxBitrate == nil, !opts.bitrateIsChosen else { return nil }
+        let source = item.MediaSources?.first
+        if let memory = speedMemory, memory.isFollowed(by: item, interface: interface) {
+            speedMemory = memory.carried(to: item)
+            Self.log.info("speed check: next episode, reusing \(Int(memory.bitsPerSecond / 1000)) kbps")
+            return .some(Quality.fitting(memory.bitsPerSecond, source: source))
+        }
+        guard await !SpeedCheck.serverIsHome(prefs.session?.server, interface: interface) else {
+            Self.log.info("speed check: server is on the home network, skipped")
+            return nil
+        }
+        isCheckingSpeed = true
+        defer { isCheckingSpeed = false }
+        guard let measured = await client.measureThroughput() else {
+            Self.log.info("speed check: no answer, opening as usual")
+            return nil
+        }
+        speedMemory = SpeedMemory(item: item, bitsPerSecond: measured, interface: interface)
+        let fit = Quality.fitting(measured, source: source)
+        Self.log.info("speed check: \(Int(measured / 1000)) kbps, opening at \(Quality.label(for: fit), privacy: .public)")
+        return .some(fit)
+    }
+
+    /// The connection's speed as far as anyone knows it now: the check's,
+    /// and what the engine is actually seeing arrive, whichever is lower.
+    /// Only with the speed check on — its step-downs jump to what fits.
+    var knownThroughput: Double? {
+        guard prefs.speedCheck, let item else { return nil }
+        let remembered = speedMemory?.itemId == item.Id ? speedMemory?.bitsPerSecond : nil
+        let observed = engine?.streamFacts.observedBitrate
+        return [remembered, observed].compactMap { $0 }.filter { $0 > 0 }.min()
+    }
+
     /// The rung a stream may open at right now, given the device's state.
     var powerCapBitrate: Int? {
         guard adaptsQuality, prefs.powerAwareQuality else { return nil }
