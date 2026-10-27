@@ -71,6 +71,44 @@ extension PlayerModel {
         ))
     }
 
+    /// The engine waiting on the network, told to adaptive quality: the
+    /// stall counted as it starts, and timed while it lasts. Both were lost
+    /// when the engines moved behind `PlaybackEngine`, and nothing else can
+    /// do the timing — a stalled stream's clock stops, and the position
+    /// ticks `AdaptiveQuality.sample` rides on stop with it.
+    func noteBuffering(_ waiting: Bool) {
+        guard waiting else { endStall(); return }
+        // The opening hold, a pause, or a stall already counted: none of
+        // them is a new one.
+        guard !stallCounted, !isOpening, !isPaused, adaptsQuality, isActive, !isLocal, !isExternal else { return }
+        stallCounted = true
+        adaptive.noteStall()
+        maybeAdapt()
+        let mine = generation
+        stallWatch?.cancel()
+        stallWatch = Task { [weak self] in
+            var stalledFor: TimeInterval = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self, self.isActive, self.stallCounted,
+                      self.generation == mine else { return }
+                // Paused by the viewer, the wait isn't the network's.
+                if self.isPaused || self.isOpening { continue }
+                stalledFor += 1
+                if self.adaptive.noteStillStalled(for: stalledFor) {
+                    self.maybeAdapt()
+                    return
+                }
+            }
+        }
+    }
+
+    func endStall() {
+        stallCounted = false
+        stallWatch?.cancel()
+        stallWatch = nil
+    }
+
     func onAudioDelayApplied(_ delay: Double, refused: Bool) {
         setAudioDelayApplied(delay != 0 && !refused)
         if refused {

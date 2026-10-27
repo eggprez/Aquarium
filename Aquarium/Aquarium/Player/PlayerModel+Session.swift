@@ -243,16 +243,28 @@ extension PlayerModel {
 
     func powerStateChanged() {
         refreshPowerProfile()
-        guard prefs.adaptiveQuality, prefs.powerAwareQuality, isActive, !isLocal, !isExternal else { return }
+        guard adaptsQuality, prefs.powerAwareQuality, isActive, !isLocal, !isExternal else { return }
         let power = devicePower
         if adaptive.notePower(thermal: power.thermal, lowPower: power.lowPower, currentBitrate: currentBitrate) {
             maybeAdapt()
         }
     }
 
+    /// Whether Auto steers this player's quality. Never on an Apple TV: its
+    /// Settings hold one quality rather than offering Auto, and nothing there
+    /// turns the synced switch off — so the iPhone's Auto was quietly
+    /// stepping down the TV's streams, overruling the rung picked on it.
+    var adaptsQuality: Bool {
+        #if os(tvOS)
+        false
+        #else
+        prefs.adaptiveQuality
+        #endif
+    }
+
     /// The rung a stream may open at right now, given the device's state.
     var powerCapBitrate: Int? {
-        guard prefs.adaptiveQuality, prefs.powerAwareQuality else { return nil }
+        guard adaptsQuality, prefs.powerAwareQuality else { return nil }
         let power = devicePower
         return AdaptiveQuality.powerRung(thermal: power.thermal, lowPower: power.lowPower)
     }

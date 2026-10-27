@@ -76,6 +76,28 @@ enum Quality {
         return choices.firstIndex { $0.maxBitrate == rung } ?? 0
     }
 
+    /// The smallest rung that still leaves this file as it is: it and every
+    /// rung above it allow the file's own bitrate and picture size, so the
+    /// server sends the original whichever of them is asked for. Adaptive
+    /// quality steps down from here rather than from direct play — a 6 Mbps
+    /// 1080p file walked through 4K, 1440p and both 1080p rungs, reopening
+    /// the same file each time, before 720p changed anything. 0 when the file
+    /// says too little to tell.
+    static func untouchedRung(for source: MediaSource?) -> Int {
+        guard let source, let bitrate = source.Bitrate, bitrate > 0,
+              let video = source.streams.first(where: { $0.type == "Video" }),
+              let width = video.Width, let height = video.Height, width > 0, height > 0
+        else { return 0 }
+        var last = 0
+        for (index, choice) in choices.enumerated().dropFirst() {
+            guard let max = choice.maxBitrate, bitrate <= max,
+                  let w = choice.maxWidth, let h = choice.maxHeight, width <= w, height <= h
+            else { break }
+            last = index
+        }
+        return last
+    }
+
     /// What the error card's "Try a smaller stream" asks for: the 720p rung,
     /// or the rung below whatever was already playing at or under it. It
     /// used to ask for a flat 4 Mbps, which is no rung: the quality pill read

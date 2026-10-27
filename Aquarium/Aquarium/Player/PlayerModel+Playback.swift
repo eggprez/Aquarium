@@ -157,6 +157,7 @@ extension PlayerModel {
         noVideoDetail = nil
         bitrateNoticeDismissal?.cancel()
         bitrateNotice = nil
+        if let notice = meta.notice { showBitrateNotice(notice) }
 
         let startSeconds = startSeconds(for: item, options: opts)
 
@@ -277,7 +278,9 @@ extension PlayerModel {
                     await loadExtras(for: item)
                     guard generation == mine else { return }
                     await client.reportPlaybackStart(report(paused: false))
-                    adaptive.begin(inherited: meta.inherited, ceiling: requestedBitrate, powerCap: powerCapBitrate)
+                    adaptive.begin(
+                        inherited: meta.inherited, ceiling: requestedBitrate, powerCap: powerCapBitrate,
+                        untouched: Quality.untouchedRung(for: src.mediaSource))
                     return
                 }
             }
@@ -314,7 +317,9 @@ extension PlayerModel {
             await loadExtras(for: item)
             guard generation == mine else { return }
             await client.reportPlaybackStart(report(paused: false))
-            adaptive.begin(inherited: meta.inherited, ceiling: requestedBitrate, powerCap: powerCapBitrate)
+            adaptive.begin(
+                inherited: meta.inherited, ceiling: requestedBitrate, powerCap: powerCapBitrate,
+                untouched: Quality.untouchedRung(for: src.mediaSource))
         } catch {
             guard generation == mine else { return }
             resolvingGeneration = nil
@@ -733,15 +738,16 @@ extension PlayerModel {
     }
 
     func maybeAdapt() {
-        guard prefs.adaptiveQuality, !isLocal, !isExternal, isActive else { return }
+        guard adaptsQuality, !isLocal, !isExternal, isActive else { return }
         guard let decision = adaptive.decide(currentBitrate: currentBitrate) else { return }
         // Auto's first choice is the copy on this device, so a stream that
         // has to give ground goes there before it goes to a smaller stream:
-        // a download that finished while this played.
+        // a download that finished while this played. The notice goes up
+        // after the switch, which clears whatever was showing.
         #if !os(tvOS)
         if decision.isDrop, let record = downloadedCopy {
-            showBitrateNotice(BitrateNotice(isUp: false, headline: "Downloaded copy", detail: decision.reason))
             playLocal(record, startAt: position)
+            showBitrateNotice(BitrateNotice(isUp: false, headline: "Downloaded copy", detail: decision.reason))
             return
         }
         #endif
@@ -749,11 +755,11 @@ extension PlayerModel {
             AppModel.shared.toast(decision.message, tone: .error)
             return
         }
-        showBitrateNotice(BitrateNotice(
+        let notice = BitrateNotice(
             isUp: !decision.isDrop,
             headline: decision.bitrate == nil ? "Original quality" : Quality.label(for: decision.bitrate),
-            detail: decision.reason))
-        Task { await switchQuality(to: decision.bitrate, meta: StartMeta(inherited: true, quiet: true)) }
+            detail: decision.reason)
+        Task { await switchQuality(to: decision.bitrate, meta: StartMeta(inherited: true, quiet: true, notice: notice)) }
     }
 
     // MARK: - Choosing a quality

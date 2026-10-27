@@ -71,6 +71,10 @@ final class AdaptiveQuality {
     /// The rung the device itself can afford right now, as an index into the
     /// ladder — see `notePower`. Nil when it can afford any of them.
     private var powerCap: Int?
+    /// The smallest rung that still sends this stream's file untouched — see
+    /// `Quality.untouchedRung`. Anything from direct play down to it is the
+    /// same stream, so it is read as this rung.
+    private var untouched = 0
     private var streamStartedAt = Date.distantPast
     private var lastSwitchAt = Date.distantPast
     /// While this is in the future, the rung playing was chosen by hand and the
@@ -105,9 +109,10 @@ final class AdaptiveQuality {
     /// climbed towards the ceiling, the start capped the climb straight back
     /// to the rung that was playing, and the same stream was torn down and
     /// reopened for nothing.
-    func begin(inherited: Bool, ceiling requested: Int?, powerCap capBitrate: Int?) {
+    func begin(inherited: Bool, ceiling requested: Int?, powerCap capBitrate: Int?, untouched: Int = 0) {
         let index = rungIndex(requested)
         powerCap = capBitrate.map(rungIndex)
+        self.untouched = untouched
         resetStream()
         streamStartedAt = Date()
         lastSwitchAt = inherited ? streamStartedAt : .distantPast
@@ -123,6 +128,7 @@ final class AdaptiveQuality {
     func reset() {
         resetStream()
         ceiling = 0
+        untouched = 0
         lastUpshiftAt = nil
         manualUntil = .distantPast
     }
@@ -155,7 +161,7 @@ final class AdaptiveQuality {
     func notePower(thermal: ProcessInfo.ThermalState, lowPower: Bool, currentBitrate: Int?) -> Bool {
         let cap = Self.powerRung(thermal: thermal, lowPower: lowPower).flatMap(rungIndex)
         powerCap = cap
-        guard let cap, rungIndex(currentBitrate) < cap else { return false }
+        guard let cap, effectiveIndex(currentBitrate) < cap else { return false }
         powerReason = lowPower && thermal != .serious && thermal != .critical ? .lowPower : .heat
         wantPowerDrop = true
         return true
@@ -198,6 +204,12 @@ final class AdaptiveQuality {
     private func rungIndex(_ bitrate: Int?) -> Int {
         let rung = Quality.snapped(bitrate)
         return Quality.choices.firstIndex { $0.maxBitrate == rung } ?? 0
+    }
+
+    /// Where the stream playing actually sits: any rung that sends the file
+    /// untouched is the same stream as the smallest of them.
+    private func effectiveIndex(_ bitrate: Int?) -> Int {
+        max(rungIndex(bitrate), untouched)
     }
 
     /// True while anything recent would make a stall someone else's fault.
@@ -327,7 +339,7 @@ final class AdaptiveQuality {
     /// per event, and starts the cooldown as it hands it over — the caller is
     /// expected to act on it.
     func decide(currentBitrate: Int?) -> Decision? {
-        let index = rungIndex(currentBitrate)
+        let index = effectiveIndex(currentBitrate)
 
         // The device's own limit comes first and waits for nothing — not the
         // startup grace, not a rung picked by hand. A phone at its thermal
@@ -387,8 +399,13 @@ final class AdaptiveQuality {
 
         if wantUp {
             wantUp = false
-            let next = index - 1
-            guard next >= ceiling, next >= (powerCap ?? 0), next >= 0, !settling else { return nil }
+            // Already the original file: there is nothing better to climb to.
+            guard rungIndex(currentBitrate) > untouched else { return nil }
+            var next = index - 1
+            // Every rung from here up is the original, so climb straight to
+            // the best of them the line allows rather than one at a time.
+            if next <= untouched { next = max(ceiling, powerCap ?? 0) }
+            guard next < index, next >= ceiling, next >= (powerCap ?? 0), next >= 0, !settling else { return nil }
             lastUpshiftAt = Date()
             lastSwitchAt = Date()
             return Decision(

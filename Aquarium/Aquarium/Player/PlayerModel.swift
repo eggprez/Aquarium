@@ -65,6 +65,10 @@ struct StartMeta: Sendable {
     /// which for a quality change is seamless and for a subtitle is twelve
     /// seconds of the old stream with none, under a menu saying it is on.
     var forTracks: Bool = false
+    /// Adaptive quality's announcement of the move this stream is. The start
+    /// clears whatever notice was up, so it is shown from there: put up
+    /// before the reopen, it was cleared again before it was ever drawn.
+    var notice: PlayerModel.BitrateNotice?
 }
 
 struct StreamOptions: Sendable {
@@ -297,6 +301,11 @@ final class PlayerModel {
     var prefs: Preferences { .shared }
 
     let adaptive = AdaptiveQuality()
+    /// A stall has been counted for adaptive quality and the engine hasn't
+    /// said it is over yet — see `noteBuffering`.
+    @ObservationIgnored var stallCounted = false
+    /// Times a stall that goes on. See `noteBuffering`.
+    @ObservationIgnored var stallWatch: Task<Void, Never>?
     /// What Now Playing was last told, so its clock is only re-anchored when
     /// it would otherwise be wrong.
     var nowPlayingAnchor: (position: Double, rate: Double, at: Date, duration: Double)?
@@ -574,6 +583,7 @@ final class PlayerModel {
 
         case .buffering(let waiting):
             isBuffering = waiting || isOpening
+            noteBuffering(waiting)
 
         case .seeking:
             break
@@ -668,6 +678,7 @@ final class PlayerModel {
         frameRate = nil
         decoder = nil
         droppedFrames = 0
+        endStall()
         softwareDecodeHandled = false
         syncTest = nil
         seekWatch?.cancel(); seekWatch = nil
