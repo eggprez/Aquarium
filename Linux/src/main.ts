@@ -633,6 +633,49 @@ function showLogin(): void {
   renderLogin($("login-root"), showShell);
 }
 
+/**
+ * Settings → Add Account: the sign-in screen, with the account in use still
+ * signed in behind it. Cancel goes back to it untouched; a sign-in makes the
+ * new account the one in use and the shell redraws for it.
+ */
+function showAddAccount(): void {
+  closeMenus();
+  $("shell").classList.add("hidden");
+  $("login-root").classList.remove("hidden");
+  const back = () => {
+    $("login-root").classList.add("hidden");
+    $("shell").classList.remove("hidden");
+  };
+  renderLogin($("login-root"), () => void enterAccount(), { adding: true, onCancel: back });
+}
+
+/**
+ * The account in use has just changed (a switch, or Add Account). Whatever was
+ * playing belongs to the last one, and so do the screens in memory; the
+ * persistent cache is keyed per account, so the new one's own screens come
+ * back from disk.
+ */
+async function enterAccount(): Promise<void> {
+  if (playerActive) await playerCtl.stop().catch(() => {});
+  clearCache();
+  history.replaceState(null, "", "#/home");
+  const s = api.getSession();
+  await showShell();
+  if (s) toast(`Signed in as ${s.userName}`, "ok");
+}
+
+async function switchToAccount(key: string): Promise<void> {
+  closeMenus();
+  try {
+    await api.switchAccount(key);
+  } catch (e: any) {
+    toast(e.message ?? "Couldn't switch account", "error");
+    route();
+    return;
+  }
+  await enterAccount();
+}
+
 // ---------- Player bar ----------
 
 const PB_ICONS = {
@@ -2242,6 +2285,12 @@ async function boot(): Promise<void> {
   // The server stopped honouring our token (expired, or the session was
   // revoked from another device). Every page would otherwise fail on its own,
   // with Settings → Sign out as the only way out.
+  document.addEventListener("aquarium-account-switch", (ev) => {
+    const key = (ev as CustomEvent).detail?.key;
+    if (key) void switchToAccount(key);
+  });
+  document.addEventListener("aquarium-add-account", () => showAddAccount());
+
   document.addEventListener("aquarium-auth-expired", () => {
     closeMenus();
     showLogin();

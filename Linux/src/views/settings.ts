@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "../api";
 import * as iptv from "../iptv";
-import { el, clear, toast } from "../ui";
+import { el, clear, toast, openDialog } from "../ui";
 import {
   isAdaptiveEnabled,
   setAdaptiveEnabled,
@@ -294,6 +294,146 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
             el("span", { class: "sync-pill warn" }, ["Pending"]),
           ])
         : null,
+    ])
+  );
+
+  // Accounts: everyone signed in on this device, switched between without a
+  // password, each with its own token in the keyring.
+  const accountsBlock = el("div", { class: "settings-block" }, [el("h3", {}, ["Accounts"])]);
+  root.append(accountsBlock);
+  const drawAccounts = async (): Promise<void> => {
+    const list = await api.listAccounts();
+    if (!document.contains(accountsBlock)) return;
+    accountsBlock.querySelectorAll(".settings-row").forEach((n) => n.remove());
+    for (const a of list) {
+      const where = a.server_name || a.server.replace(/^https?:\/\//, "");
+      const controls = a.current
+        ? el("span", { class: "sync-pill ok" }, ["In use"])
+        : el("div", { class: "settings-actions" }, [
+            el("button", {
+              class: "btn small",
+              title: "Sign in as this account. Switching is instant and needs no password.",
+              onClick: () => document.dispatchEvent(new CustomEvent("aquarium-account-switch", { detail: { key: a.key } })),
+            }, ["Switch"]),
+            el("button", {
+              class: "btn small danger",
+              onClick: () =>
+                openDialog({
+                  title: `Sign ${a.user_name} out of this device?`,
+                  body: [el("p", {}, [`Their session on ${where} is ended and the account is removed from this device. The account in use isn't touched.`])],
+                  actions: [
+                    { label: "Cancel", primary: true },
+                    {
+                      label: "Sign Out",
+                      danger: true,
+                      run: async () => {
+                        try {
+                          const r = await api.forgetAccount(a.key);
+                          if (!r.revoked) toast("Removed here, but the server couldn't be reached to end that session.", "error");
+                        } catch (e: any) {
+                          toast(e.message ?? "Couldn't sign that account out", "error");
+                        }
+                        void drawAccounts();
+                      },
+                    },
+                  ],
+                }),
+            }, ["Sign Out of This Device"]),
+          ]);
+      accountsBlock.append(
+        el("div", { class: "settings-row" }, [
+          el("div", {}, [
+            el("div", { class: "lbl" }, [a.user_name || "Unnamed user"]),
+            el("div", { class: "sub" }, [where]),
+          ]),
+          controls,
+        ])
+      );
+    }
+    accountsBlock.append(
+      row(
+        "Add Account…",
+        "Sign in to another user on this server, or to a different server, without signing this one out. Switching is instant and needs no password: each account keeps its own token in the keyring.",
+        el("button", {
+          class: "btn small",
+          onClick: () => document.dispatchEvent(new CustomEvent("aquarium-add-account")),
+        }, ["Add Account…"])
+      )
+    );
+  };
+  await drawAccounts();
+  if (!document.contains(title)) return;
+
+  // Quick Connect, the approving side: a device signing in to this server
+  // shows a code, and entering it here signs that device in as this user.
+  const qcInput = el("input", {
+    class: "control md qc-code",
+    type: "text",
+    inputmode: "numeric",
+    autocomplete: "off",
+    placeholder: "6-digit code",
+    maxlength: "6",
+    "aria-label": "Quick Connect code",
+  }) as HTMLInputElement;
+  const qcOutcome = el("div", { class: "sub", hidden: "" });
+  const qcButton = el("button", { class: "btn small", disabled: "" }, ["Approve…"]) as HTMLButtonElement;
+  const qcSay = (text: string, tone: "ok" | "warn" | "bad") => {
+    qcOutcome.textContent = text;
+    qcOutcome.className = `sub qc-outcome ${tone}`;
+    qcOutcome.removeAttribute("hidden");
+  };
+  qcInput.addEventListener("input", () => {
+    // Digits only, and the six of them.
+    const digits = qcInput.value.replace(/\D/g, "").slice(0, 6);
+    if (digits !== qcInput.value) qcInput.value = digits;
+    qcButton.disabled = digits.length !== 6 || api.isOffline();
+    qcOutcome.setAttribute("hidden", "");
+  });
+  const qcConfirm = () => {
+    const code = qcInput.value;
+    if (code.length !== 6) return;
+    openDialog({
+      title: `Sign another device in as ${s?.userName ?? "you"}?`,
+      body: [el("p", {}, ["Only approve a code you can see on your own device's screen right now. Whoever holds the device showing it gets full access to your account."])],
+      actions: [
+        { label: "Cancel", primary: true },
+        {
+          label: `Approve ${code}`,
+          run: async () => {
+            qcButton.disabled = true;
+            try {
+              if (await api.authorizeQuickConnect(code)) {
+                qcInput.value = "";
+                qcSay("The other device is signing in now.", "ok");
+              } else {
+                qcSay("The server doesn't know that code. Check the digits, or ask for a new code — they expire after ten minutes.", "warn");
+              }
+            } catch (e: any) {
+              qcSay(e.message ?? String(e), "bad");
+            }
+            qcButton.disabled = qcInput.value.length !== 6;
+          },
+        },
+      ],
+    });
+  };
+  qcButton.addEventListener("click", qcConfirm);
+  qcInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") qcConfirm();
+  });
+  root.append(
+    el("div", { class: "settings-block" }, [
+      el("h3", {}, ["Quick Connect"]),
+      el("div", { class: "settings-row" }, [
+        el("div", {}, [
+          el("div", { class: "lbl" }, ["Approve a code"]),
+          el("div", { class: "sub" }, [
+            "Another device signing in to this server — a TV, say — can show a code instead of asking for a password. Enter the code here and it is signed in as you.",
+          ]),
+          qcOutcome,
+        ]),
+        el("div", { class: "settings-actions" }, [qcInput, qcButton]),
+      ]),
     ])
   );
 

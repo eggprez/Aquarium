@@ -143,7 +143,10 @@ export async function loadConfig(): Promise<any> {
 
 export async function saveConfig(patch: Record<string, any>): Promise<void> {
   appConfig = { ...appConfig, ...patch };
-  await invoke("config_save", { cfg: appConfig });
+  // Only the keys that changed: the backend merges, and a whole copy sent from
+  // here could carry stale values for keys it owns (the server, the signed-in
+  // user, the saved accounts) back over newer ones.
+  await invoke("config_save", { cfg: patch });
 }
 
 export async function api(
@@ -242,6 +245,198 @@ export async function logout(): Promise<{ revoked: boolean; pending: boolean }> 
     await loadConfig().catch(() => {});
   }
   return { revoked: !!res.revoked, pending: !!res.pending };
+}
+
+// ---------- Before sign-in: discovery, public users, Quick Connect ----------
+
+/** A Jellyfin server that answered the LAN broadcast. */
+export interface DiscoveredServer {
+  id: string;
+  name: string;
+  address: string;
+}
+
+/** Ask the local network who is a Jellyfin server; about 1.6 s. */
+export async function discoverServers(): Promise<DiscoveredServer[]> {
+  try {
+    return await invoke<DiscoveredServer[]>("jf_discover");
+  } catch {
+    return [];
+  }
+}
+
+async function publicCall(server: string, path: string, method = "GET"): Promise<{ status: number; body: any }> {
+  try {
+    return await invoke("jf_public", { server, path, method });
+  } catch (e) {
+    throw new Error(splitError(e).message);
+  }
+}
+
+/**
+ * A user the server will name to somebody who hasn't signed in: the faces on
+ * Jellyfin's own sign-in page. An administrator can hide any or all of them,
+ * so the list is an offer and the username field stays.
+ */
+export interface PublicUser {
+  Id: string;
+  Name: string;
+  HasPassword?: boolean;
+}
+
+export async function publicUsers(server: string): Promise<PublicUser[]> {
+  try {
+    const r = await publicCall(server, "/Users/Public");
+    if (r.status !== 200 || !Array.isArray(r.body)) return [];
+    return (r.body as PublicUser[])
+      .filter((u) => u?.Id && u.Name)
+      .sort((a, b) => a.Name.localeCompare(b.Name, undefined, { sensitivity: "base" }));
+  } catch {
+    return [];
+  }
+}
+
+export async function quickConnectEnabled(server: string): Promise<boolean> {
+  try {
+    const r = await publicCall(server, "/QuickConnect/Enabled");
+    return r.status === 200 && r.body === true;
+  } catch {
+    return false;
+  }
+}
+
+export interface QuickConnectStart {
+  secret: string;
+  code: string;
+}
+
+/**
+ * Ask for a code. The server files the request under this device's name and
+ * id, and the code is what the user types into a client that is already
+ * signed in. Jellyfin 10.9 made this a POST; the GET is kept for an older
+ * server, which answers 405 to the POST.
+ */
+export async function quickConnectInitiate(server: string): Promise<QuickConnectStart> {
+  let r = await publicCall(server, "/QuickConnect/Initiate", "POST");
+  if (r.status === 405 || r.status === 404) r = await publicCall(server, "/QuickConnect/Initiate", "GET");
+  if (r.status === 401) throw new Error("Quick Connect is turned off on this server");
+  if (r.status < 200 || r.status >= 300) throw new Error(`Quick Connect failed (${r.status})`);
+  const secret = r.body?.Secret;
+  const code = r.body?.Code;
+  if (!secret || !code) throw new Error("The server didn't hand out a Quick Connect code");
+  return { secret, code };
+}
+
+/**
+ * Has someone approved this code yet? `null` means the request has expired
+ * on the server — Jellyfin forgets a code after ten minutes.
+ */
+export async function quickConnectState(server: string, secret: string): Promise<boolean | null> {
+  const r = await publicCall(server, `/QuickConnect/Connect?secret=${encodeURIComponent(secret)}`);
+  if (r.status === 404) return null;
+  if (r.status < 200 || r.status >= 300) throw new Error(`Quick Connect failed (${r.status})`);
+  return !!r.body?.Authenticated;
+}
+
+/** Turn an approved code into a session, the same way `login` does. */
+export async function loginWithQuickConnect(server: string, secret: string): Promise<Session> {
+  let res: any;
+  try {
+    res = await invoke("jf_login_quick_connect", { server, secret });
+  } catch (e) {
+    throw new Error(splitError(e).message);
+  }
+  await loadConfig();
+  session = {
+    server: res.server,
+    userId: res.user_id,
+    userName: res.user_name ?? "",
+    deviceId: res.device_id,
+    secure: !!res.secure,
+  };
+  setOffline(false);
+  return session;
+}
+
+/**
+ * The other side of the exchange: this signed-in device approving a code
+ * shown on another. True when the server recognised the code; false when it
+ * didn't (mistyped, or already expired).
+ */
+export async function authorizeQuickConnect(code: string): Promise<boolean> {
+  const digits = code.replace(/\D/g, "");
+  if (!digits) return false;
+  let res: { status: number; body: any };
+  try {
+    res = await invoke("jf_request", { path: `/QuickConnect/Authorize?code=${digits}`, method: "POST", body: null });
+  } catch (e) {
+    throw new Error(splitError(e).message);
+  }
+  if (res.status === 403) throw new Error("This account isn't allowed to approve Quick Connect requests");
+  if (res.status === 404 || res.status === 400) return false;
+  if (res.status === 401) throw new Error("Quick Connect is turned off on this server");
+  if (res.status < 200 || res.status >= 300) throw new Error(`Server error ${res.status}`);
+  return res.body === true;
+}
+
+// ---------- More than one account ----------
+
+/** One account this device can become without a password. */
+export interface SavedAccount {
+  key: string;
+  server: string;
+  server_id?: string | null;
+  server_name?: string | null;
+  server_secure?: boolean;
+  user_id: string;
+  user_name: string;
+  current: boolean;
+}
+
+export async function listAccounts(): Promise<SavedAccount[]> {
+  try {
+    return await invoke<SavedAccount[]>("accounts_list");
+  } catch {
+    return [];
+  }
+}
+
+/** Servers signed in to before, newest first. */
+export function knownServers(): { server: string; name?: string | null }[] {
+  const list = appConfig.known_servers;
+  return Array.isArray(list) ? list.filter((s: any) => typeof s?.server === "string") : [];
+}
+
+/**
+ * Become another saved account. The one being left keeps its token, so coming
+ * back to it is the same click. The caller redraws the shell for the new
+ * account; the persistent cache is keyed per account already.
+ */
+export async function switchAccount(key: string): Promise<Session> {
+  try {
+    await invoke("account_switch", { key });
+  } catch (e) {
+    throw new Error(splitError(e).message);
+  }
+  await loadConfig();
+  if (!session) throw new Error("That account couldn't be opened");
+  setOffline(false);
+  return session;
+}
+
+/** Sign an account that isn't the one in use out of this device. */
+export async function forgetAccount(key: string): Promise<{ revoked: boolean }> {
+  try {
+    const r: any = await invoke("account_forget", { key });
+    return { revoked: !!r?.revoked };
+  } catch (e) {
+    throw new Error(splitError(e).message);
+  }
+}
+
+/** A user's picture, served without a token. */
+export function avatarUrl(server: string, userId: string, width = 96): string {
+  return `${server}/UserImage?userId=${userId}&maxWidth=${width}&quality=90`;
 }
 
 /**

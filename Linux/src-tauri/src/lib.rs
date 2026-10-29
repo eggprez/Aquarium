@@ -1,4 +1,5 @@
 mod config;
+mod discovery;
 mod downloads;
 mod egl;
 mod gl;
@@ -182,6 +183,41 @@ async fn jf_login(server: String, username: String, password: String) -> Result<
 #[tauri::command]
 async fn jf_logout() -> Result<Value, String> {
     server::logout().await
+}
+
+#[tauri::command]
+async fn jf_login_quick_connect(server: String, secret: String) -> Result<Value, String> {
+    server::login_quick_connect(&server, &secret).await
+}
+
+/// The unauthenticated calls the sign-in screen makes: `/Users/Public` and the
+/// Quick Connect exchange, nothing else (see `server::public_request`).
+#[tauri::command]
+async fn jf_public(server: String, path: String, method: Option<String>) -> Result<Value, String> {
+    server::public_request(&server, &path, method).await
+}
+
+/// Jellyfin servers on the local network, by UDP broadcast.
+#[tauri::command]
+async fn jf_discover() -> Vec<Value> {
+    tokio::task::spawn_blocking(|| discovery::find(std::time::Duration::from_millis(1600)))
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command(async)]
+fn accounts_list() -> Value {
+    server::accounts()
+}
+
+#[tauri::command(async)]
+fn account_switch(key: String) -> Result<Value, String> {
+    server::switch_account(&key)
+}
+
+#[tauri::command]
+async fn account_forget(key: String) -> Result<Value, String> {
+    server::forget_account(&key).await
 }
 
 #[tauri::command]
@@ -938,6 +974,12 @@ pub fn run() {
             jf_probe,
             jf_login,
             jf_logout,
+            jf_login_quick_connect,
+            jf_public,
+            jf_discover,
+            accounts_list,
+            account_switch,
+            account_forget,
             jf_request,
             jf_image,
             jf_ping,
