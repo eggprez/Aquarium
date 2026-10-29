@@ -110,6 +110,10 @@ final class LibraryIndex {
         directory.appending(path: "home.lzfse")
     }
 
+    nonisolated private static var librariesURL: URL {
+        directory.appending(path: "libraries.lzfse")
+    }
+
     private var isEnabled: Bool { Preferences.shared.keepsLibraryCopy }
 
     /// Whose library this is. A copy made for one account on one server is
@@ -135,6 +139,9 @@ final class LibraryIndex {
     func wipe() {
         #if os(iOS) || os(macOS)
         SpotlightIndexer.shared.wipe()
+        #if os(iOS)
+        FollowFeed.shared.wipe()
+        #endif
         #endif
         loadTask?.cancel()
         syncTask?.cancel()
@@ -149,6 +156,10 @@ final class LibraryIndex {
         views = []
         home = nil
         hasHomeCopy = false
+        homeReadFor = nil
+        homeRead?.cancel()
+        homeRead = nil
+        libraries = nil
         cursor = nil
         owner = nil
         isReady = false
@@ -167,6 +178,64 @@ final class LibraryIndex {
 
     // MARK: - Loading
 
+    /// Read the saved Home and library list on their own: a few dozen items,
+    /// where the snapshot is the whole library. The launch draws its first
+    /// frame from these while the server is still being asked and `prepare`
+    /// is still decoding everything else.
+    ///
+    /// Kept whether or not the library copy is on. Without it the launch had
+    /// nothing to draw and held a bare spinner until the server answered —
+    /// up to the probe's whole timeout against a server that never replies.
+    /// Read once per account; cheap to call again.
+    func prepareHome() async {
+        guard let owner = currentOwner, homeReadFor != owner else { return }
+        if let homeRead { return await homeRead.value }
+        let task = Task {
+            if isEnabled { await ImageLoader.shared.setDiskEnabled(true) }
+            let (savedHome, savedLibraries) = await Task.detached(priority: .userInitiated) {
+                (LibraryIndex.read(HomeCopy.self, from: LibraryIndex.homeURL),
+                 LibraryIndex.read(SavedLibraries.self, from: LibraryIndex.librariesURL))
+            }.value
+            guard currentOwner == owner else { return }
+            homeReadFor = owner
+            // Another account's, from before a switch, is never kept.
+            if home?.owner != owner {
+                home = savedHome?.owner == owner ? savedHome : nil
+                hasHomeCopy = home != nil
+            }
+            if libraries?.owner != owner {
+                libraries = savedLibraries?.owner == owner ? savedLibraries : nil
+            }
+        }
+        homeRead = task
+        await task.value
+        homeRead = nil
+    }
+
+    /// Which account's Home has been read off disk, and the read in flight.
+    @ObservationIgnored private var homeReadFor: String?
+    @ObservationIgnored private var homeRead: Task<Void, Never>?
+    /// The libraries as the shell last sorted them — see `SavedLibraries`.
+    @ObservationIgnored private var libraries: SavedLibraries?
+
+    /// The library list the tab bar was last built from, for the launch to
+    /// build it again before the server has been asked.
+    var savedLibraries: SavedLibraries? {
+        guard let libraries, libraries.owner == currentOwner else { return nil }
+        return libraries
+    }
+
+    /// The shell has just sorted the server's libraries into tabs.
+    func keepLibraries(video: [BaseItem], music: [BaseItem], books: [BaseItem], liveTV: Bool) {
+        guard let owner = currentOwner else { return }
+        let saved = SavedLibraries(owner: owner, video: video, music: music, books: books, liveTV: liveTV)
+        guard saved != libraries else { return }
+        libraries = saved
+        Task.detached(priority: .utility) {
+            LibraryIndex.write(saved, to: LibraryIndex.librariesURL)
+        }
+    }
+
     /// Read the saved copy, once per launch. Cheap to call again.
     func prepare() async {
         guard isEnabled, let owner = currentOwner else { return }
@@ -174,11 +243,12 @@ final class LibraryIndex {
         if isReady, self.owner == owner { return }
         if let loadTask { return await loadTask.value }
         let task = Task {
+            await prepareHome()
             // The table by id and the season and episode orderings are built
             // here too, beside the decode, rather than on the main actor once
             // it lands: every item hashed into a dictionary and every show's
             // episodes sorted, before Home could draw.
-            let (loaded, savedHome) = await Task.detached(priority: .userInitiated) {
+            let loaded = await Task.detached(priority: .userInitiated) {
                 var snapshot = LibraryIndex.readSnapshot()
                 // A sync that found nothing new moved the cursor on without
                 // rewriting the snapshot; the newer of the two wins.
@@ -188,20 +258,15 @@ final class LibraryIndex {
                     snapshot?.cursor = progress.cursor
                     snapshot?.syncedAt = progress.syncedAt
                 }
-                let loaded = snapshot.map { snapshot in
+                return snapshot.map { snapshot in
                     let table = Dictionary(snapshot.items.map { ($0.Id, $0) }, uniquingKeysWith: { _, new in new })
                     return (snapshot, table, LibraryIndex.derive(table))
                 }
-                return (loaded, LibraryIndex.read(HomeCopy.self, from: LibraryIndex.homeURL))
             }.value
             guard !Task.isCancelled, isEnabled, currentOwner == owner else { return }
             if case let (snapshot, table, derived)? = loaded, snapshot.version == Snapshot.currentVersion,
                snapshot.owner == owner, !isReady {
                 apply(snapshot, items: table, derived: derived)
-            }
-            if home == nil, let savedHome, savedHome.owner == owner {
-                home = savedHome
-                hasHomeCopy = true
             }
             artworkBytes = await ImageLoader.shared.diskUsage()
         }
@@ -289,17 +354,17 @@ final class LibraryIndex {
                 members[gone] = nil
                 changed = true
             }
-            if changed {
-                let kept = Set(members.values.joined())
-                items = items.filter { kept.contains($0.key) }
-            }
-
             // Worked out before anything is assigned, so the table and its
             // orderings change in the same moment rather than a query landing
-            // between the two.
+            // between the two. And beside the sync, as the merges are: the
+            // trim is a pass over every item.
             var derived: Derived?
             if changed {
-                derived = await Task.detached(priority: .utility) { [items] in LibraryIndex.derive(items) }.value
+                (items, derived) = await Task.detached(priority: .utility) { [items, members] in
+                    let kept = Set(members.values.joined())
+                    let trimmed = items.filter { kept.contains($0.key) }
+                    return (trimmed, LibraryIndex.derive(trimmed))
+                }.value
             }
             try Task.checkCancellation()
             guard isEnabled, currentOwner == owner else { return }
@@ -325,15 +390,24 @@ final class LibraryIndex {
             if let derived {
                 install(derived)
                 ItemMutations.shared.changed()
+                // Every item against its old self, off the main actor.
+                let (updated, removed) = await Task.detached(priority: .utility) { [items, previous] in
+                    (items.values.filter { previous[$0.Id] != $0 },
+                     Set(previous.keys.filter { items[$0] == nil }))
+                }.value
                 #if os(iOS) || os(macOS)
                 // The system's search follows the copy: what changed goes in
                 // again, what is gone comes out. On a first sync that is
                 // everything.
-                SpotlightIndexer.shared.update(
-                    changed: items.values.filter { previous[$0.Id] != $0 },
-                    removed: previous.keys.filter { items[$0] == nil }
-                )
+                SpotlightIndexer.shared.update(changed: updated, removed: Array(removed))
                 #endif
+                // And the pictures saved for what is gone come off the disk.
+                if !removed.isEmpty {
+                    Task {
+                        await ImageLoader.shared.forgetDiskArtwork(for: removed)
+                        artworkBytes = await ImageLoader.shared.diskUsage()
+                    }
+                }
             }
             // The whole library encoded, compressed and written only when some
             // of it changed. The common sync — every return to the app — finds
@@ -358,7 +432,6 @@ final class LibraryIndex {
         _ library: BaseItem, name: String, userId: String, since: Date?,
         items: inout [String: BaseItem], members: inout [String: [String]]
     ) async throws -> Bool {
-        var changed = false
         let base: [URLQueryItem] = [
             .init(name: "ParentId", value: library.Id),
             .init(name: "Recursive", value: "true"),
@@ -375,17 +448,6 @@ final class LibraryIndex {
         let full = try await pages(heavy, userId: userId, pageSize: Self.heavyPage) { done, total in
             self.syncProgress = SyncProgress(library: name, done: done, total: total)
         }
-        var parentsToRefresh = Set<String>()
-        for item in full {
-            if items[item.Id] != item { changed = true }
-            items[item.Id] = item
-            // A new or changed episode changes its season's and show's counts,
-            // and saving it does not re-save them.
-            if since != nil {
-                if let s = item.SeasonId { parentsToRefresh.insert(s) }
-                if let s = item.SeriesId { parentsToRefresh.insert(s) }
-            }
-        }
 
         // 2. What exists, and its watched state — see the note at the top.
         let light = try await pages(base + [
@@ -393,6 +455,57 @@ final class LibraryIndex {
             .init(name: "EnableUserData", value: "true"),
         ] + Self.stableOrder, userId: userId, pageSize: Self.lightPage) { _, _ in }
 
+        // Both folded into the table off the main actor. Every item compared,
+        // and the table copied on its first change, is tens of thousands of
+        // items on a large server — and a sync runs at every launch, while
+        // the first page is still being drawn and touched.
+        let merge = await Task.detached(priority: .utility) { [items, known = members[library.Id]] in
+            LibraryIndex.merge(full: full, light: light, into: items, known: known, trackParents: since != nil)
+        }.value
+        items = merge.items
+        members[library.Id] = merge.ids
+        let changed = merge.changed
+        let missing = merge.missing
+        let parentsToRefresh = merge.parents
+
+        // 3. Anything listed and not held, and the parents of what changed.
+        let wanted = Array(Set(missing).union(parentsToRefresh.subtracting(missing)))
+        if !wanted.isEmpty {
+            for fetched in try await byIds(wanted, userId: userId) {
+                items[fetched.Id] = fetched
+            }
+            return true
+        }
+        return changed
+    }
+
+    /// What `syncLibrary` makes of one library's two listings — see there.
+    struct Merge: Sendable {
+        var items: [String: BaseItem]
+        var ids: [String]
+        var missing: [String]
+        var parents: Set<String>
+        var changed: Bool
+    }
+
+    /// Pure, so it runs beside the sync rather than on the main actor.
+    nonisolated static func merge(
+        full: [BaseItem], light: [BaseItem], into table: [String: BaseItem],
+        known: [String]?, trackParents: Bool
+    ) -> Merge {
+        var items = table
+        var changed = false
+        var parents = Set<String>()
+        for item in full {
+            if items[item.Id] != item { changed = true }
+            items[item.Id] = item
+            // A new or changed episode changes its season's and show's counts,
+            // and saving it does not re-save them.
+            if trackParents {
+                if let s = item.SeasonId { parents.insert(s) }
+                if let s = item.SeriesId { parents.insert(s) }
+            }
+        }
         var ids: [String] = []
         ids.reserveCapacity(light.count)
         var missing: [String] = []
@@ -408,18 +521,8 @@ final class LibraryIndex {
                 changed = true
             }
         }
-        if Set(members[library.Id] ?? []) != Set(ids) { changed = true }
-        members[library.Id] = ids
-
-        // 3. Anything listed and not held, and the parents of what changed.
-        let wanted = Array(Set(missing).union(parentsToRefresh.subtracting(missing)))
-        if !wanted.isEmpty {
-            for fetched in try await byIds(wanted, userId: userId) {
-                items[fetched.Id] = fetched
-                changed = true
-            }
-        }
-        return changed
+        if Set(known ?? []) != Set(ids) { changed = true }
+        return Merge(items: items, ids: ids, missing: missing, parents: parents, changed: changed)
     }
 
     /// An order that holds still between pages. Paged by `StartIndex` with no
@@ -447,7 +550,7 @@ final class LibraryIndex {
                 .init(name: "Limit", value: String(pageSize)),
                 .init(name: "EnableTotalRecordCount", value: "true"),
             ]
-            let page = try await fetch("/Users/\(userId)/Items?\(JellyfinClient.encode(q))")
+            let page = try await fetch("/Items?userId=\(userId)&\(JellyfinClient.encode(q))")
             out += page.items
             total = page.TotalRecordCount ?? out.count
             progress(out.count, total)
@@ -465,7 +568,7 @@ final class LibraryIndex {
                 .init(name: "Ids", value: chunk),
                 .init(name: "Fields", value: JellyfinClient.indexFields),
             ]
-            out += try await fetch("/Users/\(userId)/Items?\(JellyfinClient.encode(q))").items
+            out += try await fetch("/Items?userId=\(userId)&\(JellyfinClient.encode(q))").items
         }
         return out
     }
@@ -501,12 +604,13 @@ final class LibraryIndex {
     private func save() async {
         guard let owner else { return }
         hasUnsavedChanges = false
-        let snapshot = Snapshot(
-            version: Snapshot.currentVersion, owner: owner, cursor: cursor, syncedAt: lastSynced,
-            views: views, members: members, items: Array(items.values)
-        )
+        // The table flattened beside the write, not here: a copy of every item.
         await Task.detached(priority: .utility) {
-            LibraryIndex.write(snapshot)
+            [cursor, lastSynced, views, members, items] in
+            LibraryIndex.write(Snapshot(
+                version: Snapshot.currentVersion, owner: owner, cursor: cursor, syncedAt: lastSynced,
+                views: views, members: members, items: Array(items.values)
+            ))
         }.value
     }
 
@@ -630,9 +734,11 @@ final class LibraryIndex {
     /// What Home last showed, brought up to date with the copy's watched
     /// state: something finished since is no longer in Continue Watching, and
     /// something further along says so. Nil until Home has loaded once from
-    /// the server with the copy on.
+    /// the server with the copy on. Before the rest of the copy has been read
+    /// (see `prepareHome`), exactly as it was saved.
     func homeCopy() -> HomeCopy? {
-        guard isReady, var copy = home else { return nil }
+        guard var copy = home, copy.owner == currentOwner else { return nil }
+        guard isReady else { return copy }
         // Which of the two is newer isn't recorded, so the copy only wins where
         // it has something to say: finished, or further along. A copy that
         // simply holds no position for an item hasn't heard less than Home did
@@ -657,7 +763,9 @@ final class LibraryIndex {
     /// Home as the server just drew it.
     func keepHome(sections: [HomeSection], resume: [BaseItem], nextUp: [BaseItem],
                   latest: [(library: BaseItem, items: [BaseItem])], hero: [BaseItem]) {
-        guard isEnabled, isReady, let owner else { return }
+        // Not only with the library copy on: the launch opens on this whatever
+        // the setting — see `prepareHome`.
+        guard let owner = currentOwner else { return }
         let copy = HomeCopy(
             owner: owner, sections: sections.map(\.rawValue), resume: resume, nextUp: nextUp,
             latest: latest.map { .init(library: $0.library, items: $0.items) }, hero: hero
@@ -749,7 +857,12 @@ final class LibraryIndex {
         ].joined(separator: "|")
 
         let list: [String]
-        if let cached = queryCache[key] {
+        // A random order is drawn afresh with each first page and kept only
+        // for the pages after it, so a grid scrolled down doesn't repeat or
+        // skip. Cached outright, every later "Random" — Surprise Me's forty
+        // above all — was the same draw until the library next changed.
+        let freshDraw = query.sortBy == "Random" && query.startIndex == 0
+        if !freshDraw, let cached = queryCache[key] {
             list = cached
         } else {
             var matches = ids.compactMap { items[$0] }.filter { types.contains($0.kind) }
@@ -917,6 +1030,18 @@ struct HomeCopy: Codable, Sendable {
     var nextUp: [BaseItem]
     var latest: [LatestRow]
     var hero: [BaseItem]
+}
+
+/// The libraries as the shell last sorted them into tabs, so a launch builds
+/// the same tab bar before the server has been asked. Sorted rather than raw:
+/// telling an audiobook folder from a video library takes a request per
+/// untyped library — see `AppModel.loadLibraries`.
+struct SavedLibraries: Codable, Sendable, Equatable {
+    var owner: String
+    var video: [BaseItem]
+    var music: [BaseItem]
+    var books: [BaseItem]
+    var liveTV: Bool
 }
 
 /// The copy as it is written to disk.

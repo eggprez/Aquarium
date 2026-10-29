@@ -2,7 +2,6 @@
 //  the media keys on a Mac keyboard — all one API, and the counterpart to
 //  mpris.rs on Linux.
 
-import AVFoundation
 import Foundation
 import MediaPlayer
 
@@ -40,27 +39,26 @@ final class NowPlaying {
         let centre = MPRemoteCommandCenter.shared()
         let onStage = musicHasTheStage
         centre.previousTrackCommand.isEnabled = onStage
-        #if os(tvOS)
-        let videoHasNext = model?.upNext != nil
-        #else
         let videoHasNext = model?.upNext != nil || model?.upNextLocalId != nil || model?.isShuffling == true
             || model?.queue.isEmpty == false
-        #endif
         centre.nextTrackCommand.isEnabled = onStage || videoHasNext
         centre.skipForwardCommand.isEnabled = !onStage || music.current?.isAudiobook == true
         centre.skipBackwardCommand.isEnabled = !onStage || music.current?.isAudiobook == true
         centre.changeShuffleModeCommand.isEnabled = onStage
         centre.changeRepeatModeCommand.isEnabled = onStage
-        // Thumbs, for a song in a station: what a watch, a car or a pair of
-        // headphones with the controls for it shows. They steer the station
-        // playing and mean nothing to an album or a playlist, so those get
-        // none.
-        let canThumb = onStage && music.canThumb
-        let thumb = canThumb ? music.thumb : nil
-        centre.likeCommand.isEnabled = canThumb
-        centre.dislikeCommand.isEnabled = canThumb
-        centre.likeCommand.isActive = thumb == 1
-        centre.dislikeCommand.isActive = thumb == -1
+        // The rates the system's menu offers are the ones whoever has the
+        // stage can play. The music player has no 0.5×: offered it anyway, a
+        // book set to it from the lock screen landed somewhere else and the
+        // menu showed no tick at all.
+        let rates = (onStage ? MusicPlayer.speeds : PlayerModel.speeds).map { NSNumber(value: $0) }
+        if centre.changePlaybackRateCommand.supportedPlaybackRates != rates {
+            centre.changePlaybackRateCommand.supportedPlaybackRates = rates
+        }
+        // No like or dislike: stations are steered by skipping and letting
+        // songs play, and a watch, a car or headphones that offer those
+        // buttons get none to show.
+        centre.likeCommand.isEnabled = false
+        centre.dislikeCommand.isEnabled = false
         if onStage {
             centre.changeShuffleModeCommand.currentShuffleType = music.isShuffled ? .items : .off
             centre.changeRepeatModeCommand.currentRepeatType = {
@@ -78,127 +76,121 @@ final class NowPlaying {
         guard !wired else { return }
         wired = true
 
-        let centre = MPRemoteCommandCenter.shared()
+        // After the first frame: the command centre is another process, and
+        // this ran inside the player's init, inside the app's. A title started
+        // from Siri in that moment plays; its lock-screen controls follow.
+        Launch.afterFirstFrame { [self] in
+            let centre = MPRemoteCommandCenter.shared()
 
-        centre.playCommand.addTarget { [weak self] _ in
-            guard let self else { return .noSuchContent }
-            if self.musicHasTheStage { self.music.resume(); return .success }
-            guard let model = self.model else { return .noSuchContent }
-            model.resume()
-            return .success
-        }
-        centre.pauseCommand.addTarget { [weak self] _ in
-            guard let self else { return .noSuchContent }
-            if self.musicHasTheStage { self.music.pause(); return .success }
-            guard let model = self.model else { return .noSuchContent }
-            model.pause()
-            return .success
-        }
-        centre.togglePlayPauseCommand.addTarget { [weak self] _ in
-            guard let self else { return .noSuchContent }
-            if self.musicHasTheStage { self.music.togglePlayPause(); return .success }
-            guard let model = self.model else { return .noSuchContent }
-            model.togglePlayPause()
-            return .success
-        }
-        centre.stopCommand.addTarget { [weak self] _ in
-            guard let self else { return .noSuchContent }
-            if self.musicHasTheStage { self.music.stop(); return .success }
-            guard let model = self.model else { return .noSuchContent }
-            model.stop()
-            return .success
-        }
-
-        // ±30 s, the same jumps the app's own buttons make and the same ones
-        // the Linux player bar offered.
-        centre.skipForwardCommand.preferredIntervals = [30]
-        centre.skipBackwardCommand.preferredIntervals = [30]
-        centre.skipForwardCommand.addTarget { [weak self] event in
-            guard let self else { return .noSuchContent }
-            let interval = (event as? MPSkipIntervalCommandEvent)?.interval ?? 30
-            if self.musicHasTheStage { self.music.seek(by: interval); return .success }
-            guard let model = self.model else { return .noSuchContent }
-            model.seek(by: interval)
-            return .success
-        }
-        centre.skipBackwardCommand.addTarget { [weak self] event in
-            guard let self else { return .noSuchContent }
-            let interval = (event as? MPSkipIntervalCommandEvent)?.interval ?? 30
-            if self.musicHasTheStage { self.music.seek(by: -interval); return .success }
-            guard let model = self.model else { return .noSuchContent }
-            model.seek(by: -interval)
-            return .success
-        }
-
-        centre.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let self, let event = event as? MPChangePlaybackPositionCommandEvent
-            else { return .noSuchContent }
-            if self.musicHasTheStage { self.music.seek(to: event.positionTime); return .success }
-            guard let model = self.model else { return .noSuchContent }
-            model.seek(to: event.positionTime)
-            return .success
-        }
-
-        // The shell's "next track" button means the next episode here, which is
-        // exactly what it meant over MPRIS — and the next song when it is the
-        // music player on the lock screen.
-        centre.nextTrackCommand.addTarget { [weak self] _ in
-            guard let self else { return .noSuchContent }
-            if self.musicHasTheStage { self.music.skipNext(); return .success }
-            guard let model = self.model else { return .noSuchContent }
-            Task { await model.playNextNow() }
-            return .success
-        }
-        centre.previousTrackCommand.addTarget { [weak self] _ in
-            guard let self, self.musicHasTheStage else { return .noSuchContent }
-            self.music.skipPrevious()
-            return .success
-        }
-        centre.likeCommand.localizedTitle = "Thumbs Up"
-        centre.likeCommand.localizedShortTitle = "Like"
-        centre.dislikeCommand.localizedTitle = "Thumbs Down"
-        centre.dislikeCommand.localizedShortTitle = "Dislike"
-        centre.likeCommand.addTarget { [weak self] event in
-            guard let self, self.musicHasTheStage, self.music.canThumb,
-                  let event = event as? MPFeedbackCommandEvent else { return .noSuchContent }
-            self.music.setThumb(event.isNegative ? nil : 1)
-            self.refreshCommandAvailability()
-            return .success
-        }
-        centre.dislikeCommand.addTarget { [weak self] event in
-            guard let self, self.musicHasTheStage, self.music.canThumb,
-                  let event = event as? MPFeedbackCommandEvent else { return .noSuchContent }
-            self.music.setThumb(event.isNegative ? nil : -1)
-            self.refreshCommandAvailability()
-            return .success
-        }
-        centre.changeShuffleModeCommand.addTarget { [weak self] event in
-            guard let self, self.musicHasTheStage,
-                  let event = event as? MPChangeShuffleModeCommandEvent else { return .noSuchContent }
-            if (event.shuffleType == .off) == self.music.isShuffled { self.music.toggleShuffle() }
-            return .success
-        }
-        centre.changeRepeatModeCommand.addTarget { [weak self] event in
-            guard let self, self.musicHasTheStage,
-                  let event = event as? MPChangeRepeatModeCommandEvent else { return .noSuchContent }
-            switch event.repeatType {
-            case .off: self.music.repeatMode = .off
-            case .one: self.music.repeatMode = .one
-            case .all: self.music.repeatMode = .all
-            @unknown default: break
+            centre.playCommand.addTarget { [weak self] _ in
+                guard let self else { return .noSuchContent }
+                if self.musicHasTheStage { self.music.resume(); return .success }
+                guard let model = self.model else { return .noSuchContent }
+                model.resume()
+                return .success
             }
-            return .success
-        }
+            centre.pauseCommand.addTarget { [weak self] _ in
+                guard let self else { return .noSuchContent }
+                if self.musicHasTheStage { self.music.pause(); return .success }
+                guard let model = self.model else { return .noSuchContent }
+                model.pause()
+                return .success
+            }
+            centre.togglePlayPauseCommand.addTarget { [weak self] _ in
+                guard let self else { return .noSuchContent }
+                if self.musicHasTheStage { self.music.togglePlayPause(); return .success }
+                guard let model = self.model else { return .noSuchContent }
+                model.togglePlayPause()
+                return .success
+            }
+            centre.stopCommand.addTarget { [weak self] _ in
+                guard let self else { return .noSuchContent }
+                if self.musicHasTheStage { self.music.stop(); return .success }
+                guard let model = self.model else { return .noSuchContent }
+                model.stop()
+                return .success
+            }
 
-        centre.changePlaybackRateCommand.supportedPlaybackRates =
-            PlayerModel.speeds.map { NSNumber(value: $0) }
-        centre.changePlaybackRateCommand.addTarget { [weak self] event in
-            guard let self, let event = event as? MPChangePlaybackRateCommandEvent
-            else { return .noSuchContent }
-            if self.musicHasTheStage { self.music.speed = Double(event.playbackRate); return .success }
-            guard let model = self.model else { return .noSuchContent }
-            model.speed = Double(event.playbackRate)
-            return .success
+            // ±30 s, the same jumps the app's own buttons make and the same ones
+            // the Linux player bar offered.
+            centre.skipForwardCommand.preferredIntervals = [30]
+            centre.skipBackwardCommand.preferredIntervals = [30]
+            centre.skipForwardCommand.addTarget { [weak self] event in
+                guard let self else { return .noSuchContent }
+                let interval = (event as? MPSkipIntervalCommandEvent)?.interval ?? 30
+                if self.musicHasTheStage { self.music.seek(by: interval); return .success }
+                guard let model = self.model else { return .noSuchContent }
+                model.seek(by: interval)
+                return .success
+            }
+            centre.skipBackwardCommand.addTarget { [weak self] event in
+                guard let self else { return .noSuchContent }
+                let interval = (event as? MPSkipIntervalCommandEvent)?.interval ?? 30
+                if self.musicHasTheStage { self.music.seek(by: -interval); return .success }
+                guard let model = self.model else { return .noSuchContent }
+                model.seek(by: -interval)
+                return .success
+            }
+
+            centre.changePlaybackPositionCommand.addTarget { [weak self] event in
+                guard let self, let event = event as? MPChangePlaybackPositionCommandEvent
+                else { return .noSuchContent }
+                if self.musicHasTheStage { self.music.seek(to: event.positionTime); return .success }
+                guard let model = self.model else { return .noSuchContent }
+                model.seek(to: event.positionTime)
+                return .success
+            }
+
+            // The shell's "next track" button means the next episode here, which is
+            // exactly what it meant over MPRIS — and the next song when it is the
+            // music player on the lock screen.
+            centre.nextTrackCommand.addTarget { [weak self] _ in
+                guard let self else { return .noSuchContent }
+                if self.musicHasTheStage { self.music.skipNext(); return .success }
+                guard let model = self.model else { return .noSuchContent }
+                Task { await model.playNextNow() }
+                return .success
+            }
+            centre.previousTrackCommand.addTarget { [weak self] _ in
+                guard let self, self.musicHasTheStage else { return .noSuchContent }
+                self.music.skipPrevious()
+                return .success
+            }
+            centre.changeShuffleModeCommand.addTarget { [weak self] event in
+                guard let self, self.musicHasTheStage,
+                      let event = event as? MPChangeShuffleModeCommandEvent else { return .noSuchContent }
+                if (event.shuffleType == .off) == self.music.isShuffled { self.music.toggleShuffle() }
+                return .success
+            }
+            centre.changeRepeatModeCommand.addTarget { [weak self] event in
+                guard let self, self.musicHasTheStage,
+                      let event = event as? MPChangeRepeatModeCommandEvent else { return .noSuchContent }
+                switch event.repeatType {
+                case .off: self.music.repeatMode = .off
+                case .one: self.music.repeatMode = .one
+                case .all: self.music.repeatMode = .all
+                @unknown default: break
+                }
+                return .success
+            }
+
+            // Which rates are offered follows the stage — see
+            // `refreshCommandAvailability`.
+            centre.changePlaybackRateCommand.supportedPlaybackRates =
+                PlayerModel.speeds.map { NSNumber(value: $0) }
+            centre.changePlaybackRateCommand.addTarget { [weak self] event in
+                guard let self, let event = event as? MPChangePlaybackRateCommandEvent
+                else { return .noSuchContent }
+                if self.musicHasTheStage {
+                    // Onto the music player's own steps, whatever was asked.
+                    let asked = Double(event.playbackRate)
+                    self.music.speed = MusicPlayer.speeds.min { abs($0 - asked) < abs($1 - asked) } ?? 1
+                    return .success
+                }
+                guard let model = self.model else { return .noSuchContent }
+                model.speed = Double(event.playbackRate)
+                return .success
+            }
         }
     }
 

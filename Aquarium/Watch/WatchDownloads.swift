@@ -48,6 +48,9 @@ struct WatchRecord: Codable, Identifiable, Hashable, Sendable {
     var estimatedBytes: Int64 = 0
     var status: Status = .queued
     var errorMessage: String?
+    /// Failed only because it didn't fit: tried again by the pump once
+    /// there is room, which no other failure is.
+    var lackedSpace = false
     var attempts = 0
     /// Why this is here: "book", "song", "album:<id>", "playlist:<id>". A
     /// group deleted takes its reason away; a record with none left goes.
@@ -119,6 +122,7 @@ struct WatchRecord: Codable, Identifiable, Hashable, Sendable {
         estimatedBytes = try c.decodeIfPresent(Int64.self, forKey: .estimatedBytes) ?? 0
         status = try c.decodeIfPresent(Status.self, forKey: .status) ?? .queued
         errorMessage = try c.decodeIfPresent(String.self, forKey: .errorMessage)
+        lackedSpace = try c.decodeIfPresent(Bool.self, forKey: .lackedSpace) ?? false
         attempts = try c.decodeIfPresent(Int.self, forKey: .attempts) ?? 0
         reasons = try c.decodeIfPresent(Set<String>.self, forKey: .reasons) ?? ["song"]
         automatic = try c.decodeIfPresent(Bool.self, forKey: .automatic) ?? false
@@ -226,10 +230,15 @@ final class WatchDownloads: NSObject {
     }
     private var active: String?
     private var mirrorTask: Task<Void, Never>?
-    /// Items this watch failed to fetch for itself: asked of the phone next,
-    /// even on Wi‑Fi. A watch on a network that can't reach the server
-    /// (a TLS failure, a timeout) otherwise retries the same dead route.
-    private var viaPhone: Set<String> = []
+    /// Kept playlists' songs, and the books in progress, as the phone last
+    /// sent them.
+    private var phoneLists: [String: WatchPlaylistContents] = [:]
+    private var phoneBooks: [String: BaseItem] = [:]
+    /// Items the phone gave up on, and when: fetched by this watch itself
+    /// while it has a network, and asked of the phone again once that
+    /// fails too, or after an hour.
+    private var phoneGaveUp: [String: Date] = [:]
+    private static let phoneGaveUpFor: TimeInterval = 60 * 60
     /// Items the phone has shown progress on since launch: asked for and
     /// under way, not merely asked for.
     private var phoneWorking: Set<String> = []
@@ -245,6 +254,22 @@ final class WatchDownloads: NSObject {
     /// is given a while to catch up before its word counts again.
     private var droppedPlaylists: [String: Date] = [:]
     private static let dropGrace: TimeInterval = 10 * 60
+    /// What each of the plan's wants comes to — see `WatchMirrorPlan.wants`
+    /// — as the phone sent it or the server said, by the want's key. Kept
+    /// on disk so a pass can check a want against the records with neither.
+    private var wantContents: [String: WatchDownloadContents] = [:]
+    /// Wants taken off here, and when: given the same grace as a playlist
+    /// before the phone's plan, which may still name them, counts again.
+    private var droppedWants: [String: Date] = [:]
+    /// Items cancelled by hand while a want still names them. A want is
+    /// checked on every pass, and without this the song cancelled from the
+    /// queue was straight back in it. Cleared when the want is asked for
+    /// again from the phone.
+    private var declined: Set<String> = []
+    /// When a want's failed item was last queued again: once an hour, not
+    /// on every raise of the wrist.
+    private var wantRetriedAt: [String: Date] = [:]
+    private static let wantRetryInterval: TimeInterval = 60 * 60
     /// Things a background wake is still doing — a file being measured, the
     /// next transfer being started — before the app may be put back to sleep.
     private var settling = 0
@@ -277,6 +302,12 @@ final class WatchDownloads: NSObject {
            let saved = try? JSONDecoder().decode([String: Date].self, from: data) {
             droppedPlaylists = saved
         }
+        if let data = UserDefaults.standard.data(forKey: "watch_dropped_wants"),
+           let saved = try? JSONDecoder().decode([String: Date].self, from: data) {
+            droppedWants = saved
+        }
+        declined = Set(UserDefaults.standard.stringArray(forKey: "watch_declined_items") ?? [])
+        wantContents = Self.loadWants()
         pathMonitor.pathUpdateHandler = { [weak self] path in
             // Wi‑Fi of the watch's own. Through the phone the path is
             // neither Wi‑Fi nor cellular, and the phone is the better carrier.
@@ -338,6 +369,21 @@ final class WatchDownloads: NSObject {
             out.append(record)
         }
         return out.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private nonisolated static var wantsFile: URL { root.appendingPathComponent("wants.json") }
+
+    private nonisolated static func loadWants() -> [String: WatchDownloadContents] {
+        guard let data = try? Data(contentsOf: wantsFile) else { return [:] }
+        return (try? JSONDecoder().decode([String: WatchDownloadContents].self, from: data)) ?? [:]
+    }
+
+    /// Written off the main thread: an artist's worth of items is a few
+    /// hundred kilobytes.
+    private func saveWants() {
+        guard let data = try? JSONEncoder().encode(wantContents) else { return }
+        let file = Self.wantsFile
+        Task.detached(priority: .utility) { try? data.write(to: file, options: .atomic) }
     }
 
     private nonisolated static func loadPlaylists() -> [WatchPlaylist] {
@@ -516,7 +562,19 @@ final class WatchDownloads: NSObject {
         WatchLog.note("downloads", "cancel \(itemId)")
         if active == itemId { cancelActiveTask() }
         if record(for: itemId)?.relayAskedAt != nil { WatchLink.shared.send(.cancelFetch(itemId: itemId)) }
+        // A song or book wanted on its own is a want of its own: gone with
+        // it. One of an album's or an artist's is declined, not the want.
+        dropWant("song:\(itemId)", keepingFiles: false, tellPhone: true)
+        dropWant("book:\(itemId)", keepingFiles: false, tellPhone: true)
+        if wantContents.values.contains(where: { $0.items.contains { $0.Id == itemId } }) {
+            declined.insert(itemId)
+            persistDeclined()
+        }
         removeFolder(itemId)
+    }
+
+    private func persistDeclined() {
+        UserDefaults.standard.set(Array(declined), forKey: "watch_declined_items")
     }
 
     // MARK: - Deleting
@@ -527,6 +585,8 @@ final class WatchDownloads: NSObject {
         removeFolder(itemId)
         for i in playlists.indices { playlists[i].itemIds.removeAll { $0 == itemId } }
         savePlaylists()
+        // The room freed may be what something turned away was waiting for.
+        pump()
     }
 
     /// Take away one reason for these records to be here; whatever has none
@@ -545,10 +605,19 @@ final class WatchDownloads: NSObject {
         }
     }
 
-    func deleteBook(_ itemId: String) { delete(itemId) }
+    func deleteBook(_ itemId: String) {
+        dropWant("book:\(itemId)", keepingFiles: false, tellPhone: true)
+        delete(itemId)
+    }
 
     func deleteAlbum(_ albumId: String) {
         let ids = records.filter { $0.albumId == albumId && !$0.isAudiobook }.map(\.itemId)
+        // Wanted as this album, or as a song of it: those wants go. Wanted
+        // as part of an artist or a genre: that want goes too — the phone
+        // would otherwise put the album straight back — but the artist's
+        // other albums stay, as albums of their own.
+        dropWant("album:\(albumId)", keepingFiles: false, tellPhone: true)
+        forgetWants(among: ids)
         // Songs kept for an album, or on their own, go with the album; songs
         // that are also in a kept playlist stay for it.
         for id in ids {
@@ -565,25 +634,27 @@ final class WatchDownloads: NSObject {
         pump()
     }
 
-    func deletePlaylist(_ playlistId: String) {
+    /// `fromPhone`: the phone's own switch, which it already knows about —
+    /// told back, a reply crossing a switch turned on again turned it off.
+    func deletePlaylist(_ playlistId: String, fromPhone: Bool = false) {
         guard let list = playlists.first(where: { $0.id == playlistId }) else { return }
         withdraw(reason: "playlist:\(playlistId)", from: list.itemIds)
         playlists.removeAll { $0.id == playlistId }
         playlistSyncedAt[playlistId] = nil
         savePlaylists()
-        dropped([playlistId])
+        dropped([playlistId], tellPhone: !fromPhone)
         pump()
     }
 
     /// Playlists taken off the watch here: the phone is told, so its
     /// "Kept on the watch" switch goes off and its plan stops naming them,
     /// and until it has caught up its plan's word on them is set aside.
-    private func dropped(_ playlistIds: [String]) {
+    private func dropped(_ playlistIds: [String], tellPhone: Bool = true) {
         guard !playlistIds.isEmpty else { return }
         let now = Date()
         for id in playlistIds {
             droppedPlaylists[id] = now
-            WatchLink.shared.send(.playlistRemoved(id: id))
+            if tellPhone { WatchLink.shared.send(.playlistRemoved(id: id)) }
         }
         persistDropped()
     }
@@ -591,6 +662,162 @@ final class WatchDownloads: NSObject {
     private func persistDropped() {
         droppedPlaylists = droppedPlaylists.filter { Date().timeIntervalSince($0.value) < Self.dropGrace }
         UserDefaults.standard.set(try? JSONEncoder().encode(droppedPlaylists), forKey: "watch_dropped_playlists")
+        droppedWants = droppedWants.filter { Date().timeIntervalSince($0.value) < Self.dropGrace }
+        UserDefaults.standard.set(try? JSONEncoder().encode(droppedWants), forKey: "watch_dropped_wants")
+    }
+
+    // MARK: - Wants
+
+    /// A want let go of. Its records lose the want's reason, and whatever is
+    /// left with none goes — unless `keepingFiles`, when a finished song
+    /// stays as its album's, or on its own: what the hand took off was one
+    /// album of an artist, not the artist's other albums. `tellPhone` when
+    /// it was taken off here, so the phone's list lets it go too.
+    private func dropWant(_ key: String, keepingFiles: Bool, tellPhone: Bool) {
+        guard let contents = wantContents.removeValue(forKey: key) else { return }
+        saveWants()
+        let reason = contents.request.reason
+        var letGo = 0
+        for item in contents.items {
+            declined.remove(item.Id)
+            wantRetriedAt[item.Id] = nil
+            guard var r = record(for: item.Id), r.reasons.contains(reason) else { continue }
+            r.reasons.remove(reason)
+            if r.reasons.isEmpty, keepingFiles, r.status == .complete {
+                r.reasons.insert(r.albumId.flatMap { $0.isEmpty ? nil : "album:\($0)" } ?? "song")
+            }
+            if r.reasons.isEmpty {
+                if active == item.Id { cancelActiveTask() }
+                if r.relayAskedAt != nil, r.status != .complete { WatchLink.shared.send(.cancelFetch(itemId: item.Id)) }
+                removeFolder(item.Id)
+                letGo += 1
+            } else {
+                save(r)
+            }
+        }
+        persistDeclined()
+        if tellPhone {
+            droppedWants[key] = Date()
+            persistDropped()
+            WatchLink.shared.send(.wantRemoved(key: key))
+        }
+        WatchLog.note("downloads", "want \(key) dropped\(tellPhone ? " here" : " by the phone"): \(letGo) of \(contents.items.count) items let go")
+        changed()
+    }
+
+    /// A group cancelled by hand: its own want, and the artist and genre
+    /// wants its records are here for, are let go of — the records kept —
+    /// or the want would bring it straight back.
+    func forgetWants(for kind: WatchStorageGroup.Kind, id: String, among itemIds: [String]) {
+        switch kind {
+        case .album: dropWant("album:\(id)", keepingFiles: true, tellPhone: true)
+        case .book: dropWant("book:\(id)", keepingFiles: true, tellPhone: true)
+        case .playlist, .songs: break
+        }
+        forgetWants(among: itemIds)
+    }
+
+    /// The artist and genre wants these records are here for are let go
+    /// of, the records themselves kept: for a group taken off or cancelled
+    /// by hand, whose want would otherwise bring it back.
+    func forgetWants(among itemIds: [String]) {
+        var keys = Set<String>()
+        for id in itemIds {
+            guard let r = record(for: id) else { continue }
+            for reason in r.reasons where reason.hasPrefix("artist:") || reason.hasPrefix("genre:") { keys.insert(reason) }
+            if wantContents["song:\(id)"] != nil { keys.insert("song:\(id)") }
+        }
+        for key in keys { dropWant(key, keepingFiles: true, tellPhone: true) }
+    }
+
+    /// A want taken off the list on the phone.
+    func deleteWant(_ request: WatchDownloadRequest) {
+        dropWant(request.key, keepingFiles: false, tellPhone: false)
+        pump()
+    }
+
+    private func isDroppedWant(_ key: String) -> Bool {
+        droppedWants[key].map { Date().timeIntervalSince($0) < Self.dropGrace } ?? false
+    }
+
+    /// What a want comes to, asked of the server. Nil when it couldn't be.
+    private func lookUp(_ request: WatchDownloadRequest) async -> WatchDownloadContents? {
+        let client = JellyfinClient.shared
+        guard client.isSignedIn, !client.isOffline else { return nil }
+        let items: [BaseItem]?
+        switch request.kind {
+        case .song, .book: items = (try? await client.item(request.id)).map { [$0] }
+        case .album: items = try? await client.albumTracks(albumId: request.id)
+        case .playlist: items = try? await client.playlistItems(playlistId: request.id)
+        case .artist: items = try? await client.songs(artistId: request.id)
+        case .genre: items = try? await client.songs(genreId: request.id)
+        }
+        guard let items else {
+            WatchLog.error("downloads", "\(request.kind.rawValue) \(request.id) not looked up: the server didn't answer")
+            return nil
+        }
+        return WatchDownloadContents(request: request, items: items.filter(\.isAudio).map(\.forWatch))
+    }
+
+    /// Every want in the plan checked against the records: an item with no
+    /// record, or one failed an hour or more ago, is queued; one declined
+    /// by hand is left. A want whose contents never came is asked of the
+    /// server, and reported to the phone when that fails too. How many
+    /// were queued.
+    private func checkWants(generation: Int) async -> Int {
+        var queued = 0
+        for want in plan.wants where want.kind != .playlist && !isDroppedWant(want.key) {
+            var contents = wantContents[want.key]
+            if contents == nil, let found = await lookUp(want) {
+                guard !Task.isCancelled, mirrorGeneration == generation else { return queued }
+                contents = found
+                wantContents[want.key] = found
+                saveWants()
+                // The phone hears it has its contents, and stops sending them.
+                changed()
+                WatchLog.note("downloads", "want \(want.key) looked up on the server: \(found.items.count) items")
+            }
+            guard !Task.isCancelled, mirrorGeneration == generation else { return queued }
+            guard let contents else { continue }
+            let now = Date()
+            var missing: [BaseItem] = []
+            for item in contents.items where !declined.contains(item.Id) {
+                guard let r = record(for: item.Id) else { missing.append(item); continue }
+                if r.status == .error, !r.lackedSpace {
+                    guard wantRetriedAt[item.Id].map({ now.timeIntervalSince($0) > Self.wantRetryInterval }) ?? true else { continue }
+                    wantRetriedAt[item.Id] = now
+                    missing.append(item)
+                } else if !r.reasons.contains(want.reason) {
+                    // Here for something else: claimed for this want too,
+                    // so the other thing's delete doesn't take it.
+                    missing.append(item)
+                }
+            }
+            guard !missing.isEmpty else { continue }
+            let n = enqueue(missing, reason: want.reason)
+            queued += n
+            WatchLog.note("downloads", "want \(want.key): \(missing.count) of \(contents.items.count) not here, \(n) queued")
+        }
+        return queued
+    }
+
+    /// Where each of the plan's wants stands, for the phone.
+    func wantStates() -> [WatchWantState] {
+        plan.wants.filter { $0.kind != .playlist }.map { want in
+            guard let contents = wantContents[want.key] else {
+                return WatchWantState(key: want.key, count: 0, complete: 0, needsContents: true)
+            }
+            var complete = 0
+            var failed = 0
+            for item in contents.items {
+                switch record(for: item.Id)?.status {
+                case .complete: complete += 1
+                case .error: failed += 1
+                default: break
+                }
+            }
+            return WatchWantState(key: want.key, count: contents.items.count, complete: complete, failed: failed)
+        }
     }
 
     /// The plan's playlists, less those just taken off here.
@@ -601,11 +828,23 @@ final class WatchDownloads: NSObject {
     /// Loose songs: those here for no album, playlist or book.
     func deleteLooseSongs() {
         let loose = songs.filter { $0.reasons == ["song"] }.map(\.itemId)
-        for id in loose { removeFolder(id) }
+        for id in loose {
+            dropWant("song:\(id)", keepingFiles: false, tellPhone: true)
+            removeFolder(id)
+        }
+        pump()
     }
 
     func deleteEverything() {
         cancelActiveTask()
+        for key in wantContents.keys {
+            droppedWants[key] = Date()
+            WatchLink.shared.send(.wantRemoved(key: key))
+        }
+        wantContents = [:]
+        persistDropped()
+        declined = []
+        persistDeclined()
         for r in records { removeFolder(r.itemId, quiet: true) }
         records = []
         reindex()
@@ -702,50 +941,60 @@ final class WatchDownloads: NSObject {
     /// How long a phone is given, from its last word, before the watch
     /// tries by itself.
     private static let relayPatience: TimeInterval = 20 * 60
-    /// A phone heard from this recently is well into an item: the watch
-    /// finding Wi‑Fi of its own doesn't take that one back.
-    private static let phoneBusyWindow: TimeInterval = 10 * 60
+    /// How long the phone may be silent on an item before it is asked
+    /// again, doubling with each ask up to the longest. The phone can lose
+    /// an ask — killed with a send half queued — and a real watch, whose
+    /// path monitor always says down, never takes the item back to fetch
+    /// itself; without asking again it waits forever.
+    private static let reaskFirst: TimeInterval = 5 * 60
+    private static let reaskLongest: TimeInterval = 60 * 60
+    /// Items asked of the phone again since launch: how many times, and when last.
+    @ObservationIgnored private var relayReasks: [String: (count: Int, at: Date)] = [:]
 
     /// Start the next transfer, if there is one and something can carry it.
     ///
-    /// On Wi‑Fi of its own the watch fetches for itself. Through the
-    /// phone's Bluetooth link a background download session is throttled to
-    /// a crawl, so there the item is asked of the phone, which fetches it on
-    /// its own connection and hands the file across — a transfer that runs
-    /// in the background on both ends, in reach or not. Cellular carries
-    /// what was asked for by hand, never the mirror's things; and the phone
-    /// gets a long while before the watch takes an item back.
+    /// With a phone app to ask, everything is asked of the phone: it
+    /// fetches on its own connection and hands the file across, a transfer
+    /// that runs in the background on both ends, in reach or not. The
+    /// watch's own session fetches one item at a time and only while the
+    /// app is awake, which watchOS allows now and then; and on a real watch
+    /// the path monitor says "down" all day and its requests to the server
+    /// fail for hours at a stretch. It used to fetch for itself whenever
+    /// the monitor said Wi‑Fi, and on a relaunch took back everything the
+    /// phone was carrying to do so: the phone's queue emptied, and the
+    /// items waited on the watch for wakes that never came. Now an item is
+    /// taken back only when the phone has been away past its patience, or
+    /// has given up on it, and only while this watch has a network.
+    /// Without a phone app at all the watch fetches for itself as before:
+    /// cellular carries what was asked for by hand, never the mirror's.
     func pump() {
-        guard JellyfinClient.shared.isSignedIn, pathKnown else { return }
+        guard JellyfinClient.shared.isSignedIn else { return }
         let link = WatchLink.shared
-        let phone = link.hasCompanion && !isOnWiFi
-        // Anything the phone was asked for is taken back only when this
-        // watch will fetch it itself: on Wi‑Fi of its own, or with no phone
-        // app to ask. Taken back anywhere else, it went straight back to the
-        // phone, which started the whole book again. On Wi‑Fi, an item the
-        // phone is well into stays the phone's unless it has gone quiet.
-        if hasNetwork {
+        let canFetchItself = pathKnown && hasNetwork
+        if canFetchItself {
             for var r in records where r.status == .downloading && r.relayAskedAt != nil && active != r.itemId {
                 let quiet = Date().timeIntervalSince(r.relayAskedAt!)
-                let overdue = quiet > Self.relayPatience && !link.isPhoneReachable
-                let busy = phoneWorking.contains(r.itemId) && quiet < Self.phoneBusyWindow
-                let fetchesItself = isOnWiFi || (!link.hasCompanion && !r.automatic)
-                if fetchesItself, (!viaPhone.contains(r.itemId) && !busy) || overdue {
-                    link.send(.cancelFetch(itemId: r.itemId))
-                    r.status = .queued
-                    r.relayAskedAt = nil
-                    save(r)
-                }
+                guard quiet > Self.relayPatience && !link.isPhoneReachable else { continue }
+                WatchLog.note("downloads", "\(r.itemId): the phone has been away \(Int(quiet / 60)) min; fetching it here")
+                link.send(.cancelFetch(itemId: r.itemId))
+                phoneGaveUp[r.itemId] = Date()
+                r.status = .queued
+                r.relayAskedAt = nil
+                save(r)
             }
         }
-        // Asked-for things first; the mirror's things only when a phone
-        // will carry them or the watch is on Wi‑Fi.
-        let candidates = makeRoom(for: records.filter { $0.status == .queued }
+        reaskPhone()
+        // Asked-for things first, then the mirror's, oldest ask first.
+        let candidates = makeRoom(for: records.filter { $0.status == .queued || ($0.status == .error && $0.lackedSpace) }
             .sorted { a, b in
                 if a.automatic != b.automatic { return !a.automatic }
                 return a.createdAt < b.createdAt
             })
-        let forPhone = phone ? candidates : link.hasCompanion ? candidates.filter { viaPhone.contains($0.itemId) } : []
+        let now = Date()
+        func phoneGaveUpOn(_ id: String) -> Bool {
+            phoneGaveUp[id].map { now.timeIntervalSince($0) < Self.phoneGaveUpFor } ?? false
+        }
+        let forPhone = link.hasCompanion ? candidates.filter { !phoneGaveUpOn($0.itemId) } : []
         if !forPhone.isEmpty {
             // Every queued item goes to the phone at once: its queue is the
             // reliable one, and it downloads a few at a time on its own. One
@@ -770,10 +1019,13 @@ final class WatchDownloads: NSObject {
                 }
                 WatchLog.note("downloads", "asked the phone for \(ids.count) items")
             }
-            if phone { return }
         }
-        guard active == nil, hasNetwork else { return }
-        guard let next = candidates.first(where: { (!$0.automatic || isOnWiFi) && !viaPhone.contains($0.itemId) }) else { return }
+        // What is left for this watch: with no phone app to ask, or given
+        // up on by the phone.
+        guard canFetchItself, active == nil else { return }
+        guard let next = candidates.first(where: { r in
+            (!link.hasCompanion || phoneGaveUpOn(r.itemId)) && (!r.automatic || isOnWiFi || link.hasCompanion)
+        }) else { return }
         settling += 1
         Task {
             await start(next)
@@ -781,18 +1033,59 @@ final class WatchDownloads: NSObject {
         }
     }
 
-    /// The app is being put away. The watch's own session fetches one item
-    /// at a time and needs the app woken between them, which watchOS allows
-    /// only now and then; the phone's downloads and file transfers carry on
-    /// in the background by themselves. So with the phone in reach, what is
-    /// still waiting goes to it, and stays its for as long as the app runs.
-    func handOffToPhone() {
+    /// Sync Now on the watch: everything the phone was asked for is asked
+    /// for again this minute, whatever the back-off says, and anything the
+    /// phone gave up on goes back to it.
+    func syncNow() {
+        relayReasks = [:]
+        phoneGaveUp = [:]
         let link = WatchLink.shared
-        guard link.hasCompanion, link.isPhoneReachable else { return }
-        let waiting = records.filter { $0.status == .queued && $0.itemId != active }.map(\.itemId)
-        guard !waiting.isEmpty else { return }
-        viaPhone.formUnion(waiting)
-        WatchLog.note("downloads", "put away: handing \(waiting.count) waiting items to the phone")
+        let awaiting = awaitingPhone
+        if link.hasCompanion, !awaiting.isEmpty {
+            for start in stride(from: 0, to: awaiting.count, by: 200) {
+                link.send(.fetchMany(itemIds: Array(awaiting[start..<min(start + 200, awaiting.count)])))
+            }
+            WatchLog.note("downloads", "sync now: asked the phone again for \(awaiting.count) items")
+        }
+        pump()
+        mirror(force: true)
+    }
+
+    /// Items the phone has gone quiet on are asked for again, whatever the
+    /// path monitor says: with the phone in reach after a few minutes'
+    /// silence, out of reach once its patience has run out, and less often
+    /// each time. An item the phone is still working on costs it nothing
+    /// to be asked for again; one it lost starts over.
+    private func reaskPhone() {
+        let link = WatchLink.shared
+        guard link.hasCompanion else { return }
+        let now = Date()
+        var again: [String] = []
+        for r in records where r.status == .downloading && active != r.itemId {
+            guard let asked = r.relayAskedAt else { continue }
+            let quiet = now.timeIntervalSince(asked)
+            let last = relayReasks[r.itemId]
+            let wait = min(Self.reaskLongest, Self.reaskFirst * pow(2, Double(last?.count ?? 0)))
+            let sinceLast = last.map { now.timeIntervalSince($0.at) } ?? quiet
+            guard quiet > wait, sinceLast > wait, link.isPhoneReachable || quiet > Self.relayPatience else { continue }
+            relayReasks[r.itemId] = ((last?.count ?? 0) + 1, now)
+            again.append(r.itemId)
+        }
+        guard !again.isEmpty else { return }
+        if again.count == 1 {
+            link.send(.fetch(itemId: again[0]))
+        } else {
+            for start in stride(from: 0, to: again.count, by: 200) {
+                link.send(.fetchMany(itemIds: Array(again[start..<min(start + 200, again.count)])))
+            }
+        }
+        WatchLog.note("downloads", "asked the phone again for \(again.count) items it has gone quiet on")
+    }
+
+    /// The app is being put away. Everything waiting is already the
+    /// phone's when there is one; a pump now catches anything queued since
+    /// the last.
+    func handOffToPhone() {
         pump()
     }
 
@@ -801,9 +1094,11 @@ final class WatchDownloads: NSObject {
 
     /// The queued items that fit, in order; what doesn't fit is failed now
     /// with the sizes, rather than downloaded for an hour and refused at
-    /// the end. What is already on its way has its room taken first.
+    /// the end. What is already on its way has its room taken first. Items
+    /// failed here before come back in as candidates, and are queued again
+    /// once something has been deleted and they fit.
     private func makeRoom(for candidates: [WatchRecord]) -> [WatchRecord] {
-        guard let free = Self.freeBytes() else { return candidates }
+        guard let free = Self.freeBytes() else { return candidates.filter { $0.status == .queued } }
         let coming = records.filter { $0.status == .downloading }
             .reduce(Int64(0)) { sum, r in sum + max(0, r.estimatedBytes - (liveBytes[r.itemId]?.received ?? 0)) }
         var room = free - Self.spareBytes - coming
@@ -811,14 +1106,26 @@ final class WatchDownloads: NSObject {
         for var r in candidates {
             if r.estimatedBytes <= room {
                 room -= max(0, r.estimatedBytes)
+                if r.status == .error || r.lackedSpace {
+                    // Turned away for room before, and there is room now.
+                    if r.status == .error { WatchLog.note("downloads", "room for \(r.itemId) now: queued again") }
+                    r.status = .queued
+                    r.errorMessage = nil
+                    r.lackedSpace = false
+                    save(r)
+                }
                 fitting.append(r)
                 continue
             }
+            // Already turned away for room: written down once, not on every
+            // pass that finds the watch still full.
+            if r.status == .error { continue }
             let size = ByteCountFormatter.string(fromByteCount: r.estimatedBytes, countStyle: .file)
             let left = ByteCountFormatter.string(fromByteCount: max(0, free - Self.spareBytes), countStyle: .file)
             WatchLog.error("downloads", "no room for \(r.itemId): needs \(size), \(left) usable")
             r.status = .error
             r.errorMessage = "Not enough space: needs \(size), \(left) free"
+            r.lackedSpace = true
             save(r)
         }
         return fitting
@@ -836,21 +1143,24 @@ final class WatchDownloads: NSObject {
     /// again. Written down at most once a minute.
     func phoneStillAtIt(_ itemId: String) {
         phoneWorking.insert(itemId)
+        relayReasks[itemId] = nil
         guard var r = record(for: itemId), r.status == .downloading, let asked = r.relayAskedAt,
               Date().timeIntervalSince(asked) > 60 else { return }
         r.relayAskedAt = Date()
         save(r)
     }
 
-    /// The phone gave up on an item. The watch tries itself when it can,
-    /// and otherwise says why.
+    /// The phone gave up on an item. The watch tries itself when it has a
+    /// network, and otherwise says why; the phone is asked again after an
+    /// hour, or on the next Sync Now.
     func phoneFailed(itemId: String, reason: String) {
         WatchLog.error("downloads", "phone gave up on \(itemId): \(reason)")
         guard var r = record(for: itemId), r.relayAskedAt != nil else { return }
         r.relayAskedAt = nil
         liveBytes[itemId] = nil
         lastReported.withLock { $0[itemId] = nil }
-        if hasNetwork, isOnWiFi || !r.automatic {
+        phoneGaveUp[itemId] = Date()
+        if pathKnown, hasNetwork, isOnWiFi || !r.automatic {
             r.status = .queued
             save(r)
             pump()
@@ -861,7 +1171,9 @@ final class WatchDownloads: NSObject {
         }
     }
 
-    /// A file the phone handed over, already moved into place by the link.
+    /// A file the phone handed over, set down in the item's folder by the
+    /// link under a name of its own. It takes the audio file's place only
+    /// here, once it is wanted.
     func receivedFromPhone(itemId: String, at url: URL, bytes: Int64) async {
         guard let r = record(for: itemId) else {
             try? FileManager.default.removeItem(at: url)
@@ -869,11 +1181,27 @@ final class WatchDownloads: NSObject {
         }
         if r.status == .complete {
             // Arrived twice — a phone that resent, or a watch that fetched
-            // for itself in the meantime.
-            if url.lastPathComponent != r.fileName { try? FileManager.default.removeItem(at: url) }
+            // for itself in the meantime. The file already here stays.
+            try? FileManager.default.removeItem(at: url)
             return
         }
-        await landed(itemId: itemId, at: url, bytes: bytes)
+        let folder = Self.folder(itemId)
+        let destination = folder.appendingPathComponent("audio.\(url.pathExtension)")
+        for old in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        where old.lastPathComponent.hasPrefix("audio.") {
+            try? FileManager.default.removeItem(at: old)
+        }
+        do {
+            try FileManager.default.moveItem(at: url, to: destination)
+        } catch {
+            // Left asked of the phone, which is asked again once it has
+            // been quiet a while.
+            WatchLog.error("downloads", "couldn't put the phone's file for \(itemId) in place: \(error.localizedDescription)")
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        relayReasks[itemId] = nil
+        await landed(itemId: itemId, at: destination, bytes: bytes)
     }
 
     private func start(_ record: WatchRecord) async {
@@ -1005,7 +1333,7 @@ final class WatchDownloads: NSObject {
             return
         }
         WatchLog.note("downloads", "\(itemId) landed: \(Int(seconds))s, \(bytes / 1024)KB")
-        viaPhone.remove(itemId)
+        phoneGaveUp[itemId] = nil
         rec.fileName = url.lastPathComponent
         rec.status = .complete
         rec.bytes = bytes
@@ -1026,12 +1354,12 @@ final class WatchDownloads: NSObject {
         guard var rec = record(for: itemId) else { finishActive(itemId); return }
         WatchLog.error("downloads", "\(itemId) failed (attempt \(rec.attempts + 1)): \(message)")
         rec.attempts += 1
-        if WatchLink.shared.hasCompanion, !viaPhone.contains(itemId) {
+        if WatchLink.shared.hasCompanion {
             // This watch couldn't fetch it; the phone gets the next try.
-            viaPhone.insert(itemId)
+            phoneGaveUp[itemId] = nil
             WatchLog.note("downloads", "\(itemId): asking the phone next")
         }
-        if rec.attempts < 3, hasNetwork {
+        if rec.attempts < 3, hasNetwork || WatchLink.shared.hasCompanion {
             rec.status = .queued
         } else {
             rec.status = .error
@@ -1079,8 +1407,11 @@ final class WatchDownloads: NSObject {
         // A plan that no longer names a playlist taken off here: the phone
         // has caught up, and its word counts again.
         let caughtUp = droppedPlaylists.keys.filter { !plan.playlistIds.contains($0) }
-        if !caughtUp.isEmpty {
+        let named = Set(plan.wants.map(\.key))
+        let caughtUpWants = droppedWants.keys.filter { !named.contains($0) }
+        if !caughtUp.isEmpty || !caughtUpWants.isEmpty {
             for id in caughtUp { droppedPlaylists[id] = nil }
+            for key in caughtUpWants { droppedWants[key] = nil }
             persistDropped()
         }
         // What the phone asked for by itself and no longer does is dropped
@@ -1099,21 +1430,28 @@ final class WatchDownloads: NSObject {
     ///
     /// `force` (Sync Now) matches every playlist whenever it was last
     /// looked at, and queues again any of its songs not on the watch.
+    ///
+    /// Not held back by `hasNetwork`: on a watch the path monitor reports
+    /// no network all day (it is for audio streaming only there), and the
+    /// playlists the phone sends need none.
     func mirror(force: Bool = false) {
-        guard mirrorTask == nil, hasNetwork, JellyfinClient.shared.isSignedIn else { return }
+        guard mirrorTask == nil, JellyfinClient.shared.isSignedIn else { return }
         let plan = plan
         let planned = plannedPlaylistIds
         let lists = planned + playlists.map(\.id).filter { !planned.contains($0) }
-        guard !plan.bookIds.isEmpty || !lists.isEmpty else { return }
+        guard !plan.bookIds.isEmpty || !lists.isEmpty || !plan.wants.isEmpty else { return }
         let generation = mirrorGeneration
         mirrorTask = Task {
             defer { if mirrorGeneration == generation { mirrorTask = nil } }
             let client = JellyfinClient.shared
-            var queued = 0
+            var queued = await checkWants(generation: generation)
+            guard !Task.isCancelled else { return }
             let missingBooks = plan.bookIds.filter { record(for: $0) == nil }
             if !missingBooks.isEmpty {
                 for id in missingBooks {
-                    guard let book = try? await client.item(id), book.isAudiobook else { continue }
+                    var book = phoneBooks[id]
+                    if book == nil { book = try? await client.item(id) }
+                    guard let book, book.isAudiobook else { continue }
                     guard !Task.isCancelled else { return }
                     queued += enqueue([book], reason: "book", automatic: true)
                 }
@@ -1130,6 +1468,15 @@ final class WatchDownloads: NSObject {
         }
     }
 
+    /// The mirror's pass done, or `limit` gone by: what a background wake
+    /// holds for, so the server's answer is heard and the phone asked.
+    func mirrorSettled(within limit: Duration) async {
+        let deadline = ContinuousClock.now + limit
+        while mirrorTask != nil, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+    }
+
     /// One playlist made to match the server's: songs added there are
     /// queued, and songs taken out there leave the watch — unless an album,
     /// another playlist or a tap of their own still keeps them. A song that
@@ -1137,17 +1484,31 @@ final class WatchDownloads: NSObject {
     /// off by hand) is left off, except by `force`. Nil when the server
     /// couldn't be asked, or the list went while it was being asked.
     private func syncPlaylist(_ id: String, planned: Bool, force: Bool) async -> Int? {
-        let client = JellyfinClient.shared
-        guard let songs = try? await client.playlistItems(playlistId: id) else { return nil }
-        let named = try? await client.item(id)
+        let songs: [BaseItem]
+        var name: String?
+        var imageTag: String?
+        if let given = phoneLists[id] {
+            // The phone's word, as fresh as anything the server would say.
+            songs = given.songs
+            name = given.name
+            imageTag = given.imageTag
+        } else {
+            let client = JellyfinClient.shared
+            guard let asked = try? await client.playlistItems(playlistId: id) else { return nil }
+            songs = asked
+            if let named = try? await client.item(id) {
+                name = named.title
+                imageTag = named.ImageTags?["Primary"]
+            }
+        }
         guard !Task.isCancelled else { return nil }
         // Looked at again after the waits: taken off meanwhile, it stays off.
         let existing = playlists.first { $0.id == id }
         guard existing != nil || (planned && plannedPlaylistIds.contains(id)) else { return nil }
         var list = existing ?? WatchPlaylist(id: id, name: "Playlist", itemIds: [], automatic: true)
-        if let named {
-            list.name = named.title
-            list.imageTag = named.ImageTags?["Primary"]
+        if let name {
+            list.name = name
+            list.imageTag = imageTag
         }
         let audio = songs.filter(\.isAudio)
         let before = Set(existing?.itemIds ?? [])
@@ -1167,6 +1528,28 @@ final class WatchDownloads: NSObject {
             WatchLog.note("downloads", "playlist \(id) matched to the server: \(added) queued, \(gone.count) gone")
         }
         return added
+    }
+
+    /// A playlist's songs as the phone found them. Matched now, in place of
+    /// asking the server: a pass already waiting on the server is dropped
+    /// for this one. Kept for later passes until the phone sends it again.
+    func receivedFromPhone(playlist: WatchPlaylistContents) {
+        phoneLists[playlist.id] = playlist
+        playlistSyncedAt[playlist.id] = nil
+        mirrorTask?.cancel()
+        mirrorTask = nil
+        mirrorGeneration += 1
+        mirror()
+    }
+
+    /// The books in progress as the phone found them: queued from these,
+    /// not asked of the server.
+    func receivedFromPhone(books: WatchBooksContents) {
+        for book in books.books { phoneBooks[book.Id] = book }
+        mirrorTask?.cancel()
+        mirrorTask = nil
+        mirrorGeneration += 1
+        mirror()
     }
 
     /// Keep a whole playlist by hand: saved, and every song queued.
@@ -1247,42 +1630,42 @@ final class WatchDownloads: NSObject {
         switch kind {
         case .book: deleteBook(id)
         case .album: deleteAlbum(id)
-        case .playlist: deletePlaylist(id)
+        case .playlist: deletePlaylist(id, fromPhone: true)
         case .songs: deleteLooseSongs()
         }
     }
 
     /// A download asked for from the phone: fetch what it names and queue it.
     func download(_ request: WatchDownloadRequest) async {
-        let client = JellyfinClient.shared
-        switch request.kind {
-        case .song, .book:
-            if let item = try? await client.item(request.id) {
-                enqueue([item], reason: request.kind == .book ? "book" : "song")
-            }
-        case .album:
-            if let songs = try? await client.albumTracks(albumId: request.id) {
-                enqueue(songs, reason: "album:\(request.id)")
-            }
-        case .playlist:
-            if let songs = try? await client.playlistItems(playlistId: request.id) {
-                var list = BaseItem()
-                list.Id = request.id
-                list.Name = request.title
-                list.type = "Playlist"
-                keep(playlist: list, songs: songs)
-            }
-        case .artist:
-            if let songs = try? await client.songs(artistId: request.id) {
-                for (albumId, group) in Dictionary(grouping: songs, by: { $0.AlbumId ?? "" }) {
-                    enqueue(group, reason: albumId.isEmpty ? "song" : "album:\(albumId)")
-                }
-            }
-        case .genre:
-            if let songs = try? await client.songs(genreId: request.id) {
-                enqueue(songs, reason: "song")
-            }
+        guard let contents = await lookUp(request) else { return }
+        keep(request, items: contents.items)
+    }
+
+    /// A download from the phone, with what it comes to — looked up there,
+    /// or here by `download(_:)` when the phone couldn't. The want is
+    /// written down with its items, and checked on every pass from now on
+    /// until it is taken off — see `checkWants`.
+    func keep(_ request: WatchDownloadRequest, items: [BaseItem]) {
+        if request.kind == .playlist {
+            var list = BaseItem()
+            list.Id = request.id
+            list.Name = request.title
+            list.type = "Playlist"
+            keep(playlist: list, songs: items)
+            return
         }
+        let audio = items.filter(\.isAudio)
+        wantContents[request.key] = WatchDownloadContents(request: request, items: audio.map(\.forWatch))
+        saveWants()
+        // Asked for again: a song cancelled from it last time is wanted now.
+        let ids = Set(audio.map(\.Id))
+        if !declined.isDisjoint(with: ids) {
+            declined.subtract(ids)
+            persistDeclined()
+        }
+        for id in ids { wantRetriedAt[id] = nil }
+        if droppedWants.removeValue(forKey: request.key) != nil { persistDropped() }
+        enqueue(audio, reason: request.reason)
     }
 }
 

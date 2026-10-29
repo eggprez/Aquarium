@@ -57,6 +57,16 @@ struct SearchView: View {
         }
     }
     @State private var scope: Scope = .all
+    #if os(iOS)
+    /// Whether the field in the bar has the keyboard. Search is opened from
+    /// Home's search button, so it comes up ready to type into.
+    @FocusState private var isFieldFocused: Bool
+    /// The field takes the keyboard on the way in, once: coming back to
+    /// the page (from a result, or after a fold rebuilt it) is not asking
+    /// to type.
+    @State private var hasFocusedOnce = false
+    @Environment(\.dismiss) private var dismiss
+    #endif
 
     var body: some View {
         ScrollView {
@@ -119,12 +129,19 @@ struct SearchView: View {
                     #endif
                     // On a Mac the count is the window's subtitle, not a line
                     // on the page.
-                    #if !os(macOS)
+                    #if os(iOS)
+                    // Under the artists, albums and books, the films and shows
+                    // are one more kind of result and get a heading like the
+                    // others: a bare "8 results" under "Audiobooks" read as
+                    // the count of the audiobooks.
+                    if !results.isEmpty, !music.isEmpty {
+                        ShelfHeading(title: "Films & TV", subtitle: "\(total) result\(total == 1 ? "" : "s")")
+                    } else if !results.isEmpty {
+                        resultCount
+                    }
+                    #elseif !os(macOS)
                     if !results.isEmpty {
-                    Text("\(total) result\(total == 1 ? "" : "s")")
-                        .font(.caption)
-                        .foregroundStyle(Theme.textDim)
-                        .padding(.horizontal, Metrics.gutter)
+                        resultCount
                     }
                     #endif
                     #if os(macOS)
@@ -155,16 +172,14 @@ struct SearchView: View {
         .screenTitle("Search")
         .paletteBar()
         #if os(iOS)
-        // Always showing, not tucked under the title until the page is pulled
-        // down. That tuck is the system's default for a field in a pushed
-        // page's bar, and Search is a pushed page whenever it lives in More —
-        // which is where it lives unless someone has made it a tab. A search
-        // screen that opens without anywhere to type reads as broken.
-        .searchable(
-            text: $term,
-            placement: .navigationBarDrawer(displayMode: .always),
-            prompt: app.hasAudio ? "Movies, shows, music, books" : "Movies, shows, episodes"
-        )
+        // The page draws its own bar, as Home does, rather than taking the
+        // system's with a search field in its drawer. Pushed from Home — whose
+        // system bar is hidden — that bar sometimes stayed behind on the way
+        // back as an empty band above Home's own.
+        .toolbar(.hidden, for: .navigationBar)
+        .background { BackSwipe().frame(width: 0, height: 0) }
+        .safeAreaInset(edge: .top, spacing: 0) { searchBar }
+        .scrollDismissesKeyboard(.immediately)
         #elseif os(macOS)
         // The field is the sidebar's — see `RootView` — and this page mirrors
         // its text. Typing there, whatever section was showing, lands here
@@ -202,12 +217,6 @@ struct SearchView: View {
             schedule(immediate: true)
         }
         #endif
-        #if os(iOS)
-        .onSubmit(of: .search) {
-            prefs.rememberSearch(term)
-            schedule(immediate: true)
-        }
-        #endif
         .onChange(of: term) { _, _ in schedule() }
         // A watched tick or a star set from a result's own press-and-hold menu
         // is drawn on the card it was set from, and the card is a copy of what
@@ -236,6 +245,21 @@ struct SearchView: View {
             reset()
         }
         #endif
+        #if os(iOS)
+        .task {
+            // Once, on the way in: the field can't take focus until the push
+            // has put the page on screen.
+            guard term.isEmpty, initialTerm.isEmpty, !hasFocusedOnce else { return }
+            hasFocusedOnce = true
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            isFieldFocused = true
+        }
+        // A result opened leaves the field without the keyboard. Kept, the
+        // focus came back with the window when a foldable was opened or
+        // closed on the title page, and the keyboard rose over it.
+        .onDisappear { isFieldFocused = false }
+        #endif
         .onAppear {
             if term.isEmpty, !initialTerm.isEmpty {
                 term = initialTerm
@@ -247,6 +271,46 @@ struct SearchView: View {
             }
         }
     }
+
+    #if os(iOS)
+    /// Back, and the field. Back with or without a term is the way out;
+    /// the field's own clear button empties it.
+    private var searchBar: some View {
+        AppTopBar {
+            HStack(spacing: 10) {
+                BarBackButton()
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(Theme.textDim)
+                    TextField(app.hasAudio ? "Movies, shows, music, books" : "Movies, shows, episodes", text: $term)
+                        .focused($isFieldFocused)
+                        .submitLabel(.search)
+                        .autocorrectionDisabled()
+                        .onSubmit {
+                            prefs.rememberSearch(term)
+                            schedule(immediate: true)
+                        }
+                    if !term.isEmpty {
+                        Button {
+                            term = ""
+                            isFieldFocused = true
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(Theme.textDim)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear")
+                    }
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 40)
+                .background(Theme.raised, in: Capsule())
+                .contentShape(Capsule())
+                .onTapGesture { isFieldFocused = true }
+            }
+        }
+    }
+    #endif
 
     #if os(macOS)
     /// The window's subtitle: how many the term found, while it has found any.
@@ -356,10 +420,12 @@ struct SearchView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.textDim)
                     Spacer()
+                    #if !os(tvOS)
                     Button("Clear") { prefs.clearRecentSearches() }
                         .buttonStyle(.plain)
                         .font(.caption)
                         .foregroundStyle(Theme.accent)
+                    #endif
                 }
                 ForEach(prefs.recentSearches, id: \.self) { recent in
                     Button {
@@ -376,11 +442,31 @@ struct SearchView: View {
                     }
                     .rowButtonStyle()
                 }
+                #if os(tvOS)
+                // Under the list rather than beside its heading. Up there it
+                // was the nearest thing below the search field, so the first
+                // press down landed on it, and down and a click wiped the
+                // history.
+                Button("Clear") { prefs.clearRecentSearches() }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(Theme.accent)
+                    .padding(.top, 10)
+                #endif
             }
             .padding(.horizontal, Metrics.gutter)
         }
         #endif
     }
+
+    #if !os(macOS)
+    private var resultCount: some View {
+        Text("\(total) result\(total == 1 ? "" : "s")")
+            .font(.caption)
+            .foregroundStyle(Theme.textDim)
+            .padding(.horizontal, Metrics.gutter)
+    }
+    #endif
 
     #if os(iOS)
     /// Artists, albums and a few songs, ahead of the films and shows. Each

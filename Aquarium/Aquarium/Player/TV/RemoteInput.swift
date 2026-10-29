@@ -10,10 +10,15 @@
 //  recogniser on indirect touches. When a panel opens it stops accepting focus
 //  and SwiftUI's focus engine takes over the panel's buttons as usual.
 //
-//  Two things stay with it while a panel is open. Menu, should a press ever
-//  reach it: focus handed on late leaves it here, and a press passed up from
-//  here would dismiss the whole player. And a swipe up, read from the window
-//  because the touches go to whichever panel button has focus.
+//  Menu is the one button it leaves alone. Swallowing the press here doesn't
+//  keep SwiftUI's full-screen cover from closing on it — the cover reads Menu
+//  by a route of its own, not through this view's `pressesEnded` — and the
+//  only thing that does is an `onExitCommand` handler on the SwiftUI side, so
+//  the press goes up the chain to `PlayerScreen`, which has one and handles
+//  Menu from there. (The debug hook still feeds a `.menu` event straight in.)
+//
+//  One thing stays with it while a panel is open: a swipe up, read from the
+//  window because the touches go to whichever panel button has focus.
 
 #if os(tvOS)
 
@@ -137,8 +142,8 @@ final class RemoteInputView: UIView {
     // MARK: - Presses
 
     /// Everything this view acts on is acted on when the press ends, the way a
-    /// button does, and swallowed rather than passed on — Menu passed on would
-    /// dismiss the player out from under the model.
+    /// button does, and swallowed rather than passed on. Menu is passed on —
+    /// see the top of the file.
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var unhandled = Set<UIPress>()
         for press in presses {
@@ -162,13 +167,12 @@ final class RemoteInputView: UIView {
     }
 
     private func map(_ type: UIPress.PressType) -> RemoteEvent? {
-        // See the top of the file: Menu is never passed up from here.
-        if type == .menu { return .menu }
+        // Menu goes up to `PlayerScreen`'s `onExitCommand` — see the top of
+        // the file.
         guard isInputEnabled else { return nil }
         switch type {
         case .select: return .select
         case .playPause: return .playPause
-        case .menu: return .menu
         case .leftArrow: return .arrow(.left)
         case .rightArrow: return .arrow(.right)
         case .upArrow: return .arrow(.up)

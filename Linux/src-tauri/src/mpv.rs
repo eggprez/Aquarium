@@ -96,12 +96,21 @@ pub fn mpv_log_path() -> Option<PathBuf> {
 /// Settings and bug reports want to know what's actually running, not just
 /// that *some* libmpv is linked in. `None` if the throwaway core couldn't be
 /// created at all, which the caller should treat as "unknown", not an error.
+///
+/// Asked once per process: the linked library can't change under a running
+/// app, and `app_info` (which reports this) runs on every sidebar refresh,
+/// where a fresh core each time is a needless cost.
 pub fn runtime_version() -> Option<String> {
-    unsafe {
-        libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
-    }
-    let mpv = Mpv::new().ok()?;
-    mpv.get_property::<String>("mpv-version").ok()
+    static VERSION: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    VERSION
+        .get_or_init(|| {
+            unsafe {
+                libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
+            }
+            let mpv = Mpv::new().ok()?;
+            mpv.get_property::<String>("mpv-version").ok()
+        })
+        .clone()
 }
 
 /// Audio outputs this machine has, as mpv sees them: `(name, description)`.

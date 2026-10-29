@@ -18,12 +18,20 @@ struct DownloadsView: View {
 
     @State private var downloads = DownloadManager.shared
     @State private var isSyncing = false
+    /// Whether this page is the one on screen — see `holdScreen`.
+    @State private var isShowing = false
     @State private var pendingDeletion: DownloadDeletion?
     /// The show whose poster is asking before it deletes. Kept apart from
     /// `pendingDeletion` so the confirmation hangs off that poster: on an
     /// iPhone it's a popover now, and one attached to the page pointed at
     /// the middle of the screen whichever show it was about.
     @State private var deletingShow: DownloadSeries.ID?
+    /// How wide a poster tile came out in the grid. A tile that fills its
+    /// column has no width of its own, and the long-press preview is laid
+    /// out alone, with no column to fill: given nothing it fell back to the
+    /// artwork's ideal size, which is next to none, and the poster lifted as
+    /// a sliver. Every tile in the grid is the same width, so one will do.
+    @State private var tileWidth: CGFloat?
 
     #if os(iOS)
     /// Download All Music, in its two steps: the library being read, and then
@@ -71,6 +79,17 @@ struct DownloadsView: View {
             VStack(alignment: .leading, spacing: 24) {
                 summary
 
+                // Paused with nothing waiting — the system's own stop button
+                // does this. Resume is in the card above; this says why
+                // anything queued later will sit.
+                if downloads.isPaused && downloads.queue.isEmpty {
+                    section("Paused") {
+                        Text("Downloads are paused. Nothing new starts until they're resumed.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textDim)
+                    }
+                }
+
                 if !running.isEmpty {
                     section("Downloading") {
                         ForEach(running) { record in
@@ -114,20 +133,15 @@ struct DownloadsView: View {
                                 .font(.caption)
                                 .foregroundStyle(Theme.textDim)
                         }
-                        HStack(spacing: 18) {
-                            // The same pause the download Live Activity has a
-                            // button for; this is where one set from the Lock
-                            // Screen is found and lifted.
-                            Button(downloads.isPaused ? "Resume downloads" : "Pause downloads") {
-                                downloads.setPaused(!downloads.isPaused)
-                            }
-                            .foregroundStyle(Theme.link)
-                            Button("Clear the queue") {
-                                let n = downloads.clearQueue()
-                                app.toast("Removed \(n) item\(n == 1 ? "" : "s") from the queue", tone: .ok)
-                            }
-                            .foregroundStyle(Theme.danger)
+                        // Pause and Resume are in the card at the top, where
+                        // they stay put: under this list they moved every time
+                        // a song finished, and a tap meant for Pause landed on
+                        // whatever had just slid under it.
+                        Button("Clear the queue") {
+                            let n = downloads.clearQueue()
+                            app.toast("Removed \(n) item\(n == 1 ? "" : "s") from the queue", tone: .ok)
                         }
+                        .foregroundStyle(Theme.danger)
                         .font(.caption)
                         .buttonStyle(.plain)
                     }
@@ -240,6 +254,18 @@ struct DownloadsView: View {
         .task(id: completeCount) {
             freeSpace = await Task.detached(priority: .utility) { DownloadManager.freeSpace() }.value
         }
+        #if os(iOS)
+        .onAppear {
+            isShowing = true
+            holdScreen(showing: true)
+        }
+        .onDisappear {
+            isShowing = false
+            holdScreen(showing: false)
+        }
+        .onChange(of: transferring) { _, _ in holdScreen(showing: isShowing) }
+        .onChange(of: prefs.downloadsKeepAwake) { _, _ in holdScreen(showing: isShowing) }
+        #endif
     }
 
     // MARK: - Tiles
@@ -256,6 +282,7 @@ struct DownloadsView: View {
             app.push(.downloadedSeries(show.id))
         } label: {
             card
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { tileWidth = $0 }
         }
         .buttonStyle(PosterButtonStyle())
         .contextMenu {
@@ -276,7 +303,7 @@ struct DownloadsView: View {
                 Label("Delete this show", systemImage: "trash")
             }
         } preview: {
-            card.poster
+            card.lifted(width: tileWidth).poster
         }
         .downloadDeletionDialog(Binding(
             get: { deletingShow == show.id ? .series(show) : nil },
@@ -300,6 +327,7 @@ struct DownloadsView: View {
             player.playLocal(film)
         } label: {
             card
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { tileWidth = $0 }
         }
         .buttonStyle(PosterButtonStyle())
         .contextMenu {
@@ -318,7 +346,7 @@ struct DownloadsView: View {
                 Label("Delete download", systemImage: "trash")
             }
         } preview: {
-            card.poster
+            card.lifted(width: tileWidth).poster
         }
     }
 
@@ -358,40 +386,67 @@ struct DownloadsView: View {
         }
     }
 
-    /// What is on the Apple Watch, and the page that manages it.
+    /// What is on the Apple Watch, the page that manages it, and a Sync
+    /// button that checks the watch against everything it should have.
     @ViewBuilder
     private var watchDoor: some View {
         let link = WatchLink.shared
         if link.isAvailable {
-            NavigationLink {
-                WatchSettingsView()
-                    .clearsBottomChrome()
-            } label: {
-                HStack(spacing: 14) {
-                    Image(systemName: "applewatch")
-                        .font(.title3)
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 30)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Apple Watch").font(.body.weight(.medium)).foregroundStyle(Theme.text)
-                        Text(link.inventory.map {
-                            $0.itemCount == 0 ? "Nothing on the watch yet" : "\($0.itemCount.formatted()) item\($0.itemCount == 1 ? "" : "s") · \(Format.bytes($0.totalBytes))"
-                        } ?? "Waiting for the watch")
-                            .font(.caption).foregroundStyle(Theme.textDim)
+            HStack(spacing: 12) {
+                NavigationLink {
+                    WatchSettingsView()
+                        .clearsBottomChrome()
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: "applewatch")
+                            .font(.title3)
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 30)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Apple Watch").font(.body.weight(.medium)).foregroundStyle(Theme.text)
+                            Text(watchDetail(link))
+                                .font(.caption).foregroundStyle(Theme.textDim)
+                        }
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.textDim)
                     }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.textDim)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                Button {
+                    link.syncNow()
+                    app.toast("Checking the watch against what it should have", tone: .ok)
+                } label: {
+                    Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                        .labelStyle(.iconOnly)
+                        .font(.body.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Sync the watch now")
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .padding(.horizontal, Metrics.gutter)
         }
+    }
+
+    /// What is on the watch, and what is still on its way there, both in
+    /// files: "12 items · 340 MB · 4 on the way". The second number is the
+    /// Transfers page's row count. It used to be "3 of 5 sent are on the
+    /// watch", which counted albums and playlists, and no page lists those
+    /// beside the files they come to, so it never matched anything.
+    private func watchDetail(_ link: WatchLink) -> String {
+        var parts: [String] = []
+        if let inventory = link.inventory {
+            parts.append(inventory.itemCount == 0 ? "Nothing on the watch yet" : "\(inventory.itemCount.formatted()) item\(inventory.itemCount == 1 ? "" : "s") · \(Format.bytes(inventory.totalBytes))")
+        } else {
+            parts.append("Waiting for the watch")
+        }
+        if let transfers = link.transfersSummary { parts.append(transfers) }
+        return parts.joined(separator: " · ")
     }
 
     private func audioDoor(_ title: String, symbol: String, detail: String, route: MusicRoute) -> some View {
@@ -460,6 +515,7 @@ struct DownloadsView: View {
                     .buttonStyle(.bordered)
                     .disabled(isSyncing || client.isOffline)
                 }
+                pauseButton
                 manageMenu
             }
 
@@ -511,10 +567,65 @@ struct DownloadsView: View {
                 }
             }
             .tint(Theme.accent)
+
+            #if os(iOS)
+            Toggle(isOn: $prefs.downloadsKeepAwake) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "sun.max.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.accent)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Keep screen awake")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.text)
+                        Text("While this page is open and something is downloading or on its way to the watch, the screen stays on.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textDim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .tint(Theme.accent)
+            #endif
         }
         .padding(Metrics.gutter)
         .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, Metrics.gutter)
+    }
+
+    #if os(iOS)
+    /// Whether the switch above has anything to hold the screen on for:
+    /// a download running here, or a file on its way to the watch.
+    private var transferring: Bool {
+        !running.isEmpty || WatchLink.shared.relayItems.contains { $0.stage == .downloading || $0.stage == .sending }
+    }
+
+    /// Held while the page is showing, the switch is on and something is
+    /// moving; let go the moment any of the three stops. `isShowing` is
+    /// the page's own appearance, not the app's: pushed under a show's
+    /// page it isn't watching anything.
+    private func holdScreen(showing: Bool) {
+        ScreenAwake.hold("downloads", showing && prefs.downloadsKeepAwake && transferring)
+    }
+    #endif
+
+    /// Pause or resume the queue, from the card at the top of the page. It
+    /// is shown whenever there is something for it to act on — a transfer
+    /// running, entries waiting, or a pause in force — and nowhere else, so
+    /// it is always in the same place.
+    @ViewBuilder
+    private var pauseButton: some View {
+        if downloads.isPaused || !downloads.queue.isEmpty || !running.isEmpty {
+            Button {
+                downloads.setPaused(!downloads.isPaused)
+            } label: {
+                Label(downloads.isPaused ? "Resume" : "Pause",
+                      systemImage: downloads.isPaused ? "play.fill" : "pause.fill")
+            }
+            .buttonStyle(.bordered)
+            .tint(downloads.isPaused ? Theme.accent : nil)
+        }
     }
 
     /// Clearing space is the one thing this screen exists for that had nowhere
@@ -793,6 +904,15 @@ struct DownloadPosterCard: View {
         }
     }
 
+    /// The same card at the width it has in the grid, for the long-press
+    /// preview: a card that fills its column has no width to lift with —
+    /// see `DownloadsView.tileWidth`.
+    func lifted(width measured: CGFloat?) -> DownloadPosterCard {
+        var card = self
+        card.width = card.width ?? measured ?? Metrics.posterWidth
+        return card
+    }
+
     /// The artwork alone, badge and all: what a long press lifts. Lifting the
     /// whole card brought the title and subtitle up with it, unbacked and
     /// scaled, over the tiles on either side.
@@ -944,8 +1064,27 @@ struct TransferRow: View {
                 )
                 .font(.caption)
                 .foregroundStyle(Theme.warn)
+            } else if awaitingEncode {
+                // A transcode at 0% is the server encoding, not the app
+                // stuck: Jellyfin starts ffmpeg on the first request and the
+                // first segment of a 1080p encode can be a minute coming —
+                // longer after a force quit, which throws the encode away
+                // and starts it again. Unexplained, that minute is exactly
+                // when people force-quit the app, which starts it over.
+                Label("Waiting for the server to encode the start — this can take a minute", systemImage: "hourglass")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textDim)
             }
         }
+    }
+
+    /// A stream with no segment yet: the only bytes are its playlists. By
+    /// bytes as well as by the loaded share, because the share is what the
+    /// task has reported, and after a relaunch or a trip to the background
+    /// it has reported nothing while the package on disk is nearly whole —
+    /// the row read 96% over "waiting for the server to encode the start".
+    private var awaitingEncode: Bool {
+        record.transport == .hls && (record.loadedFraction ?? 0) == 0 && record.receivedBytes < 512 << 10
     }
 
     private var progressText: String {

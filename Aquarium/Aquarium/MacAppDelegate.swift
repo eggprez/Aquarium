@@ -33,6 +33,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             watchPlayer()
             watchAlerts()
+            watchTransfers()
         }
     }
 
@@ -67,15 +68,17 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Errors, when there is no main window to put them on. `RootView` shows
-    /// `pendingAlert` as a sheet on the main window; without one they were set
-    /// and never seen. Here they are the standard alert instead.
+    /// Errors, when there is no window to put them on. `RootView` shows
+    /// `pendingAlert` on the main window, and a title window that is the one
+    /// being worked in shows its own (see `RouteWindow`); with neither, they
+    /// were set and never seen. Here they are the standard alert instead.
     @MainActor private func watchAlerts() {
         withObservationTracking {
             _ = AppModel.shared.pendingAlert
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
-                if let alert = AppModel.shared.pendingAlert, MacMainWindow.window == nil {
+                if let alert = AppModel.shared.pendingAlert, MacMainWindow.window == nil,
+                   AppModel.shared.isWorkingWindow(nil) {
                     let panel = NSAlert()
                     panel.messageText = alert.title
                     panel.informativeText = alert.message
@@ -84,6 +87,22 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
                 }
                 self?.watchAlerts()
             }
+        }
+    }
+
+    /// The Dock icon's count of transfers still to finish — the same number
+    /// as the sidebar's badge on Downloads, so a queue left running can be
+    /// watched from anywhere. Kept here rather than in the sidebar, which only
+    /// exists while the main window does: closed, or signed out (which stops
+    /// every transfer — see `DownloadManager.endSession`), the count the
+    /// sidebar last wrote stayed on the Dock.
+    @MainActor private func watchTransfers() {
+        withObservationTracking {
+            let count = DownloadManager.shared.transfersToFinish
+            let label = count > 0 ? "\(count)" : nil
+            if NSApp.dockTile.badgeLabel != label { NSApp.dockTile.badgeLabel = label }
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in self?.watchTransfers() }
         }
     }
 

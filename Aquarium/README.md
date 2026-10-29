@@ -20,8 +20,8 @@ embedded in the iPhone build the same way — see *Apple Watch* below.
 
 Requires Xcode 26 or later. Open `Aquarium.xcodeproj`, pick a destination and
 run. The one package dependency, [MPVKit](https://github.com/mpvkit/MPVKit)
-(its LGPL build), is resolved by Xcode on first open and linked for tvOS only —
-see *The Apple TV player* below.
+(its LGPL build), is resolved by Xcode on first open and linked for iOS, macOS
+and tvOS — see *The mpv engine* below.
 
 ```sh
 xcodebuild -project Aquarium.xcodeproj -scheme Aquarium \
@@ -78,6 +78,34 @@ Everything the Linux build does, with the exceptions listed further down.
   after; it climbs back the usual way once it cools.
 - **Shuffle** over a downloaded series, drawing without repeats until the pool
   is spent.
+- **Two engines behind one player** (iPhone, iPad, Mac). Apple's AVFoundation
+  by default — hardware decode straight to the screen, Picture in Picture,
+  AirPlay, Watch Together and the least battery — and libmpv when a title
+  needs something AVFoundation cannot do, chosen per stream. Settings → Video
+  → Playback engine pins either. Apple TV always plays through mpv.
+- **Brightness, contrast, saturation and gamma**, a **zoom** and an
+  **aspect-ratio override** — Settings → Video → Picture on iPhone, iPad and
+  Mac, and the Apple TV player's Picture tab as well. They are mpv's:
+  touching one switches the title to the mpv engine at the same position,
+  and Reset puts the file's own picture back.
+- **Audio delay on any stream**, HLS and live included — mpv's, set in
+  Settings → Audio; the Apple TV player's Sync tab sets it over the picture
+  and offers the engine switch on a stream Apple's engine cannot shift.
+  **Night mode** (dynamic range compression) has its row in Settings → Video
+  and the Apple TV's Picture tab, but the FFmpeg inside MPVKit's LGPL build
+  carries no audio compressor (`dynaudnorm` is not compiled in), so the row
+  says so rather than acting until the package's FFmpeg does.
+- **The player's controls** (iPhone, iPad, Mac) — a row of pills under the
+  timeline: Info opens the episode and every fact about the file and the
+  stream; Audio, Subtitles, Quality and Up Next (the next five episodes,
+  with their stills) each drop a card of the player's own; Fill is a
+  switch. The "…" button's card has the speed, the sleep timer, stop after
+  this episode, the channels and Watch Together. A card stays up until you
+  choose or tap the picture.
+- **MKV direct play**, DTS, TrueHD and picture subtitles (PGS, VOBSUB, ASS)
+  — direct from the file on mpv, chosen automatically when the video is one
+  this device decodes in hardware; a Matroska download plays on mpv since
+  there is no server to remux it.
 - **Sleep timer** — 15/30/60/90 minutes, or "stop after this episode".
 - **Per-series track memory** — override the audio or subtitle language for one
   show and the next episode opens the same way.
@@ -93,16 +121,25 @@ Everything the Linux build does, with the exceptions listed further down.
   (everywhere but Apple TV, which is dark and only dark), offline mode with a
   backing-off reconnect probe, and progress reported to the server every 10 s.
 
-## The Apple TV player
+## The mpv engine
 
-Apple TV plays video through **libmpv** (MPVKit) rather than AVPlayer. iPhone,
-iPad and Mac keep AVPlayer; everything in this section is tvOS only, and lives
-in `Player/TV/`.
+Every platform can play video through **libmpv** (MPVKit) as well as
+AVPlayer, behind one `PlaybackEngine` protocol (`Player/Engine/`). Apple TV
+plays through mpv alone; iPhone, iPad and Mac play through AVPlayer by
+default and switch a title to mpv when the file or a control asks for
+something AVPlayer cannot give (`EnginePolicy`, with the reasoning in
+`PLAYER-OVERHAUL-PLAN.md`). On a battery mpv draws through its
+`[aquarium-battery]` profile — the Linux app's bilinear, undithered chain —
+and gives the picture up in the background so the sound carries on. The
+Siri Remote and frame-rate parts below are tvOS only, and live in
+`Player/TV/`.
 
-- **The original file, almost always.** The device profile asks the server for
-  the file as it is: MKV, DTS, TrueHD, PGS subtitles and the rest play direct,
-  with VideoToolbox decoding and mpv's `gpu-next` renderer drawing into a
-  Metal layer. The server only transcodes when you pick a lower quality.
+- **The original file, almost always, on Apple TV.** The device profile asks
+  the server for the file as it is: MKV, DTS, TrueHD, PGS subtitles and the
+  rest play direct, with VideoToolbox decoding and mpv's `gpu-next` renderer
+  drawing into a Metal layer. The server only transcodes when you pick a
+  lower quality. On an iPhone, iPad or Mac the same profile is used whenever
+  mpv is the engine chosen.
 - **Siri Remote controls of its own.** With nothing open, the remote is read
   directly: swipe on the touch surface to scrub (with trickplay thumbnails
   from the server riding above the timeline), click the left or right edge to
@@ -117,16 +154,37 @@ in `Player/TV/`.
   switch the display for it; the player does, through `AVDisplayManager`,
   before the file opens. A 23.976 fps film is shown at 24 Hz instead of
   juddering at 60 when *Match Content → Match Frame Rate* is on.
-- **Audio delay, exact, per display mode.** mpv's `audio-delay` moves the
-  sound earlier or later on every stream. *Settings → Audio output* has two
-  sync tests, each a looping clip — a ruler, a sweeping line and a beep at 0 —
-  with the Sync tab over it setting the delay by ear: one at 60 fps for the
-  mode the Home screen runs in, one at 23.976 fps that switches the display
-  the way a film does, for televisions that lag more at 24 Hz than at 60. The
-  player applies whichever offset the display is in, and the Sync tab during
-  a video moves that one. `Tools/SyncTestClip/make-sync-test.swift` renders
-  the clips, and `EXCLUDED_SOURCE_FILE_NAMES` keeps them out of the iPhone
-  and Mac bundles, where nothing plays them.
+- **Audio delay, exact, per frame rate.** mpv's `audio-delay` moves the
+  sound earlier or later on every stream. *Settings → Audio* keeps a delay
+  for each frame rate: five presets — 24, 25, 30, 50 and 60 fps — each a
+  row that plays a looping test clip at its rate (a ruler, a sweeping line
+  and a beep at 0) with the Sync tab over it setting that delay by ear. The
+  player reads the frame rate of whatever is playing, rounds it (23.976 is
+  24, 29.97 is 30) and applies the delay kept for it; the Sync tab during a
+  video moves that one, and a rate with no preset — 48, 120 — gets an entry
+  of its own the first time, listed under *Other frame rates*.
+  `Tools/SyncTestClip/make-sync-test.swift` renders the clips, and
+  `EXCLUDED_SOURCE_FILE_NAMES` keeps them out of the iPhone and Mac bundles,
+  where nothing plays them.
+- **Measured by an iPhone, not by ear.** *Settings → Audio → Measure Apple
+  TV sync* on the iPhone films a sync clip playing on the television and
+  says what to set the Sync tab to. The clip inverts the whole picture for
+  its beat frame; the phone runs its camera at its fastest rate (240
+  fps on anything recent) with the shutter locked open for the whole frame,
+  so how bright a half-lit frame is says how far into it the flash began,
+  and reads the flash row by row across the sensor's rolling shutter to
+  place it to well under a frame. A Goertzel filter at the beep's 1 kHz
+  finds the tone's start in the microphone. Both are stamped on the one
+  capture clock, so the gap is the room's lag, less the sound's travel time
+  from a distance the page asks for and the microphone's own latency. The
+  Apple TV draws a QR code over the clip (`SyncCodeOverlay`) with the rate
+  on test and the delay in force, which the phone reads from the same
+  picture — nothing passes between the apps, no Bonjour, no server. The
+  detectors (`Player/SyncMeasure/SyncDetector.swift`) know nothing of
+  AVFoundation; `Tools/SyncMeasure/main.swift` compiles them into a Mac
+  command that runs them on a recording or on a simulated rolling-shutter
+  camera, where they land within 0.3 ms at 240 and 120 fps and within a
+  frame at 60.
 - **Carried over from the AVPlayer model:** per-series track memory, progress
   reporting, skip intro and credits, Up Next with autoplay, the sleep timer,
   Live TV reopening, and the Siri Remote's Now Playing controls.
@@ -170,8 +228,10 @@ whole of it — nothing here is a reduced version of a feature:
 ## What Apple platforms add
 
 None of this was possible on the Linux build, and all of it comes from using
-AVFoundation rather than an embedded mpv window (Apple TV's player is mpv too
-now, and keeps the Now Playing and Siri Remote parts of this list):
+AVFoundation rather than an embedded mpv window (a title playing through the
+mpv engine hands over to AVFoundation for Picture in Picture, AirPlay and
+Watch Together; Apple TV's player is mpv alone, and keeps the Now Playing and
+Siri Remote parts of this list):
 
 - **Quick Connect and finding the server.** The sign-in screen lists the
   Jellyfin servers that answer on the local network (the same UDP question
@@ -211,13 +271,6 @@ now, and keeps the Now Playing and Siri Remote parts of this list):
   is watching. Everyone needs an account that can see the title. Not Apple
   TV, whose player has no coordinator to join. Needs Group Activities on the
   App ID (`com.apple.developer.group-session`).
-- **New episode notifications** (iPhone, iPad). Settings → Appearance → Home
-  → "Tell me about new episodes": a notification when an episode *added to
-  the server* since the last look turns up in Next Up — Next Up moving on
-  because you finished something is not news. Looked for whenever Home
-  loads and, with Background App Refresh on, every few hours in the
-  background through `BGAppRefreshTask`; a tap opens the episode, Play plays
-  it (`Core/NextUpAlerts.swift`).
 - Picture in Picture, and AirPlay to another device.
 - The lock screen, Control Centre and Now Playing transport, plus media keys on
   a Mac keyboard and the Siri Remote on Apple TV — the counterpart to MPRIS.
@@ -372,17 +425,14 @@ plays with the phone switched off, as long as it has been signed in once.
 ## What did not carry over, and why
 
 The Linux build drives mpv, which can open essentially anything and exposes
-every knob it has. AVFoundation, which the iPhone, iPad and Mac play through,
-is narrower, and rather than ship controls that would quietly do nothing, these
-are absent there. Apple TV plays through mpv (see *The Apple TV player*), so
-the MKV row doesn't apply to it:
+every knob it has. The Apple app has mpv too now (see *The mpv engine*), so
+the picture controls and MKV direct play are in the features list above
+(night mode is wired but waits on an FFmpeg with a compressor in it — see
+there); what is still absent is what belongs to the system rather than to a
+player, or has no place on a television:
 
 | Linux | Apple | Why |
 |---|---|---|
-| MKV direct play | Server remuxes to HLS | AVFoundation cannot open Matroska at all. When the video and audio codecs are ones it can decode the server **rewraps** the same bitstream — no re-encode, no quality loss. Only DTS, TrueHD, VP9 and similar make it do real work. |
-| Brightness / contrast / saturation / gamma | — | No API adjusts the picture of a stream. |
-| Aspect-ratio override, zoom slider | Fit / Fill | `videoGravity` is the whole of the picture control AVPlayer has. Fill still solves the case the zoom slider existed for: a 2.35:1 film on a 16:9 screen. |
-| Night mode (dynamic range compression) | — | No equivalent for AVPlayer. |
 | Audio output device picker | AirPlay picker / system output | Route selection belongs to the system here. |
 | `hwdec` choice, mpv binary path | — | Nothing to choose; decoding is hardware by default. |
 | Subtitle position | Size and background only | `AVTextStyleRule` styles the WebVTT tracks HLS carries, but has no vertical position. |

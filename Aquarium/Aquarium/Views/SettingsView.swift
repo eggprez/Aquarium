@@ -162,6 +162,7 @@ struct SettingsView: View {
             if shows(.general) {
                 appearanceSection
                 homeSection
+                nextUpSection
                 cloudSection
             }
 
@@ -176,11 +177,12 @@ struct SettingsView: View {
             if shows(.video) {
                 qualitySection
                 pictureSection
+                playerSection
                 playingSection
+                audioLanguageSection
             }
 
             if shows(.audio) {
-                audioLanguageSection
                 audioOutputSection
             }
 
@@ -260,12 +262,34 @@ struct SettingsView: View {
     private var homeSection: some View {
         @Bindable var prefs = prefs
         return Section {
-            Toggle(isOn: $prefs.combinesNextUp) { MacSettingLabel(Copy.combineNextUp) }
-                .note(Copy.combineNextUp)
+            Toggle(isOn: $prefs.hidesContinueWatching) { MacSettingLabel(Copy.hideContinueWatching) }
+                .note(Copy.hideContinueWatching)
+            Toggle(isOn: $prefs.clearsAbandonedEpisodes) { MacSettingLabel(Copy.clearAbandoned) }
+                .note(Copy.clearAbandoned)
         } header: {
             Text("Home")
         } footer: {
-            MacSettingFooter(Copy.combineNextUp)
+            MacSettingFooter(Copy.hideContinueWatching, Copy.clearAbandoned)
+        }
+    }
+
+    private var nextUpSection: some View {
+        @Bindable var prefs = prefs
+        return Section {
+            Picker(selection: $prefs.nextUpDays) {
+                ForEach(Preferences.nextUpDayChoices, id: \.self) { Text(Preferences.nextUpDaysLabel($0)).tag($0) }
+            } label: {
+                MacSettingLabel(Copy.nextUpDays)
+            }
+            .note(Copy.nextUpDays)
+            Toggle(isOn: $prefs.nextUpIncludesInProgress) { MacSettingLabel(Copy.nextUpInProgress) }
+                .note(Copy.nextUpInProgress)
+            Toggle(isOn: $prefs.nextUpRewatching) { MacSettingLabel(Copy.nextUpRewatching) }
+                .note(Copy.nextUpRewatching)
+        } header: {
+            Text("Next Up")
+        } footer: {
+            MacSettingFooter(Copy.nextUpDays, Copy.nextUpInProgress, Copy.nextUpRewatching)
         }
     }
 
@@ -361,24 +385,19 @@ struct SettingsView: View {
 
     private var qualitySection: some View {
         @Bindable var prefs = prefs
+        // The quality itself — Auto or a rung held — is picked in the
+        // player, and only there.
         return Section {
-            Picker(selection: Self.bitrateBinding) {
-                ForEach(Quality.choices) { Text($0.label).tag($0.maxBitrate) }
-            } label: {
-                MacSettingLabel(Copy.defaultQuality)
-            }
-            .note(Copy.defaultQuality)
-
-            Toggle(isOn: $prefs.adaptiveQuality) { MacSettingLabel(Copy.adaptiveQuality) }
-                .note(Copy.adaptiveQuality)
-
             Toggle(isOn: $prefs.powerAwareQuality) { MacSettingLabel(Copy.powerAwareQuality) }
                 .disabled(!prefs.adaptiveQuality)
                 .note(Copy.powerAwareQuality)
+            Toggle(isOn: $prefs.speedCheck) { MacSettingLabel(Copy.speedCheck) }
+                .disabled(!prefs.adaptiveQuality)
+                .note(Copy.speedCheck)
         } header: {
             Text("Quality")
         } footer: {
-            MacSettingFooter(Copy.defaultQuality, Copy.adaptiveQuality, Copy.powerAwareQuality)
+            MacSettingFooter(Copy.powerAwareQuality, Copy.speedCheck)
         }
     }
 
@@ -389,14 +408,65 @@ struct SettingsView: View {
                 Text("Fit — show the whole frame").tag(false)
                 Text("Fill — crop to the screen").tag(true)
             } label: {
-                MacSettingLabel(Copy.framing, Copy.pictureControls)
+                MacSettingLabel(Copy.framing)
             }
             .pickerStyle(.radioGroup)
-            .note(Copy.framing, Copy.pictureControls)
+            .note(Copy.framing)
+            .onChange(of: prefs.fillScreen) { _, _ in player.applyFraming(switchingIfNeeded: true) }
+
+            PictureAdjustRows()
+                .note(Copy.pictureControls)
+
+            Toggle(isOn: $prefs.nightMode) { MacSettingLabel(Copy.nightMode) }
+                .note(Copy.nightMode)
+                .onChange(of: prefs.nightMode) { _, _ in player.applyNightMode() }
         } header: {
             Text("Picture")
         } footer: {
-            MacSettingFooter(Copy.framing, Copy.pictureControls)
+            MacSettingFooter(Copy.framing, Copy.pictureControls, Copy.pictureZoom, Copy.aspectOverride, Copy.nightMode)
+        }
+    }
+
+    /// The controls drawn over the picture, and the engine underneath it.
+    private var playerSection: some View {
+        @Bindable var prefs = prefs
+        return Section {
+            Picker(selection: $prefs.playbackEngine) {
+                ForEach(EnginePolicy.Preference.allCases, id: \.self) { Text($0.title).tag($0) }
+            } label: {
+                MacSettingLabel(Copy.playbackEngineChoice)
+            }
+            .note(Copy.playbackEngineChoice)
+
+            Picker(selection: $prefs.batterySaver) {
+                ForEach(EnginePolicy.BatterySaver.allCases, id: \.self) { Text($0.title).tag($0) }
+            } label: {
+                MacSettingLabel(Copy.batterySaver)
+            }
+            .note(Copy.batterySaver)
+            .onChange(of: prefs.batterySaver) { _, _ in player.refreshPowerProfile() }
+
+            Picker(selection: $prefs.skipInterval) {
+                ForEach(Preferences.skipIntervals, id: \.self) { Text("\($0) seconds").tag($0) }
+            } label: {
+                MacSettingLabel(Copy.skipInterval)
+            }
+            .note(Copy.skipInterval)
+
+            Picker(selection: $prefs.hideControlsAfter) {
+                ForEach(Preferences.hideControlsChoices, id: \.self) { Text("\(Int($0)) seconds").tag($0) }
+            } label: {
+                MacSettingLabel(Copy.hideControlsAfter)
+            }
+            .note(Copy.hideControlsAfter)
+
+            Toggle(isOn: $prefs.showsRemainingTime) { MacSettingLabel(Copy.showsRemainingTime) }
+                .note(Copy.showsRemainingTime)
+        } header: {
+            Text("Player")
+        } footer: {
+            MacSettingFooter(Copy.playbackEngineChoice, Copy.batterySaver,
+                             Copy.skipInterval, Copy.hideControlsAfter, Copy.showsRemainingTime)
         }
     }
 
@@ -415,8 +485,8 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Audio
-
+    /// On the Video tab with the rest of what a video opens with; the Audio
+    /// tab is the delay and the downmix.
     private var audioLanguageSection: some View {
         @Bindable var prefs = prefs
         return Section {
@@ -424,7 +494,7 @@ struct SettingsView: View {
                 Text("Whatever the file lists first").tag("")
                 ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
             } label: {
-                MacSettingLabel(Copy.audioLanguage, title: "Language")
+                MacSettingLabel(Copy.audioLanguage)
             }
             .note(Copy.audioLanguage)
         } header: {
@@ -433,6 +503,8 @@ struct SettingsView: View {
             MacSettingFooter(Copy.audioLanguage)
         }
     }
+
+    // MARK: - Audio
 
     private var audioOutputSection: some View {
         @Bindable var prefs = prefs
@@ -463,6 +535,7 @@ struct SettingsView: View {
             Picker(selection: $prefs.subtitleLanguage) {
                 Text("Only when the file turns them on").tag("")
                 Text("Never — no subtitles").tag("off")
+                Text("Forced only — signs and foreign lines").tag(TrackPreference.forcedOnly)
                 ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
             } label: {
                 MacSettingLabel(Copy.subtitleLanguage, title: "Language")
@@ -535,8 +608,9 @@ struct SettingsView: View {
         }
     }
 
-    /// Stations learn only while they play — thumbs included — so there is
-    /// nothing kept here to count or forget.
+    /// Stations learn only while they play, so there is nothing kept here
+    /// to count or forget — but for the moods Surprise Me remembers by time
+    /// of day, which are only a place to start (see `MoodMemory`).
     private var stationsSection: some View {
         @Bindable var prefs = prefs
         return Section {
@@ -737,10 +811,11 @@ private typealias Copy = SettingsCopy
 /// the right (`SettingsSplitPage`), the way iPadOS Settings works; narrower,
 /// it is the phone's page.
 struct SettingsView: View {
+    @Environment(AppModel.self) private var app
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
-        if AppModel.usesSidebar && sizeClass == .regular {
+        if app.usesSidebar && sizeClass == .regular {
             SettingsSplitPage()
         } else {
             SettingsListPage()
@@ -757,6 +832,7 @@ private struct SettingsListPage: View {
         .formStyle(.grouped)
         .screenTitle("Settings")
         .paletteBar()
+        .palettePage()
     }
 }
 
@@ -780,26 +856,32 @@ private struct SettingsSplitPage: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(page.title)
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(Theme.text)
-                    Text(page.note)
-                        .font(.subheadline)
-                        .foregroundStyle(Theme.textDim)
-                        .fixedSize(horizontal: false, vertical: true)
+            // The page's heading pinned over its form rather than stacked
+            // above it, on the page colour: stacked, the form's sections
+            // scrolled up into the heading's last line and were cut through
+            // under it.
+            SettingsPageView(page: page)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(page.title)
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                        Text(page.note)
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.textDim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 36)
+                    .padding(.top, 24)
+                    .padding(.bottom, 4)
+                    .background(Theme.background)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 36)
-                .padding(.top, 24)
-                .padding(.bottom, 4)
-                SettingsPageView(page: page)
-            }
-            .frame(maxWidth: .infinity)
-            .id(page)
+                .frame(maxWidth: .infinity)
+                .id(page)
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        // Both columns, the list and the page beside it.
+        .palettePage()
         .screenTitle("Settings")
         .paletteBar()
     }
@@ -916,6 +998,7 @@ extension View {
         self
             .screenTitle(page.title)
             .paletteBar()
+            .palettePage()
             .clearsBottomChrome()
     }
 }
@@ -973,19 +1056,26 @@ struct SettingsAccountCard: View {
         HStack(spacing: 14) {
             if let session = client.session {
                 AccountAvatar(account: session, size: 48)
+                // The state beside the name rather than beside both lines, so
+                // the server's address has the card's whole width under them.
+                // In the iPad's 320-point list column, or at the larger text
+                // sizes on a phone, the pill took that width from the address
+                // and cut it to "medi…glass".
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(session.userName.isEmpty ? "Unnamed user" : session.userName)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.text)
-                        .lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(session.userName.isEmpty ? "Unnamed user" : session.userName)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(Theme.text)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        StatusPill(text: client.isOffline ? "Offline" : "Connected", tone: client.isOffline ? .warn : .ok)
+                    }
                     Text(session.serverLabel)
                         .font(.subheadline)
                         .foregroundStyle(Theme.textDim)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                Spacer(minLength: 8)
-                StatusPill(text: client.isOffline ? "Offline" : "Connected", tone: client.isOffline ? .warn : .ok)
             } else {
                 SettingsTile(page: .account, size: 48)
                 VStack(alignment: .leading, spacing: 2) {
@@ -1134,32 +1224,33 @@ private struct AppearanceSettingsPage: View {
                     TabBarSettingsView()
                         .clearsBottomChrome()
                 } label: {
-                    LabeledContent(AppModel.usesSidebar ? "Sidebar" : "Tab Bar",
+                    LabeledContent(app.usesSidebar ? "Sidebar" : "Tab Bar",
                                    value: prefs.tabBarOrder.isEmpty ? "Default" : "Custom")
                 }
             } footer: {
-                Text(AppModel.usesSidebar
+                Text(app.usesSidebar
                      ? "The order of the sections in the sidebar."
                      : "Which sections have a place in the tab bar, and in what order. The rest are listed under More.")
             }
 
             Section {
-                Toggle(Copy.combineNextUp.name ?? "", isOn: $prefs.combinesNextUp)
-                Toggle(Copy.newEpisodeAlerts.name ?? "", isOn: $prefs.newEpisodeAlerts)
-                    // Turning it on asks to notify; refused, it goes back off.
-                    .onChange(of: prefs.newEpisodeAlerts) { _, on in
-                        guard on else { return }
-                        Task {
-                            if await !NextUpAlerts.shared.enable() {
-                                prefs.newEpisodeAlerts = false
-                                app.toast("Notifications are off for Aquarium — turn them on in Settings", tone: .error)
-                            }
-                        }
-                    }
+                Toggle(Copy.hideContinueWatching.name ?? "", isOn: $prefs.hidesContinueWatching)
             } header: {
                 Text("Home")
             } footer: {
-                SettingsFooter(Copy.combineNextUp, Copy.newEpisodeAlerts)
+                SettingsFooter(Copy.hideContinueWatching)
+            }
+
+            Section {
+                Picker(Copy.nextUpDays.name ?? "", selection: $prefs.nextUpDays) {
+                    ForEach(Preferences.nextUpDayChoices, id: \.self) { Text(Preferences.nextUpDaysLabel($0)).tag($0) }
+                }
+                Toggle(Copy.nextUpInProgress.name ?? "", isOn: $prefs.nextUpIncludesInProgress)
+                Toggle(Copy.nextUpRewatching.name ?? "", isOn: $prefs.nextUpRewatching)
+            } header: {
+                Text("Next Up")
+            } footer: {
+                SettingsFooter(Copy.nextUpDays, Copy.nextUpInProgress, Copy.nextUpRewatching)
             }
         }
         .formStyle(.grouped)
@@ -1173,38 +1264,19 @@ private struct VideoSettingsPage: View {
     var body: some View {
         @Bindable var prefs = prefs
         Form {
+            // The same choice as the player's Quality card, and the same
+            // place it is kept: Auto, or one rung held for every stream.
             Section {
-                Picker(Copy.defaultQuality.name ?? "", selection: SettingsView.bitrateBinding) {
-                    ForEach(Quality.choices) { Text($0.label).tag($0.maxBitrate) }
+                Picker(Copy.defaultQuality.name ?? "", selection: Self.qualityBinding) {
+                    Text("Auto").tag(PlayerModel.QualitySelection.auto)
+                    ForEach(Quality.choices, id: \.label) { Text($0.label).tag(PlayerModel.QualitySelection.stream($0.maxBitrate)) }
                 }
-                Toggle(Copy.adaptiveQuality.name ?? "", isOn: $prefs.adaptiveQuality)
-                Toggle(Copy.powerAwareQuality.name ?? "", isOn: $prefs.powerAwareQuality)
+                Toggle(Copy.speedCheck.name ?? "", isOn: $prefs.speedCheck)
                     .disabled(!prefs.adaptiveQuality)
             } header: {
                 Text("Quality")
             } footer: {
-                SettingsFooter(Copy.defaultQuality, Copy.adaptiveQuality, Copy.powerAwareQuality)
-            }
-
-            Section {
-                // The segments beside the name: a segmented picker on its own
-                // in a form row drops its label, and "Fit | Fill" with nothing
-                // to say what they are of is a puzzle.
-                HStack {
-                    Text(Copy.framing.name ?? "")
-                    Spacer(minLength: 16)
-                    Picker(Copy.framing.name ?? "", selection: $prefs.fillScreen) {
-                        Text("Fit").tag(false)
-                        Text("Fill").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
-                }
-            } header: {
-                Text("Picture")
-            } footer: {
-                SettingsFooter(Copy.framing, Copy.pictureControls)
+                SettingsFooter(Copy.defaultQualityAuto, Copy.speedCheck)
             }
 
             Section {
@@ -1218,6 +1290,27 @@ private struct VideoSettingsPage: View {
         }
         .formStyle(.grouped)
     }
+
+    /// Auto, or the rung kept in `defaultBitrate`.
+    private static var qualityBinding: Binding<PlayerModel.QualitySelection> {
+        Binding(
+            get: {
+                let prefs = Preferences.shared
+                return prefs.adaptiveQuality ? .auto : .stream(prefs.defaultBitrate)
+            },
+            set: { selection in
+                let prefs = Preferences.shared
+                switch selection {
+                case .stream(let bitrate):
+                    prefs.adaptiveQuality = false
+                    prefs.defaultBitrate = bitrate
+                default:
+                    prefs.adaptiveQuality = true
+                    prefs.defaultBitrate = nil
+                }
+            }
+        )
+    }
 }
 
 private struct AudioSettingsPage: View {
@@ -1227,7 +1320,7 @@ private struct AudioSettingsPage: View {
         @Bindable var prefs = prefs
         Form {
             Section {
-                Picker("Language", selection: $prefs.audioLanguage) {
+                Picker(Copy.audioLanguage.name ?? "", selection: $prefs.audioLanguage) {
                     Text("File's choice").tag("")
                     ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
                 }
@@ -1236,19 +1329,23 @@ private struct AudioSettingsPage: View {
             } footer: {
                 SettingsFooter(Copy.audioLanguage)
             }
-
+            // No audio delay here: a phone has nothing between it and its
+            // own speaker to lag. The Apple TV is where the delay is
+            // measured and set; the row below is how.
+            #if os(iOS)
             Section {
-                Toggle(Copy.downmix.name ?? "", isOn: $prefs.stereoDownmix)
-                Picker(Copy.audioDelay.name ?? "", selection: SettingsView.audioDelayBinding) {
-                    ForEach(SettingsView.audioDelayChoices, id: \.self) { milliseconds in
-                        Text(PlayerModel.audioDelayName(milliseconds)).tag(milliseconds)
-                    }
+                NavigationLink {
+                    SyncMeasureView()
+                        .clearsBottomChrome()
+                } label: {
+                    Text(Copy.measureSync.name ?? "")
                 }
             } header: {
-                Text("Output")
+                Text("Apple TV")
             } footer: {
-                SettingsFooter(Copy.downmix, Copy.audioDelay)
+                SettingsFooter(Copy.measureSync)
             }
+            #endif
         }
         .formStyle(.grouped)
     }
@@ -1256,7 +1353,6 @@ private struct AudioSettingsPage: View {
 
 private struct SubtitlesSettingsPage: View {
     @Environment(Preferences.self) private var prefs
-    @Environment(PlayerModel.self) private var player
 
     var body: some View {
         @Bindable var prefs = prefs
@@ -1265,35 +1361,13 @@ private struct SubtitlesSettingsPage: View {
                 Picker("Language", selection: $prefs.subtitleLanguage) {
                     Text("File's choice").tag("")
                     Text("Never").tag("off")
+                    Text("Forced only").tag(TrackPreference.forcedOnly)
                     ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
                 }
-                Toggle(Copy.forcedOnly.name ?? "", isOn: $prefs.forcedSubtitlesOnly)
             } header: {
                 Text("Language")
             } footer: {
-                SettingsFooter(Copy.subtitleLanguage, Copy.forcedOnly, Copy.trackMemory)
-            }
-
-            Section {
-                VStack(alignment: .leading) {
-                    HStack {
-                        Text(Copy.subtitleSize.name ?? "")
-                        Spacer()
-                        Text("\(Int(prefs.subtitleSize))%")
-                            .foregroundStyle(Theme.textDim)
-                            .monospacedDigit()
-                    }
-                    Slider(value: $prefs.subtitleSize, in: 60...180, step: 5)
-                        .onChange(of: prefs.subtitleSize) { _, _ in player.refreshSubtitleStyling() }
-                }
-                Picker(Copy.subtitleBackground.name ?? "", selection: $prefs.subtitleBackground) {
-                    ForEach(SubtitleBackground.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                .onChange(of: prefs.subtitleBackground) { _, _ in player.refreshSubtitleStyling() }
-            } header: {
-                Text("Appearance")
-            } footer: {
-                SettingsFooter(Copy.subtitleSize, Copy.subtitleBackground)
+                SettingsFooter(Copy.subtitleLanguage, Copy.trackMemory)
             }
         }
         .formStyle(.grouped)
@@ -1452,6 +1526,7 @@ private struct CustomPlaylistSettingsPage: View {
         .formStyle(.grouped)
         .screenTitle("Custom playlist")
         .paletteBar()
+        .palettePage()
     }
 }
 
@@ -1552,15 +1627,18 @@ private struct StationMixSettingsPage: View {
         .formStyle(.grouped)
         .screenTitle(Copy.stationMix.name ?? "")
         .paletteBar()
+        .palettePage()
     }
 }
 
 private struct AboutSettingsPage: View {
+    @Environment(PlayerModel.self) private var player
+
     var body: some View {
         Form {
             Section {
                 LabeledContent("Aquarium", value: "\(Bundle.appVersion) (\(Bundle.appBuild))")
-                LabeledContent("Playback engine", value: "AVFoundation")
+                LabeledContent("Playback engine", value: player.engineDescription)
             } footer: {
                 SettingsFooter(Copy.playbackEngine)
             }
@@ -1642,6 +1720,12 @@ struct AccountsSection: View {
             }
             HStack(spacing: 0) {
                 Button {
+                    // The sign-in sheet is the main window's (see
+                    // `RootView`), so that window comes forward to show it —
+                    // opened again if it was closed. Left where it was, the
+                    // sheet opened behind Settings, or not at all until the
+                    // main window next appeared.
+                    MacMainWindow.show()
                     app.isAddingAccount = true
                 } label: {
                     Image(systemName: "plus")
@@ -1803,6 +1887,61 @@ struct StationMixSection: View {
 
     private func binding(_ dial: MixPoints.Dial) -> Binding<Int> {
         Binding(get: { prefs.mixPoints[dial] }, set: { prefs.mixPoints[dial] = $0 })
+    }
+}
+
+/// Brightness, contrast, saturation and gamma, the zoom and the aspect
+/// override, with a Reset: the mpv engine's picture, as rows of the Video
+/// page on an iPhone and the Video tab on a Mac. Applied to the live picture
+/// where one is playing, and a title on Apple's engine is handed to mpv when
+/// any of them leaves neutral.
+struct PictureAdjustRows: View {
+    @Environment(Preferences.self) private var prefs
+    @Environment(PlayerModel.self) private var player
+
+    var body: some View {
+        @Bindable var prefs = prefs
+        Group {
+            slider("Brightness", value: $prefs.pictureBrightness)
+            slider("Contrast", value: $prefs.pictureContrast)
+            slider("Saturation", value: $prefs.pictureSaturation)
+            slider("Gamma", value: $prefs.pictureGamma)
+            HStack {
+                Text("Zoom")
+                Spacer(minLength: 16)
+                Text("\(prefs.pictureZoom.formatted(.number.precision(.fractionLength(2))))×")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Slider(value: $prefs.pictureZoom, in: 1...2, step: 0.05)
+                    .frame(maxWidth: 220)
+                    .accessibilityLabel("Zoom")
+            }
+            .onChange(of: prefs.pictureZoom) { _, _ in player.applyFraming(switchingIfNeeded: true) }
+            Picker("Aspect ratio", selection: $prefs.aspectOverride) {
+                ForEach(Preferences.aspectChoices, id: \.ratio) { Text($0.label).tag($0.ratio) }
+            }
+            .onChange(of: prefs.aspectOverride) { _, _ in player.applyFraming(switchingIfNeeded: true) }
+            Button("Reset Picture") {
+                prefs.resetPicture()
+                player.applyPicture()
+                player.applyFraming()
+            }
+            .disabled(!prefs.pictureIsAdjusted)
+        }
+    }
+
+    private func slider(_ name: String, value: Binding<Double>) -> some View {
+        HStack {
+            Text(name)
+            Spacer(minLength: 16)
+            Text("\(Int(value.wrappedValue))")
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Slider(value: value, in: -100...100, step: 1)
+                .frame(maxWidth: 220)
+                .accessibilityLabel(name)
+        }
+        .onChange(of: value.wrappedValue) { _, _ in player.applyPicture(switchingIfNeeded: true) }
     }
 }
 
@@ -2112,17 +2251,20 @@ enum SettingsCopy {
         name: "Theme",
         text: "Match system follows the device's light/dark setting. The player is always dark, wherever this is set."
     )
-    static let adaptiveQuality = SettingNote(
-        name: "Adapt quality automatically",
-        text: "Drops to a smaller stream when playback keeps stalling or the device can't decode fast enough, and climbs back after the connection has been steady for a while. It never goes above the quality you picked, and never touches downloaded files or Live TV."
+    static let layout = SettingNote(
+        name: "Layout",
+        text: "Automatic follows the hinge: the front screen is a phone, the inside an iPad, stood up like a tent a player, and half-folded on a table a picture above the fold with the controls below. Inside and Half-folded only take effect on the inside screen."
     )
     static let powerAwareQuality = SettingNote(
         name: "Ease off when the device is struggling",
-        text: "Holds the stream to 1080p at 10 Mbps while the device is running hot or in Low Power Mode, and to 720p when it is at its thermal limit — before the picture starts to stutter rather than after. It climbs back the usual way once things settle. Only with adaptive quality on."
+        text: "Holds the stream to 1080p at 10 Mbps while the device is running hot or in Low Power Mode, and to 720p when it is at its thermal limit — before the picture starts to stutter rather than after. It climbs back the usual way once things settle. Only while the player's Quality is Auto; picking a quality there is choosing it yourself."
     )
-    static let newEpisodeAlerts = SettingNote(
-        name: "Tell me about new episodes",
-        text: "A notification when an episode new to the server turns up in Next Up — a show you're watching got a new one. Looked for whenever Home loads, and now and then in the background, which needs Background App Refresh on for Aquarium."
+    static let speedCheck = SettingNote(
+        name: "Check the connection first",
+        text: "Away from home, times a short download from the server before a stream opens and starts at the quality the connection carries, rather than at the original and stepping down from there. A stream that stalls later steps straight to what fits. The next episode reuses what the last one learnt. Only while the player's Quality is Auto."
+    )
+    static let defaultQualityAuto = SettingNote(
+        text: "What a stream opens at. Auto starts at the best the connection allows and steps down by itself when it keeps stalling; a rung holds every stream there until you pick another, here or in the player's Quality card."
     )
     static let defaultQuality = SettingNote(
         name: "Default quality",
@@ -2132,9 +2274,25 @@ enum SettingsCopy {
         name: "Resume where I left off",
         text: "Opens something you have already started at the point you stopped, instead of from the beginning."
     )
-    static let combineNextUp = SettingNote(
-        name: "Combine Next Up with Continue Watching",
-        text: "Draws the two rows on Home as one: a poster for each show you are partway through, carrying the progress of the episode you were in the middle of, beside the films you have started. With more than one episode of a show on the go, the card shows the one just before where Next Up has got to. Hold a poster (right-click on a Mac) to remove a show from the row; it comes back once you watch a later episode."
+    static let hideContinueWatching = SettingNote(
+        name: "Hide Continue Watching",
+        text: "Leaves the row of part-watched episodes and films off Home, keeping Next Up, which lists the next episode of each show you're following. Nothing is forgotten: a title you stopped partway through still resumes from where you left it, and still shows in Jellyfin's other apps."
+    )
+    static let clearAbandoned = SettingNote(
+        name: "Clear abandoned episodes",
+        text: "Each time Home loads, an episode you left partway through that Next Up has since moved well past — more than one episode behind, and untouched for a month — has its saved position cleared on the server, so it leaves Continue Watching here and in every other Jellyfin app. The episode stays unwatched; nothing is marked played and Next Up does not move."
+    )
+    static let nextUpDays = SettingNote(
+        name: "Keep shows on Next Up",
+        text: "How long a show stays on Next Up after you last watched anything in it. Past that, the app takes it off Next Up on the server as well, so Jellyfin's other apps stop showing it too; nothing is marked watched. A show you're up to date on comes back when a new episode arrives, but only if you watched it within this limit. Playing an episode or adding the show to Next Up brings any show back, and adding counts as watching it today. Forever keeps a show for as long as it has an episode left and never takes one off. Like the two settings below, this follows you to every Apple device signed in to this account."
+    )
+    static let nextUpInProgress = SettingNote(
+        name: "Include episodes in progress",
+        text: "Lets Next Up offer an episode you're partway through, as Continue Watching does. Off, a show whose next episode you've started is left to Continue Watching until you finish it."
+    )
+    static let nextUpRewatching = SettingNote(
+        name: "Include shows you're rewatching",
+        text: "Keeps a show you're watching again on Next Up: after an episode you've already seen, it offers the one after it, watched or not."
     )
     static let autoplayNext = SettingNote(
         name: "Play the next episode automatically",
@@ -2144,33 +2302,38 @@ enum SettingsCopy {
         name: "Downmix surround to stereo",
         text: "Asks the server for two channels instead of six. Worth turning on if you listen on headphones or a laptop and find dialogue in 5.1 material too quiet — the centre channel it lives on gets mixed in properly rather than dropped."
     )
-    static let soundbar = SettingNote(
-        name: "Decode audio on this Apple TV",
-        text: "For a soundbar or receiver whose sound runs behind the picture. Dolby tracks are normally handed to it undecoded and it takes its own time over them; with this on, the server sends AAC instead, the Apple TV decodes it, and plain multichannel PCM goes down the HDMI cable. Surround is kept, Atmos is not. Takes effect on the next thing you play."
-    )
     static let audioDelay = SettingNote(
         name: "Audio delay",
-        text: "How far the sound is moved against the picture — the lag a television or soundbar adds, which is the same for everything watched through it. " + audioDelayPlayerHint + "Whatever is settled on is saved here and applied to everything you play. The sound can be moved earlier on any stream; moving it later needs a file the server can send untouched."
+        text: "How far the sound is moved against the picture — the lag a television or soundbar adds, which is the same for everything watched through it. Whatever is settled on is saved here and applied to everything you play. The sound can be moved earlier on any stream; moving it later needs a file the server can send untouched."
     )
-    static let matchedAudioDelay = SettingNote(
-        name: "Audio delay at 24 Hz",
-        text: "The offset used instead when Match Content → Match Frame Rate switches your television out of 60 Hz for a video — a film, mostly. Many televisions show the picture later at 24 Hz than at 60, and tvOS can tell the app that matching is on but not how much later, so this is measured on its own with the Match Frame Rate sync test. Until it has been, films get the standard delay. The player's Sync tab moves this one while a video the display switched for is playing."
+    static let measureSync = SettingNote(
+        name: "Measure Apple TV sync",
+        text: "Times the Apple TV's sync clip with this device's camera and microphone and says what to set its Sync tab to. On the Apple TV, open Settings → Audio and press a frame rate; point this camera at the television with the sound up and the whole screen in the picture, and twenty seconds later the number is here. The rate and the delay already in force are read off the code in the corner of the clip, so nothing is typed in and the two devices never need to find each other."
     )
-    static let syncTestStandard = SettingNote(
-        name: "Sync test · standard frame rate",
-        text: "Plays a short looping clip at 60 fps, which leaves the television in the mode the Home screen runs in — what shows and most Live TV play in. A line sweeps across a ruler and a beep plays as it crosses 0. Swipe down for the Sync tab: if the beep comes before the flash, press −; after it, press +. What is settled on becomes the audio delay."
-    )
-    static let syncTestMatched = SettingNote(
-        name: "Sync test · Match Frame Rate",
-        text: "The same clip at 23.976 fps, the rate films are, so with Match Content → Match Frame Rate on the television switches to the mode your films play in and the test measures that mode's lag. What is settled on becomes the audio delay at 24 Hz, and is used for every video the display switches for. With Match Frame Rate off there is no switch, and the test sets the standard delay instead."
-    )
+    #if os(tvOS)
+    /// The row for one of the preset rates, each with a sync clip of its own.
+    static func audioDelay(_ rate: PlayerModel.DelayRate) -> SettingNote {
+        let what: String = switch rate.fps {
+        case 24: "films, and most shows made for streaming, at 23.976 or 24 fps"
+        case 25: "British and European television at 25 fps"
+        case 30: "American television and video at 29.97 or 30 fps"
+        case 50: "European sport and Live TV at 50 fps"
+        default: "sport, Live TV and games at 59.94 or 60 fps, the mode the Home screen runs in — also what a video whose rate isn't known gets"
+        }
+        let clip = rate.fps == 24 ? "23.976" : rate.fps == 30 ? "29.97" : "\(rate.fps)"
+        return SettingNote(
+            name: "\(rate.name) delay",
+            text: "The offset for \(what). A television does different work at each frame rate, and with Match Frame Rate on in the Apple TV's own Settings it switches modes for one, so each is measured on its own. Press to play a looping \(clip) fps clip: a line sweeps a ruler and a beep plays as it crosses 0. Swipe down for the Sync tab — if the beep comes before the flash, press −; after it, press +. What is settled on is saved here, and the player uses it whenever the video playing is this rate. The Sync tab over a video at any other rate saves a delay for that rate. Or let an iPhone do the judging: Settings → Audio → Measure Apple TV sync in the iPhone app times the beep against the flash through its camera and says what to set here."
+        )
+    }
+    #endif
     static let audioLanguage = SettingNote(
-        name: "Audio",
+        name: "Audio language",
         text: "Preferred spoken language. When a file has more than one soundtrack, every video opens with the first track in this language — asked of the server before the stream starts, so it holds on a transcode as well as a file played untouched."
     )
     static let subtitleLanguage = SettingNote(
         name: "Subtitles",
-        text: "Which subtitles a video opens with, when the file has them in this language. “Never” is the setting to pick if you don't use subtitles: it stops them being switched on by a file that ships with them enabled, which no other option here can do."
+        text: "Which subtitles a video opens with, when the file has them in this language. “Forced only” shows just the track that translates signs and the odd line of foreign dialogue, in the language you're listening in, and nothing when a file has no such track. “Never” is the setting to pick if you don't use subtitles: it stops them being switched on by a file that ships with them enabled, which no other option here can do."
     )
     static let forcedOnly = SettingNote(
         name: "Forced subtitles only",
@@ -2215,12 +2378,77 @@ enum SettingsCopy {
         name: "Refresh channel list & guide now",
         text: "Downloads the channels and the guide again straight away, instead of waiting for the next scheduled refresh."
     )
+    #if os(tvOS)
+    // The Apple TV plays through mpv alone, so every picture control is
+    // live there; the engine row and Battery saver (it is on mains) are not
+    // offered.
+    static let framing = SettingNote(
+        name: "Framing",
+        text: "Fill is how you put a 2.35:1 film on a 16:9 screen without watching it between black bars. It does cut the edges of the frame off."
+    )
+    static let pictureControls = SettingNote(
+        name: "Picture",
+        text: "Brightness, contrast, saturation and gamma, each from −100 to 100 with 0 as the file's own, applied by the player as it draws. The television's own picture settings still apply over them to everything on screen; the player's Picture tab has the same controls over the live picture, which is the better place to judge them."
+    )
+    #else
     static let framing = SettingNote(
         name: "Framing",
         text: "Fill is how you put a 2.35:1 film on a 16:9 screen without watching it between black bars. It does cut the edges of the frame off. Also reachable from the player itself, so it can be judged against what's on screen."
     )
     static let pictureControls = SettingNote(
-        text: "There are no brightness, contrast or colour controls: Apple's video player has no way to adjust the picture of a stream."
+        name: "Picture",
+        text: "Brightness, contrast, saturation and gamma, each from −100 to 100 with 0 as the file's own. They are the mpv engine's: setting any of them switches a title playing on Apple's engine over to mpv, and the player's Picture tab has the same sliders over the live picture."
+    )
+    #endif
+    static let pictureBrightness = SettingNote(name: "Brightness", text: pictureControls.text)
+    static let pictureContrast = SettingNote(name: "Contrast", text: pictureControls.text)
+    static let pictureSaturation = SettingNote(name: "Saturation", text: pictureControls.text)
+    static let pictureGamma = SettingNote(name: "Gamma", text: pictureControls.text)
+    static let resetPicture = SettingNote(
+        name: "Reset picture",
+        text: "Puts the file's own picture back: no adjustment, no zoom, its own shape."
+    )
+    static let nightMode = SettingNote(
+        name: "Night mode",
+        text: "Evens the sound out: quiet dialogue comes up and loud passages come down, for a room where the volume has to stay low. The mpv engine's; a title playing through Apple's engine is left as it is, and the player's Picture tab says so. Stays on this device rather than following you to your others, like the volume."
+    )
+    static let pictureZoom = SettingNote(
+        name: "Zoom",
+        text: "Enlarges the picture about its centre, up to 2×, cropping what spills over the edges. The mpv engine's, like the sliders above."
+    )
+    static let aspectOverride = SettingNote(
+        name: "Aspect ratio",
+        text: "Stretches or crops the picture to a shape other than the file's own, for a film letterboxed inside its own frame. The mpv engine's too."
+    )
+    #if !os(tvOS)
+    static let playbackEngineChoice = SettingNote(
+        name: "Playback engine",
+        text: "Automatic plays through Apple's engine and switches a title to mpv only when it needs something Apple's cannot do — picture subtitles, DTS or TrueHD, the picture controls, an audio delay on a transcode, a Matroska download. Apple: hardware decode straight to the screen, Picture in Picture, AirPlay and Watch Together, and the least battery; Matroska and DTS go to the server to convert, and picture subtitles are burned in there. mpv: opens the original file whatever it is and has every control, at a shader pass per frame that costs more battery; Picture in Picture, AirPlay and Watch Together hand the title back to Apple's engine while they run."
+    )
+    static let batterySaver = SettingNote(
+        name: "Battery saver",
+        text: "How the mpv engine draws. Always: the cheapest chain that still looks right — bilinear scaling, no dithering or debanding, 8-bit intermediates. Never: mpv's full-quality chain. Automatic: the cheap chain on an iPhone or iPad, on a Mac running on its battery or in Low Power Mode, and on any device running hot, which overrides the other two."
+    )
+    #endif
+    static let skipInterval = SettingNote(
+        name: "Skip by",
+        text: "How far the two skip buttons jump, and a double-tap on the left or right of the picture. Taps in a row add up, and the total is shown as they do."
+    )
+    static let edgeGestures = SettingNote(
+        name: "Edge drags for brightness and volume",
+        text: "Drag up or down along the left edge of the picture for brightness and along the right edge for volume. Off unless you want it: on some devices the drags fight the system's own edge gestures."
+    )
+    static let holdForDoubleSpeed = SettingNote(
+        name: "Hold for 2×",
+        text: "Hold a finger on the picture to play at double speed, and lift it to go back to the speed you were at."
+    )
+    static let hideControlsAfter = SettingNote(
+        name: "Hide controls after",
+        text: "How long the controls stay up after the last touch while something plays. They never hide while paused, while a panel is open, or while VoiceOver is on."
+    )
+    static let showsRemainingTime = SettingNote(
+        name: "Show time remaining",
+        text: "Whether the time at the right of the timeline counts down to the end or shows the whole length. Tapping it in the player flips this too."
     )
     static let concurrency = SettingNote(
         name: "Parallel downloads",
@@ -2257,16 +2485,6 @@ enum SettingsCopy {
         name: "Delete the copy",
         text: "Removes the saved details and artwork from this device. With the setting still on, the next sync downloads everything again."
     )
-    /// The player's own audio-sync controls exist only on Apple TV; elsewhere
-    /// the footer pointed at a panel that isn't there.
-    private static var audioDelayPlayerHint: String {
-        #if os(tvOS)
-        "Set from inside the player: the Sync tab puts the controls over whatever is playing, so the sound can be nudged while watching a line of dialogue, or over the sync test's clip. Used while the television is in its usual 60 Hz mode; a video the display is switched for gets the delay at 24 Hz instead. "
-        #else
-        ""
-        #endif
-    }
-
     static let cloudUnavailable = SettingNote(
         text: "Not signed in to iCloud on this device, or this build isn't set up for it."
     )
@@ -2276,13 +2494,21 @@ enum SettingsCopy {
     /// What the About panel says — on a Mac the app menu's About item, now
     /// that the General tab no longer carries it. The version first, then the
     /// engine, then the paragraph.
+    @MainActor
     static var aboutLines: [String] {
-        ["Aquarium \(Bundle.appVersion) (\(Bundle.appBuild))", "Playback engine: AVFoundation", about.text]
+        ["Aquarium \(Bundle.appVersion) (\(Bundle.appBuild))", "Playback engine: \(PlayerModel.shared.engineDescription)", about.text]
     }
+    #if os(tvOS)
     static let playbackEngine = SettingNote(
         name: "Playback engine",
-        text: "Apple's AVFoundation, the same media framework the system's own players are built on — so what plays directly, and what the server is asked to convert, follows what this device supports."
+        text: "mpv, which opens the original file whatever it is — Matroska, DTS and TrueHD included — so the server is rarely asked to convert one, mostly when a lower quality is chosen. The picture is decoded by Apple TV's hardware wherever it takes the codec."
     )
+    #else
+    static let playbackEngine = SettingNote(
+        name: "Playback engine",
+        text: "Which engine is playing right now, or which Settings → Video → Playback engine will pick. Apple's AVFoundation is the same media framework the system's own players are built on; mpv is the library the Apple TV and the Linux app play through, and it opens the original file whatever it is."
+    )
+    #endif
 }
 
 extension SettingsView {
@@ -2367,9 +2593,21 @@ enum SettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .account: "Who is signed in and where, how the connection is secured, the other accounts on this device, and signing out."
         case .appearance: "Light or dark, the icon on the Home Screen, and the order of the tabs."
-        case .video: "The quality a stream opens at, whether it adapts, how a wide picture is framed, and what happens at the end of an episode."
-        case .audio: "The spoken language a video opens with, downmixing surround for a stereo setup, and the delay that keeps sound and picture together."
+        #if os(tvOS)
+        // No adaptive quality on the Apple TV's player — see `VideoSettingsPage`.
+        case .video: "The quality a stream opens at, how a wide picture is framed, what happens at the end of an episode, and the spoken language a video opens with."
+        #elseif os(iOS)
+        case .video: "The quality a stream opens at, and what happens at the end of an episode."
+        #else
+        case .video: "Easing the stream off when the device is struggling, how a wide picture is framed, what happens at the end of an episode, and the spoken language a video opens with."
+        #endif
+        #if os(iOS)
+        case .audio: "The spoken language a video opens with, and measuring the Apple TV's delay."
+        case .subtitles: "Which subtitles a video opens with: a language, the forced track only, or none."
+        #else
+        case .audio: "The delay that keeps sound and picture together, and downmixing surround for a stereo setup."
         case .subtitles: "Which subtitles a video opens with, whether only the forced track shows, and how large they are drawn and on what."
+        #endif
         case .music: "Keeping the music going, levelling quiet albums against loud ones, lossless over cellular, and how stations choose."
         case .liveTV: "Where channels and the guide come from — Jellyfin's own Live TV, or an M3U playlist and XMLTV guide of your own."
         case .downloads: "The quality a download is asked for, how many run at once, and whether they wait for Wi‑Fi."
@@ -2391,24 +2629,36 @@ enum SettingsSummary {
     }
 
     static func video(_ prefs: Preferences) -> String {
+        #if os(tvOS)
         var parts = [Quality.shortLabel(for: prefs.defaultBitrate)]
+        #else
+        var parts = [prefs.adaptiveQuality ? "Auto" : prefs.defaultBitrate == nil ? "Direct" : Quality.shortLabel(for: prefs.defaultBitrate)]
+        #endif
         if prefs.fillScreen { parts.append("Fill") }
         return parts.joined(separator: " · ")
     }
 
     static func audio(_ prefs: Preferences) -> String {
-        var parts = [language(prefs.audioLanguage, none: "File's choice")]
-        if prefs.stereoDownmix {
-            parts.append("Stereo")
-        } else if prefs.audioDelay != 0 {
-            parts.append(PlayerModel.audioDelayShortName(Int((prefs.audioDelay * 1000).rounded())))
-        }
+        #if os(iOS)
+        // The language is all an iPhone or an iPad sets here.
+        return language(prefs.audioLanguage, none: "File's choice")
+        #else
+        var parts = [prefs.audioDelay == 0 ? "In step" : PlayerModel.audioDelayShortName(Int((prefs.audioDelay * 1000).rounded()))]
+        if prefs.stereoDownmix { parts.append("Stereo") }
         return parts.joined(separator: " · ")
+        #endif
     }
 
     static func subtitles(_ prefs: Preferences) -> String {
-        var parts = [prefs.subtitleLanguage == "off" ? "Never" : language(prefs.subtitleLanguage, none: "File's choice")]
-        if prefs.forcedSubtitlesOnly { parts.append("Forced only") }
+        let first: String = switch prefs.subtitleLanguage {
+        case "off": "Never"
+        case TrackPreference.forcedOnly: "Forced only"
+        default: language(prefs.subtitleLanguage, none: "File's choice")
+        }
+        var parts = [first]
+        // The switch below the picker is about a language's own forced track;
+        // with forced only picked above, it would only say the same twice.
+        if prefs.forcedSubtitlesOnly, prefs.subtitleLanguage != TrackPreference.forcedOnly { parts.append("Forced only") }
         return parts.joined(separator: " · ")
     }
 
