@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "../api";
 import * as iptv from "../iptv";
+import { cachedLineup, loadLineup, refreshNow as refreshLineup } from "../lineup";
 import { el, clear, toast } from "../ui";
 import {
   isAdaptiveEnabled,
@@ -423,8 +424,110 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     value: cfg.livetv_xmltv ?? "",
   }) as HTMLInputElement;
 
+  const uaInput = el("input", {
+    class: "control lg",
+    type: "text",
+    placeholder: iptv.DEFAULT_USER_AGENT,
+    value: cfg.livetv_user_agent ?? "",
+    spellcheck: "false",
+  }) as HTMLInputElement;
+  uaInput.addEventListener("change", () => {
+    void api
+      .saveConfig({ livetv_user_agent: uaInput.value.trim() || null })
+      .then(() => iptv.invalidate())
+      .catch(() => toast("Couldn't save that setting", "error"));
+  });
+
+  const refreshChoice = choice(
+    { livetv_refresh_min: String(iptv.refreshMinutes()) },
+    "livetv_refresh_min",
+    [
+      ["0", "Never — only when asked"],
+      ["15", "Every 15 minutes"],
+      ["30", "Every 30 minutes"],
+      ["60", "Every hour"],
+      ["180", "Every 3 hours"],
+      ["360", "Every 6 hours"],
+      ["720", "Every 12 hours"],
+      ["1440", "Every 24 hours"],
+    ]
+  );
+
   const liveStatus = el("div", { class: "sub" }, [""]);
   const customRows = el("div", { class: "settings-sub" });
+
+  /** "Last read: 124 channels · 98 with artwork · 3,410 programmes in the
+   *  guide · 2:14 PM". A column of blank logos has two causes — the artwork
+   *  wouldn't load, or the playlist never named any — and this tells them
+   *  apart. */
+  const lastReadLine = el("div", { class: "sub" }, [""]);
+  const syncLastRead = (): void => {
+    if (!iptv.isCustom()) {
+      const n = cachedLineup()?.length;
+      lastReadLine.textContent = n != null ? `${n} channel${n === 1 ? "" : "s"} from the server.` : "";
+      return;
+    }
+    const r = iptv.lastRead();
+    if (!r) {
+      lastReadLine.textContent = "Not read yet this session — open Live TV, or Refresh now.";
+      return;
+    }
+    const art =
+      r.withLogos === 0
+        ? "no channel artwork — the playlist has no tvg-logo and the guide no <icon>"
+        : r.withLogos < r.channels
+          ? `${r.withLogos} with artwork`
+          : "all with artwork";
+    const when = new Date(r.at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+    lastReadLine.textContent =
+      `Last read: ${r.channels} channel${r.channels === 1 ? "" : "s"} · ${art} · ` +
+      `${r.programs.toLocaleString()} programme${r.programs === 1 ? "" : "s"} in the guide · ${when}.`;
+  };
+
+  const refreshNow = async (btn: HTMLButtonElement): Promise<void> => {
+    btn.disabled = true;
+    const was = btn.textContent;
+    btn.textContent = "Refreshing…";
+    try {
+      await refreshLineup();
+      syncLastRead();
+      toast("Live TV refreshed", "ok");
+    } catch (e: any) {
+      lastReadLine.textContent = e?.message ?? String(e);
+      toast("Couldn't refresh Live TV", "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = was;
+    }
+  };
+
+  /** Load every channel's logo the way the guide does and count what came
+   *  back, so "why are my logos blank" has an answer rather than a guess. */
+  const artStatus = el("div", { class: "sub" }, [""]);
+  const checkArtwork = async (btn: HTMLButtonElement): Promise<void> => {
+    btn.disabled = true;
+    const was = btn.textContent;
+    btn.textContent = "Checking…";
+    artStatus.textContent = "";
+    try {
+      const channels = await loadLineup();
+      const r = await probeArtwork(channels, (done, total) => {
+        artStatus.textContent = `Checking ${done} of ${total}…`;
+      });
+      const parts = [`${r.loaded} of ${r.channels} channel logos loaded`];
+      if (r.missing) parts.push(`${r.missing} name no logo`);
+      if (r.failed.length) {
+        const some = r.failed.slice(0, 3).join(", ");
+        parts.push(`${r.failed.length} wouldn't load (${some}${r.failed.length > 3 ? ", …" : ""})`);
+      }
+      artStatus.textContent = parts.join(" · ") + ".";
+    } catch (e: any) {
+      artStatus.textContent = e?.message ?? String(e);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = was;
+    }
+  };
 
   const syncLiveRows = (v: string): void => {
     customRows.style.display = v === "custom" ? "" : "none";
@@ -440,6 +543,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     (v) => {
       syncLiveRows(v);
       iptv.invalidate();
+      syncLastRead();
       document.dispatchEvent(new CustomEvent("aquarium-nav-refresh"));
     }
   );
@@ -459,6 +563,9 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
       });
       iptv.invalidate();
       const r = await iptv.describe();
+      // The guide and the player's Channels panel read the new line-up.
+      await refreshLineup().catch(() => {});
+      syncLastRead();
       const guide = r.programs
         ? `${r.programs.toLocaleString()} programmes across ${r.matched} of them`
         : "no guide data matched";
@@ -484,6 +591,29 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
       "The schedule, as a URL or a path. Optional: without it you get a channel list rather than a guide. Gzipped files are handled, so a .xml.gz address works as-is. Channels are joined on tvg-id, falling back to matching names.",
       xmltvInput
     ),
+    row(
+      "User agent",
+      `Sent when fetching the playlist, the guide and every channel's stream. Some stream servers serve differently — or not at all — depending on the client they see; a channel that stalls here and plays in VLC is usually this. Empty sends ${iptv.DEFAULT_USER_AGENT}.`,
+      uaInput
+    ),
+    row(
+      "Refresh the guide",
+      "How often the playlist and guide are read again while the app is open. Never means only when you press Refresh now or change an address.",
+      refreshChoice
+    ),
+    el("div", { class: "settings-row" }, [
+      el("div", {}, [
+        el("div", { class: "lbl" }, ["Channel artwork"]),
+        el("div", { class: "sub" }, [
+          "Loads every channel's logo the way the guide does and says how many came back, which ones the playlist never named, and which hosts wouldn't serve them.",
+        ]),
+        artStatus,
+      ]),
+      el("button", {
+        class: "btn",
+        onClick: (ev: Event) => void checkArtwork(ev.currentTarget as HTMLButtonElement),
+      }, ["Check artwork"]),
+    ]),
     el("div", { class: "settings-row" }, [
       el("div", {}, [
         el("div", { class: "lbl" }, ["Check and load"]),
@@ -496,6 +626,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     ])
   );
   syncLiveRows(cfg.livetv_source === "custom" ? "custom" : "jellyfin");
+  syncLastRead();
 
   root.append(
     el("div", { class: "settings-block" }, [
@@ -506,6 +637,19 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
         sourceSelect
       ),
       customRows,
+      el("div", { class: "settings-row" }, [
+        el("div", {}, [
+          el("div", { class: "lbl" }, ["Channel list and guide"]),
+          el("div", { class: "sub" }, [
+            "Read the channels and schedule again now, rather than waiting for the next refresh.",
+          ]),
+          lastReadLine,
+        ]),
+        el("button", {
+          class: "btn",
+          onClick: (ev: Event) => void refreshNow(ev.currentTarget as HTMLButtonElement),
+        }, ["Refresh now"]),
+      ]),
     ])
   );
 
@@ -717,4 +861,48 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
       ]),
     ])
   );
+}
+
+/**
+ * Fetch every channel's logo through an `<img>`, as the guide would, a few at
+ * a time and each with a deadline: one host that never answers must not hold
+ * the report up for the whole line-up.
+ */
+async function probeArtwork(
+  channels: any[],
+  progress: (done: number, total: number) => void
+): Promise<{ channels: number; loaded: number; missing: number; failed: string[] }> {
+  const TIMEOUT_MS = 8000;
+  const PARALLEL = 8;
+  let loaded = 0, missing = 0, done = 0;
+  const failed: string[] = [];
+  const urls = channels.map((ch) => (ch.LogoUrl ?? (ch.ImageTags?.Primary ? api.imageUrl(ch, "Primary", 160) : null)) as string | null);
+
+  const one = (url: string): Promise<boolean> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      const timer = window.setTimeout(() => finish(false), TIMEOUT_MS);
+      const finish = (ok: boolean): void => {
+        clearTimeout(timer);
+        img.onload = img.onerror = null;
+        resolve(ok);
+      };
+      img.onload = () => finish(img.naturalWidth > 0);
+      img.onerror = () => finish(false);
+      img.src = url;
+    });
+
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < channels.length) {
+      const i = next++;
+      const url = urls[i];
+      if (!url) missing++;
+      else if (await one(url)) loaded++;
+      else failed.push(channels[i].Name ?? `Channel ${i + 1}`);
+      progress(++done, channels.length);
+    }
+  };
+  await Promise.all(Array.from({ length: PARALLEL }, worker));
+  return { channels: channels.length, loaded, missing, failed };
 }
