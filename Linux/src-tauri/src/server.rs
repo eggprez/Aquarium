@@ -389,6 +389,68 @@ pub async fn bitrate_test(size: u32) -> Result<f64, String> {
     Ok((bytes.len() as f64 * 8.0) / elapsed)
 }
 
+/// Open the next title's stream ahead of time, so the server has it running
+/// by the time the current one ends.
+///
+/// A transcode is the slow part of starting anything: the server only starts
+/// ffmpeg when the playlist is first asked for, and the first segments take
+/// seconds to appear. Asking for the playlist (and the variant playlist it
+/// names) 90 seconds early means mpv later opens a session that is already
+/// producing segments — Jellyfin reuses the job for the same play session. A
+/// direct file just has its first half-megabyte read, which wakes the disk
+/// and fills the server's page cache. Only addresses on the signed-in server
+/// get the token.
+pub async fn warm(url: &str) -> Result<(), String> {
+    let server = configured_server()?;
+    if !url.starts_with(&format!("{}/", server)) {
+        return Err(err("config", "Not a stream on this server"));
+    }
+    ensure_verified(&server).await?;
+    let token = secret::token().ok_or_else(|| err("auth", "Not signed in"))?;
+    let auth = jellyfin::auth_header(&token, &config::device_id());
+    let get = |u: String, range: Option<&str>| {
+        let mut r = jellyfin::http()
+            .get(u)
+            .header("Authorization", auth.clone())
+            .timeout(Duration::from_secs(30));
+        if let Some(range) = range {
+            r = r.header(reqwest::header::RANGE, range);
+        }
+        r
+    };
+
+    let resp = get(url.to_string(), None).send().await.map_err(|e| offline_err(&e))?;
+    let final_url = resp.url().clone();
+    let playlist = final_url.path().ends_with(".m3u8")
+        || resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.to_ascii_lowercase().contains("mpegurl"));
+    if !playlist {
+        // A file: never read it all. Drop the connection after the first part.
+        drop(resp);
+        let _ = get(url.to_string(), Some("bytes=0-524287"))
+            .send()
+            .await
+            .map_err(|e| offline_err(&e))?
+            .bytes()
+            .await;
+        return Ok(());
+    }
+    let text = resp.text().await.map_err(|e| offline_err(&e))?;
+    // The master playlist names the variant playlist; asking for that is
+    // what starts the transcode.
+    if let Some(variant) = text.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with('#')) {
+        if let Ok(next) = final_url.join(variant) {
+            if next.as_str().starts_with(&server) {
+                let _ = get(next.to_string(), None).send().await.map(|r| drop(r));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Is the saved server reachable — and still the right one? Used for the
 /// offline indicator and the startup check.
 pub async fn ping() -> Result<bool, String> {
@@ -430,7 +492,6 @@ pub async fn ping() -> Result<bool, String> {
 pub async fn login(raw_server: &str, username: &str, password: &str) -> Result<Value, String> {
     let probed = probe(raw_server).await?;
     let server = probed["server"].as_str().unwrap_or_default().to_string();
-    let secure = is_secure(&server);
     let device_id = config::device_id();
 
     let resp = jellyfin::http()
@@ -454,8 +515,44 @@ pub async fn login(raw_server: &str, username: &str, password: &str) -> Result<V
         .json()
         .await
         .map_err(|_| err("server", "Login succeeded but the reply made no sense"))?;
+    install(&server, &probed, &data)
+}
 
-    let token = str_field(&data, "AccessToken")
+/// Turn an approved Quick Connect code into a session. Only sensible once
+/// `/QuickConnect/Connect` has answered `Authenticated: true`; before that the
+/// server refuses.
+pub async fn login_quick_connect(raw_server: &str, secret_code: &str) -> Result<Value, String> {
+    let probed = probe(raw_server).await?;
+    let server = probed["server"].as_str().unwrap_or_default().to_string();
+    let device_id = config::device_id();
+    let resp = jellyfin::http()
+        .post(format!("{}/Users/AuthenticateWithQuickConnect", server))
+        .header("Authorization", jellyfin::auth_header_anon(&device_id))
+        .json(&json!({ "Secret": secret_code }))
+        .send()
+        .await
+        .map_err(|e| offline_err(&e))?;
+    if !resp.status().is_success() {
+        return Err(err(
+            "auth",
+            format!("The server didn't accept that code ({})", resp.status().as_u16()),
+        ));
+    }
+    let data: Value = resp
+        .json()
+        .await
+        .map_err(|_| err("server", "Sign-in succeeded but the reply made no sense"))?;
+    install(&server, &probed, &data)
+}
+
+/// Make the account an authentication reply names the one in use: its token
+/// to the keyring (as the active token and in the account's own slot), its
+/// identity to the config, and the account to the list this device can switch
+/// between. The account being left, if any, keeps its token in its slot.
+fn install(server: &str, probed: &Value, data: &Value) -> Result<Value, String> {
+    let secure = is_secure(server);
+    let device_id = config::device_id();
+    let token = str_field(data, "AccessToken")
         .ok_or_else(|| err("server", "Server issued no access token"))?;
     let user_id = data
         .get("User")
@@ -465,17 +562,36 @@ pub async fn login(raw_server: &str, username: &str, password: &str) -> Result<V
         .get("User")
         .and_then(|u| str_field(u, "Name"))
         .unwrap_or_default();
+    let server_id = str_field(probed, "server_id");
+    let server_name = str_field(probed, "server_name");
 
+    stash_current();
     secret::store(&token)?;
+    let key = account_key(server_id.as_deref(), server, &user_id);
     // The identity recorded here is what every later launch is checked against.
     config::merge(json!({
         "server": server,
-        "server_id": probed.get("server_id").cloned().unwrap_or(Value::Null),
+        "server_id": server_id,
+        "server_secure": secure,
+        "user_id": user_id,
+        "user_name": user_name,
+        "account_key": key,
+    }))?;
+    config::upsert_account(json!({
+        "key": key,
+        "server": server,
+        "server_id": server_id,
+        "server_name": server_name,
         "server_secure": secure,
         "user_id": user_id,
         "user_name": user_name,
     }))?;
-    *VERIFIED.lock().unwrap() = Some(server.clone());
+    // After the entry exists: without a keyring the token is filed in it.
+    if let Err(e) = secret::store_account(&key, &token) {
+        crate::debug_log_line(&format!("server: couldn't file the account's own token: {}", e));
+    }
+    remember_server(server, server_name.as_deref());
+    *VERIFIED.lock().unwrap() = Some(server.to_string());
 
     Ok(json!({
         "server": server,
@@ -485,6 +601,181 @@ pub async fn login(raw_server: &str, username: &str, password: &str) -> Result<V
         "device_id": device_id,
         "token_storage": secret::backend_name(),
     }))
+}
+
+// ---------- More than one account ----------
+
+/// What identifies one account: the server's own id where it reports one (so
+/// a server that moves address is still the same account), its address
+/// otherwise, and the user.
+fn account_key(server_id: Option<&str>, server: &str, user_id: &str) -> String {
+    format!("{}|{}", server_id.filter(|s| !s.is_empty()).unwrap_or(server), user_id)
+}
+
+/// The key of the account in use, if one is signed in. Installs from before
+/// accounts existed have no `account_key` yet; it is worked out and recorded.
+fn current_key(cfg: &Value) -> Option<String> {
+    let user_id = str_field(cfg, "user_id")?;
+    let server = str_field(cfg, "server")?;
+    if let Some(k) = str_field(cfg, "account_key") {
+        return Some(k);
+    }
+    let key = account_key(str_field(cfg, "server_id").as_deref(), &server, &user_id);
+    let _ = config::merge(json!({ "account_key": key }));
+    Some(key)
+}
+
+/// Make sure the account in use is in the saved list with its token in its
+/// own slot, before anything replaces the active token.
+fn stash_current() {
+    let cfg = config::load();
+    let Some(key) = current_key(&cfg) else { return };
+    let Some(token) = secret::token() else { return };
+    let _ = config::upsert_account(json!({
+        "key": key,
+        "server": cfg.get("server").cloned().unwrap_or(Value::Null),
+        "server_id": cfg.get("server_id").cloned().unwrap_or(Value::Null),
+        "server_secure": cfg.get("server_secure").cloned().unwrap_or(Value::Null),
+        "user_id": cfg.get("user_id").cloned().unwrap_or(Value::Null),
+        "user_name": cfg.get("user_name").cloned().unwrap_or(Value::Null),
+    }));
+    // After the entry exists: without a keyring the token is filed in it.
+    if let Err(e) = secret::store_account(&key, &token) {
+        crate::debug_log_line(&format!("server: couldn't keep the current account's token: {}", e));
+    }
+}
+
+/// Servers this device has signed in to, newest first, for the sign-in
+/// screen. Kept apart from the accounts so a server stays offered after its
+/// last account is signed out.
+fn remember_server(server: &str, name: Option<&str>) {
+    let cfg = config::load();
+    let mut list: Vec<Value> = cfg
+        .get("known_servers")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|s| s.get("server").and_then(|v| v.as_str()) != Some(server))
+        .collect();
+    list.insert(0, json!({ "server": server, "name": name }));
+    list.truncate(8);
+    let _ = config::merge(json!({ "known_servers": list }));
+}
+
+/// Every account on this device, the one in use marked `current`. Tokens are
+/// left out; the webview only learns that an account exists.
+pub fn accounts() -> Value {
+    let cfg = config::load();
+    let current = current_key(&cfg);
+    // The account in use is always on the list, including on an install that
+    // signed in before there was a list.
+    if let Some(key) = &current {
+        if !config::accounts().iter().any(|a| a.get("key").and_then(|v| v.as_str()) == Some(key)) {
+            stash_current();
+        }
+    }
+    let list: Vec<Value> = config::accounts()
+        .into_iter()
+        .map(|mut a| {
+            let is_current = a.get("key").and_then(|v| v.as_str()) == current.as_deref();
+            if let Some(obj) = a.as_object_mut() {
+                obj.remove("token");
+                obj.insert("current".into(), json!(is_current));
+            }
+            a
+        })
+        .collect();
+    json!(list)
+}
+
+/// Become another of this device's accounts. Nothing is revoked: the one being
+/// left keeps its token in its own slot, which is the whole of what makes
+/// coming back to it a click.
+pub fn switch_account(key: &str) -> Result<Value, String> {
+    let cfg = config::load();
+    if current_key(&cfg).as_deref() == Some(key) {
+        return Ok(json!({ "switched": false }));
+    }
+    let target = config::accounts()
+        .into_iter()
+        .find(|a| a.get("key").and_then(|v| v.as_str()) == Some(key))
+        .ok_or_else(|| err("config", "That account isn't on this device any more"))?;
+    let server = normalize(str_field(&target, "server").as_deref().unwrap_or_default())?;
+    let Some(token) = secret::account_token(key) else {
+        // Its token has gone, so the only way back in is to sign in again.
+        secret::clear_account(key);
+        let _ = config::remove_account(key);
+        return Err(err("auth", "That account's sign-in has gone from this device — sign in to it again"));
+    };
+    stash_current();
+    secret::store(&token)?;
+    config::merge(json!({
+        "server": server,
+        "server_id": target.get("server_id").cloned().unwrap_or(Value::Null),
+        "server_secure": is_secure(&server),
+        "user_id": target.get("user_id").cloned().unwrap_or(Value::Null),
+        "user_name": target.get("user_name").cloned().unwrap_or(Value::Null),
+        "account_key": key,
+    }))?;
+    // The next request checks the pinned identity of *this* account's server.
+    forget_verification();
+    Ok(json!({ "switched": true }))
+}
+
+/// Sign one of the *other* accounts out of this device: its token revoked on
+/// its own server, with its own token, and gone from the keyring and the list.
+/// The account in use is signed out with `logout()` instead.
+pub async fn forget_account(key: &str) -> Result<Value, String> {
+    let cfg = config::load();
+    if current_key(&cfg).as_deref() == Some(key) {
+        return Err(err("config", "That's the account in use — sign out of it instead"));
+    }
+    let target = config::accounts()
+        .into_iter()
+        .find(|a| a.get("key").and_then(|v| v.as_str()) == Some(key));
+    let mut revoked = true;
+    if let (Some(token), Some(server)) = (
+        secret::account_token(key),
+        target.as_ref().and_then(|t| str_field(t, "server")),
+    ) {
+        revoked = revoke(&server, &token, &config::device_id()).await;
+    }
+    secret::clear_account(key);
+    config::remove_account(key)?;
+    Ok(json!({ "revoked": revoked }))
+}
+
+// ---------- Before signing in ----------
+
+/// The unauthenticated calls the sign-in screen makes to a server it has
+/// probed: who is on it, and the Quick Connect exchange. Only these paths, so
+/// the command can't be turned into a general fetch-anything.
+pub async fn public_request(raw_server: &str, path: &str, method: Option<String>) -> Result<Value, String> {
+    const ALLOWED: [&str; 4] = [
+        "/QuickConnect/Enabled",
+        "/QuickConnect/Initiate",
+        "/QuickConnect/Connect?secret=",
+        "/Users/Public",
+    ];
+    if !ALLOWED.iter().any(|p| path == *p || (p.ends_with('=') && path.starts_with(p))) {
+        return Err(err("config", "Not a public path"));
+    }
+    let server = normalize(raw_server)?;
+    let method = method.unwrap_or_else(|| "GET".into());
+    let verb = reqwest::Method::from_bytes(method.as_bytes())
+        .map_err(|_| err("config", format!("Unsupported method {}", method)))?;
+    let resp = jellyfin::http()
+        .request(verb, format!("{}{}", server, path))
+        .header("Authorization", jellyfin::auth_header_anon(&config::device_id()))
+        .timeout(PROBE_TIMEOUT)
+        .send()
+        .await
+        .map_err(|e| offline_err(&e))?;
+    let status = resp.status().as_u16();
+    let text = resp.text().await.unwrap_or_default();
+    let parsed: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    Ok(json!({ "status": status, "body": parsed }))
 }
 
 /// Ask the server to invalidate a token. `true` means it is definitely dead —
@@ -535,7 +826,13 @@ pub async fn logout() -> Result<Value, String> {
     // Local teardown happens either way: the user asked to be signed out.
     secret::clear();
     forget_verification();
-    config::merge(json!({ "user_id": null, "user_name": null }))?;
+    // Signing out of the account in use takes it off this device's list too:
+    // the only way back into it is to sign in again.
+    if let Some(key) = current_key(&cfg) {
+        secret::clear_account(&key);
+        let _ = config::remove_account(&key);
+    }
+    config::merge(json!({ "user_id": null, "user_name": null, "account_key": null }))?;
 
     Ok(json!({ "revoked": revoked, "pending": parked }))
 }

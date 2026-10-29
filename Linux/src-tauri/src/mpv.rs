@@ -513,6 +513,24 @@ impl Session {
         self.run_node(args)
     }
 
+    /// One property as mpv formats it for display (`video-params/w`,
+    /// `video-codec`, …), or `None` when it isn't available right now — which
+    /// for most of them means "not until the file is open".
+    pub fn get_string(&self, name: &str) -> Option<String> {
+        let c = std::ffi::CString::new(name).ok()?;
+        // SAFETY: the handle outlives the call (we hold the Arc), and the
+        // returned string is mpv's to free, which happens before returning.
+        unsafe {
+            let raw = libmpv2_sys::mpv_get_property_string(self.mpv.ctx.as_ptr(), c.as_ptr());
+            if raw.is_null() {
+                return None;
+            }
+            let out = std::ffi::CStr::from_ptr(raw).to_string_lossy().into_owned();
+            libmpv2_sys::mpv_free(raw as *mut std::ffi::c_void);
+            Some(out)
+        }
+    }
+
     /// `mpv_command_node` on a JSON array, types kept.
     fn run_node(&self, args: &[Value]) -> Result<(), String> {
         let cmd = Value::Array(args.to_vec());

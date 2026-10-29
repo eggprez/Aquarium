@@ -503,3 +503,71 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
     syncNow();
   }, 30_000);
 }
+
+/** Start a channel from elsewhere (Home's On Now row) with the same tuning
+ *  screen the guide shows, from whichever source Live TV is set to. */
+export function tuneChannel(ch: any): void {
+  tune(iptv.isCustom() ? customSource : jellyfinSource, ch);
+}
+
+/**
+ * What's on right now, channel by channel, for Home's On Now row: each
+ * channel with a programme airing, in channel order, up to `limit`. Empty
+ * when there is no Live TV at all.
+ */
+export async function onNow(limit = 16): Promise<{ channel: any; program: any }[]> {
+  if (iptv.isCustom()) {
+    const now = new Date();
+    const [channels, programs] = await Promise.all([
+      iptv.getChannels(),
+      iptv.getPrograms(now, new Date(now.getTime() + 60_000)),
+    ]);
+    const byChannel = new Map<string, any>();
+    for (const p of programs) if (!byChannel.has(p.ChannelId)) byChannel.set(p.ChannelId, p);
+    return channels
+      .filter((c) => byChannel.has(c.Id))
+      .slice(0, limit)
+      .map((c) => ({ channel: c, program: byChannel.get(c.Id) }));
+  }
+  const channels = await api.getChannels();
+  return channels
+    .filter((c: any) => c.CurrentProgram)
+    .slice(0, limit)
+    .map((c: any) => ({ channel: c, program: c.CurrentProgram }));
+}
+
+/** One On Now card: the programme over its channel, with how far in it is. */
+export function onNowCard(channel: any, program: any): HTMLElement {
+  const start = Date.parse(program.StartDate ?? "");
+  const end = Date.parse(program.EndDate ?? "");
+  const now = Date.now();
+  const pct = isFinite(start) && isFinite(end) && end > start ? Math.max(0, Math.min(100, ((now - start) / (end - start)) * 100)) : 0;
+  const until = isFinite(end) ? new Date(end).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  const img =
+    (program.Id && program.ImageTags?.Primary ? api.imageUrl(program, "Primary", 500) : null) ??
+    channel.LogoUrl ??
+    api.imageUrl(channel, "Primary", 320);
+  const title = program.Name ?? channelLabel(channel);
+  return el("div", {
+    class: "card wide onnow-card",
+    role: "button",
+    tabindex: "0",
+    title: `${channelLabel(channel)} — ${title}`,
+    onClick: () => tuneChannel(channel),
+    onKeydown: (ev: KeyboardEvent) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        tuneChannel(channel);
+      }
+    },
+  }, [
+    el("div", { class: "card-poster onnow-poster" }, [
+      art(img, () => document.createTextNode(String(channel.ChannelNumber ?? channel.Name ?? "?").slice(0, 4))),
+      el("div", { class: "card-scrim" }),
+      el("div", { class: "time-left onnow-live" }, [el("span", { class: "live-dot" }), "Live"]),
+      el("div", { class: "progress-strip" }, [el("div", { style: `width:${pct}%` })]),
+    ]),
+    el("div", { class: "card-title" }, [title]),
+    el("div", { class: "card-sub" }, [`${channelLabel(channel)}${until ? ` · until ${until}` : ""}`]),
+  ]);
+}

@@ -47,6 +47,34 @@ query parameter, all of which Jellyfin 12 disables by default), and the
 
 ## Features
 
+- **Signing in** — servers you've signed in to before and any Jellyfin server
+  that answers on the local network (the UDP 7359 broadcast, asked on every
+  interface) are listed under the address field. Once connected, the server's
+  users are offered under "Who's signing in?" (typing narrows them), and where
+  the server has Quick Connect a code sits beside the password form, signing
+  in by itself once approved on another device.
+- **Several accounts** — keep accounts on several servers, each with its own
+  keyring token; switch without a password, add one, or sign one out of this
+  device from Settings → Accounts. Settings → Quick Connect approves a code
+  shown by another device.
+- **Up Next queue** — Play Next / Play Later on films, episodes and seasons.
+  Queued titles play ahead of the series' next episode and lead the in-player
+  Up next strip (Clear Up Next empties it). About 90 s before the end the next
+  title's stream is opened on the server, so autoplay starts straight away.
+- **Player** — skip interval (10/15/30 s), hide-controls delay, time remaining
+  (click the time to flip it), autoplay and resume, all in Settings → Playback;
+  audio delay (saved), a stream info panel (`i`, Ctrl+I), a chapter list, and a
+  "This didn't play" card with Try Again / Try a Smaller Stream. Over the
+  picture: wheel for volume, a sideways wheel to scrub, right-click for the
+  player menu, `c` for subtitles, `s` to skip intro or credits; on a
+  touchscreen, double-tap to skip, pinch for Fit/Fill, hold for 2×.
+- **Next Up** — Remove from Next Up and Add to Next Up (from the last watched
+  episode, or from the first with the show marked unwatched) write to the
+  server, so Jellyfin's other apps agree. Settings → Next Up: how long shows
+  stay, episodes in progress, rewatching.
+- **Home** — rows follow the account's Jellyfin home-screen order (Jellyfin's
+  default when it was never set), with library chips and an On Now row of
+  what's airing on Live TV.
 - **Direct streaming** — original quality, remux-free `static=true` streams.
 - **Transcoded streaming** — pick a bitrate (35/18/10/5/2.5 Mbps); the server is
   asked via `PlaybackInfo` with an HLS h264/aac device profile and mpv plays the
@@ -205,7 +233,8 @@ runtime relative to the executable; `$AQUARIUM_MPV_CONFIG` overrides it.
 
 ## Storage
 
-- Config: `~/.config/aquarium/config.json` (server, token, device id, prefs)
+- Config: `~/.config/aquarium/config.json` (server, saved accounts, device id,
+  prefs; tokens only when there is no desktop keyring)
 - Downloads + offline progress queue: `~/.local/share/aquarium/`
 
 ## Releases & updating

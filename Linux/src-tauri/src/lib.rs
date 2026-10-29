@@ -1,5 +1,6 @@
 mod audio;
 mod config;
+mod discovery;
 mod download_extras;
 mod downloads;
 mod egl;
@@ -185,6 +186,56 @@ async fn jf_login(server: String, username: String, password: String) -> Result<
 #[tauri::command]
 async fn jf_logout() -> Result<Value, String> {
     server::logout().await
+}
+
+#[tauri::command]
+async fn jf_login_quick_connect(server: String, secret: String) -> Result<Value, String> {
+    server::login_quick_connect(&server, &secret).await
+}
+
+/// The unauthenticated calls the sign-in screen makes: `/Users/Public` and the
+/// Quick Connect exchange, nothing else (see `server::public_request`).
+#[tauri::command]
+async fn jf_public(server: String, path: String, method: Option<String>) -> Result<Value, String> {
+    server::public_request(&server, &path, method).await
+}
+
+/// Jellyfin servers on the local network, by UDP broadcast.
+#[tauri::command]
+async fn jf_discover() -> Vec<Value> {
+    tokio::task::spawn_blocking(|| discovery::find(std::time::Duration::from_millis(1600)))
+        .await
+        .unwrap_or_default()
+}
+
+/// mpv properties as display strings, for the stream info panel.
+#[tauri::command]
+async fn player_get_properties(
+    player: State<'_, player::Player>,
+    names: Vec<String>,
+) -> Result<Value, String> {
+    Ok(player.properties(&names).await)
+}
+
+/// Start the next title's stream on the server before this one ends.
+#[tauri::command]
+async fn player_warm(url: String) -> Result<(), String> {
+    server::warm(&url).await
+}
+
+#[tauri::command(async)]
+fn accounts_list() -> Value {
+    server::accounts()
+}
+
+#[tauri::command(async)]
+fn account_switch(key: String) -> Result<Value, String> {
+    server::switch_account(&key)
+}
+
+#[tauri::command]
+async fn account_forget(key: String) -> Result<Value, String> {
+    server::forget_account(&key).await
 }
 
 #[tauri::command]
@@ -1035,6 +1086,14 @@ pub fn run() {
             jf_probe,
             jf_login,
             jf_logout,
+            jf_login_quick_connect,
+            jf_public,
+            jf_discover,
+            accounts_list,
+            account_switch,
+            player_get_properties,
+            player_warm,
+            account_forget,
             jf_request,
             jf_image,
             jf_ping,

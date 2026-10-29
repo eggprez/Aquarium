@@ -34,6 +34,18 @@ import {
   switchToDownload,
   downloadedLabel,
   syncOfflineProgress,
+  skipInterval,
+  hideControlsAfter,
+  showsRemaining,
+  setShowsRemaining,
+  autoplayNextEnabled,
+  getUserQueue,
+  clearQueue,
+  playQueued,
+  removeFromQueue,
+  AUDIO_DELAY_STEP,
+  getStreamSource,
+  getNowPlayingFull,
 } from "./playback";
 import {
   el,
@@ -186,7 +198,7 @@ function fsArmHide(): void {
       return;
     }
     fsSetBar(false);
-  }, 2500);
+  }, hideControlsAfter() * 1000);
 }
 
 /**
@@ -657,6 +669,49 @@ function showLogin(): void {
   renderLogin($("login-root"), showShell);
 }
 
+/**
+ * Settings → Add Account: the sign-in screen, with the account in use still
+ * signed in behind it. Cancel goes back to it untouched; a sign-in makes the
+ * new account the one in use and the shell redraws for it.
+ */
+function showAddAccount(): void {
+  closeMenus();
+  $("shell").classList.add("hidden");
+  $("login-root").classList.remove("hidden");
+  const back = () => {
+    $("login-root").classList.add("hidden");
+    $("shell").classList.remove("hidden");
+  };
+  renderLogin($("login-root"), () => void enterAccount(), { adding: true, onCancel: back });
+}
+
+/**
+ * The account in use has just changed (a switch, or Add Account). Whatever was
+ * playing belongs to the last one, and so do the screens in memory; the
+ * persistent cache is keyed per account, so the new one's own screens come
+ * back from disk.
+ */
+async function enterAccount(): Promise<void> {
+  if (playerActive) await playerCtl.stop().catch(() => {});
+  clearCache();
+  history.replaceState(null, "", "#/home");
+  const s = api.getSession();
+  await showShell();
+  if (s) toast(`Signed in as ${s.userName}`, "ok");
+}
+
+async function switchToAccount(key: string): Promise<void> {
+  closeMenus();
+  try {
+    await api.switchAccount(key);
+  } catch (e: any) {
+    toast(e.message ?? "Couldn't switch account", "error");
+    route();
+    return;
+  }
+  await enterAccount();
+}
+
 // ---------- Player bar ----------
 
 const PB_ICONS = {
@@ -706,7 +761,37 @@ const PB_ICONS = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6"/><path d="M12 7.8a4.2 4.2 0 0 1 0 8.4z" fill="currentColor" stroke="none"/></svg>',
   sleep:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.2 8.2 0 0 1 9.5 4 8.4 8.4 0 1 0 20 14.5z"/></svg>',
+  // A list of marks along a line: chapters.
+  chapters:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3.5 12h17"/><path d="M6.5 8.5v7M12 8.5v7M17.5 8.5v7"/></svg>',
+  // The circled "i" every player uses for stream statistics.
+  info:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r="1.1" fill="currentColor" stroke="none"/></svg>',
 };
+
+/** The skip buttons' glyph, with the interval from Settings written in it. */
+function skipIcon(forward: boolean, seconds: number): string {
+  const glyph = forward ? PB_ICONS.fwd30 : PB_ICONS.back30;
+  return glyph.replace(">30</text>", `>${seconds}</text>`);
+}
+
+/** Point the skip buttons at the current interval: glyph, tooltip, and the
+ *  number the click uses (read at click time, so Settings applies at once). */
+function syncSkipButtons(): void {
+  const n = skipInterval();
+  const back = document.getElementById("pb-back");
+  const fwd = document.getElementById("pb-fwd");
+  if (back && back.dataset.n !== String(n)) {
+    back.dataset.n = String(n);
+    back.innerHTML = skipIcon(false, n);
+    back.title = `Back ${n}s (←)`;
+  }
+  if (fwd && fwd.dataset.n !== String(n)) {
+    fwd.dataset.n = String(n);
+    fwd.innerHTML = skipIcon(true, n);
+    fwd.title = `Forward ${n}s (→)`;
+  }
+}
 
 function pbButton(id: string, icon: string, tip: string, onClick: () => void): HTMLElement {
   const b = el("button", { class: "btn icon", id, title: tip, html: icon });
@@ -732,9 +817,10 @@ interface PlayerState {
   mute: boolean;
   speed: number;
   subDelay: number;
+  audioDelay: number;
 }
 
-const pbState: PlayerState = { volume: getVolume(), mute: false, speed: 1, subDelay: 0 };
+const pbState: PlayerState = { volume: getVolume(), mute: false, speed: 1, subDelay: 0, audioDelay: 0 };
 
 /** Chapter marks for the current file, as mpv reported them. */
 interface Chapter {
@@ -954,6 +1040,7 @@ function toggleSubtitlePanel(): void {
  *  but are needed mid-episode (a fast talker, or subs running ahead). */
 function togglePlaybackPanel(): void {
   toggleBarPanel("tune", "Speed", (panel) => {
+    panel.classList.add("pb-tune");
     const speedBtns = SPEEDS.map(
       (s) =>
         el("button", {
@@ -963,6 +1050,7 @@ function togglePlaybackPanel(): void {
         }, [s === 1 ? "Normal" : `${s}×`]) as HTMLButtonElement
     );
     const delay = el("span", { class: "pb-panel-value" }, ["0.0s"]);
+    const audioDelay = el("span", { class: "pb-panel-value" }, ["0 ms"]);
     panel.append(
       ...speedBtns,
       el("span", { class: "pb-panel-label" }, ["Subtitle delay"]),
@@ -980,6 +1068,25 @@ function togglePlaybackPanel(): void {
       el("button", {
         class: "btn small",
         onClick: () => playerCtl.setSubDelay(0).catch(() => {}),
+      }, ["Reset"]),
+      // For a headset whose sound runs behind the picture. Saved, so the next
+      // file starts with it as well.
+      el("span", { class: "pb-panel-label" }, ["Audio delay"]),
+      el("button", {
+        class: "btn small",
+        title: `Sound ${AUDIO_DELAY_STEP * 1000} ms earlier (Ctrl+−)`,
+        onClick: () => nudgeAudioDelay(-1, true),
+      }, ["−"]),
+      audioDelay,
+      el("button", {
+        class: "btn small",
+        title: `Sound ${AUDIO_DELAY_STEP * 1000} ms later (Ctrl+=)`,
+        onClick: () => nudgeAudioDelay(1, true),
+      }, ["+"]),
+      el("button", {
+        class: "btn small",
+        title: "No audio delay (Ctrl+0)",
+        onClick: () => nudgeAudioDelay(0, true),
       }, ["Reset"])
     );
     panel.sync = (st) => {
@@ -987,6 +1094,8 @@ function togglePlaybackPanel(): void {
         b.classList.toggle("primary", Math.abs(parseFloat(b.dataset.speed!) - st.speed) < 0.001);
       }
       delay.textContent = `${st.subDelay > 0 ? "+" : ""}${st.subDelay.toFixed(1)}s`;
+      const ms = Math.round(st.audioDelay * 1000);
+      audioDelay.textContent = `${ms > 0 ? "+" : ""}${ms} ms`;
     };
   });
 }
@@ -1102,11 +1211,31 @@ function toggleEpisodePanel(): void {
     panel.classList.add("pb-queue");
     const note = el("span", { class: "pb-panel-note" }, ["Loading episodes…"]);
     panel.append(note);
+    // Titles queued by hand play first, so they lead the strip, with the one
+    // way to be rid of them all beside it.
+    const queued = queueTiles();
+    if (queued.length) {
+      panel.append(
+        el("button", {
+          class: "btn small",
+          title: "Take everything you queued off Up Next",
+          onClick: () => {
+            clearQueue();
+            closeBarPanel();
+            toast("Up Next cleared", "ok");
+          },
+        }, ["Clear Up Next"])
+      );
+    }
     void getEpisodeQueue()
       .then((queue) => {
         if (!panel.isConnected) return;
         note.remove();
         if (!queue) {
+          if (queued.length) {
+            panel.append(el("div", { class: "pb-queue-strip", role: "list" }, queued));
+            return;
+          }
           panel.append(el("span", { class: "pb-panel-note" }, ["Not playing an episode"]));
           return;
         }
@@ -1121,7 +1250,7 @@ function toggleEpisodePanel(): void {
         const { current, episodes } = queue;
         const label = panel.querySelector(".pb-panel-label");
         if (label) label.textContent = `${current.SeriesName ?? "Up next"} · ${current.SeasonName ?? ""}`.replace(/ · $/, "");
-        const strip = el("div", { class: "pb-queue-strip", role: "list" });
+        const strip = el("div", { class: "pb-queue-strip", role: "list" }, queued);
         let currentTile: HTMLElement | null = null;
         const at = episodes.findIndex((ep: any) => ep.Id === current.Id);
         episodes.forEach((ep: any, i: number) => {
@@ -1131,7 +1260,7 @@ function toggleEpisodePanel(): void {
           const minutes = ep.RunTimeTicks ? Math.round(ep.RunTimeTicks / 600_000_000) : 0;
           const status = playing
             ? "Playing"
-            : i === at + 1
+            : i === at + 1 && !queued.length
               ? "Up next"
               : played
                 ? "Watched"
@@ -1163,7 +1292,7 @@ function toggleEpisodePanel(): void {
             ]),
             el("div", { class: "pb-queue-text" }, [
               el("span", { class: "pb-queue-name" }, [`${num}${ep.Name ?? ""}`]),
-              el("span", { class: `pb-queue-status${playing || i === at + 1 ? " live" : ""}` }, [
+              el("span", { class: `pb-queue-status${playing || (i === at + 1 && !queued.length) ? " live" : ""}` }, [
                 status,
                 played && !playing ? icon("check", 12) : null,
               ]),
@@ -1249,6 +1378,165 @@ function toggleSleepPanel(): void {
       );
     }
   });
+}
+
+/**
+ * Chapters as a strip of buttons, the one playing highlighted: a click jumps
+ * there. The tick marks on the scrubber say where they are; this says what
+ * they are called.
+ */
+function toggleChapterPanel(): void {
+  toggleBarPanel("chapters", "Chapters", (panel) => {
+    const chapters = [{ time: 0, title: "" }, ...pbChapters];
+    if (!pbChapters.length) {
+      panel.append(el("span", { class: "pb-panel-note" }, ["This file has no chapters"]));
+      return;
+    }
+    const buttons = chapters.map((c, i) =>
+      el("button", {
+        class: "btn small pb-chapter",
+        "data-time": String(c.time),
+        title: api.secondsToClock(c.time),
+        onClick: () => {
+          closeBarPanel();
+          playerCtl.seek(c.time, true).catch(() => {});
+        },
+      }, [
+        el("span", { class: "pb-chapter-time" }, [api.secondsToClock(c.time)]),
+        c.title || `Chapter ${i + 1}`,
+      ]) as HTMLButtonElement
+    );
+    panel.append(...buttons);
+    let scrolled = false;
+    panel.sync = () => {
+      const pos = lastBarStatus?.position ?? 0;
+      let at = 0;
+      chapters.forEach((c, i) => {
+        if (c.time <= pos + 0.5) at = i;
+      });
+      buttons.forEach((b, i) => b.classList.toggle("primary", i === at));
+      if (!scrolled) {
+        scrolled = true;
+        buttons[at]?.scrollIntoView({ inline: "center", block: "nearest" });
+      }
+    };
+  });
+}
+
+/** Stalls seen in this file, for the stream info panel. */
+let stallsThisFile = 0;
+
+/** "12.3 Mbps" from bits per second. */
+function mbps(bps: number): string {
+  return bps >= 1_000_000 ? `${(bps / 1_000_000).toFixed(1)} Mbps` : `${Math.round(bps / 1000)} kbps`;
+}
+
+/** How the server is sending this: direct, a remux (only the wrapper or the
+ *  sound changed) or a transcode, from the reasons in the transcode URL. */
+function deliveryLabel(): string {
+  const np = getNowPlayingFull();
+  if (!np) return "–";
+  if (np.isLocal) return "Playing from this device";
+  const src = getStreamSource();
+  if (!src) return np.live ? "Live, straight from the playlist" : "–";
+  if (src.playMethod !== "Transcode") return "Direct play";
+  const reasons = (new URL(src.url).searchParams.get("TranscodeReasons") ?? "").split(",").filter(Boolean);
+  const video = reasons.some((r) => /Video|Resolution|Bitrate|Framerate|Level|Profile|Anamorphic|Interlaced|BitDepth|RefFrames/i.test(r));
+  const cap = np.maxBitrate ? ` · capped at ${mbps(np.maxBitrate)}` : "";
+  return `${video || np.maxBitrate ? "Transcode" : "Remux"}${cap}${reasons.length ? ` (${reasons.join(", ")})` : ""}`;
+}
+
+/**
+ * Stream info: how it's being delivered, what it is, and how it's going —
+ * the same facts the Apple app's info panel lists, as label/value pairs along
+ * the bar (the only surface there is). Live values refresh with the status.
+ */
+function toggleInfoPanel(): void {
+  toggleBarPanel("info", "Stream", (panel) => {
+    panel.classList.add("pb-info");
+    const cells = new Map<string, HTMLElement>();
+    const cell = (label: string): HTMLElement => {
+      const value = el("span", { class: "pb-info-value" }, ["…"]);
+      panel.append(el("div", { class: "pb-info-cell" }, [el("span", { class: "pb-info-label" }, [label]), value]));
+      cells.set(label, value);
+      return value;
+    };
+    for (const l of ["Delivery", "Container", "Video", "Audio", "Resolution", "Bitrate", "On the server", "Engine", "Decoder", "Buffer", "Stalls", "Dropped frames"]) cell(l);
+    const set = (label: string, text: string | null | undefined) => {
+      const c = cells.get(label);
+      if (c) c.textContent = text && text.trim() ? text : "–";
+    };
+    let engine = "mpv";
+    void invoke<any>("app_info").then((info) => {
+      engine = info?.mpv ? String(info.mpv) : "mpv";
+    }).catch(() => {});
+    const props = [
+      "file-format", "video-codec", "video-format", "audio-codec-name", "audio-params/channel-count",
+      "audio-params/samplerate", "video-params/w", "video-params/h", "container-fps", "video-bitrate",
+      "audio-bitrate", "hwdec-current", "current-vo", "demuxer-cache-duration", "cache-speed",
+    ];
+    let busy = false;
+    const refresh = async (): Promise<void> => {
+      if (busy || !panel.isConnected) return;
+      busy = true;
+      const p: Record<string, string> = await invoke<any>("player_get_properties", { names: props }).catch(() => ({}));
+      busy = false;
+      if (!panel.isConnected) return;
+      const ms = getStreamSource()?.mediaSource;
+      set("Delivery", deliveryLabel());
+      set("Container", p["file-format"] ?? ms?.Container);
+      set("Video", [p["video-format"]?.toUpperCase() || p["video-codec"]?.split(" ")[0], p["container-fps"] ? `${parseFloat(p["container-fps"]).toFixed(3).replace(/\.?0+$/, "")} fps` : null].filter(Boolean).join(" · "));
+      const ch = p["audio-params/channel-count"];
+      set("Audio", [p["audio-codec-name"]?.toUpperCase(), ch ? `${ch} ch` : null, p["audio-params/samplerate"] ? `${Math.round(+p["audio-params/samplerate"] / 100) / 10} kHz` : null].filter(Boolean).join(" · "));
+      set("Resolution", p["video-params/w"] && p["video-params/h"] ? `${p["video-params/w"]}×${p["video-params/h"]}` : null);
+      const vb = Number(p["video-bitrate"] ?? 0) + Number(p["audio-bitrate"] ?? 0);
+      const speed = Number(p["cache-speed"] ?? 0) * 8;
+      set("Bitrate", [vb > 0 ? mbps(vb) : null, speed > 0 ? `arriving at ${mbps(speed)}` : null].filter(Boolean).join(" · "));
+      set("On the server", ms?.Bitrate ? `${mbps(ms.Bitrate)} source` : getNowPlayingFull()?.isLocal ? "Downloaded file" : null);
+      set("Engine", `${engine}${p["current-vo"] ? ` · vo=${p["current-vo"]}` : ""}`);
+      const hw = p["hwdec-current"];
+      set("Decoder", !hw ? null : hw === "no" ? "Software (CPU)" : `Hardware (${hw})`);
+      const buf = parseFloat(p["demuxer-cache-duration"] ?? "");
+      set("Buffer", isFinite(buf) ? `${Math.round(buf)} s ahead` : null);
+      set("Stalls", String(stallsThisFile));
+      set("Dropped frames", String(lastBarStatus?.dropped_frames ?? 0));
+    };
+    void refresh();
+    panel.sync = () => void refresh();
+  });
+}
+
+/** Up Next with nothing to say about a season: the queue, on its own. */
+function queueTiles(): HTMLElement[] {
+  const queue = getUserQueue();
+  return queue.map((item: any, i: number) =>
+    el("button", {
+      class: "pb-queue-tile queued",
+      role: "listitem",
+      title: upNextTitle(item),
+      onClick: () => {
+        closeBarPanel();
+        playQueued(item.Id).catch((e) => toast(String(e), "error"));
+      },
+      onContextmenu: (ev: MouseEvent) => {
+        ev.preventDefault();
+        removeFromQueue(item.Id);
+        closeBarPanel();
+        toggleEpisodePanel();
+      },
+    }, [
+      el("div", { class: "pb-queue-thumb" }, [
+        art(api.imageUrl(item, "Primary", 240), () => icon("play", 18), {
+          lazy: false,
+          hash: api.imageHash(item, "Primary"),
+        }),
+      ]),
+      el("div", { class: "pb-queue-text" }, [
+        el("span", { class: "pb-queue-name" }, [item.SeriesName ? `${item.SeriesName} · ${item.Name ?? ""}` : item.Name ?? ""]),
+        el("span", { class: `pb-queue-status${i === 0 ? " live" : ""}` }, [i === 0 ? "Up next · queued" : "Queued"]),
+      ]),
+    ])
+  );
 }
 
 // ---------- Volume ----------
@@ -1364,6 +1652,7 @@ let upNextStarting = false;
 /** Point every per-file cache at a new item (or at nothing). */
 function resetMediaExtras(itemId: string | null): void {
   mediaItemId = itemId;
+  stallsThisFile = 0;
   tpInfo = null;
   tpTiles.clear();
   segments = [];
@@ -1490,9 +1779,13 @@ function syncUpNext(st: any): void {
   const item = upNextItem;
   if (title) title.textContent = upNextTitle(item);
   if (label) {
+    // With autoplay off (and nothing queued by hand) the card still asks; it
+    // just won't answer itself.
     label.textContent = upNextStarting
       ? "Starting…"
-      : `Up next · in ${Math.max(0, Math.ceil(left))}s`;
+      : autoplayNextEnabled() || getUserQueue().length
+        ? `Up next · in ${Math.max(0, Math.ceil(left))}s`
+        : "Up next";
   }
   // The frame from the next episode, fetched once per item rather than on
   // every tick. A download that was started from the Downloads view has no
@@ -1645,7 +1938,19 @@ function buildPlayerBar(): void {
   }, ["Skip intro"]);
 
   const pos = el("span", { id: "pb-pos" }, ["0:00"]);
-  const dur = el("span", { id: "pb-dur" }, ["0:00"]);
+  // Clicking the time flips it between the length and the time left, and the
+  // choice is kept (Settings → Playback has the same switch).
+  const dur = el("span", {
+    id: "pb-dur",
+    class: "pb-dur",
+    role: "button",
+    tabindex: "0",
+    title: "Show time remaining or the whole length",
+    onClick: () => {
+      setShowsRemaining(!showsRemaining());
+      if (lastBarStatus) updatePlayerBar(lastBarStatus);
+    },
+  }, ["0:00"]);
   const range = el("input", {
     type: "range",
     class: "pb-range",
@@ -1702,9 +2007,9 @@ function buildPlayerBar(): void {
     title,
     skip,
     el("div", { class: "pb-controls" }, [
-      pbButton("pb-back", PB_ICONS.back30, "Back 30s (←)", () => playerCtl.seek(-30, false)),
+      pbButton("pb-back", skipIcon(false, skipInterval()), `Back ${skipInterval()}s (←)`, () => playerCtl.seek(-skipInterval(), false)),
       pbButton("pb-playpause", PB_ICONS.pause, "Play/Pause (Space)", () => playerCtl.pauseToggle()),
-      pbButton("pb-fwd", PB_ICONS.fwd30, "Forward 30s (→)", () => playerCtl.seek(30, false)),
+      pbButton("pb-fwd", skipIcon(true, skipInterval()), `Forward ${skipInterval()}s (→)`, () => playerCtl.seek(skipInterval(), false)),
       pbButton("pb-stop", PB_ICONS.stop, "Stop", () => playerCtl.stop()),
     ]),
     el("div", { class: "pb-seek" }, [liveBadge, pos, scrub, dur]),
@@ -1712,7 +2017,9 @@ function buildPlayerBar(): void {
     el("div", { class: "pb-controls" }, [
       pbButton("pb-subs", PB_ICONS.subtitles, "Subtitles", () => toggleSubtitlePanel()),
       pbButton("pb-audio", PB_ICONS.audio, "Audio track", () => toggleAudioPanel()),
-      pbButton("pb-tune", PB_ICONS.tune, "Speed and subtitle delay", () => togglePlaybackPanel()),
+      pbButton("pb-tune", PB_ICONS.tune, "Speed, subtitle and audio delay", () => togglePlaybackPanel()),
+      pbButton("pb-chapters-btn", PB_ICONS.chapters, "Chapters", () => toggleChapterPanel()),
+      pbButton("pb-info", PB_ICONS.info, "Stream info (i)", () => toggleInfoPanel()),
       pbButton("pb-picture", PB_ICONS.picture, "Picture and zoom", () => togglePicturePanel()),
       pbButton("pb-sleep", PB_ICONS.sleep, "Sleep timer", () => toggleSleepPanel()),
       pbButton("pb-quality", PB_ICONS.quality, "Stream quality", () => toggleQualityPicker()),
@@ -1766,6 +2073,220 @@ function buildPlayerBar(): void {
     // strip.
     if (videoFullscreen && fsBarShown) fsArmHide();
   });
+}
+
+/** A short note in the bar's state badge ("Subtitles off", "+10 s"), for
+ *  input that has no button of its own to light up. Toasts sit on the page,
+ *  which the picture covers. */
+let barNote = { text: "", until: 0 };
+
+function barNoteShowing(): boolean {
+  return Date.now() < barNote.until;
+}
+
+function flashBarNote(text: string): void {
+  barNote = { text, until: Date.now() + 1800 };
+  const state = document.getElementById("pb-state");
+  if (state) state.textContent = text;
+  if (videoFullscreen) fsPokeControls();
+}
+
+/** The subtitle track `c` brings back after turning subtitles off. */
+let lastSubTrack: { id: number; lang?: string } | null = null;
+
+/** `c`: subtitles off, or back on with the track last used. */
+function toggleSubtitles(): void {
+  const subs = getTracks().filter((t) => t.type === "sub");
+  const on = subs.find((t) => t.selected);
+  if (on) {
+    lastSubTrack = { id: on.id, lang: on.lang };
+    playerCtl.setTrack("sub", "no").catch(() => {});
+    flashBarNote("Subtitles off");
+    return;
+  }
+  if (!subs.length) {
+    flashBarNote("No subtitles for this file");
+    return;
+  }
+  const last = lastSubTrack;
+  const back =
+    (last && (subs.find((t) => t.id === last.id && t.lang === last.lang) ?? subs.find((t) => last.lang && t.lang === last.lang))) ||
+    subs[0];
+  playerCtl.setTrack("sub", back.id).catch(() => {});
+  flashBarNote(`Subtitles: ${trackLabel(back, subs.indexOf(back))}`);
+}
+
+/** `s`: skip the intro or credits the playhead is in, when there is one. */
+function skipSegment(): void {
+  const btn = document.getElementById("pb-skip") as any;
+  if (btn?.classList.contains("on") && typeof btn.__seekTo === "number") {
+    playerCtl.seek(btn.__seekTo, true).catch(() => {});
+    flashBarNote(btn.textContent ?? "Skipped");
+  }
+}
+
+function skipBy(dir: -1 | 1): void {
+  if (getQualityState()?.live) return;
+  const n = skipInterval();
+  playerCtl.seek(dir * n, false).catch(() => {});
+  flashBarNote(`${dir < 0 ? "−" : "+"}${n} s`);
+}
+
+function nudgeAudioDelay(dir: -1 | 0 | 1, quiet = false): void {
+  // Rounded to the millisecond: mpv reports 0.050000-ish floats, and the sum
+  // of a few of them is otherwise "+0 ms" rather than 0.
+  const v = dir === 0 ? 0 : Math.round((pbState.audioDelay + dir * AUDIO_DELAY_STEP) * 1000) / 1000;
+  // Set here as well as from the next status, so two quick presses are two steps.
+  pbState.audioDelay = v;
+  playerCtl.setAudioDelay(v).catch(() => {});
+  if (!quiet) flashBarNote(`Audio delay ${v > 0 ? "+" : ""}${Math.round(v * 1000)} ms`);
+  ($("player-bar").querySelector(".pb-panel") as BarPanel | null)?.sync?.(pbState);
+}
+
+function openInfo(): void {
+  if (videoFullscreen) fsPokeControls();
+  toggleInfoPanel();
+}
+
+/** Speed before a hold took it to 2×, to go back to on release. */
+let speedBeforeHold: number | null = null;
+
+/**
+ * The player's controls as a menu on the picture, for a right-click there.
+ * Drawn by uosc inside the video: nothing in the page can draw over it.
+ */
+function openPictureMenu(): void {
+  const st = lastBarStatus;
+  if (!st) return;
+  const live = !!getQualityState()?.live;
+  const n = skipInterval();
+  const items: any[] = [
+    { title: st.paused ? "Play" : "Pause", hint: "Space", value: "cycle pause" },
+  ];
+  if (!live) {
+    items.push(
+      { title: `Back ${n} seconds`, hint: "←", value: `seek -${n}` },
+      { title: `Forward ${n} seconds`, hint: "→", value: `seek ${n}` }
+    );
+  }
+  const skip = document.getElementById("pb-skip") as any;
+  if (skip?.classList.contains("on")) items.push({ title: skip.textContent, hint: "s", value: "script-message aquarium-ctl skip" });
+  if (upNextItem) items.push({ title: "Play next", hint: upNextTitle(upNextItem), value: "script-message aquarium-ctl next" });
+  const tracks = getTracks();
+  const subs = tracks.filter((t) => t.type === "sub");
+  items.push({
+    title: "Subtitles",
+    hint: "c",
+    items: [
+      { title: "Off", active: !subs.some((t) => t.selected), value: "set sid no" },
+      ...subs.map((t, i) => ({ title: trackLabel(t, i), active: !!t.selected, value: `set sid ${t.id}` })),
+    ],
+  });
+  const audio = tracks.filter((t) => t.type === "audio");
+  if (audio.length > 1) {
+    items.push({
+      title: "Audio",
+      items: audio.map((t, i) => ({ title: trackLabel(t, i), active: !!t.selected, value: `set aid ${t.id}` })),
+    });
+  }
+  items.push({
+    title: "Speed",
+    hint: Math.abs(pbState.speed - 1) < 0.001 ? "Normal" : `${pbState.speed}×`,
+    items: SPEEDS.map((sp) => ({ title: sp === 1 ? "Normal" : `${sp}×`, active: Math.abs(sp - pbState.speed) < 0.001, value: `set speed ${sp}` })),
+  });
+  if (pbChapters.length) {
+    items.push({
+      title: "Chapters",
+      items: [{ time: 0, title: "" }, ...pbChapters].map((c, i) => ({
+        title: c.title || `Chapter ${i + 1}`,
+        hint: api.secondsToClock(c.time),
+        value: `script-message aquarium-chapter ${c.time}`,
+      })),
+    });
+  }
+  items.push(
+    { title: "Stream info", hint: "i", value: "script-message aquarium-ctl info" },
+    { title: videoFullscreen ? "Leave fullscreen" : "Fullscreen", hint: "f", value: "script-message aquarium-ctl fullscreen" },
+    { title: videoPip ? "Back into the window" : "Picture in picture", hint: "p", value: "script-message aquarium-ctl pip" },
+    { title: "Stop", value: "script-message aquarium-ctl stop" }
+  );
+  invoke("player_mpv_command", {
+    cmd: ["script-message-to", "uosc", "open-menu", JSON.stringify({ type: "aquarium-player", title: "Player", items })],
+  }).catch(() => {});
+}
+
+/** Keys, wheel, touch and right-click over the picture, by way of mpv
+ *  (see input.conf and surface.rs `connect_touch_gestures`). */
+function onPlayerInput(name: string, arg: string): void {
+  if (!playerActive) return;
+  if (name === "aquarium-key") {
+    switch (arg) {
+      case "back": skipBy(-1); break;
+      case "forward": skipBy(1); break;
+      case "subtitles": toggleSubtitles(); break;
+      case "skip": skipSegment(); break;
+      case "info": openInfo(); break;
+      case "shortcuts": toggleShortcuts(); break;
+      case "audio-later": nudgeAudioDelay(1); break;
+      case "audio-earlier": nudgeAudioDelay(-1); break;
+      case "audio-reset": nudgeAudioDelay(0); break;
+    }
+    return;
+  }
+  if (name === "aquarium-context") {
+    openPictureMenu();
+    return;
+  }
+  if (name === "aquarium-ctl") {
+    switch (arg) {
+      case "skip": skipSegment(); break;
+      case "next": void startUpNext(); break;
+      case "info": openInfo(); break;
+      case "fullscreen": if (playerEmbedded && !videoPip) void setVideoFullscreen(!videoFullscreen); break;
+      case "pip": void setVideoPip(!videoPip); break;
+      case "stop":
+        void (async () => {
+          if (videoFullscreen) await setVideoFullscreen(false);
+          await playerCtl.stop();
+        })();
+        break;
+    }
+    return;
+  }
+  if (name === "aquarium-gesture") {
+    switch (arg) {
+      case "tap":
+        if (videoFullscreen) fsPokeControls();
+        break;
+      case "doubletap-left":
+        skipBy(-1);
+        break;
+      case "doubletap-right":
+        skipBy(1);
+        break;
+      case "doubletap-middle":
+        if (playerEmbedded && !videoPip) void setVideoFullscreen(!videoFullscreen);
+        break;
+      // Fill crops the picture to the window; Fit shows all of it.
+      case "pinch-out":
+        playerCtl.setProp("panscan", 1).catch(() => {});
+        flashBarNote("Fill");
+        break;
+      case "pinch-in":
+        playerCtl.setProp("panscan", 0).catch(() => {});
+        flashBarNote("Fit");
+        break;
+      case "hold-start":
+        if (speedBeforeHold === null) speedBeforeHold = pbState.speed;
+        playerCtl.setSpeed(2).catch(() => {});
+        flashBarNote("2× speed");
+        break;
+      case "hold-end":
+        if (speedBeforeHold !== null) playerCtl.setSpeed(speedBeforeHold).catch(() => {});
+        speedBeforeHold = null;
+        break;
+    }
+  }
 }
 
 /** The last player-status seen, for redrawing the bar when it comes back into
@@ -1852,14 +2373,24 @@ function updatePlayerBar(st: any): void {
   // Only the states worth interrupting for get the badge — the play/pause
   // button already says "Playing", so repeating it here under a title that's
   // otherwise silent is exactly the noise "Buffering…" needs to cut through.
-  ($("pb-state") as HTMLElement).textContent = st.paused
-    ? "Paused"
-    : st.buffering
-      ? "Buffering…"
-      : "";
+  ($("pb-state") as HTMLElement).textContent = barNoteShowing()
+    ? barNote.text
+    : st.paused
+      ? "Paused"
+      : st.buffering
+        ? "Buffering…"
+        : "";
   ($("pb-playpause") as HTMLElement).innerHTML = st.paused ? PB_ICONS.play : PB_ICONS.pause;
   ($("pb-pos") as HTMLElement).textContent = api.secondsToClock(st.position ?? 0);
-  ($("pb-dur") as HTMLElement).textContent = st.duration > 0 ? api.secondsToClock(st.duration) : "live";
+  ($("pb-dur") as HTMLElement).textContent =
+    st.duration > 0
+      ? showsRemaining()
+        ? `−${api.secondsToClock(Math.max(0, st.duration - (st.position ?? 0)))}`
+        : api.secondsToClock(st.duration)
+      : "live";
+  syncSkipButtons();
+  const chBtn = document.getElementById("pb-chapters-btn");
+  if (chBtn) chBtn.style.display = pbChapters.length ? "" : "none";
   const range = $("pb-range") as HTMLInputElement;
   range.dataset.duration = String(live ? 0 : st.duration ?? 0);
   if (!seeking && !live && st.duration > 0) {
@@ -1896,6 +2427,7 @@ function syncAudioState(st: any): void {
   if (typeof st.mute === "boolean") pbState.mute = st.mute;
   if (typeof st.speed === "number" && st.speed > 0) pbState.speed = st.speed;
   if (typeof st.sub_delay === "number") pbState.subDelay = st.sub_delay;
+  if (typeof st.audio_delay === "number") pbState.audioDelay = st.audio_delay;
 
   const muteBtn = document.getElementById("pb-mute");
   if (muteBtn) {
@@ -1906,7 +2438,7 @@ function syncAudioState(st: any): void {
   vol?.classList.toggle("muted", pbState.mute);
   // A speed other than 1× is easy to forget you set; say so next to the title.
   const state = document.getElementById("pb-state");
-  if (state && Math.abs(pbState.speed - 1) > 0.001 && !st.paused) {
+  if (state && Math.abs(pbState.speed - 1) > 0.001 && !st.paused && !barNoteShowing()) {
     state.textContent = `${pbState.speed}× speed`;
   }
   ($("player-bar").querySelector(".pb-panel") as BarPanel | null)?.sync?.(pbState);
@@ -2068,14 +2600,30 @@ const SHORTCUTS: { group: string; rows: [string[], string][] }[] = [
     rows: [
       [["Space"], "Play / pause"],
       [["Enter"], "Play the next episode (while Up next is showing)"],
-      [["←", "→"], "Seek 10 seconds"],
+      [["←", "→"], "Skip back / forward (the interval in Settings)"],
       [["↑", "↓"], "Volume"],
       [["m"], "Mute"],
+      [["c"], "Subtitles off, or back to the last track"],
+      [["s"], "Skip intro or credits"],
+      [["i"], "Stream info (also Ctrl+I)"],
       [["[", "]"], "Slower / faster"],
       [["z", "Z"], "Subtitles earlier / later"],
+      [["Ctrl", "−", "="], "Audio earlier / later (Ctrl+0 resets)"],
       [["f"], "Fullscreen"],
       [["p"], "Picture in picture"],
       [["Esc"], "Leave fullscreen"],
+    ],
+  },
+  {
+    group: "On the picture",
+    rows: [
+      [["Wheel"], "Volume"],
+      [["Tilt", "Swipe ↔"], "Scrub"],
+      [["Right-click"], "Player menu"],
+      [["Double-click"], "Fullscreen"],
+      [["Double-tap ◀ ▶"], "Skip back / forward"],
+      [["Pinch"], "Fit or Fill"],
+      [["Hold"], "Play at 2× while held"],
     ],
   },
   {
@@ -2266,6 +2814,38 @@ async function boot(): Promise<void> {
   // The server stopped honouring our token (expired, or the session was
   // revoked from another device). Every page would otherwise fail on its own,
   // with Settings → Sign out as the only way out.
+  document.addEventListener("aquarium-player-input", (ev) => {
+    const d = (ev as CustomEvent).detail ?? {};
+    const arg = d.name === "aquarium-gesture" && d.arg === "doubletap" ? `doubletap-${d.rest?.[0] ?? "middle"}` : d.arg;
+    onPlayerInput(d.name, String(arg ?? ""));
+  });
+  // Something was queued or dequeued: the Up Next card and the desktop's
+  // next button follow the queue.
+  document.addEventListener("aquarium-queue-changed", () => {
+    if (!playerActive) return;
+    const forId = mediaItemId;
+    void peekNextEpisode().then((next) => {
+      if (mediaItemId !== forId) return;
+      upNextItem = next;
+      invoke("player_set_next_available", { available: !!next }).catch(() => {});
+    }).catch(() => {});
+  });
+  await listen("player-stall", () => {
+    stallsThisFile++;
+  });
+
+  // Next Up was changed on the server from a menu: Home redraws from a fresh
+  // request rather than waiting for the next visit.
+  document.addEventListener("aquarium-next-up-changed", () => {
+    if (atHome() && !playerActive) route();
+  });
+
+  document.addEventListener("aquarium-account-switch", (ev) => {
+    const key = (ev as CustomEvent).detail?.key;
+    if (key) void switchToAccount(key);
+  });
+  document.addEventListener("aquarium-add-account", () => showAddAccount());
+
   document.addEventListener("aquarium-auth-expired", () => {
     closeMenus();
     showLogin();
@@ -2508,6 +3088,31 @@ async function boot(): Promise<void> {
     if (!playerActive) return;
     const t = ev.target as HTMLElement;
     if (t && ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)) return;
+    // Audio delay on mpv's own Ctrl++ / Ctrl+−, and Ctrl+I for stream info.
+    if (ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+      switch (ev.key) {
+        case "=":
+        case "+":
+          ev.preventDefault();
+          nudgeAudioDelay(1);
+          break;
+        case "-":
+          ev.preventDefault();
+          nudgeAudioDelay(-1);
+          break;
+        case "0":
+          ev.preventDefault();
+          nudgeAudioDelay(0);
+          break;
+        case "i":
+        case "I":
+          ev.preventDefault();
+          openInfo();
+          break;
+      }
+      return;
+    }
+    if (ev.altKey || ev.metaKey) return;
     switch (ev.key) {
       case " ":
         ev.preventDefault();
@@ -2522,11 +3127,22 @@ async function boot(): Promise<void> {
         break;
       case "ArrowLeft":
         ev.preventDefault();
-        if (!getQualityState()?.live) playerCtl.seek(-10, false);
+        skipBy(-1);
         break;
       case "ArrowRight":
         ev.preventDefault();
-        if (!getQualityState()?.live) playerCtl.seek(10, false);
+        skipBy(1);
+        break;
+      case "c":
+      case "C":
+        toggleSubtitles();
+        break;
+      case "s":
+      case "S":
+        skipSegment();
+        break;
+      case "i":
+        openInfo();
         break;
       case "ArrowUp":
         ev.preventDefault();

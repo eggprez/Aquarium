@@ -197,6 +197,12 @@ impl Prefs {
         if self.flag("stereo_downmix") {
             push("audio-channels", "stereo".into());
         }
+        // Saved from the tune panel: a headset that runs behind the picture
+        // runs behind it on every file.
+        let audio_delay = self.number("audio_delay", 0.0).clamp(-10.0, 10.0);
+        if audio_delay.abs() > 0.0005 {
+            push("audio-delay", format!("{:.3}", audio_delay));
+        }
         if self.flag("night_mode") {
             // Compress the range so whispered dialogue and an explosion end up
             // within reach of each other. dynaudnorm is a realtime filter;
@@ -307,5 +313,12 @@ mod tests {
         let args = prefs(json!({})).args();
         assert!(!args.iter().any(|a| a.starts_with("--sub-")));
         assert!(!args.iter().any(|a| a.starts_with("--brightness")));
+        assert!(!args.iter().any(|a| a.starts_with("--audio-delay")));
+    }
+
+    #[test]
+    fn audio_delay_carries_to_the_next_file() {
+        let args = prefs(json!({ "audio_delay": -0.25 })).args();
+        assert!(args.iter().any(|a| a == "--audio-delay=-0.250"), "{args:?}");
     }
 }

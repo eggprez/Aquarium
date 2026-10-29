@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "../api";
 import * as iptv from "../iptv";
-import { el, clear, toast } from "../ui";
+import { el, clear, toast, openDialog } from "../ui";
 import {
   isAdaptiveEnabled,
   setAdaptiveEnabled,
@@ -328,6 +328,146 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     ])
   );
 
+  // Accounts: everyone signed in on this device, switched between without a
+  // password, each with its own token in the keyring.
+  const accountsBlock = el("div", { class: "settings-block" }, [el("h3", {}, ["Accounts"])]);
+  root.append(accountsBlock);
+  const drawAccounts = async (): Promise<void> => {
+    const list = await api.listAccounts();
+    if (!document.contains(accountsBlock)) return;
+    accountsBlock.querySelectorAll(".settings-row").forEach((n) => n.remove());
+    for (const a of list) {
+      const where = a.server_name || a.server.replace(/^https?:\/\//, "");
+      const controls = a.current
+        ? el("span", { class: "sync-pill ok" }, ["In use"])
+        : el("div", { class: "settings-actions" }, [
+            el("button", {
+              class: "btn small",
+              title: "Sign in as this account. Switching is instant and needs no password.",
+              onClick: () => document.dispatchEvent(new CustomEvent("aquarium-account-switch", { detail: { key: a.key } })),
+            }, ["Switch"]),
+            el("button", {
+              class: "btn small danger",
+              onClick: () =>
+                openDialog({
+                  title: `Sign ${a.user_name} out of this device?`,
+                  body: [el("p", {}, [`Their session on ${where} is ended and the account is removed from this device. The account in use isn't touched.`])],
+                  actions: [
+                    { label: "Cancel", primary: true },
+                    {
+                      label: "Sign Out",
+                      danger: true,
+                      run: async () => {
+                        try {
+                          const r = await api.forgetAccount(a.key);
+                          if (!r.revoked) toast("Removed here, but the server couldn't be reached to end that session.", "error");
+                        } catch (e: any) {
+                          toast(e.message ?? "Couldn't sign that account out", "error");
+                        }
+                        void drawAccounts();
+                      },
+                    },
+                  ],
+                }),
+            }, ["Sign Out of This Device"]),
+          ]);
+      accountsBlock.append(
+        el("div", { class: "settings-row" }, [
+          el("div", {}, [
+            el("div", { class: "lbl" }, [a.user_name || "Unnamed user"]),
+            el("div", { class: "sub" }, [where]),
+          ]),
+          controls,
+        ])
+      );
+    }
+    accountsBlock.append(
+      row(
+        "Add Account…",
+        "Sign in to another user on this server, or to a different server, without signing this one out. Switching is instant and needs no password: each account keeps its own token in the keyring.",
+        el("button", {
+          class: "btn small",
+          onClick: () => document.dispatchEvent(new CustomEvent("aquarium-add-account")),
+        }, ["Add Account…"])
+      )
+    );
+  };
+  await drawAccounts();
+  if (!document.contains(title)) return;
+
+  // Quick Connect, the approving side: a device signing in to this server
+  // shows a code, and entering it here signs that device in as this user.
+  const qcInput = el("input", {
+    class: "control md qc-code",
+    type: "text",
+    inputmode: "numeric",
+    autocomplete: "off",
+    placeholder: "6-digit code",
+    maxlength: "6",
+    "aria-label": "Quick Connect code",
+  }) as HTMLInputElement;
+  const qcOutcome = el("div", { class: "sub", hidden: "" });
+  const qcButton = el("button", { class: "btn small", disabled: "" }, ["Approve…"]) as HTMLButtonElement;
+  const qcSay = (text: string, tone: "ok" | "warn" | "bad") => {
+    qcOutcome.textContent = text;
+    qcOutcome.className = `sub qc-outcome ${tone}`;
+    qcOutcome.removeAttribute("hidden");
+  };
+  qcInput.addEventListener("input", () => {
+    // Digits only, and the six of them.
+    const digits = qcInput.value.replace(/\D/g, "").slice(0, 6);
+    if (digits !== qcInput.value) qcInput.value = digits;
+    qcButton.disabled = digits.length !== 6 || api.isOffline();
+    qcOutcome.setAttribute("hidden", "");
+  });
+  const qcConfirm = () => {
+    const code = qcInput.value;
+    if (code.length !== 6) return;
+    openDialog({
+      title: `Sign another device in as ${s?.userName ?? "you"}?`,
+      body: [el("p", {}, ["Only approve a code you can see on your own device's screen right now. Whoever holds the device showing it gets full access to your account."])],
+      actions: [
+        { label: "Cancel", primary: true },
+        {
+          label: `Approve ${code}`,
+          run: async () => {
+            qcButton.disabled = true;
+            try {
+              if (await api.authorizeQuickConnect(code)) {
+                qcInput.value = "";
+                qcSay("The other device is signing in now.", "ok");
+              } else {
+                qcSay("The server doesn't know that code. Check the digits, or ask for a new code — they expire after ten minutes.", "warn");
+              }
+            } catch (e: any) {
+              qcSay(e.message ?? String(e), "bad");
+            }
+            qcButton.disabled = qcInput.value.length !== 6;
+          },
+        },
+      ],
+    });
+  };
+  qcButton.addEventListener("click", qcConfirm);
+  qcInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") qcConfirm();
+  });
+  root.append(
+    el("div", { class: "settings-block" }, [
+      el("h3", {}, ["Quick Connect"]),
+      el("div", { class: "settings-row" }, [
+        el("div", {}, [
+          el("div", { class: "lbl" }, ["Approve a code"]),
+          el("div", { class: "sub" }, [
+            "Another device signing in to this server — a TV, say — can show a code instead of asking for a password. Enter the code here and it is signed in as you.",
+          ]),
+          qcOutcome,
+        ]),
+        el("div", { class: "settings-actions" }, [qcInput, qcButton]),
+      ]),
+    ])
+  );
+
   // Appearance block — applied immediately, no Save needed.
   const themeSelect = el("select", {
     class: "control md",
@@ -365,6 +505,35 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     ])
   );
 
+  // Next Up: what the server's Next Up offers, and for how long. Sent with
+  // every Next Up request, so the row follows at once.
+  root.append(
+    el("div", { class: "settings-block" }, [
+      el("h3", {}, ["Next Up"]),
+      row(
+        "Keep shows on Next Up",
+        "How long a show stays on Next Up after you last watched anything in it. Past that, Aquarium takes it off Next Up on the server as well, so Jellyfin's other apps stop showing it too; nothing is marked watched. Playing an episode or adding the show to Next Up brings it back. Forever keeps a show for as long as it has an episode left.",
+        choice(
+          { next_up_days: String(cfg.next_up_days ?? "0") },
+          "next_up_days",
+          api.NEXT_UP_DAY_CHOICES.map((d) => [String(d), api.nextUpDaysLabel(d)] as [string, string]).sort((a, b) =>
+            a[0] === "0" ? 1 : b[0] === "0" ? -1 : Number(a[0]) - Number(b[0])
+          )
+        )
+      ),
+      row(
+        "Include episodes in progress",
+        "Lets Next Up offer an episode you're partway through, as Continue Watching does. Off, a show whose next episode you've started is left to Continue Watching until you finish it.",
+        toggle({ next_up_in_progress: cfg.next_up_in_progress !== false }, "next_up_in_progress", ["Off", "On"])
+      ),
+      row(
+        "Include shows you're rewatching",
+        "Keeps a show you're watching again on Next Up: after an episode you've already seen, it offers the one after it, watched or not.",
+        toggle(cfg, "next_up_rewatching", ["Off", "On"])
+      ),
+    ])
+  );
+
   // Playback block
   const adaptiveSelect = el("select", {
     class: "control md",
@@ -390,6 +559,40 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
   root.append(
     el("div", { class: "settings-block" }, [
       el("h3", {}, ["Playback"]),
+      row(
+        "Resume where I left off",
+        "Opens something you have already started at the point you stopped, instead of from the beginning.",
+        toggle({ resume_playback: cfg.resume_playback !== false }, "resume_playback", ["Off — always from the start", "On"])
+      ),
+      row(
+        "Play the next episode automatically",
+        "The Up Next card appears over the closing stretch of an episode either way — turning this off just means it won't start on its own.",
+        toggle({ autoplay_next: cfg.autoplay_next !== false }, "autoplay_next", ["Off", "On"])
+      ),
+      row(
+        "Skip by",
+        "How far the two skip buttons jump, along with ← and → and a double-tap on the left or right of the picture.",
+        choice({ player_skip_interval: String(cfg.player_skip_interval ?? "10") }, "player_skip_interval", [
+          ["10", "10 seconds"],
+          ["15", "15 seconds"],
+          ["30", "30 seconds"],
+        ])
+      ),
+      row(
+        "Hide controls after",
+        "How long the controls stay up in fullscreen after the pointer last moved. They never hide while a panel is open or the pointer is over them.",
+        choice({ player_hide_after: String(cfg.player_hide_after ?? "2") }, "player_hide_after", [
+          ["2", "2 seconds"],
+          ["4", "4 seconds"],
+          ["6", "6 seconds"],
+          ["10", "10 seconds"],
+        ])
+      ),
+      row(
+        "Show time remaining",
+        "Whether the time at the right of the timeline counts down to the end or shows the whole length. Clicking it in the player flips this too.",
+        toggle(cfg, "player_show_remaining", ["Off — the whole length", "On — time left"])
+      ),
       row(
         "Streaming quality",
         "Adapting drops to a smaller stream when playback keeps stalling or the machine can't decode fast enough, and climbs back after the connection has been steady for a while. It never goes above the quality you picked, and never touches downloaded files or Live TV.",
