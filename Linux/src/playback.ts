@@ -525,23 +525,23 @@ export async function playItem(
  * being reported to a server that has never heard of this channel. `live` still
  * has to be set, so the player bar shows Live rather than a scrubber.
  */
-export async function playChannelUrl(ch: any): Promise<void> {
+export async function playChannelUrl(ch: any, opts: { quiet?: boolean } = {}): Promise<void> {
   shuffleState = null;
   nowPlaying = { item: ch, opts: { live: true }, isLocal: false, queue: null, serverItem: null, download: null };
   autoplayCancelled = false;
   nextPeek = null;
   tracksApplied = false;
-  toast(`Starting “${ch.Name}”…`);
+  if (!opts.quiet) toast(`Starting “${ch.Name}”…`);
   // A channel is a session on the far end more often than it is a file, and
   // a cold one can take a good while to come up. The backend waits for it —
   // and retries, since the server has been seen answering a request made
   // while it was still starting with a 500 — so mpv only ever opens a
   // running stream. The second toast is there because the first has faded
-  // by the time a slow one arrives, and silence reads as a failure.
-  const slow = window.setTimeout(
-    () => toast(`Still waiting for “${ch.Name}” to start…`),
-    5000
-  );
+  // by the time a slow one arrives, and silence reads as a failure. A quiet
+  // caller (the guide's tuning screen) says all of this itself.
+  const slow = opts.quiet
+    ? 0
+    : window.setTimeout(() => toast(`Still waiting for “${ch.Name}” to start…`), 5000);
   try {
     invoke("ui_log", { msg: `playChannelUrl ${ch.Id}` }).catch(() => {});
     const url = await invoke<string>("resolve_stream", { url: ch.StreamUrl }).finally(

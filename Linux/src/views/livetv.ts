@@ -1,8 +1,10 @@
 import * as api from "../api";
 import * as iptv from "../iptv";
-import { playItem, playChannelUrl } from "../playback";
+import { playItem, playChannelUrl, getNowPlaying } from "../playback";
 import { el, clear, art, emptyState, icon, openDialog, skeletonRows } from "../ui";
 import { getCached, setCached } from "../cache";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 /**
  * Where the page gets its channels and schedule. Jellyfin's Live TV and a
@@ -14,7 +16,8 @@ interface GuideSource {
   custom: boolean;
   channels(): Promise<any[]>;
   programs(ids: string[], from: Date, to: Date): Promise<any[]>;
-  play(ch: any): void;
+  /** Start a channel. Quiet: the tuning screen is the feedback, not toasts. */
+  play(ch: any): Promise<void>;
   /** What to say when there are no channels at all. */
   emptyBody: string;
   /** What to say when there are channels but nothing scheduled. */
@@ -25,7 +28,7 @@ const jellyfinSource: GuideSource = {
   custom: false,
   channels: () => api.getChannels(),
   programs: (ids, from, to) => api.getPrograms(ids, from, to),
-  play: (ch) => void playItem(ch, { live: true }),
+  play: (ch) => playItem(ch, { live: true }, { quiet: true }),
   emptyBody:
     "This server has a Live TV library but no channels in it. Add a tuner and a guide source in the Jellyfin dashboard, then reload.",
   noGuide:
@@ -36,12 +39,102 @@ const customSource: GuideSource = {
   custom: true,
   channels: () => iptv.getChannels(),
   programs: (_ids, from, to) => iptv.getPrograms(from, to),
-  play: (ch) => void playChannelUrl(ch),
+  play: (ch) => playChannelUrl(ch, { quiet: true }),
   emptyBody:
     "Your M3U playlist loaded but has no channels in it. Check the address in Settings → Live TV.",
   noGuide:
     "No XMLTV guide is set, or none of its channels matched this playlist. The guide joins on each channel's tvg-id, falling back to its name. Set one in Settings → Live TV.",
 };
+
+/**
+ * A channel that's been clicked but isn't playing yet. A cold channel can take
+ * 20 s to come up, and a toast that fades after three of them left the guide
+ * looking idle — so it got clicked again, and again. Instead the player's
+ * space goes dark straight away with the channel on it, the way a TV tunes.
+ */
+let tuning: { ch: any; overlay: HTMLElement; timer: number; cancelled: boolean; opened: boolean } | null = null;
+
+/** Past this, say why it's slow rather than just that it is. */
+const TUNING_SLOW_S = 5;
+/** Longest the screen waits on the first frame once mpv has the stream. */
+const FIRST_FRAME_CAP_MS = 15_000;
+
+/**
+ * mpv takes the stream a few seconds before it has a picture to show (about
+ * 3 s on a Tunarr channel). Lifting the tuning screen when the player starts
+ * would show the guide again for that long; wait for the clock to move.
+ */
+async function firstFrame(): Promise<void> {
+  let done!: () => void;
+  const shown = new Promise<void>((r) => (done = r));
+  const unlisten = listen<any>("player-status", (ev) => {
+    const st = ev.payload;
+    if (!st?.active || (st.position > 0 && !st.buffering)) done();
+  });
+  const cap = window.setTimeout(done, FIRST_FRAME_CAP_MS);
+  await shown;
+  clearTimeout(cap);
+  (await unlisten)();
+}
+
+function endTuning(): void {
+  if (!tuning) return;
+  clearInterval(tuning.timer);
+  tuning.overlay.remove();
+  tuning = null;
+}
+
+function tune(src: GuideSource, ch: any): void {
+  // Another click on the channel already on its way changes nothing.
+  if (tuning && tuning.ch.Id === ch.Id) return;
+  endTuning();
+  const started = Date.now();
+  const status = el("p", { class: "tuning-status" }, ["Tuning…"]);
+  const overlay = el("div", { class: "tuning", role: "status", "aria-live": "polite" }, [
+    el("div", { class: "channel-logo tuning-logo" }, [
+      art(ch.LogoUrl ?? api.imageUrl(ch, "Primary", 320), () =>
+        document.createTextNode(String(ch.ChannelNumber ?? ch.Name ?? "?").slice(0, 4))
+      ),
+    ]),
+    el("h2", { class: "tuning-name" }, [channelLabel(ch)]),
+    status,
+    el("button", { class: "btn small", onClick: () => cancel() }, [icon("close"), "Cancel"]),
+  ]);
+  const t = { ch, overlay, timer: 0, cancelled: false, opened: false };
+  // A once-a-second text change, not an animation: this can sit on screen for
+  // 20 s, and a spinner repaints the whole window every frame (see CLAUDE.md).
+  t.timer = window.setInterval(() => {
+    const s = Math.round((Date.now() - started) / 1000);
+    status.textContent =
+      s < TUNING_SLOW_S
+        ? `Tuning… ${s} s`
+        : `Still tuning… ${s} s — a channel nobody's watching can take a while to start`;
+  }, 1000);
+  function cancel(): void {
+    t.cancelled = true;
+    // mpv already has it and is waiting on the first frame.
+    if (t.opened && getNowPlaying()?.item === ch) void invoke("player_stop").catch(() => {});
+    if (tuning === t) endTuning();
+  }
+  tuning = t;
+  document.getElementById("main")?.append(overlay);
+  src
+    .play(ch)
+    .then(async () => {
+      // Cancelled after the stream was asked for: it may have opened anyway.
+      if (t.cancelled) {
+        if (getNowPlaying()?.item === ch) void invoke("player_stop").catch(() => {});
+        return;
+      }
+      t.opened = true;
+      await firstFrame();
+    })
+    // playItem / playChannelUrl already toast the failure.
+    .catch(() => {})
+    .finally(() => {
+      if (tuning === t) endTuning();
+    });
+}
 
 /** Horizontal scale of the guide. 30 minutes is the slot every schedule is
  *  built on, and 150px is the narrowest it can be and still fit a programme
@@ -214,6 +307,7 @@ export async function renderLiveTv(root: HTMLElement): Promise<void> {
 /** Everything below the heading, for a known channel list. `root` already
  *  holds `heading` and nothing else. */
 function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, channels: any[]): void {
+  const watch = (ch: any): void => tune(src, ch);
   if (!channels.length) {
     root.append(
       emptyState({
@@ -316,7 +410,7 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
         const block = el("button", {
           class: "guide-prog",
           title: `${p.Name ?? ""} · ${fmtTime(new Date(s))} – ${fmtTime(new Date(e))}`,
-          onClick: () => showProgram(p, ch, src.play),
+          onClick: () => showProgram(p, ch, watch),
         }, [
           el("span", { class: "guide-prog-title" }, [p.Name ?? "Programme"]),
           el("span", { class: "guide-prog-sub" }, [
@@ -331,7 +425,7 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
       }
       rows.append(
         el("div", { class: "guide-row" }, [
-          channelCell(ch, () => src.play(ch)),
+          channelCell(ch, () => watch(ch)),
           lane,
         ])
       );
@@ -358,7 +452,7 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
         root.append(
           heading,
           el("p", { class: "guide-note" }, [src.noGuide]),
-          channelList(channels, src.play)
+          channelList(channels, watch)
         );
         return;
       }
