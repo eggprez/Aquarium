@@ -63,6 +63,9 @@ import { renderItem } from "./views/item";
 import { renderLiveTv } from "./views/livetv";
 import { renderDownloads, updateDownloadProgress } from "./views/downloads";
 import { renderSettings } from "./views/settings";
+import { renderMusic } from "./views/music";
+import { renderBooks } from "./views/books";
+import { wireMusicPlayer } from "./views/musicPlayer";
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -74,6 +77,9 @@ const ICONS: Record<string, string> = {
   downloads: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>',
   settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h0a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55h0a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v0a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></svg>',
   folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  music: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5.5l10-2V16"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>',
+  musicLibrary: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="4" height="16" rx="1"/><rect x="9" y="4" width="4" height="16" rx="1"/><path d="m16 5 3.5 1L16.5 20 13 19"/></svg>',
+  books: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h9.5a3 3 0 0 1 3 3v12H8a3 3 0 0 1-3-3z"/><path d="M5 16.5a3 3 0 0 1 3-3h9.5"/></svg>',
   favorites: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 4.5 2.35 4.9 5.15.7-3.8 3.75.95 5.15L12 16.6l-4.65 2.4.95-5.15L4.5 10.1l5.15-.7z"/></svg>',
 };
 
@@ -347,7 +353,7 @@ function updateBackButton(): void {
 }
 
 // Pages that can't render without the server.
-const SERVER_PAGES = ["home", "lib", "item", "livetv", "search", "favorites"];
+const SERVER_PAGES = ["home", "lib", "item", "livetv", "search", "favorites", "music", "books"];
 
 function renderOffline(content: HTMLElement): void {
   clear(content);
@@ -388,7 +394,7 @@ function highlightNav(): void {
   const page = hash.match(/^#\/([^/]*)/)?.[1] ?? "home";
   document.querySelectorAll(".nav-item").forEach((n) => {
     const route = n.getAttribute("data-route");
-    const active = route === hash || route === `#/${page}`;
+    const active = route === hash || route === `#/${page}` || (!!route && hash.startsWith(`${route}/`));
     n.classList.toggle("active", active);
     // The accent colour is the only thing that said "you are here"; a screen
     // reader needs to be told in words.
@@ -447,6 +453,8 @@ async function route(): Promise<void> {
       case "downloads": await renderDownloads(content); break;
       case "settings": await renderSettings(content, showLogin); break;
       case "search": await renderSearch(content, decodeURIComponent(arg)); break;
+      case "music": await renderMusic(content, arg); break;
+      case "books": await renderBooks(content, arg); break;
       default: await renderHome(content);
     }
   } catch (e: any) {
@@ -517,6 +525,8 @@ function paintNav(views: any[] | null): void {
   }
 
   let hasLiveTv = false;
+  const hasMusic = views.some((v) => v.CollectionType === "music");
+  const hasBooks = views.some((v) => v.CollectionType === "books" || v.CollectionType === "audiobooks");
   if (views.length) nav.append(el("div", { class: "nav-sep" }, ["Libraries"]));
   for (const v of views) {
     if (v.CollectionType === "livetv") { hasLiveTv = true; continue; }
@@ -526,6 +536,18 @@ function paintNav(views: any[] | null): void {
       v.CollectionType === "movies" ? ICONS.movies :
       v.CollectionType === "tvshows" ? ICONS.tv : ICONS.folder;
     add(`#/lib/${v.Id}`, v.Name, icon);
+  }
+
+  // Music and audiobooks have screens of their own (views/music.ts, books.ts)
+  // rather than a library grid each.
+  if (hasMusic) {
+    nav.append(el("div", { class: "nav-sep" }, ["Music"]));
+    add("#/music/discover", "Listen Now", ICONS.music);
+    add("#/music/library", "Library", ICONS.musicLibrary);
+  }
+  if (hasBooks) {
+    if (!hasMusic) nav.append(el("div", { class: "nav-sep" }, ["Listening"]));
+    add("#/books", "Audiobooks", ICONS.books);
   }
 
   nav.append(el("div", { class: "nav-sep" }, ["Aquarium"]));
@@ -604,6 +626,7 @@ async function showShell(): Promise<void> {
   if (owner) await hydrateCache(owner);
   $("login-root").classList.add("hidden");
   $("shell").classList.remove("hidden");
+  void wireMusicPlayer();
   buildNav();
   updateOfflinePill();
   // Reopen where the last session left off. Only on a cold start with no hash

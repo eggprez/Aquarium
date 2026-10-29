@@ -1,0 +1,354 @@
+/* Music and audiobooks (views/music.ts, books.ts, musicPlayer.ts).
+   Kept out of styles.css so the music work merges cleanly with the rest of
+   the app. Same tokens, same type scale. No infinite animations anywhere in
+   here: a "now playing" row is marked with colour, not a moving equaliser
+   (see the power notes in Linux/CLAUDE.md). */
+
+.mu-page .page-title { margin-bottom: 12px; }
+.mu-page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.mu-page-head .page-title { margin-bottom: 0; }
+
+.ico { display: inline-flex; width: 1.15em; height: 1.15em; vertical-align: -0.2em; }
+.ico svg { width: 100%; height: 100%; display: block; }
+.btn .ico { margin-right: 2px; }
+.mu-ibtn { display: inline-grid; place-items: center; }
+.mu-ibtn .ico { margin: 0; width: 20px; height: 20px; }
+
+/* ---------- Tabs ---------- */
+.mu-tabs { display: flex; gap: 4px; margin: 14px 0 20px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.mu-tab {
+  padding: 9px 14px;
+  color: var(--text-dim);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+.mu-tab:hover { color: var(--text); }
+.mu-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.mu-filter { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+.mu-input, .mu-select {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.mu-input:focus, .mu-select:focus { outline: none; border-color: var(--accent); }
+.mu-filter-input { width: 240px; }
+.mu-search { width: min(520px, 100%); margin-bottom: 20px; font-size: var(--fs-base); padding: 10px 14px; }
+.dialog .mu-input { width: 100%; margin-top: 6px; }
+.mu-sub-head { font-size: var(--fs-lg); font-weight: 700; margin: 8px 0 12px; }
+.mu-sentinel { height: 1px; }
+
+/* ---------- Cards ---------- */
+.mu-shelf { margin-bottom: 30px; }
+.mu-shelf-sub { font-size: var(--fs-xs); color: var(--text-dim); margin-top: 2px; }
+.mu-shelf-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 168px;
+  gap: 16px;
+  overflow-x: auto;
+  padding: 6px 2px 10px;
+  scrollbar-width: thin;
+}
+.mu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 22px 16px; }
+.mu-card { cursor: pointer; min-width: 0; }
+.mu-cover {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.mu-cover.round { border-radius: 50%; }
+.mu-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mu-cover .noart, .mu-head-cover .noart, .mb-cover .noart, .np-cover .noart, .mu-song-art .noart, .np-qart .noart {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: var(--text-dim); background: var(--noart-bg); font-size: var(--fs-3xl); font-weight: 700;
+}
+.mu-card:hover .mu-cover, .mu-card:focus-visible .mu-cover { transform: translateY(-3px); box-shadow: var(--shadow); }
+.mu-cover-play {
+  position: absolute; right: 8px; bottom: 8px;
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--accent-strong); color: #fff;
+  display: grid; place-items: center;
+  opacity: 0; transition: opacity 0.15s;
+  box-shadow: var(--shadow);
+}
+.mu-card:hover .mu-cover-play, .mu-card:focus-within .mu-cover-play { opacity: 1; }
+.mu-card-title { margin-top: 8px; font-size: var(--fs-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mu-card-sub { font-size: var(--fs-xs); color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mu-card.artist { text-align: center; }
+
+.mu-station {
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.mu-station-art {
+  aspect-ratio: 1;
+  border-radius: 10px;
+  display: grid; place-items: center;
+  color: #fff;
+  background: linear-gradient(140deg, var(--accent-strong), #2c6ea8);
+  transition: transform 0.2s ease;
+}
+.mu-station:nth-child(3n+2) .mu-station-art { background: linear-gradient(140deg, #b4436c, #6b3fa0); }
+.mu-station:nth-child(3n+3) .mu-station-art { background: linear-gradient(140deg, #1f8f7a, #2c4aa8); }
+.mu-station:hover .mu-station-art { transform: translateY(-3px); }
+
+.mu-genres { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.mu-genre, .mu-author {
+  display: block;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mu-genre:hover, .mu-author:hover { border-color: var(--accent); color: var(--accent); }
+.mu-authors { display: flex; flex-wrap: wrap; gap: 8px; }
+.mu-author { padding: 8px 14px; border-radius: 99px; font-size: var(--fs-sm); }
+
+/* ---------- Page header ---------- */
+.mu-head { display: flex; gap: 28px; align-items: flex-end; margin-bottom: 26px; position: relative; z-index: 1; }
+.mu-head-cover {
+  position: relative;
+  width: 220px; height: 220px; flex-shrink: 0;
+  border-radius: 12px; overflow: hidden;
+  background: var(--bg-hover);
+  box-shadow: var(--shadow-lg);
+}
+.mu-head-cover.round { border-radius: 50%; }
+.mu-head-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mu-head-text { min-width: 0; }
+.mu-eyebrow { font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-dim); font-weight: 700; }
+.mu-title { font-size: var(--fs-4xl); font-weight: 800; line-height: var(--lh-tight); margin: 6px 0 8px; }
+.mu-head-line { color: var(--text-body); font-size: var(--fs-base); margin-top: 2px; }
+.mu-head-buttons { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; align-items: center; }
+.mu-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+.mu-link:hover { text-decoration: underline; }
+.mu-about { color: var(--text-body); line-height: var(--lh-body); max-width: 820px; white-space: pre-line; }
+.mu-artist-backdrop {
+  position: absolute; left: 0; right: 0; top: 0; height: 360px;
+  background-size: cover; background-position: center 25%;
+  opacity: 0.28;
+  -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent);
+  mask-image: linear-gradient(180deg, #000 30%, transparent);
+  pointer-events: none;
+}
+.mu-page { position: relative; }
+.mu-book-progress { width: 240px; height: 4px; border-radius: 3px; background: var(--track-empty); margin-top: 8px; overflow: hidden; }
+.mu-book-progress > div { height: 100%; background: var(--accent); }
+
+/* ---------- Song rows ---------- */
+.mu-songs { display: flex; flex-direction: column; position: relative; }
+.mu-songs.columns { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); column-gap: 18px; }
+.mu-disc { font-size: var(--fs-sm); font-weight: 700; color: var(--text-dim); padding: 14px 10px 6px; }
+.mu-song {
+  display: grid;
+  grid-template-columns: 34px 0 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: default;
+  user-select: none;
+  min-width: 0;
+}
+.mu-song:has(> .mu-song-time + .mu-song-time) { grid-template-columns: 34px 0 1fr auto auto; }
+.mu-song:hover { background: var(--bg-hover); }
+.mu-song.selected { background: var(--accent-soft); }
+.mu-song.playing .mu-song-title, .mu-song.playing .mu-song-num { color: var(--accent); }
+.mu-song-num { color: var(--text-dim); font-size: var(--fs-sm); text-align: right; font-variant-numeric: tabular-nums; }
+.mu-song-art { position: relative; width: 40px; height: 40px; border-radius: 5px; overflow: hidden; background: var(--bg-hover); }
+.mu-song:has(.mu-song-art) { grid-template-columns: 40px 0 1fr auto auto; }
+.mu-song-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* The play button sits over the number/cover on hover. */
+.mu-song-play {
+  position: relative; left: -46px;
+  width: 34px; height: 34px; border-radius: 50%;
+  display: grid; place-items: center;
+  color: var(--text);
+  opacity: 0;
+}
+.mu-song:hover .mu-song-play, .mu-song:focus-within .mu-song-play { opacity: 1; }
+.mu-song:hover .mu-song-num, .mu-song:focus-within .mu-song-num { visibility: hidden; }
+.mu-song-text { min-width: 0; }
+.mu-song-title { font-size: var(--fs-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mu-song-sub { font-size: var(--fs-xs); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+.mu-song-time { font-size: var(--fs-xs); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.mu-song-more { opacity: 0; padding: 4px 6px; }
+.mu-song:hover .mu-song-more, .mu-song:focus-within .mu-song-more { opacity: 1; }
+.mu-fav { color: var(--accent); margin-left: 6px; font-size: var(--fs-xs); }
+.mu-selbar {
+  position: sticky; top: calc(var(--topbar-h) + 4px); z-index: 5;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; margin-bottom: 8px;
+  background: var(--bg-raised); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow);
+  font-size: var(--fs-sm);
+}
+.mu-selbar > span { margin-right: auto; font-weight: 600; }
+.mu-songs.editing .mu-song { grid-template-columns: 24px 1fr auto auto; cursor: grab; }
+.mu-grip { color: var(--text-dim); display: grid; place-items: center; cursor: grab; }
+.dragging { opacity: 0.4; }
+.drop-target { box-shadow: inset 0 2px 0 var(--accent); }
+
+/* ---------- Dialogs ---------- */
+.mu-info { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; font-size: var(--fs-sm); }
+.mu-info dt { color: var(--text-dim); }
+.mu-info dd { margin: 0; word-break: break-word; }
+.mu-info-missing { color: var(--warn) !important; margin-bottom: 12px; }
+.mu-mix-intro { margin-bottom: 12px; }
+.mu-mix-presets { display: flex; gap: 8px; margin-bottom: 16px; }
+.mu-mix-presets .btn.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.mu-mix-row { display: grid; grid-template-columns: 1fr 200px 28px; align-items: center; gap: 14px; padding: 7px 0; }
+.mu-mix-name { font-weight: 600; font-size: var(--fs-sm); }
+.mu-mix-help { color: var(--text-dim); font-size: var(--fs-xs); }
+.mu-mix-val { font-variant-numeric: tabular-nums; text-align: right; font-weight: 700; }
+.mu-mix-row input { accent-color: var(--accent); }
+
+/* ---------- Smart playlist editor ---------- */
+.mu-form { display: flex; flex-direction: column; gap: 16px; max-width: 560px; }
+.mu-field { display: flex; flex-direction: column; gap: 6px; }
+.mu-field-label { font-weight: 600; font-size: var(--fs-sm); }
+.mu-field-help { color: var(--text-dim); font-size: var(--fs-xs); }
+.mu-field.mu-check { flex-direction: row; align-items: center; gap: 10px; }
+.mu-pair { display: flex; align-items: center; gap: 10px; }
+.mu-pair .mu-input { width: 110px; }
+.mu-chips, .mu-chip-results { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.mu-chip { padding: 5px 11px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); font-size: var(--fs-xs); font-weight: 600; }
+.mu-chip.add { background: var(--bg-raised); color: var(--text); border: 1px solid var(--border); }
+
+/* ---------- Mini player ---------- */
+#content.has-music { padding-bottom: 112px; }
+#music-bar {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 68px;
+  z-index: 70;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 16px;
+  background: var(--player-bg);
+  border-top: 1px solid var(--border);
+  color: var(--text);
+}
+#music-bar.hidden { display: none; }
+.mb-progress { position: absolute; left: 0; right: 0; top: -1px; height: 3px; background: var(--track-empty); cursor: pointer; }
+.mb-progress:hover { height: 5px; top: -2px; }
+.mb-progress-fill { height: 100%; background: var(--accent); }
+.mb-cover { position: relative; width: 46px; height: 46px; border-radius: 6px; overflow: hidden; flex-shrink: 0; background: var(--bg-hover); }
+.mb-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mb-text { flex: 1 1 auto; min-width: 0; text-align: left; }
+.mb-title { font-weight: 700; font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-sub { color: var(--text-dim); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+.mb-controls { display: flex; align-items: center; gap: 2px; }
+.mb-play, .np-play { background: var(--accent-strong) !important; color: #fff !important; border-radius: 50% !important; }
+.mb-play { width: 40px; height: 40px; }
+.mb-time { color: var(--text-dim); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 86px; text-align: center; }
+.mu-volume { display: flex; align-items: center; gap: 4px; }
+.mu-vol, .mu-scrub {
+  -webkit-appearance: none; appearance: none;
+  height: 4px; border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent) var(--fill, 0%), var(--track-empty) var(--fill, 0%));
+  cursor: pointer;
+}
+.mu-vol { width: 96px; }
+.mu-vol::-webkit-slider-thumb, .mu-scrub::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--scrub-thumb); border: none;
+}
+@media (max-width: 1100px) {
+  .mu-volume, .mb-time { display: none; }
+}
+
+/* ---------- Now Playing ---------- */
+#now-playing {
+  position: fixed; inset: 0;
+  z-index: 85;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+#now-playing.hidden { display: none; }
+.np-backdrop {
+  position: absolute; inset: -60px;
+  background-size: cover; background-position: center;
+  filter: blur(60px) saturate(1.3);
+  opacity: 0.45;
+  /* Its own layer, so the scrubber moving each second doesn't repaint it. */
+  will-change: transform;
+}
+.np-close { position: absolute; top: 18px; left: 20px; z-index: 2; }
+.np-body {
+  position: relative; z-index: 1;
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) minmax(320px, 440px);
+  gap: 40px;
+  padding: 56px 48px 32px;
+}
+.np-left { display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; gap: 18px; }
+.np-cover {
+  position: relative;
+  width: min(48vh, 440px); aspect-ratio: 1;
+  border-radius: 14px; overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  background: var(--bg-hover);
+}
+.np-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.np-meta { text-align: center; max-width: 560px; width: 100%; }
+.np-title { font-size: var(--fs-2xl); font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-sub { color: var(--text-body); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-chapter { color: var(--text-dim); font-size: var(--fs-sm); margin-top: 4px; min-height: 1.2em; }
+.np-scrub { width: min(560px, 100%); }
+.mu-scrub { width: 100%; height: 5px; }
+.np-times { display: flex; justify-content: space-between; color: var(--text-dim); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; margin-top: 6px; }
+.np-transport { display: flex; align-items: center; gap: 10px; }
+.np-transport .mu-ibtn .ico { width: 26px; height: 26px; }
+.np-play { width: 60px; height: 60px; }
+.np-play .ico { width: 30px !important; height: 30px !important; }
+.np-toggle.on { color: var(--accent); background: var(--accent-soft); }
+.np-extras { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.np-sc.active { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.np-right { display: flex; flex-direction: column; min-height: 0; background: color-mix(in srgb, var(--bg-raised) 75%, transparent); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.np-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.np-tab { flex: 1; padding: 12px; font-weight: 700; font-size: var(--fs-sm); color: var(--text-dim); border-bottom: 2px solid transparent; }
+.np-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.np-panel { flex: 1; overflow-y: auto; padding: 10px; }
+.np-empty { color: var(--text-dim); padding: 20px 10px; line-height: var(--lh-body); }
+.np-queue-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 10px; color: var(--text-dim); font-size: var(--fs-xs); font-weight: 600; }
+.np-qrow { display: grid; grid-template-columns: 20px 40px 1fr auto; align-items: center; gap: 10px; padding: 6px; border-radius: 8px; cursor: grab; }
+.np-qrow:hover, .np-qrow:focus-visible { background: var(--bg-hover); }
+.np-qart { position: relative; width: 40px; height: 40px; border-radius: 5px; overflow: hidden; background: var(--bg-hover); }
+.np-qart img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.np-lyrics { padding: 10px 8px 40vh; }
+.np-lyric {
+  display: block; width: 100%; text-align: left;
+  font-size: var(--fs-lg); font-weight: 700; line-height: 1.35;
+  padding: 6px 4px;
+  color: var(--text-body);
+  white-space: pre-wrap;
+}
+.np-lyrics.timed .np-lyric { color: var(--text-dim); cursor: pointer; transition: color 0.2s; }
+.np-lyrics.timed .np-lyric:hover { color: var(--text-body); }
+.np-lyrics.timed .np-lyric.current { color: var(--text); }
+.np-chapter-row { display: flex; justify-content: space-between; gap: 12px; width: 100%; text-align: left; padding: 10px; border-radius: 8px; font-size: var(--fs-sm); }
+.np-chapter-row:hover { background: var(--bg-hover); }
+.np-chapter-row.current { color: var(--accent); font-weight: 700; }
+.np-chapter-time { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+@media (max-width: 1000px) {
+  .np-body { grid-template-columns: 1fr; overflow-y: auto; }
+  .np-right { min-height: 420px; }
+}
