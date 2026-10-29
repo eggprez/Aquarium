@@ -53,6 +53,8 @@ import { registerAdaptiveQuality } from "./adaptive";
 import { wireSmoothScroll } from "./scroll";
 import { initTheme } from "./theme";
 import { wireSpatialNav } from "./spatial";
+import { fillChannelsPanel, liveTitleLines, stepChannel } from "./channels-panel";
+import { preloadLineup } from "./lineup";
 import { wirePrefetch } from "./prefetch";
 import { clearCache, hydrateCache, getCached, setCached } from "./cache";
 import { renderLogin } from "./views/login";
@@ -621,6 +623,8 @@ async function showShell(): Promise<void> {
   syncOfflineProgress(false);
   // Pick the season-download queue back up where the last run left it.
   void restoreDownloadQueue();
+  // Live TV's line-up, so the guide and any "On Now" row open with it there.
+  preloadLineup();
 }
 
 function showLogin(): void {
@@ -1172,6 +1176,12 @@ function toggleEpisodePanel(): void {
   });
 }
 
+/** Live TV's line-up, to change channel without leaving the player. See
+ *  channels-panel.ts; shown only while a channel plays. */
+function toggleChannelsPanel(): void {
+  toggleBarPanel("channels", "Channels", (panel) => fillChannelsPanel(panel, closeBarPanel));
+}
+
 function toggleSleepPanel(): void {
   toggleBarPanel("sleep", "Sleep", (panel) => {
     const rebuild = (): void => {
@@ -1533,7 +1543,10 @@ async function startUpNext(): Promise<void> {
  * "Series Season 2, Episode 4 · Name" shape MPRIS and toasts want, which is
  * the wrong shape for two lines that are laid out separately.
  */
-function playerTitleLines(item: any, fallback: string): { line1: string; line2: string } {
+function playerTitleLines(item: any, fallback: string): { line1: string; line2: string; tip?: string } {
+  // A channel: its name, then what's on and what's coming up.
+  const live = liveTitleLines(item);
+  if (live) return live;
   if (item?.Type === "Episode" && item.SeriesName) {
     const s = item.ParentIndexNumber, e = item.IndexNumber;
     return {
@@ -1693,6 +1706,7 @@ function buildPlayerBar(): void {
       pbButton("pb-sleep", PB_ICONS.sleep, "Sleep timer", () => toggleSleepPanel()),
       pbButton("pb-quality", PB_ICONS.quality, "Stream quality", () => toggleQualityPicker()),
       pbButton("pb-episodes", PB_ICONS.episodes, "Up next (this season's episodes)", () => toggleEpisodePanel()),
+      pbButton("pb-channels", ICONS.livetv, "Channels (Page Up/Down changes channel)", () => toggleChannelsPanel()),
       pbButton("pb-pip", PB_ICONS.pip, "Picture in picture (p)", () => setVideoPip(!videoPip)),
       pbButton("pb-fullscreen", PB_ICONS.fullscreen, "Fullscreen (f, Esc exits)", () =>
         setVideoFullscreen(!videoFullscreen)
@@ -1816,12 +1830,12 @@ function updatePlayerBar(st: any): void {
   // of its own is already the thing PiP would make.
   const pipBtn = $("pb-pip");
   if (pipBtn) pipBtn.style.display = playerEmbedded ? "" : "none";
-  const { line1, line2 } = playerTitleLines(getNowPlaying()?.item, st.title || "Playing");
+  const { line1, line2, tip } = playerTitleLines(getNowPlaying()?.item, st.title || "Playing");
   const titleEl = $("pb-title") as HTMLElement;
   titleEl.textContent = line1;
   // The box is narrow and the text is ellipsised; the tooltip is the only way
   // to read the whole of "The One Where Everybody Finds Out".
-  titleEl.title = st.title || line1;
+  titleEl.title = tip ?? (st.title || line1);
   const subtitleEl = $("pb-subtitle") as HTMLElement;
   subtitleEl.textContent = line2;
   subtitleEl.title = line2;
@@ -2507,6 +2521,11 @@ async function boot(): Promise<void> {
       case "ArrowUp":
         ev.preventDefault();
         bumpVolume(5);
+        break;
+      // Channel up and down, while a channel plays.
+      case "PageUp":
+      case "PageDown":
+        if (getQualityState()?.live && stepChannel(ev.key === "PageUp" ? -1 : 1)) ev.preventDefault();
         break;
       case "ArrowDown":
         ev.preventDefault();

@@ -2200,3 +2200,24 @@ h1.page-title { font-size: var(--fs-2xl); margin-bottom: 20px; }
 .tuning-name { margin: 0; font-size: 1.5rem; font-weight: 700; }
 .tuning-status { margin: 0; color: #9a9ab0; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; max-width: 48ch; }
 .tuning .btn { --text: #ececf4; --border: #3a3a4e; color: #ececf4; background: transparent; margin-top: 6px; }
+
+/* ---------- Player: Live TV channels ---------- */
+#player-bar:not(.live) #pb-channels { display: none; }
+.pb-ch-tile { width: 240px; }
+.pb-ch-logo {
+  width: 72px; height: 44px; flex-shrink: 0;
+  border-radius: 6px; overflow: hidden;
+  background: var(--bg-hover);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--fs-xs); font-weight: 700; color: var(--text-dim);
+}
+.pb-ch-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.pb-ch-name {
+  font-size: var(--fs-sm); font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pb-ch-num { color: var(--text-dim); font-weight: 500; margin-right: 6px; font-variant-numeric: tabular-nums; }
+.pb-ch-tile .pb-queue-status { display: block; overflow: hidden; text-overflow: ellipsis; }
+/* How far through the programme on now. Static: redrawn when the panel is. */
+.pb-ch-progress { display: block; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.pb-ch-progress > span { display: block; height: 100%; background: var(--accent); }
