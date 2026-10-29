@@ -1,7 +1,7 @@
 import * as api from "../api";
 import * as iptv from "../iptv";
 import { getNowPlaying } from "../playback";
-import { loadLineup, lineupKey, playChannel } from "../lineup";
+import { loadLineup, lineupKey, onNow as lineupOnNow, playChannel } from "../lineup";
 import { el, clear, art, emptyState, icon, openDialog, skeletonRows } from "../ui";
 import { getCached, setCached } from "../cache";
 import { invoke } from "@tauri-apps/api/core";
@@ -861,24 +861,8 @@ export function tuneChannel(ch: any): void {
  * when there is no Live TV at all.
  */
 export async function onNow(limit = 16): Promise<{ channel: any; program: any }[]> {
-  if (iptv.isCustom()) {
-    const now = new Date();
-    const [channels, programs] = await Promise.all([
-      iptv.getChannels(),
-      iptv.getPrograms(now, new Date(now.getTime() + 60_000)),
-    ]);
-    const byChannel = new Map<string, any>();
-    for (const p of programs) if (!byChannel.has(p.ChannelId)) byChannel.set(p.ChannelId, p);
-    return channels
-      .filter((c) => byChannel.has(c.Id))
-      .slice(0, limit)
-      .map((c) => ({ channel: c, program: byChannel.get(c.Id) }));
-  }
-  const channels = await api.getChannels();
-  return channels
-    .filter((c: any) => c.CurrentProgram)
-    .slice(0, limit)
-    .map((c: any) => ({ channel: c, program: c.CurrentProgram }));
+  const rows = await lineupOnNow(limit);
+  return rows.map((r) => ({ channel: r.channel, program: r.now }));
 }
 
 /** One On Now card: the programme over its channel, with how far in it is. */

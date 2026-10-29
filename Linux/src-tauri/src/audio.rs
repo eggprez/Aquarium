@@ -404,6 +404,7 @@ impl AudioPlayer {
             volume: req.volume.unwrap_or(100.0).clamp(0.0, 130.0),
             start: None,
             auth_header,
+            user_agent: None,
             prefs,
         };
         let (session, rx) = mpv::Session::start(opts)?;
