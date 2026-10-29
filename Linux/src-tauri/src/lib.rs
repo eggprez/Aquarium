@@ -1,3 +1,4 @@
+mod audio;
 mod config;
 mod downloads;
 mod egl;
@@ -305,7 +306,49 @@ async fn player_play(
     player: State<'_, player::Player>,
     req: player::PlayRequest,
 ) -> Result<(), String> {
+    // Music and video never play over each other; see audio.rs.
+    app.state::<audio::AudioPlayer>().stop(&app).await;
     player.play(app, req).await
+}
+
+// ---- Music and audiobooks (audio.rs) ----
+
+#[tauri::command]
+async fn audio_play(app: AppHandle, audio: State<'_, audio::AudioPlayer>, req: audio::PlayRequest) -> Result<(), String> {
+    audio.play(app, req).await
+}
+
+#[tauri::command]
+async fn audio_set_next(audio: State<'_, audio::AudioPlayer>, next: Option<audio::AudioTrack>) -> Result<(), String> {
+    audio.set_next(next).await
+}
+
+#[tauri::command]
+async fn audio_command(audio: State<'_, audio::AudioPlayer>, cmd: Vec<Value>) -> Result<(), String> {
+    audio.send(Value::Array(cmd)).await
+}
+
+#[tauri::command]
+async fn audio_stop(app: AppHandle, audio: State<'_, audio::AudioPlayer>) -> Result<(), String> {
+    audio.stop(&app).await;
+    Ok(())
+}
+
+#[tauri::command]
+fn audio_status(audio: State<'_, audio::AudioPlayer>) -> audio::AudioStatus {
+    audio.status()
+}
+
+/// The frontend's queue, for MPRIS's track list and Next/Previous.
+#[tauri::command]
+fn audio_set_queue(
+    audio: State<'_, audio::AudioPlayer>,
+    entries: Vec<audio::AudioTrack>,
+    index: usize,
+    can_next: bool,
+    can_prev: bool,
+) {
+    audio.set_queue(entries, index, can_next, can_prev);
 }
 
 #[tauri::command]
@@ -690,6 +733,7 @@ pub fn run() {
                 .build(),
         )
         .manage(player::Player::new())
+        .manage(audio::AudioPlayer::new())
         .manage(downloads::DlManager::default())
         .setup(|app| {
             // Reopen at the size the window was last closed at. Position,
@@ -954,6 +998,12 @@ pub fn run() {
             player_set_viewport,
             player_set_pip,
             player_mpv_command,
+            audio_play,
+            audio_set_next,
+            audio_command,
+            audio_stop,
+            audio_status,
+            audio_set_queue,
             quit_confirm,
             download_start,
             download_cancel,
@@ -972,6 +1022,7 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 app.state::<player::Player>().stop_sync();
+                app.state::<audio::AudioPlayer>().stop_sync();
             }
         });
 }
