@@ -1258,6 +1258,13 @@ img.art.has-ph {
 }
 .dl-bar > div { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.3s; }
 .dl-actions { display: flex; gap: 6px; }
+/* The selected row (a click focuses it), which the Delete key removes. */
+.dl-row[data-dl-ids]:focus { outline: none; border-color: var(--accent); }
+.dl-body .dl-overview {
+  font-size: var(--fs-xs); color: var(--text-dim); margin-top: 4px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.dl-hold { color: var(--text-dim); }
 .sync-pill {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: var(--fs-xs); color: var(--text-dim);
