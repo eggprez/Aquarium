@@ -42,7 +42,9 @@ struct StreamInfoInspector: View {
         }
         .formStyle(.grouped)
         .textSelection(.enabled)
-        .navigationTitle("Stream Info")
+        // No title of its own: an inspector column has nowhere to draw one,
+        // and a `navigationTitle` here would be taken for the window's,
+        // which is the title of what is playing.
     }
 
     private func section(_ title: String, _ rows: [PlayerStreamRows.Row]) -> some View {

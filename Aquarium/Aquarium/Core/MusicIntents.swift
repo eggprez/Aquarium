@@ -1,7 +1,8 @@
 //  What Siri and Shortcuts can ask of the music player: resume the book,
 //  play a book by name, play an album, an artist, a playlist or a song,
-//  shuffle everything, play a genre. The video ones are in AppIntents.swift;
-//  these join them in `AquariumShortcuts`.
+//  shuffle everything, play a genre. The video ones are in AppIntents.swift,
+//  where `AquariumShortcuts` gives resume-the-book, play-music and shuffle
+//  a voice phrase; the rest are for the Shortcuts app.
 //
 //  Each resolves against the server when it can be reached and against the
 //  downloads when it can't, the way the music pages do.

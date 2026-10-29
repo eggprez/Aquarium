@@ -40,8 +40,33 @@ const STALL_POLL: std::time::Duration = std::time::Duration::from_secs(5);
 /// Total silence from the server before the download is declared stalled.
 const STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
-fn item_dir(item_id: &str) -> PathBuf {
-    config::downloads_dir().join(item_id)
+/// The folder a download lives in, for an id that is safe to use as one.
+///
+/// The id arrives over IPC and is joined straight onto the downloads folder,
+/// so `..` (or anything with a slash, or an absolute path, which `join` would
+/// take in place of the base) would point `delete` at the data folder or
+/// beyond. Jellyfin item ids are GUIDs, so anything that isn't a short run of
+/// letters, digits, `-` and `_` is refused rather than cleaned up.
+pub(crate) fn item_dir(item_id: &str) -> Result<PathBuf, String> {
+    let ok = !item_id.is_empty()
+        && item_id.len() <= 64
+        && item_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if !ok {
+        return Err(format!("not a valid item id: {:?}", item_id.chars().take(70).collect::<String>()));
+    }
+    Ok(config::downloads_dir().join(item_id))
+}
+
+/// The same guard for the file name a download is saved under, which is
+/// joined onto the item's folder. The frontend already replaces anything
+/// unusual in it; this only has to stop it leaving the folder.
+fn check_file_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\0') {
+        return Err(format!("not a valid file name: {name:?}"));
+    }
+    Ok(())
 }
 
 /// Bytes an unprivileged process can still write to the filesystem holding the
@@ -109,7 +134,8 @@ impl DlManager {
             }
         }
 
-        let dir = item_dir(&req.item_id);
+        let dir = item_dir(&req.item_id)?;
+        check_file_name(&req.file_name)?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
         let mut meta = req.meta.clone();
@@ -376,7 +402,7 @@ async fn run_download(
 /// block written by `start`) and start it again. Any existing .part file is
 /// picked up by the Range-resume logic in `run_download`.
 pub fn restart(app: AppHandle, mgr: &DlManager, item_id: &str) -> Result<(), String> {
-    let dir = item_dir(item_id);
+    let dir = item_dir(item_id)?;
     let meta: Value = std::fs::read_to_string(dir.join("meta.json"))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -484,7 +510,10 @@ pub fn list(mgr: &DlManager) -> Vec<Value> {
 /// Mirror server-side watch state into a download's meta.json (display only —
 /// unlike progress::store_local this does NOT enqueue anything for sync).
 pub fn set_watch_state(item_id: &str, position_ticks: u64, played: bool) {
-    let meta_path = item_dir(item_id).join("meta.json");
+    let Ok(dir) = item_dir(item_id) else {
+        return;
+    };
+    let meta_path = dir.join("meta.json");
     let Ok(s) = std::fs::read_to_string(&meta_path) else {
         return;
     };
@@ -499,7 +528,7 @@ pub fn set_watch_state(item_id: &str, position_ticks: u64, played: bool) {
 }
 
 pub fn delete(item_id: &str) -> Result<(), String> {
-    let dir = item_dir(item_id);
+    let dir = item_dir(item_id)?;
     if dir.exists() {
         std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
     }

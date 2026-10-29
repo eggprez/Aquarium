@@ -78,19 +78,24 @@ final class MusicPlayer {
     /// Where the queue came from — an album's name, "Rock Mix", a playlist —
     /// for the top of the Now Playing screen.
     private(set) var queueTitle: String?
-    private(set) var isShuffled = false
+    /// Said to the system as it changes, as `repeatMode` is: the lock screen,
+    /// CarPlay's shuffle button and a watch's all read the remote command
+    /// centre, which otherwise only heard about it at the next track.
+    private(set) var isShuffled = false {
+        didSet { if isShuffled != oldValue { NowPlaying.shared.refreshCommandAvailability() } }
+    }
     private(set) var sleepDeadline: Date?
     /// The audiobook's chapters, when the current item has them.
     private(set) var chapters: [ChapterInfo] = []
     /// The track reached the end of the queue and stopped; Play starts it over.
     private(set) var reachedEndOfQueue = false
     /// The station the queue is being dealt from, when it is one. It re-deals
-    /// Up Next after every song finished or skipped and every thumb. Nil for
-    /// an album, a playlist or anything else picked by hand — and then there
-    /// is nothing for a thumb to steer.
+    /// Up Next after every song finished or skipped. Nil for an album, a
+    /// playlist or anything else picked by hand.
     private(set) var station: LiveStation? {
         didSet {
-            // The lock screen's thumbs come and go with the station.
+            // Shuffle and repeat mean nothing to a station, which deals for
+            // itself; the lock screen's controls follow.
             if station !== oldValue { NowPlaying.shared.refreshCommandAvailability() }
         }
     }
@@ -102,6 +107,7 @@ final class MusicPlayer {
         didSet {
             Preferences.shared.musicRepeat = repeatMode.rawValue
             prepareNext()
+            NowPlaying.shared.refreshCommandAvailability()
         }
     }
 
@@ -139,6 +145,11 @@ final class MusicPlayer {
     var hasUpNext: Bool {
         guard let i = currentIndex else { return false }
         return i + 1 < queue.count
+    }
+    /// `upNext.count`, the same way.
+    var upNextCount: Int {
+        guard let i = currentIndex else { return 0 }
+        return max(0, queue.count - i - 1)
     }
     var artworkURL: URL? { current.flatMap { MusicArt.url($0, width: 600) } }
 
@@ -223,6 +234,7 @@ final class MusicPlayer {
     private static let reportInterval: TimeInterval = 10
 
     private init() {
+        Launch.mark("music player init")
         repeatMode = RepeatMode(rawValue: Preferences.shared.musicRepeat) ?? .off
         player.actionAtItemEnd = .advance
         player.allowsExternalPlayback = false
@@ -483,8 +495,10 @@ final class MusicPlayer {
             return
         }
         guard let target else {
-            learn(.skipped)
-            reachedEnd()
+            // Reported where it was skipped, not as heard to the end — an
+            // external Next (the lock screen, CarPlay, AirPods, the Watch)
+            // reaches here on the last track as readily as the button does.
+            reachedEnd(skippedAt: position)
             return
         }
         leaveAs = .skipped
@@ -843,65 +857,21 @@ final class MusicPlayer {
               )
         else { return }
         station.session.note(prepared.item, reaction)
-        // A Surprise Mix grows towards what is heard to the end: more like
-        // it joins the pool, once per song, and the next deal can reach it.
-        if station.profile.isSurprise, reaction == .finished {
+        if station.profile.isSurprise {
+            // The mood this session is in, a step at a time, for the next
+            // one at this time of day — see `MoodMemory`.
+            MoodMemory.record(station.session)
+        }
+        // A Surprise Mix grows towards what is heard to the end — once the
+        // session has backed that direction more than once: more like it
+        // joins the pool, once per song, and the next deal can reach it.
+        if station.profile.isSurprise, reaction == .finished, station.session.supports(prepared.item) {
             Task {
                 let grew = await StationBuilder.widen(station, from: prepared.item)
                 if grew, self.station === station { self.scheduleRestation() }
             }
         }
         scheduleRestation()
-    }
-
-    /// Whether thumbs mean anything now: a station is dealing the queue and
-    /// a song is playing. A thumb is advice to that station and nothing
-    /// else, so an album or a playlist picked by hand offers none.
-    var canThumb: Bool { station != nil && current?.isSong == true }
-
-    /// The thumb on the song playing, in this station: 1 up, -1 down, nil
-    /// neither — and nil whenever `canThumb` is false.
-    var thumb: Int? {
-        guard let station, let song = current, song.isSong else { return nil }
-        return station.session.thumbs[song.Id]
-    }
-
-    /// Thumbs up (1), down (-1) or neither (nil) for the song playing, told
-    /// to the station playing it and forgotten when it ends. Down also skips
-    /// the song, and this station never deals it again; up pulls in more
-    /// like it. Does nothing when `canThumb` is false.
-    func setThumb(_ value: Int?) {
-        guard canThumb, let station, let song = current else { return }
-        guard station.session.thumbs[song.Id] != value else { return }
-        station.session.setThumb(song, value)
-        // The lock screen shows the thumb too, and after a skip, the next
-        // song's lack of one.
-        defer { NowPlaying.shared.refreshCommandAvailability() }
-        if value == -1 {
-            if let c = currentIndex {
-                let later = queue.indices.filter { $0 > c && queue[$0].item.Id == song.Id }
-                for i in later.reversed() { queue.remove(at: i) }
-            }
-            // The thumb has said all there is to say about it: the skip that
-            // follows isn't counted again as a skip.
-            if let prepared = currentPrepared {
-                learnedFrom = ObjectIdentifier(prepared.avItem)
-                heardSeconds = 0
-                lastTickPosition = nil
-            }
-            // `learn` won't ask for the re-deal, having been told the song is
-            // already accounted for.
-            if hasNext { skipNext() }
-            scheduleRestation()
-        } else if value == 1 {
-            // More like this, as well as more of this.
-            Task {
-                await StationBuilder.widen(station, from: song)
-                scheduleRestation()
-            }
-        } else {
-            scheduleRestation()
-        }
     }
 
     /// Re-deal once whatever is under way has settled — `currentIndex` has
@@ -1053,14 +1023,24 @@ final class MusicPlayer {
         prepareNext()
     }
 
-    /// The last track ended and nothing was queued after it.
-    private func reachedEnd() {
-        learn(.finished)
-        let finished = closingReport(position: duration)
+    /// The last track ended and nothing was queued after it — or, with
+    /// `skippedAt`, was skipped at that position with nothing after it.
+    private func reachedEnd(skippedAt: Double? = nil) {
+        learn(skippedAt == nil ? .finished : .skipped)
+        let finished = closingReport(position: skippedAt ?? duration)
         let finishedSource = currentPrepared?.source
         #if !os(tvOS)
-        if let heard = current, heard.isSong { OfflineMusicIndex.shared.notePlayed(heard.Id) }
+        if skippedAt == nil, let heard = current, heard.isSong { OfflineMusicIndex.shared.notePlayed(heard.Id) }
         #endif
+        if skippedAt != nil {
+            // A song that ran out has already stopped by itself. One skipped
+            // is still in the player, and left there it went on playing
+            // under a screen that said the queue had ended at 0:00.
+            isSwitching = true
+            player.pause()
+            player.removeAllItems()
+            isSwitching = false
+        }
         teardownItemObservers()
         currentPrepared = nil
         nextPrepared = nil
@@ -1213,7 +1193,7 @@ final class MusicPlayer {
         // second, a cross-process write from the main actor, to say what the
         // system had already worked out. Pauses, speed and track changes post
         // the whole card themselves (see `updateNowPlaying`).
-        let rate = isPlaying ? speed : 0
+        let rate = nowPlayingRate
         let isStale: Bool = {
             guard let anchor = nowPlayingAnchor else { return true }
             let expected = anchor.position + rate * now.timeIntervalSince(anchor.at)
@@ -1363,7 +1343,7 @@ final class MusicPlayer {
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: item.title,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: position,
-            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? speed : 0,
+            MPNowPlayingInfoPropertyPlaybackRate: nowPlayingRate,
             MPNowPlayingInfoPropertyDefaultPlaybackRate: speed,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
             MPNowPlayingInfoPropertyIsLiveStream: false,
@@ -1385,7 +1365,7 @@ final class MusicPlayer {
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
-        lastNowPlayingRate = isPlaying ? speed : 0
+        lastNowPlayingRate = nowPlayingRate
         nowPlayingAnchor = (position, Date(), duration)
         if artworkFor != artworkURL {
             artworkFor = artworkURL
@@ -1400,13 +1380,19 @@ final class MusicPlayer {
             return
         }
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = position
-        info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? speed : 0
+        info[MPNowPlayingInfoPropertyPlaybackRate] = nowPlayingRate
         if duration > 0 { info[MPMediaItemPropertyPlaybackDuration] = duration }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
+    /// The rate the lock screen, CarPlay and a watch run their clocks at.
+    /// Nothing while the stream is stalled: a buffering player still says
+    /// "playing", and posted at full speed the system's clock ran on through
+    /// the stall and then jumped back when the next tick corrected it.
+    private var nowPlayingRate: Double { isPlaying && !isBuffering ? speed : 0 }
+
     private func updateNowPlayingRateIfChanged() {
-        let rate = isPlaying ? speed : 0
+        let rate = nowPlayingRate
         guard rate != lastNowPlayingRate else { return }
         updateNowPlaying()
     }

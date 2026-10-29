@@ -64,6 +64,11 @@ enum Theme {
     static let text = adaptive(dark: 0xECECF4, light: 0x16161F)
     static let textBody = adaptive(dark: 0xC9C9DA, light: 0x3D3D4E)
     static let textDim = adaptive(dark: 0x9A9AB0, light: 0x63637A)
+
+    /// An iPad's sidebar: a step up from the page, a step short of a card,
+    /// so the column reads as a surface the pages sit beside rather than a
+    /// list painted on the page.
+    static let sidebar = adaptive(dark: 0x121219, light: 0xF1F1F7)
     #endif
 
     /// A word that goes somewhere. `accent` itself is a fill colour — mid
@@ -115,10 +120,14 @@ enum Theme {
         startPoint: .top, endPoint: .bottom
     )
 
-    /// Twelve points is an iOS card. The Mac's own media apps round their
-    /// artwork at six to eight, and anything rounder reads as a widget.
+    /// Twelve points is an iOS card. The Mac and the iPad share fourteen:
+    /// their cards are bigger and sit further off, and the two screens are
+    /// meant to be the same design at two sizes — see `PadSidebar`.
     #if os(macOS)
-    static let cornerRadius: CGFloat = 8
+    static let cornerRadius: CGFloat = 14
+    #elseif os(iOS)
+    /// Fourteen on an iPad, whose cards are bigger and sit further off.
+    static var cornerRadius: CGFloat { Metrics.phoneLayout ? 12 : 14 }
     #else
     static let cornerRadius: CGFloat = 12
     #endif
@@ -141,36 +150,29 @@ enum Theme {
 
 /// The card treatment used by every poster and row tile.
 ///
-/// On the Mac the hairline goes: a stroke around every poster is what made a
-/// grid of them read as a page of web cards. The one exception is dark mode,
-/// where artwork with a black edge sinks into a near-black window and a
-/// one-pixel separator is what keeps the tiles' shapes.
+/// On the Mac and the iPad the hairline goes: a stroke around every poster
+/// is what made a grid of them read as a page of web cards. The artwork
+/// keeps its own edge, and the room between tiles does the rest. (The Mac
+/// used to keep a separator in dark mode, where a black-edged poster sinks
+/// into a near-black window; the iPad's grid showed that the gap between
+/// tiles holds their shapes on its own, and the Mac follows it.)
 struct CardChrome: ViewModifier {
     var radius: CGFloat = Theme.cornerRadius
-    #if os(macOS)
-    @Environment(\.colorScheme) private var colorScheme
-    #endif
 
     func body(content: Content) -> some View {
         content
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(strokeStyle, lineWidth: lineWidth)
+                    .strokeBorder(Theme.border.opacity(0.6), lineWidth: lineWidth)
             )
-    }
-
-    private var strokeStyle: AnyShapeStyle {
-        #if os(macOS)
-        colorScheme == .dark ? AnyShapeStyle(.separator) : AnyShapeStyle(.clear)
-        #else
-        AnyShapeStyle(Theme.border.opacity(0.6))
-        #endif
     }
 
     private var lineWidth: CGFloat {
         #if os(macOS)
-        colorScheme == .dark ? 1 : 0
+        0
+        #elseif os(iOS)
+        Metrics.phoneLayout ? 0.5 : 0
         #else
         0.5
         #endif
@@ -194,6 +196,25 @@ extension View {
     func paletteBar() -> some View {
         #if os(iOS)
         toolbarBackground(Theme.background, for: .navigationBar)
+        #else
+        self
+        #endif
+    }
+
+    /// Paints a `Form` or a `List` in the app's own background colour rather
+    /// than the system's grouped one — the page under a `paletteBar`.
+    ///
+    /// The grouped background is pure black in dark mode, so every settings
+    /// page sat under a bar of the app's near-black with a seam where the one
+    /// met the other once the page scrolled, and an iPad's Settings, which is
+    /// all list, was a shade darker than every page around it. The rows keep
+    /// the system's raised fill, which reads on the page colour in both
+    /// appearances.
+    @ViewBuilder
+    func palettePage() -> some View {
+        #if os(iOS)
+        scrollContentBackground(.hidden)
+            .background(Theme.background)
         #else
         self
         #endif
@@ -234,6 +255,11 @@ struct StatusPill: View {
         #else
         Text(text)
             .font(.caption.weight(.semibold))
+            // A word in a capsule is one line at its own width. Squeezed by
+            // what it sits beside, it broke as "Con-/nected" rather than give
+            // up a point.
+            .lineLimit(1)
+            .fixedSize()
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
             .background(colour.opacity(0.16), in: Capsule())

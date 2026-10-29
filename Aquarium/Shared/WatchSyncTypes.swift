@@ -56,6 +56,25 @@ struct WatchCredentials: Codable, Hashable, Sendable {
 struct WatchMirrorPlan: Codable, Hashable, Sendable {
     var bookIds: [String] = []
     var playlistIds: [String] = []
+    /// Everything "Download to Apple Watch" was tapped for on the phone —
+    /// an album, a book, an artist, a song — and not since taken off. The
+    /// phone keeps this list and sends it with every plan; the watch checks
+    /// it against what it holds on every pass and fetches what is missing,
+    /// so a download cut short by a dead link or a killed app is picked up
+    /// again rather than lost. Playlists go through `playlistIds` instead.
+    var wants: [WatchDownloadRequest] = []
+}
+
+extension WatchMirrorPlan {
+    private enum CodingKeys: String, CodingKey { case bookIds, playlistIds, wants }
+
+    /// Key by key, for the same reason as `PhoneContext`.
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        bookIds = try c.decodeIfPresent([String].self, forKey: .bookIds) ?? []
+        playlistIds = try c.decodeIfPresent([String].self, forKey: .playlistIds) ?? []
+        wants = try c.decodeIfPresent([WatchDownloadRequest].self, forKey: .wants) ?? []
+    }
 }
 
 struct PhoneContext: Codable, Sendable {
@@ -158,13 +177,32 @@ struct WatchContext: Codable, Sendable {
     /// phone's "Kept on the watch" switches show. Apart from the inventory,
     /// which is cut to fit a message. Nil from a watch too old to say.
     var playlistIds: [String]?
+    /// How far each of the plan's `wants` has got on the watch, by
+    /// `WatchDownloadRequest.key`. Nil from a watch too old to say.
+    var wants: [WatchWantState]?
     /// Whether the watch is signed in to the same account the phone last sent.
     var signedIn: Bool
     var sentAt = Date()
 }
 
+/// Where one of the plan's wants stands on the watch.
+struct WatchWantState: Codable, Hashable, Sendable, Identifiable {
+    var key: String
+    /// How many items it comes to, and how many of them have landed.
+    var count: Int
+    var complete: Int
+    /// Items the watch has given up on for now; retried on a later pass.
+    var failed = 0
+    /// The watch doesn't know what the want comes to — the phone's list
+    /// never arrived and the server couldn't be asked — so the phone sends
+    /// it again.
+    var needsContents = false
+
+    var id: String { key }
+}
+
 extension WatchContext {
-    private enum CodingKeys: String, CodingKey { case revision, inventory, awaitingPhone, playlistIds, signedIn, sentAt }
+    private enum CodingKeys: String, CodingKey { case revision, inventory, awaitingPhone, playlistIds, wants, signedIn, sentAt }
 
     /// Key by key, for the same reason as `PhoneContext`.
     init(from decoder: any Decoder) throws {
@@ -173,6 +211,7 @@ extension WatchContext {
         inventory = try c.decode(WatchInventory.self, forKey: .inventory)
         awaitingPhone = try c.decodeIfPresent([String].self, forKey: .awaitingPhone)
         playlistIds = try c.decodeIfPresent([String].self, forKey: .playlistIds)
+        wants = try c.decodeIfPresent([WatchWantState].self, forKey: .wants)
         signedIn = try c.decode(Bool.self, forKey: .signedIn)
         sentAt = try c.decodeIfPresent(Date.self, forKey: .sentAt) ?? Date()
     }
@@ -182,10 +221,50 @@ extension WatchContext {
 
 /// Something asked for from the phone.
 struct WatchDownloadRequest: Codable, Hashable, Sendable {
-    enum Kind: String, Codable, Sendable { case album, playlist, book, song, artist, genre }
+    enum Kind: String, Codable, Sendable {
+        case album, playlist, book, song, artist, genre
+
+        var label: String {
+            switch self {
+            case .album: "Album"
+            case .playlist: "Playlist"
+            case .book: "Audiobook"
+            case .song: "Song"
+            case .artist: "Artist"
+            case .genre: "Genre"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .album: "square.stack"
+            case .playlist: "music.note.list"
+            case .book: "book"
+            case .song: "music.note"
+            case .artist: "music.mic"
+            case .genre: "guitars"
+            }
+        }
+    }
     var kind: Kind
     var id: String
     var title: String
+
+    /// One name for the want on both sides: "album:abc123".
+    var key: String { "\(kind.rawValue):\(id)" }
+
+    /// The reason a record on the watch carries for being there because of
+    /// this want — what a later delete of the want takes with it.
+    var reason: String {
+        switch kind {
+        case .book: "book"
+        case .song: "song"
+        case .album: "album:\(id)"
+        case .playlist: "playlist:\(id)"
+        case .artist: "artist:\(id)"
+        case .genre: "genre:\(id)"
+        }
+    }
 }
 
 /// Listening done on the watch, to be told to the server. One per stop,
@@ -220,6 +299,9 @@ enum WatchMessage: Codable, Sendable {
     case fetchProgress(itemId: String, fraction: Double)
     /// The phone could not fetch this; the watch may try itself.
     case fetchFailed(itemId: String, reason: String)
+    /// A want taken off the list on the phone: the watch lets go of what
+    /// was there for it alone. The plan stops naming it in the same breath.
+    case deleteWant(WatchDownloadRequest)
     // Watch → phone
     case progress([WatchProgressEvent])
     /// Fetch this item and hand it over as a file. The watch's own radio
@@ -233,6 +315,10 @@ enum WatchMessage: Codable, Sendable {
     /// A playlist was taken off the watch there: the phone stops keeping it
     /// there too, or the next plan would put it straight back.
     case playlistRemoved(id: String)
+    /// A want's album or book was taken off on the watch: the phone drops
+    /// the want (by `WatchDownloadRequest.key`), or the next check would
+    /// put it straight back.
+    case wantRemoved(key: String)
     /// Send me the sign-in and the plan now, in the reply. The application
     /// context is the usual way; this is for a watch that missed it.
     case requestContext
@@ -375,9 +461,19 @@ enum WatchDownloadSource {
 
 /// The metadata on a file the phone hands the watch.
 enum WatchFileTransfer {
-    /// What a file is: absent for an audio item, `logsKind` for a log.
+    /// What a file is: absent for an audio item, `logsKind` for a log,
+    /// `playlistKind` for a kept playlist's songs (a `WatchPlaylistContents`,
+    /// named by `playlistKey` rather than `itemKey`, which means audio),
+    /// `booksKind` for the books in progress (a `WatchBooksContents`),
+    /// `downloadKind` for a download asked for on the phone.
     static let kindKey = "kind"
     static let logsKind = "logs"
+    static let playlistKind = "playlist"
+    static let playlistKey = "playlistId"
+    static let booksKind = "books"
+    /// A "Download to Watch" from the phone, songs and all: a
+    /// `WatchDownloadContents`.
+    static let downloadKind = "download"
     static let itemKey = "item"
     static let bytesKey = "bytes"
     static let secondsKey = "seconds"
@@ -396,6 +492,47 @@ enum WatchFileTransfer {
     static let pieceBytes: Int64 = 16 * 1024 * 1024
 }
 
+/// A kept playlist's songs as the phone found them on the server, sent so
+/// the watch needn't ask: its own way to the server can fail for hours — a
+/// certificate it won't take, a server only the phone's network reaches.
+struct WatchPlaylistContents: Codable, Sendable {
+    var id: String
+    var name: String
+    var imageTag: String?
+    var songs: [BaseItem]
+}
+
+/// The books in progress as the phone found them, chapters and all, sent
+/// for the same reason.
+struct WatchBooksContents: Codable, Sendable {
+    var books: [BaseItem]
+}
+
+/// A download asked for on the phone, with what it comes to — an album's
+/// tracks, an artist's songs, a book with its chapters — looked up there.
+struct WatchDownloadContents: Codable, Sendable {
+    var request: WatchDownloadRequest
+    var items: [BaseItem]
+}
+
+extension BaseItem {
+    /// Only what the watch keeps of an item: a playlist's worth of media
+    /// sources and blur hashes is most of the file.
+    var forWatch: BaseItem {
+        var s = self
+        s.MediaSources = nil
+        s.People = nil
+        s.Studios = nil
+        s.ImageBlurHashes = nil
+        s.Genres = nil
+        s.GenreItems = nil
+        s.Taglines = nil
+        s.BackdropImageTags = nil
+        s.ParentBackdropImageTags = nil
+        return s
+    }
+}
+
 /// The reply a live message gets. A queued transfer gets none.
 struct WatchReply: Codable, Sendable {
     var ok: Bool
@@ -410,6 +547,22 @@ struct WatchReply: Codable, Sendable {
     /// The answer to `requestPlayback`: nil when nothing is playing, or
     /// from a phone too old to say.
     var playback: PhonePlaybackState?
+}
+
+// MARK: - Watching rules
+
+/// When a film or episode counts as watched. One rule for marking it played and
+/// for declining to resume it, so nothing sits between the two: left in that
+/// gap, an episode stopped 38 minutes into 42 was neither watched nor resumed,
+/// and opened at 0:00. The rule is the server's, so the two agree.
+enum VideoProgress {
+    /// Jellyfin marks a video played when it is stopped past this much of it:
+    /// its MaxResumePct, 90 unless changed.
+    static let finishedFraction = 0.9
+
+    static func isFinished(positionTicks: Int64, runTimeTicks: Int64) -> Bool {
+        runTimeTicks > 0 && positionTicks > 0 && Double(positionTicks) / Double(runTimeTicks) > finishedFraction
+    }
 }
 
 // MARK: - Listening rules, both ends

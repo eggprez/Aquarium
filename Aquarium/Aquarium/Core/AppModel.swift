@@ -481,6 +481,11 @@ final class AppModel {
     }
     #endif
 
+    /// The show "Add to Next Up" was chosen for, while the app asks where to
+    /// pick it up — see `NextUpAdding`. Held here rather than by the menu,
+    /// which is gone by the time the question is asked.
+    var addingToNextUp: BaseItem?
+
     /// Raised when something needs the whole screen to explain itself — a
     /// server identity change, an expired session.
     var blockingMessage: String?
@@ -496,15 +501,51 @@ final class AppModel {
     /// `performConnectivityRefresh`.
     private var hasProbedOnce = false
 
-    /// False until the launch's first question to the server has an answer.
-    /// The shell waits for it (see `RootView`), so an app opened offline goes
-    /// straight to the offline tabs instead of first drawing the online ones
-    /// with Home failing to load — the same tabs, reached the same way, as an
-    /// app that loses the server while open. Once per launch: a later sign-in
-    /// doesn't wait again.
+    /// False until the launch has what it opens on — the saved Home and
+    /// library list, read off disk in a moment (see `restoreLaunchState`). The
+    /// shell is drawn as soon as they are, and the server is asked behind it.
+    ///
+    /// It used to wait for the server: an app opened offline went straight to
+    /// the offline tabs rather than drawing the online ones first. But the wait
+    /// was a bare spinner for as long as the probe took — its whole timeout
+    /// against a server that never replies — and every launch paid it unless
+    /// the optional library copy happened to be on. Opened with the server
+    /// truly gone, the online tabs now show the saved Home until the probe
+    /// says so, and then give way to the offline ones.
     private(set) var launchSettled = false
 
+    /// Whether the launch's own catch-up with the server — the probe, the
+    /// libraries, progress both ways, the library copy — has run. Until then
+    /// coming to the foreground (which a launch also is) leaves it alone
+    /// rather than starting a second round of the same requests beside it.
+    private(set) var launchCaughtUp = false
+
+    /// Whether the libraries on show came from the saved list rather than the
+    /// server — see `loadLibraries`.
+    @ObservationIgnored private var librariesFromSave = false
+
+    /// Read what the launch opens on and build the shell from it: the tab bar
+    /// as it was last time, and Home's rows (which Home reads for itself). A
+    /// small file or two, read off the main thread; then the shell is up.
+    func restoreLaunchState() async {
+        await LibraryIndex.shared.prepareHome()
+        if libraries.isEmpty, librariesUnknown, let saved = LibraryIndex.shared.savedLibraries {
+            libraries = saved.video
+            musicLibraries = saved.music
+            audiobookLibraries = saved.books
+            serverHasLiveTV = saved.liveTV
+            librariesUnknown = false
+            librariesFromSave = true
+        }
+        launchSettled = true
+    }
+
+    func launchCatchUpFinished() {
+        launchCaughtUp = true
+    }
+
     private init() {
+        Launch.mark("app model init")
         // The network changing under the app, or a page's request finding
         // nothing there, is asked about at once, by the same probe a launch
         // uses — so "offline" means one thing however it came about.
@@ -553,16 +594,11 @@ final class AppModel {
         for kind in customOrder ?? customizableSections {
             switch kind {
             case .search:
-                // A phone never lists it here: there Search is a tab or it is
-                // in More — see `overflowSections`. An iPad's sidebar does. It
-                // once left Search out on the grounds that each page had a
-                // field of its own, and the library pages don't: on an iPad
-                // there was no way to search films and shows at all. A Mac's
-                // sidebar has the field itself, at its top, the way Music's
-                // does — see `sidebarSearchTerm` — so it has no row either.
-                #if !os(macOS)
-                if Self.usesSidebar { out.append(.search) }
-                #endif
+                // Never reached on iOS, where Search is a button on Home rather
+                // than a section (see `customizableSections`), nor listed on a
+                // Mac, whose sidebar has the field itself at its top, the way
+                // Music's does — see `sidebarSearchTerm`.
+                break
             case .libraries:
                 for library in libraries {
                     out.append(.library(id: library.Id, name: library.title, collectionType: library.CollectionType))
@@ -630,27 +666,42 @@ final class AppModel {
         return selection
         #else
         guard isOfflineShell else { return selection }
-        let shown = Self.usesSidebar ? sections : tabSections
+        let shown = usesSidebar ? sections : tabSections
         return shown.contains(selection) ? selection : .downloads
         #endif
     }
 
     /// Going offline or coming back: put the selection somewhere that exists.
-    /// Offline that is Downloads. Back online it is wherever they already are
-    /// if the full shell still has that as a tab, and Home if it doesn't.
+    /// Offline that is Downloads. Back online it is where they were before the
+    /// server went, if Downloads is still where it left them; otherwise
+    /// wherever they already are if the full shell still has that as a tab,
+    /// and Home if it doesn't.
     func reconcileSelection() {
         #if !os(tvOS)
         if isOfflineShell {
             // Always Downloads, wherever they were — the same place an app
             // opened offline starts. More starts at its list, since whatever
             // was pushed in it came from the server.
+            if selectionBeforeOffline == nil { selectionBeforeOffline = selection }
             selection = .downloads
             paths[AppSection.more.id] = nil
             routeStacks[AppSection.more.id] = nil
             return
         }
+        // A server that was gone for a few seconds moved them to Downloads
+        // and, coming back, left them there: a timeout on Live TV ended on a
+        // page of downloads nobody asked for. If Downloads is still where it
+        // put them, they go back to where they were — whose stack, apart from
+        // More's, is still as they left it.
+        if let before = selectionBeforeOffline {
+            selectionBeforeOffline = nil
+            if selection == .downloads { selection = before }
+        }
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom == .phone {
+        // The tab bar, wherever it is showing: a phone, an iPad in Slide Over,
+        // a foldable closed. The idiom was asked before, and an iPad in a
+        // narrow split was reconciled as if it had a sidebar.
+        if !sidebarShown {
             // Downloads is a tab of its own offline and, on most setups, a
             // row in More online. Someone on it when the server comes back
             // stays on it — `show` reopens it where it now lives.
@@ -667,6 +718,10 @@ final class AppModel {
         #endif
     }
 
+    /// Where the shell was when it last went offline, for `reconcileSelection`
+    /// to go back to. Nil while online.
+    @ObservationIgnored private var selectionBeforeOffline: AppSection?
+
     /// What the tab bar and the sidebar bind their selection to.
     var shownSelectionBinding: Binding<AppSection> {
         Binding(get: { self.shownSelection }, set: { self.selection = $0 })
@@ -682,7 +737,10 @@ final class AppModel {
         var out: [AppSection] = []
         if hasMusic { out.append(.music) }
         if hasBooks { out.append(.books) }
+        // On iOS Search is a button on Home, not a section — see `show`.
+        #if !os(iOS)
         out.append(.search)
+        #endif
         out.append(.libraries)
         out.append(.favorites)
         if hasLiveTV { out.append(.liveTV) }
@@ -723,16 +781,15 @@ final class AppModel {
     }
 
     /// The four sections that keep a permanent place in the phone's tab bar:
-    /// Home, Search, the libraries, and then whichever of Live TV and Downloads
-    /// this setup actually uses. Favorites is a filter you reach for
+    /// Home, the libraries, then Live TV where this setup has a guide, then
+    /// Downloads. Search is not one of them: it is a button on Home. Favorites is a filter you reach for
     /// occasionally rather than a place you live, so it goes into More along
     /// with the individual libraries.
     ///
-    /// Live TV takes the fourth slot wherever there is a guide to show — from
-    /// the server's own tuner or from a custom playlist, `hasLiveTV` doesn't
-    /// care which. A guide is somewhere you go on purpose and go back to;
-    /// Downloads is a shelf you visit before a flight, and one trip through
-    /// More is the right price for it.
+    /// Live TV goes ahead of Downloads wherever there is a guide to show —
+    /// from the server's own tuner or from a custom playlist, `hasLiveTV`
+    /// doesn't care which. A guide is somewhere you go on purpose and go back
+    /// to.
     ///
     /// Music, where the server has any, takes the slot after Home: it is a
     /// whole second application living in this one, and a tab bar has five
@@ -740,8 +797,8 @@ final class AppModel {
     /// a server — both are still one tap into More.
     ///
     /// Audiobooks take a slot of their own too, when there are any. With both,
-    /// the bar is Home, Music, Audiobooks, Search, More, and the video
-    /// Library joins Live TV and Downloads in More.
+    /// the bar is Home, Music, Audiobooks, Library, More, and Live TV and
+    /// Downloads are in More.
     ///
     /// All of that is what happens until someone puts the bar in an order of
     /// their own (Settings → Tab Bar). Then the first three of their order
@@ -778,6 +835,16 @@ final class AppModel {
     /// this run past three, which is what keeps the bar to five places.
     private var defaultPrimaryOrder: [AppSection] {
         var out: [AppSection] = []
+        #if os(iOS)
+        // No Search tab: it is a button on Home. Its place goes to whatever
+        // comes next — the libraries, then Live TV or Downloads.
+        if hasMusic { out.append(.music) }
+        if hasBooks { out.append(.books) }
+        out.append(.libraries)
+        if hasLiveTV { out.append(.liveTV) }
+        out.append(.downloads)
+        return Array(out.prefix(Self.slotsAfterHome))
+        #else
         if hasMusic { out.append(.music) }
         if hasBooks { out.append(.books) }
         out.append(.search)
@@ -786,36 +853,78 @@ final class AppModel {
         if !hasAudio { out.append(hasLiveTV ? .liveTV : .downloads) }
         #endif
         return out
+        #endif
     }
 
     /// What More lists: everything the tab bar has no room for, Settings last.
     ///
-    /// Search is added by hand when the bar hasn't got it, because `sections`
-    /// never lists it — and a phone with no search anywhere is a phone that
-    /// can't find anything.
+    /// Off iOS, Search is added by hand when the bar hasn't got it, because
+    /// `sections` never lists it. On iOS it is Home's search button.
     var overflowSections: [AppSection] {
         #if !os(tvOS)
         if isOfflineShell { return [.settings] }
         #endif
         let shown = Set(primaryTabs.map(\.id))
         var out = sections.filter { !shown.contains($0.id) && $0 != .settings }
+        #if !os(iOS)
         if !shown.contains(AppSection.search.id), !out.contains(.search) { out.append(.search) }
+        #endif
         out.append(.settings)
         return out
     }
 
-    /// Whether this device's shell is the sidebar rather than the tab bar —
-    /// the idiom, not the size class, for the reason `RootView.adaptiveShell`
-    /// gives.
-    static var usesSidebar: Bool {
+    /// Whether the shell on screen is the sidebar rather than the tab bar.
+    ///
+    /// On iOS that is `RootView.adaptiveShell`'s decision, from the idiom *and*
+    /// the size class, and the shell reports it here — see `shellChanged`. It
+    /// used to be the idiom alone, which an iPad in Slide Over or a narrow
+    /// third of Split View contradicts: the shell there is the tab bar, and
+    /// `show` went on selecting sections the bar hasn't got — "Go to
+    /// Downloads", "Show Download Progress", a music shelf's See All — which
+    /// shows nothing at all.
+    var usesSidebar: Bool {
         #if os(iOS)
-        UIDevice.current.userInterfaceIdiom != .phone
+        sidebarShown
         #elseif os(macOS)
         true
         #else
         false
         #endif
     }
+
+    #if os(iOS)
+    /// Someone in the tent pose pressed Browse: the ordinary shell instead of
+    /// the lean-back screen, until the pose changes — see `TentIdleView` and
+    /// `RootView`.
+    var tentBrowsing = false
+
+    /// What `RootView.adaptiveShell` last laid out. The idiom until it says
+    /// otherwise, which is what an iPad at full width gets anyway.
+    private var sidebarShown = UIDevice.current.userInterfaceIdiom != .phone
+
+    /// The shell has swapped between the sidebar and the tab bar — an iPad
+    /// going into or out of Slide Over or a narrow split, a foldable opened
+    /// or closed. The selection goes where the new shell has it, the way
+    /// `reconcileSelection` does for the offline shell: a section the bar has
+    /// no tab for opens inside More, and More, which a sidebar has no row
+    /// for, becomes whatever it had open.
+    func shellChanged(toSidebar sidebar: Bool) {
+        guard sidebar != sidebarShown else { return }
+        sidebarShown = sidebar
+        if sidebar {
+            guard selection == .more else { return }
+            if case .section(let section)? = routeStacks[AppSection.more.id]?.first, sections.contains(section) {
+                selection = section
+            } else {
+                selection = .home
+            }
+            paths[AppSection.more.id] = nil
+            routeStacks[AppSection.more.id] = nil
+        } else if !tabSections.contains(selection) {
+            show(selection)
+        }
+    }
+    #endif
 
     /// A phone's tab bar, in order.
     ///
@@ -853,7 +962,7 @@ final class AppModel {
         #if os(tvOS)
         selection = section
         #else
-        if primaryTabs.contains(section) || (Self.usesSidebar && sections.contains(section)) {
+        if primaryTabs.contains(section) || (usesSidebar && sections.contains(section)) {
             selection = section
             return
         }
@@ -861,6 +970,16 @@ final class AppModel {
         // No row, but a section of its own: the sidebar field's results.
         if section == .search {
             selection = .search
+            return
+        }
+        #elseif os(iOS)
+        // No tab and no row: Search opens over Home, as its button does.
+        if section == .search {
+            selection = .home
+            var path = NavigationPath()
+            path.append(Route.search(""))
+            paths[AppSection.home.id] = path
+            routeStacks[AppSection.home.id] = [.search("")]
             return
         }
         #endif
@@ -941,10 +1060,35 @@ final class AppModel {
             break
         }
         #endif
+        // The page already on top: a second tap on a poster while the
+        // first was still zooming in pushed the page twice, and Back from
+        // it then "did nothing" — it went to the copy underneath.
+        if routeStacks[selection.id]?.last == route { return }
         var path = paths[selection.id] ?? NavigationPath()
         path.append(route)
         paths[selection.id] = path
         routeStacks[selection.id, default: []].append(route)
+    }
+
+    /// One page back on a section's stack, through the path itself.
+    ///
+    /// What the pages that draw their own bar do for Back (`BarBackButton`)
+    /// instead of `dismiss`. The path is the stack's truth and a shorter
+    /// path is a pop that SwiftUI owes, whatever UIKit is in the middle of;
+    /// `dismiss` was a request UIKit could drop — and did, on a foldable's
+    /// inside screen, where a palm on the left edge of the big screen had
+    /// quietly begun the back-swipe (`BackSwipe`), so the button's press
+    /// landed during an interactive pop that then cancelled. The button
+    /// lit, and the page stayed.
+    func pop(_ section: AppSection) {
+        let key = section.id
+        guard var path = paths[key], !path.isEmpty else { return }
+        path.removeLast()
+        paths[key] = path
+        if var routes = routeStacks[key], !routes.isEmpty {
+            routes.removeLast()
+            routeStacks[key] = routes
+        }
     }
 
     /// Open a page, or go back to it where it is already behind you.
@@ -1024,8 +1168,9 @@ final class AppModel {
             return
         }
         #if os(iOS)
-        // Where a tap on a Live Activity lands: the queue for the download
-        // one, Now Playing for the listening one.
+        // Where a tap on the Now Playing card or the listening Live Activity
+        // lands: Downloads for a film with no server item behind it, Now
+        // Playing for music.
         if url.host == "downloads" {
             show(.downloads)
             return
@@ -1159,7 +1304,9 @@ final class AppModel {
         // once the server answers. (It is no longer browsed offline: see
         // `isOfflineShell`.)
         guard let views = (try? await client.views()) ?? LibraryIndex.shared.savedViews else {
-            librariesUnknown = true
+            // The saved list stays up rather than the bar falling back to
+            // guesses; it is what the server said last time.
+            if !librariesFromSave { librariesUnknown = true }
             return
         }
         // Music-type libraries are out of scope for this client, as on Linux.
@@ -1190,12 +1337,20 @@ final class AppModel {
         // library that was every launch, and the bar UIKit was left holding
         // showed Downloads' icon over Music's name from the next tap on.
         librariesUnknown = false
-        serverHasLiveTV = views.contains { $0.CollectionType == "livetv" }
-        libraries = video
+        librariesFromSave = false
+        // Assigned only where they differ: the bar is usually rebuilt from the
+        // saved list already, and an equal value assigned is still a change to
+        // everything that reads it.
+        let liveTV = views.contains { $0.CollectionType == "livetv" }
+        if serverHasLiveTV != liveTV { serverHasLiveTV = liveTV }
+        if libraries != video { libraries = video }
         // Music-type libraries are the Music tab's, not Library's. Jellyfin
         // files audiobooks under the `books` library type.
-        musicLibraries = views.filter { $0.CollectionType == "music" }
-        audiobookLibraries = views.filter { $0.CollectionType == "books" || $0.CollectionType == "audiobooks" }
+        let music = views.filter { $0.CollectionType == "music" }
+        let books = views.filter { $0.CollectionType == "books" || $0.CollectionType == "audiobooks" }
+        if musicLibraries != music { musicLibraries = music }
+        if audiobookLibraries != books { audiobookLibraries = books }
+        LibraryIndex.shared.keepLibraries(video: video, music: music, books: books, liveTV: liveTV)
         UserDefaults.standard.set(!musicLibraries.isEmpty, forKey: "had_music_library")
         UserDefaults.standard.set(!audiobookLibraries.isEmpty, forKey: "had_books_library")
         rememberedLiveTV = serverHasLiveTV
@@ -1208,7 +1363,11 @@ final class AppModel {
         #if os(iOS)
         if isOfflineShell {
             reconcileSelection()
-        } else if !primaryTabs.contains(selection), selection != .more {
+        } else if !(usesSidebar ? allSections : primaryTabs).contains(selection), selection != .more {
+            // A sidebar lists every section, so only one that has gone — a
+            // library removed — sends it Home. On the bar it was any section
+            // without a tab, which on an iPad was most of the sidebar: the
+            // server coming back after a blip took Live TV away to Home.
             selection = .home
         }
         #endif
@@ -1252,7 +1411,6 @@ final class AppModel {
         let isLaunchProbe = !hasProbedOnce
         if hasProbedOnce, resettingConnections { client.resetConnections() }
         hasProbedOnce = true
-        defer { launchSettled = true }
         let wasOffline = client.isOffline
         // Coming back to a session that was already offline, the shell would
         // otherwise draw the offline screen in the first frame — before this
@@ -1264,9 +1422,9 @@ final class AppModel {
         // offline and one that lost the server while open used to reach the
         // offline shell by different rules and at very different speeds (3 s
         // against 27). Mid-session it takes a second opinion two seconds on,
-        // for a radio waking up. At launch it doesn't: the shell is waiting
-        // on this answer with nothing on screen (`launchSettled`), and a
-        // wrong one costs a single retry — the loop asks again after 5 s.
+        // for a radio waking up. At launch it doesn't: the saved Home is on
+        // screen looking like a working app until this answers, and a wrong
+        // one costs a single retry — the loop asks again after 5 s.
         if !online, !wasOffline, client.identityProblem == nil {
             if !isLaunchProbe {
                 try? await Task.sleep(for: .seconds(2))
@@ -1575,6 +1733,7 @@ final class AppModel {
         musicLibraries = []
         audiobookLibraries = []
         librariesUnknown = true
+        librariesFromSave = false
         serverHasLiveTV = false
         rememberedLiveTV = false
         UserDefaults.standard.removeObject(forKey: "had_music_library")
@@ -1598,6 +1757,10 @@ final class AppModel {
         selection = .home
         LiveTVStore.shared.reset()
         Preferences.shared.clearRecentSearches()
+        #if os(iOS)
+        // The Follow tile's choices go with the account.
+        FollowFeed.shared.wipe()
+        #endif
         #if os(macOS)
         sidebarSearchTerm = ""
         clearDockMenu()

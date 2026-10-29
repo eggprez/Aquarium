@@ -76,6 +76,38 @@ enum Quality {
         return choices.firstIndex { $0.maxBitrate == rung } ?? 0
     }
 
+    /// The smallest rung that still leaves this file as it is: it and every
+    /// rung above it allow the file's own bitrate and picture size, so the
+    /// server sends the original whichever of them is asked for. Adaptive
+    /// quality steps down from here rather than from direct play — a 6 Mbps
+    /// 1080p file walked through 4K, 1440p and both 1080p rungs, reopening
+    /// the same file each time, before 720p changed anything. 0 when the file
+    /// says too little to tell.
+    static func untouchedRung(for source: MediaSource?) -> Int {
+        guard let source, let bitrate = source.Bitrate, bitrate > 0,
+              let video = source.streams.first(where: { $0.type == "Video" }),
+              let width = video.Width, let height = video.Height, width > 0, height > 0
+        else { return 0 }
+        var last = 0
+        for (index, choice) in choices.enumerated().dropFirst() {
+            guard let max = choice.maxBitrate, bitrate <= max,
+                  let w = choice.maxWidth, let h = choice.maxHeight, width <= w, height <= h
+            else { break }
+            last = index
+        }
+        return last
+    }
+
+    /// What the error card's "Try a smaller stream" asks for: the 720p rung,
+    /// or the rung below whatever was already playing at or under it. It
+    /// used to ask for a flat 4 Mbps, which is no rung: the quality pill read
+    /// "Custom" and the size cap resolved to 480p.
+    static func smallerStream(than bitrate: Int?) -> Int? {
+        let floor = choices.firstIndex { $0.maxBitrate == 5_000_000 } ?? choices.count - 1
+        let index = max(floor, rungIndex(bitrate) + 1)
+        return choices[min(index, choices.count - 1)].maxBitrate
+    }
+
     /// A stored bitrate moved onto the current ladder.
     ///
     /// The rungs are not the ones earlier builds wrote, and a saved default of
@@ -229,9 +261,10 @@ enum Languages {
     static let audioChoices: [(code: String, name: String)] =
         [("", "Whatever the file lists first")] + all
     /// What `Preferences.subtitleLanguage` can be: the file's own choice,
-    /// never, then the languages.
+    /// never, forced only, then the languages.
     static let subtitleChoices: [(code: String, name: String)] =
-        [("", "Only when the file turns them on"), ("off", "Never — no subtitles")] + all
+        [("", "Only when the file turns them on"), ("off", "Never — no subtitles"),
+         (TrackPreference.forcedOnly, "Forced only — signs and foreign lines")] + all
 
     /// A readable name for a track's language tag, for the times a file names
     /// its tracks by code and nothing else. Anything not on the list above
@@ -392,8 +425,9 @@ final class Preferences {
 
     // ---- Playback ----
 
-    /// May the player drop to a smaller stream by itself when one keeps
-    /// stalling? On unless turned off, as on Linux.
+    /// The player's quality is Auto: it may drop to a smaller stream by
+    /// itself when one keeps stalling, and climb back. On unless a rung is
+    /// picked in the player, as on Linux. See `PlayerModel.QualitySelection`.
     var adaptiveQuality: Bool {
         didSet { write(adaptiveQuality, forKey: "adaptive") }
     }
@@ -404,10 +438,12 @@ final class Preferences {
         didSet { write(powerAwareQuality, forKey: "power_aware_quality") }
     }
 
-    /// A notification when an episode new to the server lands in Next Up —
-    /// see `NextUpAlerts`. Per device, because permission to notify is.
-    var newEpisodeAlerts: Bool {
-        didSet { defaults.set(newEpisodeAlerts, forKey: "new_episode_alerts") }
+    /// Time a short download from the server before a stream opens away
+    /// from home, and open at the quality that fits. Off unless turned on,
+    /// and kept to this device: a phone on cellular and a Mac on the home
+    /// network want different answers. See `SpeedCheck`.
+    var speedCheck: Bool {
+        didSet { write(speedCheck, forKey: "speed_check") }
     }
 
     /// Start the next episode when one finishes.
@@ -415,17 +451,25 @@ final class Preferences {
         didSet { write(autoplayNext, forKey: "autoplay_next") }
     }
 
-    /// Draw Home's Continue Watching and Next Up as one row: a poster per
-    /// show, carrying the progress of the episode you are partway through.
-    /// See `HomeRows.combined`.
-    var combinesNextUp: Bool {
-        didSet { write(combinesNextUp, forKey: "home_combine_next_up") }
+    /// Leave Home's Continue Watching row out, keeping Next Up: the next
+    /// episode of each show, without a row of stills from the ones you are
+    /// partway through.
+    var hidesContinueWatching: Bool {
+        didSet { write(hidesContinueWatching, forKey: "home_hide_continue_watching") }
     }
 
-    /// Shows taken out of Next Up by hand — see `ItemMenu`'s "Remove from
-    /// Next Up". Jellyfin has no way to hide a show from Next Up without
-    /// marking something watched, so the list is this app's, and it travels
-    /// with the account's other preferences.
+    /// Have the server forget the position of episodes left partway through
+    /// that Next Up has since moved well past — see `HomeRows.abandoned` —
+    /// each time Home loads. Off by default: it writes to the account's watch
+    /// state, so it is asked for.
+    var clearsAbandonedEpisodes: Bool {
+        didSet { write(clearsAbandonedEpisodes, forKey: "home_clear_abandoned") }
+    }
+
+    /// Shows taken out of Next Up by hand on a server too old for "Remove
+    /// from Next Up" to reach (before 10.9, which can't write a last-played
+    /// date on its own — see `JellyfinClient.removeFromNextUp`). The list
+    /// is this app's, and it travels with the account's other preferences.
     ///
     /// Keyed by account and series (see `nextUpHiddenKey`), the value being
     /// the episode the row was showing when the show was removed. A show
@@ -457,7 +501,52 @@ final class Preferences {
         return nextUpHidden[key]
     }
 
-    /// Default quality for a new stream. `nil` is direct play. This device's
+    /// Put a show taken off Next Up by hand back on it — what "Add to Next
+    /// Up" does first, so a show removed here doesn't stay hidden from the
+    /// row it was just added to.
+    func unhideFromNextUp(seriesId: String) {
+        guard let key = nextUpHiddenKey(seriesId: seriesId), nextUpHidden[key] != nil else { return }
+        nextUpHidden[key] = nil
+    }
+
+    /// How many days a show stays on Next Up after anything in it was last
+    /// played, or 0 for as long as it has an episode to offer. Enforced by
+    /// the app, and a show past it taken off Next Up on the server — see
+    /// `JellyfinClient.nextUp` — so every surface that asks (Home, the top
+    /// shelf, CarPlay, Siri) and every other app on the account agree.
+    var nextUpDays: Int {
+        didSet { write(nextUpDays, forKey: "next_up_days") }
+    }
+
+    static let nextUpDayChoices = [0, 7, 14, 30, 90, 180, 365]
+
+    static func nextUpDaysLabel(_ days: Int) -> String {
+        switch days {
+        case 0: "Forever"
+        case 7: "1 week"
+        case 14: "2 weeks"
+        case 30: "1 month"
+        case 365: "1 year"
+        default: "\(days / 30) months"
+        }
+    }
+
+    /// Whether Next Up offers the episode you are partway through, as well
+    /// as Continue Watching does. On by default, which is what the server
+    /// does when it isn't told.
+    var nextUpIncludesInProgress: Bool {
+        didSet { write(nextUpIncludesInProgress, forKey: "next_up_in_progress") }
+    }
+
+    /// Whether a show watched to the end comes back on Next Up at its first
+    /// episode, for anyone working through it again. Off by default, as on
+    /// the server.
+    var nextUpRewatching: Bool {
+        didSet { write(nextUpRewatching, forKey: "next_up_rewatching") }
+    }
+
+    /// The rung picked in the player, for the next stream to open at while
+    /// the quality isn't Auto (`openingBitrate`). `nil` is direct play. This device's
     /// own, not synced: what a stream can carry depends on the network and
     /// the screen it is on, and an Apple TV on Ethernet and a phone on
     /// cellular want different answers.
@@ -469,6 +558,18 @@ final class Preferences {
                 defaults.removeObject(forKey: "default_bitrate")
             }
         }
+    }
+
+    /// What a new stream opens at. Auto opens at the best there is and
+    /// leaves the rest to `AdaptiveQuality`; a rung picked in the player
+    /// opens there. The Apple TV keeps its Settings row, which is read as
+    /// it always was.
+    var openingBitrate: Int? {
+        #if os(tvOS)
+        defaultBitrate
+        #else
+        adaptiveQuality ? nil : defaultBitrate
+        #endif
     }
 
     /// Fold surround down to stereo. Unlike on Linux this is asked of the
@@ -520,32 +621,50 @@ final class Preferences {
     /// the rarer case, and the cost of getting it wrong is one menu entry
     /// rather than an offset silently reappearing next time. Only ever applied
     /// where it can be: see `PlayerModel.canDelayAudio`.
+    ///
+    /// On an Apple TV this is the 60 fps delay — shows, sport and Live TV —
+    /// and the one for a video whose rate isn't known; every other rate has
+    /// its own, in `audioDelaysByRate`.
     var audioDelay: Double {
         // Not shared between devices, for the reason above: it is the lag of
         // the room's own soundbar, and two Apple TVs are two rooms.
         didSet { defaults.set(audioDelay, forKey: "audio_delay") }
     }
 
-    /// The offset used instead of `audioDelay`, in seconds, while the Apple
-    /// TV has switched the television out of its usual 60 Hz for a video —
-    /// Match Content → Match Frame Rate, on a film.
+    /// The Apple TV's offsets for every other frame rate, in seconds and
+    /// positive for later, keyed by the rate rounded to a whole number:
+    /// "24" for a 23.976 or 24 fps film, "30" for 29.97, "48", "120". Read
+    /// and written through `audioDelay(forRate:)`, which folds the 60 fps
+    /// one into `audioDelay`.
     ///
-    /// Its own value because a television does different work at 24 Hz than
-    /// at 60: frame-rate conversion, a different motion mode, a different
-    /// game or low-latency setting. The picture comes out later by an amount
-    /// that is nothing to do with the soundbar, and tvOS reports only that
-    /// matching is switched on, never what it costs. So it is measured the
-    /// same way as the other: the Match Frame Rate sync test switches the
-    /// display and the Sync tab sets this over it. Nil until that has been
-    /// done, and `audioDelay` stands in. Not shared between devices: another
-    /// room is another television.
-    var matchedAudioDelay: Double? {
-        didSet {
-            if let matchedAudioDelay {
-                defaults.set(matchedAudioDelay, forKey: "matched_audio_delay")
-            } else {
-                defaults.removeObject(forKey: "matched_audio_delay")
-            }
+    /// A delay a rate because a television does different work on each:
+    /// with Match Frame Rate on it switches modes for a film and runs a
+    /// different motion mode there, and either way its frame-rate
+    /// conversion is a different job at 24 than at 60. The picture comes
+    /// out later by an amount that is nothing to do with the soundbar, so
+    /// each is measured on its own — the preset rates over the sync clips
+    /// in Settings → Audio, any other rate over a video at it, from the
+    /// Sync tab — and kept. Not shared between devices: another room is
+    /// another television.
+    var audioDelaysByRate: [String: Double] {
+        didSet { defaults.set(audioDelaysByRate, forKey: "audio_delays_by_rate") }
+    }
+
+    /// The offset for a video at `fps` frames a second, rounded. Nothing
+    /// measured yet is in step.
+    func audioDelay(forRate fps: Int) -> Double {
+        fps == 60 ? audioDelay : audioDelaysByRate[String(fps)] ?? 0
+    }
+
+    /// Set the offset for a rate. In step is forgotten rather than kept as
+    /// zero, so a rate only stays in the list while it has a delay.
+    func setAudioDelay(_ seconds: Double, forRate fps: Int) {
+        if fps == 60 {
+            audioDelay = seconds
+        } else if abs(seconds) < 0.0005 {
+            audioDelaysByRate.removeValue(forKey: String(fps))
+        } else {
+            audioDelaysByRate[String(fps)] = seconds
         }
     }
 
@@ -585,6 +704,137 @@ final class Preferences {
     var fillScreen: Bool {
         didSet { write(fillScreen, forKey: "fill_screen") }
     }
+
+    /// Brightness, contrast, saturation and gamma, each -100…100 with 0 as
+    /// the file's own. The mpv engine's; setting any of them on an iPhone,
+    /// iPad or Mac is one of the things that switches the engine to it for
+    /// the title (see `EnginePolicy`).
+    var pictureBrightness: Double {
+        didSet { write(pictureBrightness, forKey: "picture_brightness") }
+    }
+    var pictureContrast: Double {
+        didSet { write(pictureContrast, forKey: "picture_contrast") }
+    }
+    var pictureSaturation: Double {
+        didSet { write(pictureSaturation, forKey: "picture_saturation") }
+    }
+    var pictureGamma: Double {
+        didSet { write(pictureGamma, forKey: "picture_gamma") }
+    }
+    /// Zoom into the picture by this factor; 1 is none. mpv's too.
+    var pictureZoom: Double {
+        didSet { write(pictureZoom, forKey: "picture_zoom") }
+    }
+    /// Stretch or crop the picture to this width:height; 0 is the file's own.
+    var aspectOverride: Double {
+        didSet { write(aspectOverride, forKey: "picture_aspect") }
+    }
+
+    var picture: PictureAdjustment {
+        get {
+            PictureAdjustment(brightness: pictureBrightness, contrast: pictureContrast,
+                              saturation: pictureSaturation, gamma: pictureGamma)
+        }
+        set {
+            if pictureBrightness != newValue.brightness { pictureBrightness = newValue.brightness }
+            if pictureContrast != newValue.contrast { pictureContrast = newValue.contrast }
+            if pictureSaturation != newValue.saturation { pictureSaturation = newValue.saturation }
+            if pictureGamma != newValue.gamma { pictureGamma = newValue.gamma }
+        }
+    }
+
+    /// Whether any picture adjustment, zoom or aspect override is in force.
+    var pictureIsAdjusted: Bool {
+        !picture.isNeutral || abs(pictureZoom - 1) > 0.001 || aspectOverride > 0
+    }
+
+    /// Everything back to the file's own picture.
+    func resetPicture() {
+        picture = .neutral
+        pictureZoom = 1
+        aspectOverride = 0
+    }
+
+    /// The aspect overrides on offer, as width:height with 0 for none.
+    static let aspectChoices: [(label: String, ratio: Double)] = [
+        ("File's own", 0), ("16:9", 16.0 / 9), ("4:3", 4.0 / 3), ("1.85:1", 1.85), ("2.35:1", 2.35), ("2.39:1", 2.39),
+    ]
+
+    /// Night mode: dynamic range compression on the sound, so quiet dialogue
+    /// comes up and loud passages come down for a room where the volume has
+    /// to stay low. The mpv engine's (`dynaudnorm`); Apple's engine leaves
+    /// the sound as it is. Not synced: like the volume, it describes the
+    /// room rather than the account.
+    var nightMode: Bool {
+        didSet { write(nightMode, forKey: "player_night_mode") }
+    }
+
+    // ---- The engine ----
+
+    /// Which engine plays video on an iPhone, iPad or Mac: Apple's, mpv, or
+    /// whichever the file and the controls in use call for. The Apple TV
+    /// always plays through mpv.
+    var playbackEngine: EnginePolicy.Preference {
+        didSet { write(playbackEngine.rawValue, forKey: "player_engine") }
+    }
+
+    /// Whether the mpv engine draws cheaply: always, never, or when the
+    /// device is on a battery, in Low Power Mode or running hot.
+    var batterySaver: EnginePolicy.BatterySaver {
+        didSet { write(batterySaver.rawValue, forKey: "player_battery_saver") }
+    }
+
+    // ---- The player's controls ----
+
+    /// How far the skip buttons and a double-tap on the picture jump, in
+    /// seconds: 10, 15 or 30.
+    var skipInterval: Int {
+        didSet { write(skipInterval, forKey: "player_skip_interval") }
+    }
+
+    /// A vertical drag on the left edge of the picture for brightness and on
+    /// the right for volume. Off unless asked for: on some devices the drags
+    /// fight the system's own edge gestures.
+    var edgeGestures: Bool {
+        didSet { write(edgeGestures, forKey: "player_edge_gestures") }
+    }
+
+    /// Holding a finger on the picture plays at 2× until it lifts.
+    var holdForDoubleSpeed: Bool {
+        didSet { write(holdForDoubleSpeed, forKey: "player_hold_2x") }
+    }
+
+    /// Seconds the controls stay up after the last touch while playing. They
+    /// never hide while paused or with a panel open.
+    var hideControlsAfter: Double {
+        didSet { write(hideControlsAfter, forKey: "player_hide_after") }
+    }
+
+    /// What the right-hand time under the timeline shows: the time left, or
+    /// the whole length. Tapping it in the player flips this.
+    var showsRemainingTime: Bool {
+        didSet { write(showsRemainingTime, forKey: "player_show_remaining") }
+    }
+
+    static let skipIntervals = [10, 15, 30]
+    static let hideControlsChoices: [Double] = [2, 4, 6, 10]
+
+    /// Until it is set: 2 s on a Mac, where a pointer brings the controls
+    /// back with a nudge and QuickTime and the TV app hide theirs about as
+    /// fast; 4 s where a finger or a remote has to find them again.
+    static let defaultHideControlsAfter: Double = {
+        #if os(macOS)
+        2
+        #else
+        4
+        #endif
+    }()
+
+    /// The ranges the picture values are kept to, whatever a defaults file
+    /// or another device sends.
+    static func pictureValue(_ v: Double) -> Double { v.isFinite ? min(max(v.rounded(), -100), 100) : 0 }
+    static func zoomValue(_ v: Double) -> Double { v.isFinite && v > 0 ? min(max(v, 1), 2) : 1 }
+    static func aspectValue(_ v: Double) -> Double { v.isFinite && v > 0 ? min(max(v, 0.5), 4) : 0 }
 
     // ---- Live TV source ----
 
@@ -651,6 +901,12 @@ final class Preferences {
     /// Only queue transfers while on Wi-Fi.
     var downloadsWiFiOnly: Bool {
         didSet { write(downloadsWiFiOnly, forKey: "downloads_wifi_only") }
+    }
+    /// Downloads › Keep screen awake: the screen stays on while the Downloads
+    /// page is showing and something is transferring, so a long batch can be
+    /// watched through. This device's: a Mac doesn't sleep its screen for this.
+    var downloadsKeepAwake: Bool {
+        didSet { defaults.set(downloadsKeepAwake, forKey: "downloads_keep_awake") }
     }
 
     static let maxDownloadConcurrency = 6
@@ -742,6 +998,13 @@ final class Preferences {
         didSet { defaults.set(watchKeepsBooks, forKey: "watch_keeps_books") }
     }
 
+    /// Settings › Appearance › Layout on a foldable: hold the app in one of
+    /// its poses rather than following the hinge. A fact about this device —
+    /// no other has the hinge — so it does not travel. See `DevicePose`.
+    var layoutOverride: LayoutOverride {
+        didSet { defaults.set(layoutOverride.rawValue, forKey: "layout_override") }
+    }
+
     // ---- iCloud ----
 
     /// Whether this device joins the shared settings.
@@ -773,6 +1036,7 @@ final class Preferences {
     private var isAdoptingRemote = false
 
     private init() {
+        Launch.mark("preferences init")
         let d = UserDefaults.standard
         if let existing = d.string(forKey: "device_id"), !existing.isEmpty {
             deviceId = existing
@@ -793,10 +1057,14 @@ final class Preferences {
         theme = ThemePref(rawValue: d.string(forKey: "theme") ?? "") ?? .auto
         adaptiveQuality = d.object(forKey: "adaptive") == nil ? true : d.bool(forKey: "adaptive")
         powerAwareQuality = d.object(forKey: "power_aware_quality") == nil ? true : d.bool(forKey: "power_aware_quality")
-        newEpisodeAlerts = d.bool(forKey: "new_episode_alerts")
+        speedCheck = d.bool(forKey: "speed_check")
         autoplayNext = d.object(forKey: "autoplay_next") == nil ? true : d.bool(forKey: "autoplay_next")
-        combinesNextUp = d.bool(forKey: "home_combine_next_up")
+        hidesContinueWatching = d.bool(forKey: "home_hide_continue_watching")
+        clearsAbandonedEpisodes = d.bool(forKey: "home_clear_abandoned")
         nextUpHidden = (d.dictionary(forKey: "next_up_hidden") as? [String: String]) ?? [:]
+        nextUpDays = Self.nextUpDayChoices.contains(d.integer(forKey: "next_up_days")) ? d.integer(forKey: "next_up_days") : 0
+        nextUpIncludesInProgress = d.object(forKey: "next_up_in_progress") == nil ? true : d.bool(forKey: "next_up_in_progress")
+        nextUpRewatching = d.bool(forKey: "next_up_rewatching")
         defaultBitrate = Quality.snapped(d.object(forKey: "default_bitrate") as? Int)
         stereoDownmix = d.bool(forKey: "stereo_downmix")
         decodeAudioLocally = d.bool(forKey: "decode_audio_locally")
@@ -804,7 +1072,18 @@ final class Preferences {
         resumePlayback = d.object(forKey: "resume_playback") == nil ? true : d.bool(forKey: "resume_playback")
         volume = d.object(forKey: "volume") == nil ? 1.0 : d.double(forKey: "volume")
         audioDelay = d.double(forKey: "audio_delay")
-        matchedAudioDelay = d.object(forKey: "matched_audio_delay") as? Double
+        var byRate = (d.dictionary(forKey: "audio_delays_by_rate") as? [String: Double]) ?? [:]
+        // The 24 fps delay was the "matched" delay before the player chose
+        // by frame rate rather than by display mode: the same measurement,
+        // so it carries over.
+        if byRate["24"] == nil,
+           let old = d.object(forKey: "audio_delay_24") as? Double ?? d.object(forKey: "matched_audio_delay") as? Double,
+           old != 0 {
+            byRate["24"] = old
+        }
+        audioDelaysByRate = byRate
+        d.removeObject(forKey: "audio_delay_24")
+        d.removeObject(forKey: "matched_audio_delay")
         // The offset this replaced was added to the other rather than used
         // instead of it, so it doesn't carry over.
         d.removeObject(forKey: "frame_rate_match_delay")
@@ -814,6 +1093,20 @@ final class Preferences {
         subtitleSize = d.object(forKey: "sub_font_size") == nil ? 100 : d.double(forKey: "sub_font_size")
         subtitleBackground = SubtitleBackground(rawValue: d.string(forKey: "sub_bg") ?? "") ?? .outline
         fillScreen = d.bool(forKey: "fill_screen")
+        pictureBrightness = Self.pictureValue(d.double(forKey: "picture_brightness"))
+        pictureContrast = Self.pictureValue(d.double(forKey: "picture_contrast"))
+        pictureSaturation = Self.pictureValue(d.double(forKey: "picture_saturation"))
+        pictureGamma = Self.pictureValue(d.double(forKey: "picture_gamma"))
+        pictureZoom = Self.zoomValue(d.object(forKey: "picture_zoom") == nil ? 1 : d.double(forKey: "picture_zoom"))
+        aspectOverride = Self.aspectValue(d.double(forKey: "picture_aspect"))
+        nightMode = d.bool(forKey: "player_night_mode")
+        playbackEngine = EnginePolicy.Preference(rawValue: d.string(forKey: "player_engine") ?? "") ?? .automatic
+        batterySaver = EnginePolicy.BatterySaver(rawValue: d.string(forKey: "player_battery_saver") ?? "") ?? .automatic
+        skipInterval = Self.skipIntervals.contains(d.integer(forKey: "player_skip_interval")) ? d.integer(forKey: "player_skip_interval") : 10
+        edgeGestures = d.bool(forKey: "player_edge_gestures")
+        holdForDoubleSpeed = d.object(forKey: "player_hold_2x") == nil ? true : d.bool(forKey: "player_hold_2x")
+        hideControlsAfter = Self.hideControlsChoices.contains(d.double(forKey: "player_hide_after")) ? d.double(forKey: "player_hide_after") : Self.defaultHideControlsAfter
+        showsRemainingTime = d.object(forKey: "player_show_remaining") == nil ? true : d.bool(forKey: "player_show_remaining")
         liveTVSource = LiveTVSource(rawValue: d.string(forKey: "livetv_source") ?? "") ?? .jellyfin
         iptvPlaylistURL = d.string(forKey: "iptv_playlist_url") ?? ""
         iptvGuideURL = d.string(forKey: "iptv_guide_url") ?? ""
@@ -823,10 +1116,12 @@ final class Preferences {
         let c = d.integer(forKey: "download_concurrency")
         downloadConcurrency = (1...Preferences.maxDownloadConcurrency).contains(c) ? c : 1
         downloadsWiFiOnly = d.bool(forKey: "downloads_wifi_only")
+        downloadsKeepAwake = d.bool(forKey: "downloads_keep_awake")
         transcodesOneAtATime = d.bool(forKey: "downloads_one_transcode")
         lastRoute = d.string(forKey: "last_route") ?? ""
         recentSearches = d.stringArray(forKey: "recent_searches") ?? []
         tabBarOrder = d.stringArray(forKey: "tab_bar_order") ?? []
+        layoutOverride = d.string(forKey: "layout_override").flatMap(LayoutOverride.init(rawValue:)) ?? .automatic
         watchPlaylistIds = d.stringArray(forKey: "watch_playlists") ?? []
         watchKeepsBooks = d.bool(forKey: "watch_keeps_books")
         syncsAcrossDevices = d.object(forKey: "cloud_sync") == nil ? true : d.bool(forKey: "cloud_sync")
@@ -843,11 +1138,63 @@ final class Preferences {
         audiobookSpeed = bookSpeed > 0 ? bookSpeed : 1
 
         observeCloud()
-        adoptCloudChanges()
+        // After the first frame, and off the main thread: `CloudSync.isAvailable`
+        // is iCloud's first `synchronize()`, a round trip to the daemon that
+        // used to sit inside this init — which runs inside the app's `init`.
+        // Adopted on the main actor once it has answered, as every later
+        // change is.
+        Launch.afterFirstFrame {
+            Task.detached(priority: .utility) {
+                _ = CloudSync.isAvailable
+                await MainActor.run { Preferences.shared.adoptCloudChanges() }
+            }
+        }
+        Launch.mark("preferences loaded")
+        #if os(iOS)
+        pinSettingsNotOfferedHere()
+        #endif
         #if os(tvOS)
         shareWithHousehold()
         #endif
     }
+
+    #if os(iOS)
+    /// The settings an iPhone or an iPad has no row for, in the app's
+    /// Settings or in the player, and so keeps at their defaults: the layout
+    /// follows the hinge, the player's own behaviour is the default one, and
+    /// subtitles are drawn the one way. Another device's choices for them
+    /// arrive through iCloud and are set back here, locally only, so a Mac
+    /// or an Apple TV keeps what it was set to — see `publishEverythingToCloud`.
+    static let keysNotOfferedHere: Set<String> = [
+        "home_clear_abandoned", "power_aware_quality", "stereo_downmix",
+        "subs_forced_only", "sub_font_size", "sub_bg",
+        "picture_brightness", "picture_contrast", "picture_saturation", "picture_gamma",
+        "picture_zoom", "picture_aspect", "player_night_mode",
+        "player_engine", "player_battery_saver", "player_skip_interval",
+        "player_hide_after", "player_hold_2x", "player_edge_gestures",
+    ]
+
+    private func pinSettingsNotOfferedHere() {
+        let wasAdopting = isAdoptingRemote
+        isAdoptingRemote = true
+        defer { isAdoptingRemote = wasAdopting }
+        if layoutOverride != .automatic { layoutOverride = .automatic }
+        if clearsAbandonedEpisodes { clearsAbandonedEpisodes = false }
+        if !powerAwareQuality { powerAwareQuality = true }
+        if stereoDownmix { stereoDownmix = false }
+        if forcedSubtitlesOnly { forcedSubtitlesOnly = false }
+        if subtitleSize != 100 { subtitleSize = 100 }
+        if subtitleBackground != .outline { subtitleBackground = .outline }
+        if pictureIsAdjusted { resetPicture() }
+        if nightMode { nightMode = false }
+        if playbackEngine != .automatic { playbackEngine = .automatic }
+        if batterySaver != .automatic { batterySaver = .automatic }
+        if skipInterval != 10 { skipInterval = 10 }
+        if hideControlsAfter != Self.defaultHideControlsAfter { hideControlsAfter = Self.defaultHideControlsAfter }
+        if !holdForDoubleSpeed { holdForDoubleSpeed = true }
+        if edgeGestures { edgeGestures = false }
+    }
+    #endif
 
     // MARK: - iCloud
 
@@ -878,35 +1225,60 @@ final class Preferences {
     /// the second one copies rather than the other way round.
     private func publishEverythingToCloud() {
         guard CloudSync.isAvailable else { return }
-        CloudSync.set(theme.rawValue, forKey: "theme")
-        CloudSync.set(adaptiveQuality, forKey: "adaptive")
-        CloudSync.set(powerAwareQuality, forKey: "power_aware_quality")
-        CloudSync.set(autoplayNext, forKey: "autoplay_next")
-        CloudSync.set(combinesNextUp, forKey: "home_combine_next_up")
-        CloudSync.set(nextUpHidden, forKey: "next_up_hidden")
-        CloudSync.set(stereoDownmix, forKey: "stereo_downmix")
-        CloudSync.set(resumePlayback, forKey: "resume_playback")
-        CloudSync.set(audioLanguage, forKey: "audio_lang")
-        CloudSync.set(subtitleLanguage, forKey: "sub_lang")
-        CloudSync.set(forcedSubtitlesOnly, forKey: "subs_forced_only")
-        CloudSync.set(subtitleSize, forKey: "sub_font_size")
-        CloudSync.set(subtitleBackground.rawValue, forKey: "sub_bg")
-        CloudSync.set(losslessOnCellular, forKey: "music_lossless_cellular")
-        CloudSync.set(musicAutoplay, forKey: "music_autoplay")
-        CloudSync.set(normalizeVolume, forKey: "music_normalize")
-        CloudSync.set(musicRomanizeNames, forKey: "music_romanize")
-        CloudSync.set(mixPoints.stored, forKey: "music_mix_points")
-        CloudSync.set(audiobookSpeed, forKey: "audiobook_speed")
-        CloudSync.set(defaults.data(forKey: "smart_playlists"), forKey: "smart_playlists")
-        CloudSync.set(fillScreen, forKey: "fill_screen")
-        CloudSync.set(liveTVSource.rawValue, forKey: "livetv_source")
-        CloudSync.set(iptvPlaylistURL, forKey: "iptv_playlist_url")
-        CloudSync.set(iptvGuideURL, forKey: "iptv_guide_url")
-        CloudSync.set(iptvUserAgent, forKey: "iptv_user_agent")
-        CloudSync.set(iptvRefreshMinutes, forKey: "iptv_refresh_minutes")
-        CloudSync.set(downloadQuality, forKey: "download_quality")
-        CloudSync.set(downloadsWiFiOnly, forKey: "downloads_wifi_only")
-        CloudSync.set(tabBarOrder, forKey: "tab_bar_order")
+        // What this device has no row for is only its default, not a choice
+        // to hand to the others.
+        func publish(_ value: Any?, forKey key: String) {
+            #if os(iOS)
+            guard !Self.keysNotOfferedHere.contains(key) else { return }
+            #endif
+            CloudSync.set(value, forKey: key)
+        }
+        publish(theme.rawValue, forKey: "theme")
+        publish(adaptiveQuality, forKey: "adaptive")
+        publish(powerAwareQuality, forKey: "power_aware_quality")
+        publish(autoplayNext, forKey: "autoplay_next")
+        publish(hidesContinueWatching, forKey: "home_hide_continue_watching")
+        publish(clearsAbandonedEpisodes, forKey: "home_clear_abandoned")
+        publish(nextUpHidden, forKey: "next_up_hidden")
+        publish(nextUpDays, forKey: "next_up_days")
+        publish(nextUpIncludesInProgress, forKey: "next_up_in_progress")
+        publish(nextUpRewatching, forKey: "next_up_rewatching")
+        publish(stereoDownmix, forKey: "stereo_downmix")
+        publish(resumePlayback, forKey: "resume_playback")
+        publish(audioLanguage, forKey: "audio_lang")
+        publish(subtitleLanguage, forKey: "sub_lang")
+        publish(forcedSubtitlesOnly, forKey: "subs_forced_only")
+        publish(subtitleSize, forKey: "sub_font_size")
+        publish(subtitleBackground.rawValue, forKey: "sub_bg")
+        publish(losslessOnCellular, forKey: "music_lossless_cellular")
+        publish(musicAutoplay, forKey: "music_autoplay")
+        publish(normalizeVolume, forKey: "music_normalize")
+        publish(musicRomanizeNames, forKey: "music_romanize")
+        publish(mixPoints.stored, forKey: "music_mix_points")
+        publish(audiobookSpeed, forKey: "audiobook_speed")
+        publish(defaults.data(forKey: "smart_playlists"), forKey: "smart_playlists")
+        publish(fillScreen, forKey: "fill_screen")
+        publish(pictureBrightness, forKey: "picture_brightness")
+        publish(pictureContrast, forKey: "picture_contrast")
+        publish(pictureSaturation, forKey: "picture_saturation")
+        publish(pictureGamma, forKey: "picture_gamma")
+        publish(pictureZoom, forKey: "picture_zoom")
+        publish(aspectOverride, forKey: "picture_aspect")
+        publish(playbackEngine.rawValue, forKey: "player_engine")
+        publish(batterySaver.rawValue, forKey: "player_battery_saver")
+        publish(skipInterval, forKey: "player_skip_interval")
+        publish(edgeGestures, forKey: "player_edge_gestures")
+        publish(holdForDoubleSpeed, forKey: "player_hold_2x")
+        publish(hideControlsAfter, forKey: "player_hide_after")
+        publish(showsRemainingTime, forKey: "player_show_remaining")
+        publish(liveTVSource.rawValue, forKey: "livetv_source")
+        publish(iptvPlaylistURL, forKey: "iptv_playlist_url")
+        publish(iptvGuideURL, forKey: "iptv_guide_url")
+        publish(iptvUserAgent, forKey: "iptv_user_agent")
+        publish(iptvRefreshMinutes, forKey: "iptv_refresh_minutes")
+        publish(downloadQuality, forKey: "download_quality")
+        publish(downloadsWiFiOnly, forKey: "downloads_wifi_only")
+        publish(tabBarOrder, forKey: "tab_bar_order")
         publishSessionToCloud()
         CloudSync.flush()
     }
@@ -958,8 +1330,13 @@ final class Preferences {
         if let v = CloudSync.object(forKey: "adaptive") as? Bool, v != adaptiveQuality { adaptiveQuality = v }
         if let v = CloudSync.object(forKey: "power_aware_quality") as? Bool, v != powerAwareQuality { powerAwareQuality = v }
         if let v = CloudSync.object(forKey: "autoplay_next") as? Bool, v != autoplayNext { autoplayNext = v }
-        if let v = CloudSync.object(forKey: "home_combine_next_up") as? Bool, v != combinesNextUp { combinesNextUp = v }
+        if let v = CloudSync.object(forKey: "home_hide_continue_watching") as? Bool, v != hidesContinueWatching { hidesContinueWatching = v }
+        if let v = CloudSync.object(forKey: "home_clear_abandoned") as? Bool, v != clearsAbandonedEpisodes { clearsAbandonedEpisodes = v }
         if let v = CloudSync.object(forKey: "next_up_hidden") as? [String: String], v != nextUpHidden { nextUpHidden = v }
+        if let v = (CloudSync.object(forKey: "next_up_days") as? NSNumber)?.intValue,
+           Self.nextUpDayChoices.contains(v), v != nextUpDays { nextUpDays = v }
+        if let v = CloudSync.object(forKey: "next_up_in_progress") as? Bool, v != nextUpIncludesInProgress { nextUpIncludesInProgress = v }
+        if let v = CloudSync.object(forKey: "next_up_rewatching") as? Bool, v != nextUpRewatching { nextUpRewatching = v }
         if let v = CloudSync.object(forKey: "stereo_downmix") as? Bool, v != stereoDownmix { stereoDownmix = v }
         if let v = CloudSync.object(forKey: "resume_playback") as? Bool, v != resumePlayback { resumePlayback = v }
         if let v = CloudSync.object(forKey: "audio_lang") as? String, v != audioLanguage { audioLanguage = v }
@@ -972,6 +1349,29 @@ final class Preferences {
         if let v = CloudSync.object(forKey: "sub_bg") as? String,
            let b = SubtitleBackground(rawValue: v), b != subtitleBackground { subtitleBackground = b }
         if let v = CloudSync.object(forKey: "fill_screen") as? Bool, v != fillScreen { fillScreen = v }
+        if let v = (CloudSync.object(forKey: "picture_brightness") as? NSNumber)?.doubleValue,
+           Self.pictureValue(v) != pictureBrightness { pictureBrightness = Self.pictureValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_contrast") as? NSNumber)?.doubleValue,
+           Self.pictureValue(v) != pictureContrast { pictureContrast = Self.pictureValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_saturation") as? NSNumber)?.doubleValue,
+           Self.pictureValue(v) != pictureSaturation { pictureSaturation = Self.pictureValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_gamma") as? NSNumber)?.doubleValue,
+           Self.pictureValue(v) != pictureGamma { pictureGamma = Self.pictureValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_zoom") as? NSNumber)?.doubleValue,
+           abs(Self.zoomValue(v) - pictureZoom) > 0.001 { pictureZoom = Self.zoomValue(v) }
+        if let v = (CloudSync.object(forKey: "picture_aspect") as? NSNumber)?.doubleValue,
+           abs(Self.aspectValue(v) - aspectOverride) > 0.001 { aspectOverride = Self.aspectValue(v) }
+        if let v = CloudSync.object(forKey: "player_engine") as? String,
+           let e = EnginePolicy.Preference(rawValue: v), e != playbackEngine { playbackEngine = e }
+        if let v = CloudSync.object(forKey: "player_battery_saver") as? String,
+           let b = EnginePolicy.BatterySaver(rawValue: v), b != batterySaver { batterySaver = b }
+        if let v = (CloudSync.object(forKey: "player_skip_interval") as? NSNumber)?.intValue,
+           Self.skipIntervals.contains(v), v != skipInterval { skipInterval = v }
+        if let v = CloudSync.object(forKey: "player_edge_gestures") as? Bool, v != edgeGestures { edgeGestures = v }
+        if let v = CloudSync.object(forKey: "player_hold_2x") as? Bool, v != holdForDoubleSpeed { holdForDoubleSpeed = v }
+        if let v = (CloudSync.object(forKey: "player_hide_after") as? NSNumber)?.doubleValue,
+           Self.hideControlsChoices.contains(v), v != hideControlsAfter { hideControlsAfter = v }
+        if let v = CloudSync.object(forKey: "player_show_remaining") as? Bool, v != showsRemainingTime { showsRemainingTime = v }
         if let v = CloudSync.object(forKey: "livetv_source") as? String,
            let s = LiveTVSource(rawValue: v), s != liveTVSource { liveTVSource = s }
         if let v = CloudSync.object(forKey: "iptv_playlist_url") as? String, v != iptvPlaylistURL {
@@ -1005,6 +1405,9 @@ final class Preferences {
         if let v = CloudSync.object(forKey: "tab_bar_order") as? [String], v != tabBarOrder {
             tabBarOrder = v
         }
+        #if os(iOS)
+        pinSettingsNotOfferedHere()
+        #endif
         adoptCloudSession()
     }
 

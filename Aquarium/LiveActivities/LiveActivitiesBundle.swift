@@ -1,11 +1,11 @@
 //  The Live Activities extension — iPhone and iPad only — which is also
 //  where the Now Playing widget and the Control Centre buttons live.
 //
-//  Two activities. Each is drawn three ways: the Lock Screen,
-//  the Dynamic Island, and — from iOS 18 — the small card that Apple Watch's
-//  Smart Stack and (iOS 26) the CarPlay dashboard show. That last one gets
-//  its own layout rather than the island's compact corners, which is what the
-//  system borrows when an activity offers nothing better. What each one draws is decided entirely by
+//  One activity, drawn three ways: the Lock Screen, the Dynamic Island, and
+//  — from iOS 18 — the small card that Apple Watch's Smart Stack and (iOS 26)
+//  the CarPlay dashboard show. That last one gets its own layout rather than
+//  the island's compact corners, which is what the system borrows when an
+//  activity offers nothing better. What it draws is decided entirely by
 //  the state the app hands over (Shared/LiveActivityTypes.swift); nothing in
 //  here talks to the server, reads a file, or knows what a Jellyfin is.
 
@@ -16,14 +16,18 @@ import WidgetKit
 struct AquariumLiveActivities: WidgetBundle {
     var body: some Widget {
         ListeningLiveActivity()
-        DownloadsLiveActivity()
         // The Now Playing card, and — from iOS 18 — the Control Centre
         // buttons. See NowPlayingWidget.swift.
         NowPlayingWidget()
+        // The configurable tile for one title — see FollowWidget.swift.
+        FollowWidget()
         if #available(iOS 18.0, *) {
             ResumeWatchingControl()
             ShuffleMusicControl()
             ResumeAudiobookControl()
+            PlayPauseControl()
+            SkipSegmentControl()
+            NextEpisodeControl()
         }
     }
 }
@@ -44,6 +48,20 @@ enum ActivityPalette {
     /// Secondary text on the small card — seen at arm's length or across a
     /// car, so brighter than `dim`.
     static let smallDim = Color.white.opacity(0.78)
+}
+
+extension Image {
+    /// Cover art and posters in a Home Screen widget, kept as pictures in the
+    /// tinted and clear styles. Left to the system, an image there is drawn
+    /// as a silhouette in the tint, which for a photograph is a solid slab.
+    @ViewBuilder
+    func widgetArtwork() -> some View {
+        if #available(iOS 18.0, *) {
+            self.widgetAccentedRenderingMode(.fullColor)
+        } else {
+            self
+        }
+    }
 }
 
 /// The Lock Screen layout, or the small card for Apple Watch and CarPlay.

@@ -488,21 +488,29 @@ enum StationRanker {
         if profile.isSurprise {
             // A shuffle first: luck outweighs everything else the score
             // reads. Each reaction wears it down, and what the listener has
-            // finished and skipped — `session.lean` — takes over, so the
-            // shuffle turns into a mix of its own over an hour or so.
+            // finished and skipped — `session.surpriseLean`, let in a little
+            // more with each — takes over, so the shuffle turns into a mix
+            // of its own by the middle of a forty-minute session.
             let reactions = Double(session?.reactions ?? 0)
             jitter = max(jitter, 5 * exp(-reactions / 8))
         }
+        // A Surprise Mix's pool is mostly the account's favourites and most
+        // played, so their points on top meant the same few songs opened
+        // every session. They come in as the session's own leanings do, by
+        // `ramp`: nothing to begin with, in full by the middle.
+        let familiar = profile.isSurprise ? (session?.ramp ?? 0) : 1
         return pool.compactMap { song in
             guard !exclude.contains(song.Id), song.Id != profile.songId else { return nil }
             let likeness = profile.likeness(song, points: points)
             var score = likeness ?? -4
-            if let session { score += session.lean(for: song) }
+            if let session {
+                score += profile.isSurprise ? session.surpriseLean(for: song) : session.lean(for: song)
+            }
             // The server's own record of the song: starred, and how often it
             // has been played anywhere — or that it never has been.
             let plays = song.userData.PlayCount ?? 0
-            if song.userData.isFavorite { score += points.weight(.favorites) }
-            score += points.weight(.mostPlayed) * min(1, log2(1 + Double(plays)) / 4)
+            if song.userData.isFavorite { score += familiar * points.weight(.favorites) }
+            score += familiar * points.weight(.mostPlayed) * min(1, log2(1 + Double(plays)) / 4)
             if plays == 0 { score += points.weight(.discovery) }
             if jitter > 0 { score += jitter * (luck[song.Id] ?? Double.random(in: 0..<1)) }
             return Scored(song: song, score: score, alike: likeness != nil, artist: MusicKeys.lead(of: song))

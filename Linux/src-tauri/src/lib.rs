@@ -54,7 +54,10 @@ fn ui_log(msg: String) {
     debug_log_line(&format!("ui: {}", msg));
 }
 
-#[tauri::command]
+/// `async` here and on the other commands that block (keyring and portal
+/// D-Bus calls, fsync, a throwaway mpv core): a plain command runs on the GTK
+/// main thread, and anything slow there freezes the window, video included.
+#[tauri::command(async)]
 fn config_load() -> Value {
     secret::hydrate(config::load())
 }
@@ -62,7 +65,7 @@ fn config_load() -> Value {
 /// Merged rather than written whole: the backend now owns config keys the
 /// frontend never sees (the pinned `server_id`, in particular), and a full
 /// overwrite from a webview holding a stale copy would silently drop them.
-#[tauri::command]
+#[tauri::command(async)]
 fn config_save(cfg: Value) -> Result<(), String> {
     config::merge(secret::dehydrate(cfg))
 }
@@ -87,7 +90,7 @@ async fn fetch_source(url: String) -> Result<String, String> {
     }
 
     let raw: Vec<u8> = if url.starts_with("http://") || url.starts_with("https://") {
-        let res = jellyfin::http()
+        let mut res = jellyfin::http()
             .get(url)
             .send()
             .await
@@ -100,10 +103,20 @@ async fn fetch_source(url: String) -> Result<String, String> {
                 return Err(format!("That source is {} MB — too large to load", len / 1_048_576));
             }
         }
-        res.bytes()
+        // Counted as it arrives, too: a chunked response has no length to
+        // check up front, and would otherwise be read whole however big.
+        let mut body: Vec<u8> = Vec::new();
+        while let Some(chunk) = res
+            .chunk()
             .await
             .map_err(|e| format!("Couldn't read {}: {}", url, e))?
-            .to_vec()
+        {
+            if (body.len() + chunk.len()) as u64 > MAX_BYTES {
+                return Err(format!("That source is over {} MB — too large to load", MAX_BYTES / 1_048_576));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        body
     } else {
         let path = url.strip_prefix("file://").unwrap_or(url);
         let meta = tokio::fs::metadata(path)
@@ -137,7 +150,7 @@ async fn fetch_source(url: String) -> Result<String, String> {
     Ok(text)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn app_info() -> Value {
     let cfg = config::load();
     let server = cfg.get("server").and_then(|v| v.as_str()).unwrap_or("");
@@ -352,7 +365,7 @@ fn player_set_next_available(player: State<'_, player::Player>, available: bool)
 }
 
 /// Audio outputs to choose between in Settings.
-#[tauri::command]
+#[tauri::command(async)]
 fn audio_devices() -> Vec<Value> {
     mpv::audio_devices()
         .into_iter()

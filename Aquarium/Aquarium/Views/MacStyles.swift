@@ -18,6 +18,22 @@ extension View {
         #endif
     }
 
+    /// A `Menu` whose label is a control the page drew itself — a filter
+    /// chip — rather than a title the system bezels. `.button` with `.plain`
+    /// is the one menu style on a Mac that draws a label made of more than
+    /// a title and an icon, and the indicator goes with the bezel. Nothing
+    /// anywhere else, where a menu already draws its label as given.
+    @ViewBuilder
+    func macMenuAsLabel() -> some View {
+        #if os(macOS)
+        menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+        #else
+        self
+        #endif
+    }
+
     /// The Mac's whole-tile hover and selection treatment for a poster, a
     /// still, a library tile: a faint fill and an accent ring under the
     /// pointer, a stronger ring when the tile is selected. See `PosterHover`.

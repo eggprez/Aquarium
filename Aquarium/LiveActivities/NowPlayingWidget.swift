@@ -87,6 +87,9 @@ struct NowPlayingWidget: Widget {
 private struct NowPlayingCard: View {
     let entry: NowPlayingEntry
     @Environment(\.widgetFamily) private var family
+    /// Full colour, or the Home Screen's tinted and clear styles, where
+    /// everything but the artwork is drawn in one tint — see `small`.
+    @Environment(\.widgetRenderingMode) private var renderingMode
 
     var body: some View {
         Group {
@@ -108,6 +111,7 @@ private struct NowPlayingCard: View {
             Image(systemName: "play.circle")
                 .font(.title2)
                 .foregroundStyle(ActivityPalette.accentText)
+                .widgetAccentable()
             Text("Nothing playing")
                 .font(.headline)
             Text("Open Aquarium to start something.")
@@ -122,18 +126,29 @@ private struct NowPlayingCard: View {
             artwork(cornerRadius: 0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
-            LinearGradient(
-                colors: [.clear, ActivityPalette.background.opacity(0.9)],
-                startPoint: .center, endPoint: .bottom
-            )
+                // Tinted, the gradient below would be drawn in the tint —
+                // a pale wash under white text — so the picture is dimmed
+                // instead and the system's own dark ground does its work.
+                .opacity(renderingMode == .fullColor ? 1 : 0.4)
+            if renderingMode == .fullColor {
+                LinearGradient(
+                    colors: [.clear, ActivityPalette.background.opacity(0.9)],
+                    startPoint: .center, endPoint: .bottom
+                )
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text(snapshot.title)
                     .font(.footnote.weight(.semibold))
                     .lineLimit(2)
                 HStack(spacing: 6) {
-                    Image(systemName: snapshot.isPlaying ? "play.fill" : "pause.fill")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(ActivityPalette.accentText)
+                    Button(intent: PlayPauseWidgetIntent()) {
+                        Image(systemName: snapshot.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 26, height: 26)
+                            .background { Circle().fill(ActivityPalette.accent).widgetAccentable() }
+                    }
+                    .buttonStyle(.plain)
                     bar(snapshot)
                 }
             }
@@ -152,6 +167,7 @@ private struct NowPlayingCard: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(ActivityPalette.accentText)
                     .textCase(.uppercase)
+                    .widgetAccentable()
                 Text(snapshot.title)
                     .font(.headline)
                     .lineLimit(2)
@@ -173,8 +189,23 @@ private struct NowPlayingCard: View {
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(ActivityPalette.dim)
             }
+            // Pause or play without opening the app. The intent is an audio
+            // one, which the system runs in the app's process in the
+            // background — see Shared/WidgetTypes.swift.
+            playPause(snapshot)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    private func playPause(_ snapshot: NowPlayingSnapshot) -> some View {
+        Button(intent: PlayPauseWidgetIntent()) {
+            Image(systemName: snapshot.isPlaying ? "pause.fill" : "play.fill")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background { Circle().fill(ActivityPalette.accent).widgetAccentable() }
+        }
+        .buttonStyle(.plain)
     }
 
     private func rectangular(_ snapshot: NowPlayingSnapshot) -> some View {
@@ -204,6 +235,7 @@ private struct NowPlayingCard: View {
         if let image = entry.artwork {
             Image(uiImage: image)
                 .resizable()
+                .widgetArtwork()
                 .aspectRatio(contentMode: .fill)
         } else {
             ZStack {
@@ -211,6 +243,7 @@ private struct NowPlayingCard: View {
                 Image(systemName: entry.snapshot?.isVideo == true ? "film" : "music.note")
                     .font(.largeTitle)
                     .foregroundStyle(ActivityPalette.accentText)
+                    .widgetAccentable()
             }
         }
     }
@@ -221,6 +254,7 @@ private struct NowPlayingCard: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.22))
                 Capsule().fill(ActivityPalette.accent).frame(width: proxy.size.width * fraction)
+                    .widgetAccentable()
             }
         }
         .frame(height: 4)
@@ -271,5 +305,44 @@ struct ResumeAudiobookControl: ControlWidget {
         }
         .displayName("Resume Audiobook")
         .description("Picks up the audiobook you were listening to.")
+    }
+}
+
+@available(iOS 18.0, *)
+struct PlayPauseControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: "scottai.FellyJin.control.playpause") {
+            ControlWidgetButton(action: PlayPauseWidgetIntent()) {
+                Label("Play or Pause", systemImage: "playpause.fill")
+            }
+        }
+        .displayName("Play or Pause")
+        .description("Pauses what's playing, or starts it again.")
+    }
+}
+
+@available(iOS 18.0, *)
+struct SkipSegmentControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: "scottai.FellyJin.control.skip") {
+            ControlWidgetButton(action: SkipSegmentWidgetIntent()) {
+                Label("Skip Intro", systemImage: "forward.fill")
+            }
+        }
+        .displayName("Skip Intro")
+        .description("Jumps past the intro or the credits.")
+    }
+}
+
+@available(iOS 18.0, *)
+struct NextEpisodeControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: "scottai.FellyJin.control.next") {
+            ControlWidgetButton(action: NextEpisodeControlIntent()) {
+                Label("Next Episode", systemImage: "forward.end.fill")
+            }
+        }
+        .displayName("Next Episode")
+        .description("Starts the next episode now.")
     }
 }

@@ -3,8 +3,10 @@
 //
 //  A direct port of adaptive.ts. The signals it watches are different — mpv
 //  reported cache stalls and dropped frames over an IPC socket, AVFoundation
-//  reports them through `AVPlayerItemAccessLog` and the buffer-empty flag — but
-//  the policy is the same one, thresholds included.
+//  through `AVPlayerItemAccessLog` and the buffer-empty flag — but the policy
+//  is the same one, thresholds included. The engine behind the player reads
+//  those signals now and hands them in through `sample`, so nothing here is
+//  tied to a particular one.
 //
 //  It only ever reacts to what has already gone wrong: no probing, no
 //  prediction. Two rules move it down (repeated stalls, or one long one; and
@@ -12,7 +14,6 @@
 //  (a long clean stretch with a healthy read-ahead), and a rung that failed on
 //  the way up is never tried again for the rest of the session.
 
-import AVFoundation
 import Foundation
 
 @MainActor
@@ -23,6 +24,9 @@ final class AdaptiveQuality {
         var isDrop: Bool
         /// The cause in a few words, for the badge that announces a move.
         var reason: String
+        /// The connection speed a stall step-down was sized by, for the
+        /// next episode to remember.
+        var throughput: Double? = nil
     }
 
     /// Quality.choices runs best-first: index 0 is direct play, the last entry
@@ -70,6 +74,10 @@ final class AdaptiveQuality {
     /// The rung the device itself can afford right now, as an index into the
     /// ladder — see `notePower`. Nil when it can afford any of them.
     private var powerCap: Int?
+    /// The smallest rung that still sends this stream's file untouched — see
+    /// `Quality.untouchedRung`. Anything from direct play down to it is the
+    /// same stream, so it is read as this rung.
+    private var untouched = 0
     private var streamStartedAt = Date.distantPast
     private var lastSwitchAt = Date.distantPast
     /// While this is in the future, the rung playing was chosen by hand and the
@@ -96,8 +104,18 @@ final class AdaptiveQuality {
     /// from the last rather than being chosen; only our own switches earn the
     /// cooldown, because a user who just picked a quality shouldn't wait 45
     /// seconds for the policy to start watching it.
-    func begin(inherited: Bool, ceiling requested: Int?) {
+    ///
+    /// `powerCap` is the rung the device can afford as the stream opens — see
+    /// `powerRung`. It used to be learnt only from the notification that the
+    /// device's state had *changed*, so a phone already in Low Power Mode when
+    /// playback began had no cap here at all: every five minutes the policy
+    /// climbed towards the ceiling, the start capped the climb straight back
+    /// to the rung that was playing, and the same stream was torn down and
+    /// reopened for nothing.
+    func begin(inherited: Bool, ceiling requested: Int?, powerCap capBitrate: Int?, untouched: Int = 0) {
         let index = rungIndex(requested)
+        powerCap = capBitrate.map(rungIndex)
+        self.untouched = untouched
         resetStream()
         streamStartedAt = Date()
         lastSwitchAt = inherited ? streamStartedAt : .distantPast
@@ -113,6 +131,7 @@ final class AdaptiveQuality {
     func reset() {
         resetStream()
         ceiling = 0
+        untouched = 0
         lastUpshiftAt = nil
         manualUntil = .distantPast
     }
@@ -145,7 +164,7 @@ final class AdaptiveQuality {
     func notePower(thermal: ProcessInfo.ThermalState, lowPower: Bool, currentBitrate: Int?) -> Bool {
         let cap = Self.powerRung(thermal: thermal, lowPower: lowPower).flatMap(rungIndex)
         powerCap = cap
-        guard let cap, rungIndex(currentBitrate) < cap else { return false }
+        guard let cap, effectiveIndex(currentBitrate) < cap else { return false }
         powerReason = lowPower && thermal != .serious && thermal != .critical ? .lowPower : .heat
         wantPowerDrop = true
         return true
@@ -190,6 +209,12 @@ final class AdaptiveQuality {
         return Quality.choices.firstIndex { $0.maxBitrate == rung } ?? 0
     }
 
+    /// Where the stream playing actually sits: any rung that sends the file
+    /// untouched is the same stream as the smallest of them.
+    private func effectiveIndex(_ bitrate: Int?) -> Int {
+        max(rungIndex(bitrate), untouched)
+    }
+
     /// True while anything recent would make a stall someone else's fault.
     private var settling: Bool {
         let now = Date()
@@ -230,14 +255,14 @@ final class AdaptiveQuality {
         return true
     }
 
-    /// One sample of the player's state, taken on every time-observer tick.
-    /// `paused` is the player's own intent: the timebase's rate is zero for a
-    /// stall as much as for a pause, and read from there no stall was ever
-    /// long.
-    func sample(item: AVPlayerItem, position: Double, buffered: Double, paused: Bool) {
+    /// One sample of the player's state, taken on every time tick. `paused`
+    /// is the model's own intent, as distinct from a stall; `buffering` is
+    /// the engine waiting on the network; `droppedFrames` is the running
+    /// total the engine reports, or nil where it can't measure it.
+    func sample(position: Double, buffered: Double, paused: Bool, buffering: Bool, droppedFrames: Int?) {
         let now = Date()
         isPaused = paused
-        isBuffering = item.isPlaybackBufferEmpty || !item.isPlaybackLikelyToKeepUp
+        isBuffering = buffering
 
         // Seeks, spotted rather than reported: forward, the picture outruns the
         // clock; backward, it goes somewhere no amount of waiting takes it.
@@ -266,23 +291,15 @@ final class AdaptiveQuality {
 
         // Frames given up on. Sampled as a rate: this is the device failing to
         // decode what it's been sent, which a smaller stream fixes and a bigger
-        // buffer does not.
-        //
-        // The log is read only when a sample is due. `accessLog()` hands back
-        // a fresh copy of every event since the stream opened, and it was
-        // being taken twice a second — a copy that grows for the length of a
-        // film — to be looked at once every twenty seconds.
-        let dropSampleDue = dropSample.map { now.timeIntervalSince($0.at) >= dropWindow } ?? true
-        if dropSampleDue, !isPaused, let event = item.accessLog()?.events.last {
-            let frames = event.numberOfDroppedVideoFrames
-            if frames >= 0 {
-                if dropSample == nil {
-                    dropSample = (now, frames)
-                } else if let sample = dropSample, now.timeIntervalSince(sample.at) >= dropWindow {
-                    let delta = frames - sample.frames
-                    dropSample = (now, frames)
-                    if delta >= dropsToDrop, !settling { queueStepDown(reason: .drops) }
-                }
+        // buffer does not. The engine reports a running total; the delta over
+        // a window is what matters.
+        if !isPaused, let frames = droppedFrames, frames >= 0 {
+            if dropSample == nil {
+                dropSample = (now, frames)
+            } else if let sample = dropSample, now.timeIntervalSince(sample.at) >= dropWindow {
+                let delta = frames - sample.frames
+                dropSample = (now, frames)
+                if delta >= dropsToDrop, !settling { queueStepDown(reason: .drops) }
             }
         }
 
@@ -324,8 +341,14 @@ final class AdaptiveQuality {
     /// The move the policy wants to make, or nil. Returns at most one decision
     /// per event, and starts the cooldown as it hands it over — the caller is
     /// expected to act on it.
-    func decide(currentBitrate: Int?) -> Decision? {
-        let index = rungIndex(currentBitrate)
+    ///
+    /// `measured` is the connection's speed where the speed check is on and
+    /// knows it. A stall then steps straight down to the rung that speed
+    /// carries rather than one at a time: at 3 Mbps the original went to
+    /// 720p, took over a minute to show a picture, and stalled on to 480p.
+    /// Read only for that step — it is asked for on every tick.
+    func decide(currentBitrate: Int?, measured: @autoclosure () -> Double? = nil) -> Decision? {
+        let index = effectiveIndex(currentBitrate)
 
         // The device's own limit comes first and waits for nothing — not the
         // startup grace, not a rung picked by hand. A phone at its thermal
@@ -363,7 +386,13 @@ final class AdaptiveQuality {
                     reason: "Lowest quality"
                 )
             }
-            let next = index + 1
+            var next = index + 1
+            var sizedBy: Double?
+            if !lastReasonWasDrop, let speed = measured() {
+                let fit = rungIndex(Quality.fitting(speed, source: nil))
+                if fit > next { next = fit }
+                sizedBy = speed
+            }
             // A stall straight after climbing means that rung is beyond this
             // connection. Pin the ceiling here so the policy doesn't spend the
             // evening rediscovering it every five minutes.
@@ -379,14 +408,20 @@ final class AdaptiveQuality {
                     ? "Playback can't keep up — switching to \(label)"
                     : "Buffering — switching to \(label)",
                 isDrop: true,
-                reason: lastReasonWasDrop ? "Playback couldn't keep up" : "Connection slowed"
+                reason: lastReasonWasDrop ? "Playback couldn't keep up" : "Connection slowed",
+                throughput: sizedBy
             )
         }
 
         if wantUp {
             wantUp = false
-            let next = index - 1
-            guard next >= ceiling, next >= (powerCap ?? 0), next >= 0, !settling else { return nil }
+            // Already the original file: there is nothing better to climb to.
+            guard rungIndex(currentBitrate) > untouched else { return nil }
+            var next = index - 1
+            // Every rung from here up is the original, so climb straight to
+            // the best of them the line allows rather than one at a time.
+            if next <= untouched { next = max(ceiling, powerCap ?? 0) }
+            guard next < index, next >= ceiling, next >= (powerCap ?? 0), next >= 0, !settling else { return nil }
             lastUpshiftAt = Date()
             lastSwitchAt = Date()
             return Decision(
@@ -399,4 +434,46 @@ final class AdaptiveQuality {
 
         return nil
     }
+}
+
+// MARK: - The power source
+
+#if os(macOS)
+import IOKit.ps
+#endif
+
+/// Whether the machine is running on its battery — a Mac's question; a phone
+/// always is and an Apple TV never. `changed` is posted on the main queue
+/// when a Mac is plugged in or unplugged, for the mpv engine's render profile.
+enum PowerSource {
+    static let changed = Notification.Name("aquarium.powerSource.changed")
+
+    static var onBattery: Bool {
+        #if os(macOS)
+        guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let type = IOPSGetProvidingPowerSourceType(snapshot)?.takeUnretainedValue() as String?
+        else { return false }
+        return type == kIOPSBatteryPowerValue
+        #elseif os(tvOS)
+        return false
+        #else
+        return true
+        #endif
+    }
+
+    #if os(macOS)
+    private nonisolated(unsafe) static var source: CFRunLoopSource?
+
+    /// Start posting `changed`. Idempotent.
+    @MainActor
+    static func startObserving() {
+        guard source == nil else { return }
+        let callback: IOPowerSourceCallbackType = { _ in
+            DispatchQueue.main.async { NotificationCenter.default.post(name: PowerSource.changed, object: nil) }
+        }
+        guard let made = IOPSNotificationCreateRunLoopSource(callback, nil)?.takeRetainedValue() else { return }
+        CFRunLoopAddSource(CFRunLoopGetMain(), made, .commonModes)
+        source = made
+    }
+    #endif
 }

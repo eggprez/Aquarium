@@ -67,7 +67,12 @@ struct SettingsView: View {
                 SettingLink(Self.row(.libraryCopy), value: SettingsSummary.libraryCopy(prefs), page: .libraryCopy) {
                     LibraryCopySettingsPage()
                 }
-                SettingToggle(Copy.combineNextUp, isOn: $prefs.combinesNextUp)
+                SettingToggle(Copy.hideContinueWatching, isOn: $prefs.hidesContinueWatching)
+                SettingToggle(Copy.clearAbandoned, isOn: $prefs.clearsAbandonedEpisodes)
+                SettingChoice(Copy.nextUpDays, selection: $prefs.nextUpDays,
+                              options: Preferences.nextUpDayChoices.map { ($0, Preferences.nextUpDaysLabel($0)) })
+                SettingToggle(Copy.nextUpInProgress, isOn: $prefs.nextUpIncludesInProgress)
+                SettingToggle(Copy.nextUpRewatching, isOn: $prefs.nextUpRewatching)
                 if prefs.cloudIsAvailable {
                     SettingToggle(Copy.cloudSync, isOn: $prefs.syncsAcrossDevices)
                 } else {
@@ -81,23 +86,18 @@ struct SettingsView: View {
         }
     }
 
-    /// The language, then the offsets that are set, if either is: "40 ms
-    /// earlier", and the Match Frame Rate one after it when measured.
-    private var audioSummary: String {
-        var parts = [SettingsSummary.language(prefs.audioLanguage, none: "File's choice")]
-        if prefs.audioDelay != 0 {
-            parts.append(PlayerModel.audioDelayShortName(Int((prefs.audioDelay * 1000).rounded())))
-        }
-        if let matched = prefs.matchedAudioDelay {
-            parts.append("24 Hz \(PlayerModel.audioDelayShortName(Int((matched * 1000).rounded())))")
-        }
-        return parts.joined(separator: " · ")
+    /// "Stereo" when downmixing, and nothing otherwise. The delays are not
+    /// summarised here: one per frame rate ran the row off the page, and
+    /// the Audio page lists them a row each.
+    private var audioSummary: String? {
+        prefs.stereoDownmix ? "Stereo" : nil
     }
 
     static let audioLanguageOptions: [(String, String)] =
         [("", "Whatever the file lists first")] + Languages.all.map { ($0.code, $0.name) }
     static let subtitleLanguageOptions: [(String, String)] =
-        [("", "Only when the file turns them on"), ("off", "Never — no subtitles")]
+        [("", "Only when the file turns them on"), ("off", "Never — no subtitles"),
+         (TrackPreference.forcedOnly, "Forced only — signs and foreign lines")]
             + Languages.all.map { ($0.code, $0.name) }
 
     /// A first-page row: the page's name, and what it is about for the panel.
@@ -110,8 +110,10 @@ struct SettingsView: View {
         SettingDescription(title: page.title, symbol: page.symbol, tint: page.tint, notes: [SettingNote(text: page.note)])
     }
 
-    /// The language rows, named for the page they are on.
-    static let audioLanguageRow = SettingNote(name: "Language", text: Copy.audioLanguage.text)
+    /// The language rows, named for the page they are on: the subtitle one
+    /// is on Subtitles, the audio one on Video beside the rest of what a
+    /// video opens with.
+    static let audioLanguageRow = SettingNote(name: "Audio language", text: Copy.audioLanguage.text)
     static let subtitleLanguageRow = SettingNote(name: "Language", text: Copy.subtitleLanguage.text)
 }
 
@@ -204,6 +206,7 @@ private struct ServerSettingsPage: View {
 
 private struct VideoSettingsPage: View {
     @Environment(Preferences.self) private var prefs
+    @Environment(PlayerModel.self) private var player
 
     var body: some View {
         @Bindable var prefs = prefs
@@ -211,18 +214,69 @@ private struct VideoSettingsPage: View {
             SettingGroup(nil, page: .video) {
                 SettingChoice(Copy.defaultQuality, selection: SettingsView.bitrateBinding,
                               options: Quality.choices.map { ($0.maxBitrate, $0.label) }, isFirst: true)
-                SettingToggle(Copy.adaptiveQuality, isOn: $prefs.adaptiveQuality)
+                // No "Adapt quality automatically" here: the Apple TV's mpv
+                // player never steps a stream down by itself, so the switch
+                // would do nothing. Quality is changed by hand from the
+                // player's Quality tab instead.
             }
+            // The picture controls are mpv's, and the Apple TV is always on
+            // mpv, so every row here is live; the player's Picture tab has
+            // the same over the live picture. No engine row and no Battery
+            // saver: the box plays through mpv alone, on mains.
             SettingGroup("Picture", page: .video) {
                 SettingChoice(Copy.framing, selection: $prefs.fillScreen,
-                              options: [(false, "Fit — show the whole frame"), (true, "Fill — crop to the screen")],
-                              also: [Copy.pictureControls])
+                              options: [(false, "Fit — show the whole frame"), (true, "Fill — crop to the screen")])
+                SettingChoice(Copy.pictureBrightness, selection: $prefs.pictureBrightness,
+                              options: Self.adjustmentOptions(prefs.pictureBrightness))
+                SettingChoice(Copy.pictureContrast, selection: $prefs.pictureContrast,
+                              options: Self.adjustmentOptions(prefs.pictureContrast))
+                SettingChoice(Copy.pictureSaturation, selection: $prefs.pictureSaturation,
+                              options: Self.adjustmentOptions(prefs.pictureSaturation))
+                SettingChoice(Copy.pictureGamma, selection: $prefs.pictureGamma,
+                              options: Self.adjustmentOptions(prefs.pictureGamma))
+                SettingChoice(Copy.pictureZoom, selection: $prefs.pictureZoom,
+                              options: Self.zoomOptions(prefs.pictureZoom))
+                SettingChoice(Copy.aspectOverride, selection: $prefs.aspectOverride,
+                              options: Preferences.aspectChoices.map { ($0.ratio, $0.label) })
+                SettingButton(Copy.resetPicture.name ?? "", notes: [Copy.resetPicture]) {
+                    prefs.resetPicture()
+                }
+                .disabled(!prefs.pictureIsAdjusted)
+                SettingChoice(Copy.nightMode, selection: $prefs.nightMode,
+                              options: [(false, "Off"), (true, "On — quiet dialogue up, loud passages down")])
             }
+            .onChange(of: prefs.nightMode) { _, _ in player.applyNightMode() }
+            .onChange(of: prefs.fillScreen) { _, _ in player.applyFraming() }
+            .onChange(of: prefs.picture) { _, _ in player.applyPicture() }
+            .onChange(of: prefs.pictureZoom) { _, _ in player.applyFraming() }
+            .onChange(of: prefs.aspectOverride) { _, _ in player.applyFraming() }
             SettingGroup("Playing", page: .video) {
                 SettingToggle(Copy.resume, isOn: $prefs.resumePlayback)
                 SettingToggle(Copy.autoplayNext, isOn: $prefs.autoplayNext)
             }
+            SettingGroup("Language", page: .video) {
+                SettingChoice(SettingsView.audioLanguageRow, selection: $prefs.audioLanguage,
+                              options: SettingsView.audioLanguageOptions)
+            }
         }
+    }
+}
+
+extension VideoSettingsPage {
+    /// −100…100 in tens, plus whatever is set if it isn't one of them — the
+    /// player's tab moves in fives and a phone's slider in ones, and the
+    /// value syncs over, so without it the row would read blank.
+    static func adjustmentOptions(_ current: Double) -> [(Double, String)] {
+        var values = stride(from: -100.0, through: 100, by: 10).map { $0 }
+        if !values.contains(current) { values.append(current); values.sort() }
+        return values.map { ($0, $0 == 0 ? "0 — the file's own" : $0 > 0 ? "+\(Int($0))" : "\(Int($0))") }
+    }
+
+    /// 1× to 2× in tenths, plus the value set elsewhere if it is between.
+    static func zoomOptions(_ current: Double) -> [(Double, String)] {
+        var values = stride(from: 0, through: 10, by: 1).map { 1 + Double($0) / 10 }
+        if !values.contains(where: { abs($0 - current) < 0.001 }) { values.append(current); values.sort() }
+        return values.map { ($0, abs($0 - 1) < 0.001 ? "None" : "\($0.formatted(.number.precision(.fractionLength(1...2))))×") }
     }
 }
 
@@ -230,36 +284,46 @@ private struct AudioSettingsPage: View {
     @Environment(Preferences.self) private var prefs
     @Environment(PlayerModel.self) private var player
 
+    /// The rate whose test is about to play, while the flashing-images
+    /// warning is up over it.
+    @State private var pendingTest: PlayerModel.DelayRate?
+
     var body: some View {
         @Bindable var prefs = prefs
         SettingsColumns(title: "Audio", intro: SettingsView.intro(.audio)) {
-            SettingGroup(nil, page: .audio) {
-                SettingChoice(SettingsView.audioLanguageRow, selection: $prefs.audioLanguage,
-                              options: SettingsView.audioLanguageOptions, isFirst: true)
+            SettingGroup("Audio delay", page: .audio) {
+                // One row a frame rate: it shows what is set, and pressing
+                // it opens the player on the looped test clip at that rate,
+                // where the Sync tab sets this offset over it. The player
+                // picks among them by the frame rate of whatever is playing.
+                ForEach(PlayerModel.DelayRate.presets) { rate in
+                    let note = Copy.audioDelay(rate)
+                    SettingButton(note.name ?? "", value: delayName(prefs.audioDelay(forRate: rate.fps)),
+                                  notes: [note], isFirst: rate == PlayerModel.DelayRate.presets.first) {
+                        pendingTest = rate
+                    }
+                }
             }
+            // A rate with no clip — 48, 120 — still gets a delay of its own
+            // from the Sync tab over a video at it, and the player uses it;
+            // it just isn't listed here.
             SettingGroup("Output", page: .audio) {
                 SettingToggle(Copy.downmix, isOn: $prefs.stereoDownmix)
-                // Apple TV only: it is the one device here that passes a Dolby
-                // bitstream through to something else, and so the only one on
-                // which decoding it here changes anything.
-                SettingToggle(Copy.soundbar, isOn: $prefs.decodeAudioLocally)
-                // The two offsets, read-only here: each is set in the
-                // player, over the clip that measures it — the Sync tab.
-                SettingInfo(Copy.audioDelay.name ?? "", value: delayName(prefs.audioDelay),
-                            notes: [Copy.audioDelay, Copy.syncTestStandard])
-                SettingInfo(Copy.matchedAudioDelay.name ?? "", value: prefs.matchedAudioDelay.map(delayName) ?? "Not set",
-                            notes: [Copy.matchedAudioDelay, Copy.syncTestMatched])
             }
-            SettingGroup("Sync tests", page: .audio) {
-                // Each opens the player on a looped test clip at its rate;
-                // the Sync tab sets the matching offset over it.
-                SettingButton(Copy.syncTestStandard.name ?? "", notes: [Copy.syncTestStandard]) {
-                    Task { await player.playSyncTest(.standard) }
-                }
-                SettingButton(Copy.syncTestMatched.name ?? "", notes: [Copy.syncTestMatched]) {
-                    Task { await player.playSyncTest(.matched) }
-                }
+        }
+        // The clip flashes the whole screen once a second, which is the
+        // kind of picture a photosensitive viewer needs to be told about
+        // before it starts — every time, since whoever is holding the
+        // remote may not be whoever read it last.
+        .alert("Flashing images", isPresented: Binding(
+            get: { pendingTest != nil }, set: { if !$0 { pendingTest = nil } }
+        ), presenting: pendingTest) { rate in
+            Button("Play the test") {
+                Task { await player.playSyncTest(rate) }
             }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("The sync test fills the screen with a bright flash about once a second for as long as it plays. If you or anyone watching is sensitive to flashing light, don't play it.")
         }
     }
 
@@ -448,7 +512,7 @@ private struct AboutSettingsPage: View {
             SettingGroup(nil, page: .about) {
                 SettingInfo("Aquarium", value: "\(Bundle.appVersion) (\(Bundle.appBuild))",
                             notes: [Copy.about], isFirst: true)
-                SettingInfo("Playback engine", value: "AVFoundation", notes: [Copy.playbackEngine])
+                SettingInfo("Playback engine", value: "mpv", notes: [Copy.playbackEngine])
             }
         }
     }
@@ -797,23 +861,32 @@ private struct SettingInfo: View {
     }
 }
 
+/// A row that does something when pressed. With a `value`, it is also a
+/// fact — the audio delay rows show what is set and open the test that
+/// sets it.
 private struct SettingButton: View {
     let title: String
+    var value: String?
     var role: ButtonRole?
     let notes: [SettingNote]
+    var isFirst = false
     let action: () -> Void
 
-    init(_ title: String, role: ButtonRole? = nil, notes: [SettingNote], action: @escaping () -> Void) {
+    init(_ title: String, value: String? = nil, role: ButtonRole? = nil, notes: [SettingNote],
+         isFirst: Bool = false, action: @escaping () -> Void) {
         self.title = title
+        self.value = value
         self.role = role
         self.notes = notes
+        self.isFirst = isFirst
         self.action = action
     }
 
     var body: some View {
         Button(action: action) {
-            SettingRowLabel(title: title, titleColour: role == .destructive ? Theme.danger : Theme.accent)
-                .describes(title, notes)
+            SettingRowLabel(title: title, value: value,
+                            titleColour: role == .destructive ? Theme.danger : Theme.accent)
+                .describes(title, notes, isFirst: isFirst)
         }
         .buttonStyle(SettingRowStyle())
     }

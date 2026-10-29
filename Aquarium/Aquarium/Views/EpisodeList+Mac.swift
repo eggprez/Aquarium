@@ -28,6 +28,32 @@ struct MacEpisodeList: View {
     /// counted in. Compact — a still the height of two lines of text — because
     /// a season is twenty rows and a page is one screen.
     static let rowHeight: CGFloat = 64
+    /// The inset list's own margin above the first row and below the last.
+    private static let listPadding: CGFloat = 8
+
+    /// How tall the rows came out, as the list itself measures them — see
+    /// `MeasuresListContent`.
+    @State private var measuredHeight: CGFloat?
+
+    /// The rows' height, worked out from `rowHeight` until the list has said,
+    /// and never less than that. Counted alone, a row the system drew taller —
+    /// a larger text size, a list style with more air between rows — cut the
+    /// last episode off at the bottom of a frame that has no scrolling to
+    /// reach it with.
+    private var height: CGFloat {
+        let counted = CGFloat(episodes.count) * Self.rowHeight + Self.listPadding * 2
+        return max(counted, measuredHeight ?? 0)
+    }
+
+    /// One row's share of `height`, for the anchors below.
+    private var rowPitch: CGFloat {
+        guard !episodes.isEmpty else { return Self.rowHeight }
+        return (height - Self.listPadding * 2) / CGFloat(episodes.count)
+    }
+
+    /// What the page scrolls to when the selection moves onto a row — see
+    /// `ItemDetailView.scroll`.
+    static func anchor(for episodeId: String) -> String { "episode-row-\(episodeId)" }
 
     var body: some View {
         List(episodes, selection: $selection) { episode in
@@ -37,7 +63,23 @@ struct MacEpisodeList: View {
         .listStyle(.inset)
         .alternatingRowBackgrounds(.enabled)
         .scrollDisabled(true)
-        .frame(height: CGFloat(episodes.count) * Self.rowHeight + 16)
+        .modifier(MeasuresListContent(height: $measuredHeight))
+        .frame(height: height)
+        // An empty band per row, laid over the list in the page's own scroll
+        // view. The rows are the list's, which a `ScrollViewReader` outside it
+        // can't reach; these are the page's, so it can bring one into view as
+        // the arrow keys move the selection down past the window's edge.
+        .background(alignment: .top) {
+            VStack(spacing: 0) {
+                ForEach(episodes) { episode in
+                    Color.clear
+                        .frame(height: rowPitch)
+                        .id(Self.anchor(for: episode.Id))
+                }
+            }
+            .padding(.top, Self.listPadding)
+            .accessibilityHidden(true)
+        }
         // Right-click on the rows, or double-click and Return on them: the
         // menu for the selection, and the one thing a row is for.
         .contextMenu(forSelectionType: String.self) { ids in
@@ -53,6 +95,10 @@ struct MacEpisodeList: View {
             // The season reloaded: nothing selected that isn't there.
             let present = Set(ids)
             if !selection.isSubset(of: present) { selection = selection.intersection(present) }
+            // And measured again: a list never reports itself shorter than
+            // the frame it is in, so a season that lost a row would keep its
+            // old height otherwise.
+            measuredHeight = nil
         }
         .accessibilityLabel("Episodes")
     }
@@ -81,6 +127,26 @@ struct MacEpisodeList: View {
                     Label("Mark as Unwatched", systemImage: "arrow.uturn.backward.circle")
                 }
             }
+        }
+    }
+}
+
+/// The height of the list's rows as the list lays them out, from its own
+/// scroll geometry. macOS 15 and later; on 14 the list keeps the counted
+/// height.
+private struct MeasuresListContent: ViewModifier {
+    @Binding var height: CGFloat?
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentSize.height
+            } action: { _, new in
+                guard new > 0, abs((height ?? 0) - new) > 0.5 else { return }
+                height = new
+            }
+        } else {
+            content
         }
     }
 }

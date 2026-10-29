@@ -63,9 +63,9 @@ struct ListenNowView: View {
         ScrollView {
             if isLoading, isBare {
                 VStack(alignment: .leading, spacing: Metrics.shelfSpacing) {
-                    SkeletonShelf()
-                    SkeletonShelf()
-                    SkeletonShelf()
+                    SkeletonShelf(squareWidth: MusicMetrics.tileWidth)
+                    SkeletonShelf(squareWidth: MusicMetrics.tileWidth)
+                    SkeletonShelf(squareWidth: MusicMetrics.tileWidth)
                 }
                 .padding(.top, 12)
             } else if let error, isBare {

@@ -1,7 +1,7 @@
 //  Home on a Mac: the media bar as a carousel a pointer and a keyboard can
 //  drive, and the button style its Play wears.
 //
-//  The phone pages with a swipe and the television crossfades on a timer; a
+//  The phone pages with a swipe and the television with the selector; a
 //  Mac has both a pointer and arrow keys and no swipe at all, so this one is
 //  driven the way the TV app's is — chevrons at the edges under the pointer,
 //  ←/→ when the bar has the keyboard, dots you can click — and the timer stops
@@ -53,7 +53,16 @@ struct HeroCarousel: View {
                     .id(current.Id)
                     .transition(.opacity)
             }
-            if items.count > 1 { pageDots }
+            if items.count > 1 {
+                // Thumbnails where there is room for them beside the text
+                // block, as on an iPad on its side, and dots on a narrower
+                // window.
+                if width >= 900 {
+                    pageThumbs
+                } else {
+                    pageDots
+                }
+            }
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
@@ -156,19 +165,54 @@ struct HeroCarousel: View {
         .padding(.bottom, 12)
         .animation(.easeOut(duration: 0.25), value: index)
     }
+
+    /// What else is in the bar, as a row of its backdrops in the corner: the
+    /// one showing ringed in white, the rest dimmed, each a click away. Dots
+    /// say how many; these say what.
+    private var pageThumbs: some View {
+        HStack(spacing: 8) {
+            ForEach(Array(items.enumerated()), id: \.element.Id) { position, item in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.4)) { index = position }
+                } label: {
+                    RemoteImage(
+                        url: Artwork.url(item, type: "Backdrop", width: 300),
+                        blurHash: Artwork.hash(item, type: "Backdrop") ?? Artwork.hash(item)
+                    )
+                    .frame(width: 72, height: 42)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(.white, lineWidth: position == index ? 2 : 0)
+                    )
+                    .opacity(position == index ? 1 : 0.7)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(HeroHeader.displayTitle(of: items[position]))
+                .accessibilityLabel("Show \(HeroHeader.displayTitle(of: item))")
+                .accessibilityAddTraits(position == index ? [.isButton, .isSelected] : .isButton)
+            }
+        }
+        .padding(.trailing, Metrics.gutter)
+        .padding(.bottom, 38)
+        .animation(.easeOut(duration: 0.25), value: index)
+    }
 }
 
-/// The hero's Play button: a rounded rectangle in the accent colour with white
-/// on it, the size of a large system button, lighter under the pointer and
-/// darker while pressed. Drawn here rather than borrowed from
-/// `.borderedProminent`, which loses its fill whenever the window isn't the
-/// key one and left the hero with no Play button at all — see
-/// `HeroHeader.actions`.
+/// The hero's Play button, as the iPad draws it: a white capsule with black
+/// on it — white on the artwork rather than the accent, because an accent
+/// over a different backdrop every few seconds fights half of them, and
+/// white on a picture is what every television app puts there. Lighter
+/// under the pointer and darker while pressed. Drawn here rather than
+/// borrowed from `.borderedProminent`, which loses its fill whenever the
+/// window isn't the key one and left the hero with no Play button at all —
+/// see `HeroHeader.actions`.
 ///
-/// Not prominent, it is the hero's Details button: the same shape and white
-/// label on a translucent dark fill. `.bordered` was the first try, and its
-/// label is the text colour — black in light mode, on artwork that the hero
-/// darkens at the bottom, so Details was all but invisible.
+/// Not prominent, it is the hero's Details button: the same shape with a
+/// white label on glass. `.bordered` was the first try, and its label is
+/// the text colour — black in light mode, on artwork that the hero darkens
+/// at the bottom, so Details was all but invisible.
 struct MacHeroButtonStyle: ButtonStyle {
     var prominent = true
 
@@ -187,20 +231,22 @@ struct MacHeroButtonStyle: ButtonStyle {
         var body: some View {
             configuration.label
             .font(.body.weight(.semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(prominent ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.black.opacity(0.35)))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(.white.opacity(0.18), lineWidth: 0.5)
-            )
-            .brightness(configuration.isPressed ? -0.12 : (isHovering ? 0.08 : 0))
+            .foregroundStyle(prominent ? .black : .white)
+            .padding(.horizontal, 20)
+            .frame(height: 44)
+            .background {
+                if prominent {
+                    Capsule().fill(.white)
+                } else {
+                    Capsule().fill(.ultraThinMaterial)
+                }
+            }
+            .overlay(Capsule().strokeBorder(.white.opacity(prominent ? 0 : 0.22), lineWidth: 0.5))
+            // A press darkens the white; a hover on it only a shade, since
+            // white has nowhere lighter to go.
+            .brightness(configuration.isPressed ? -0.12 : (isHovering && !prominent ? 0.08 : 0))
             .opacity(isEnabled ? 1 : 0.5)
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(Capsule())
             .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
             .animation(.easeOut(duration: 0.12), value: isHovering)
             .onHover { isHovering = $0 }
