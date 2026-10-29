@@ -2,7 +2,7 @@
 import * as api from "./api";
 import { blurhashUrl } from "./blurhash";
 import { icon, iconSvg, type IconName } from "./icons";
-import { playItem, startDownload, downloadSeries } from "./playback";
+import { playItem, startDownload, downloadSeries, queueNext, queueLater } from "./playback";
 
 export { icon, type IconName } from "./icons";
 
@@ -832,6 +832,31 @@ export function downloadAction(item: any): MenuAction {
 }
 
 /**
+ * Play Next and Play Later: put a film, an episode or a whole season on the
+ * user's Up Next queue, ahead of what the series would offer. Empty for
+ * anything else.
+ */
+export function queueActions(item: any): MenuAction[] {
+  const season = item.Type === "Season" && !!item.SeriesId;
+  const queueable = season || ["Movie", "Episode", "Video", "MusicVideo"].includes(item.Type);
+  if (!queueable) return [];
+  const run = (next: boolean) => async () => {
+    try {
+      const n = await (next ? queueNext([item]) : queueLater([item]));
+      if (!n) toast("Nothing to queue here yet", "error");
+      else if (season) toast(next ? "Playing the season next" : "Added the season to Up Next", "ok");
+      else toast(next ? "Playing next" : "Added to Up Next", "ok");
+    } catch (e: any) {
+      toast(e.message ?? String(e), "error");
+    }
+  };
+  return [
+    { label: season ? "Play Season Next" : "Play Next", icon: "episodes", run: run(true) },
+    { label: season ? "Play Season Later" : "Play Later", run: run(false) },
+  ];
+}
+
+/**
  * Standard actions for a *server* item (movie, episode, series), shared by the
  * card grids, episode lists and the detail page. `onChanged` runs after
  * anything that alters state the caller is drawing (watched, favorite).
@@ -861,6 +886,7 @@ export function itemActions(
     }
   }
 
+  out.push(...queueActions(item));
   out.push(downloadAction(item));
 
   out.push({

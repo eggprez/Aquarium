@@ -500,6 +500,40 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     el("div", { class: "settings-block" }, [
       el("h3", {}, ["Playback"]),
       row(
+        "Resume where I left off",
+        "Opens something you have already started at the point you stopped, instead of from the beginning.",
+        toggle({ resume_playback: cfg.resume_playback !== false }, "resume_playback", ["Off — always from the start", "On"])
+      ),
+      row(
+        "Play the next episode automatically",
+        "The Up Next card appears over the closing stretch of an episode either way — turning this off just means it won't start on its own.",
+        toggle({ autoplay_next: cfg.autoplay_next !== false }, "autoplay_next", ["Off", "On"])
+      ),
+      row(
+        "Skip by",
+        "How far the two skip buttons jump, along with ← and → and a double-tap on the left or right of the picture.",
+        choice({ player_skip_interval: String(cfg.player_skip_interval ?? "10") }, "player_skip_interval", [
+          ["10", "10 seconds"],
+          ["15", "15 seconds"],
+          ["30", "30 seconds"],
+        ])
+      ),
+      row(
+        "Hide controls after",
+        "How long the controls stay up in fullscreen after the pointer last moved. They never hide while a panel is open or the pointer is over them.",
+        choice({ player_hide_after: String(cfg.player_hide_after ?? "2") }, "player_hide_after", [
+          ["2", "2 seconds"],
+          ["4", "4 seconds"],
+          ["6", "6 seconds"],
+          ["10", "10 seconds"],
+        ])
+      ),
+      row(
+        "Show time remaining",
+        "Whether the time at the right of the timeline counts down to the end or shows the whole length. Clicking it in the player flips this too.",
+        toggle(cfg, "player_show_remaining", ["Off — the whole length", "On — time left"])
+      ),
+      row(
         "Streaming quality",
         "Adapting drops to a smaller stream when playback keeps stalling or the machine can't decode fast enough, and climbs back after the connection has been steady for a while. It never goes above the quality you picked, and never touches downloaded files or Live TV.",
         adaptiveSelect

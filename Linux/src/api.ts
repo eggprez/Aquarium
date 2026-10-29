@@ -1019,6 +1019,8 @@ export interface PlaybackSource {
   mediaSourceId: string;
   playSessionId: string;
   live: boolean;
+  /** The server's MediaSource for it: container, bitrate, streams. */
+  mediaSource?: any;
 }
 
 function deviceProfile(forceTranscode: boolean, maxBitrate?: number): any {
@@ -1092,6 +1094,7 @@ export async function resolvePlayback(
       mediaSourceId: ms.Id,
       playSessionId,
       live: !!opts.live,
+      mediaSource: ms,
     };
   }
 
@@ -1112,7 +1115,7 @@ export async function resolvePlayback(
   // Live channels that direct-play expose an open stream path instead.
   if (opts.live && ms.TranscodingUrl) {
     url = s.server + ms.TranscodingUrl;
-    return { url, playMethod: "Transcode", mediaSourceId: ms.Id, playSessionId, live: true };
+    return { url, playMethod: "Transcode", mediaSourceId: ms.Id, playSessionId, live: true, mediaSource: ms };
   }
   return {
     url,
@@ -1120,6 +1123,7 @@ export async function resolvePlayback(
     mediaSourceId: ms.Id,
     playSessionId,
     live: !!opts.live,
+    mediaSource: ms,
   };
 }
 

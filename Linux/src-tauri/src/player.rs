@@ -26,6 +26,9 @@ pub struct Status {
     pub speed: f64,
     /// Subtitle timing offset in seconds; negative shows subtitles earlier.
     pub sub_delay: f64,
+    /// Audio timing offset in seconds; positive plays the sound later (for a
+    /// Bluetooth headset that runs behind the picture).
+    pub audio_delay: f64,
     /// Absolute position, in seconds, that the demuxer cache has read up to —
     /// the end of the buffered region drawn behind the scrubber. Zero means mpv
     /// hasn't reported one yet (or isn't caching, as with a local file).
@@ -239,6 +242,21 @@ impl Player {
         self.status.lock().unwrap().clone()
     }
 
+    /// Several properties at once, as display strings, for the stream info
+    /// panel. Missing ones are left out rather than reported as errors.
+    pub async fn properties(&self, names: &[String]) -> Value {
+        let guard = self.session.lock().await;
+        let mut out = serde_json::Map::new();
+        if let Some(s) = guard.as_ref() {
+            for n in names {
+                if let Some(v) = s.session.get_string(n) {
+                    out.insert(n.clone(), Value::String(v));
+                }
+            }
+        }
+        Value::Object(out)
+    }
+
     pub async fn send(&self, cmd: Value) -> Result<(), String> {
         let guard = self.session.lock().await;
         match guard.as_ref() {
@@ -443,6 +461,7 @@ impl Player {
             // thread's frame gaps, to tell a late frame from a held one.
             (17, "vo-delayed-frame-count"),
             (18, "mistimed-frame-count"),
+            (19, "audio-delay"),
         ] {
             if let Err(e) = session.command(json!(["observe_property", id, prop])) {
                 crate::debug_log_line(&format!("player: observe {} failed: {}", prop, e));
@@ -474,6 +493,7 @@ impl Player {
                 mute: false,
                 speed: 1.0,
                 sub_delay: 0.0,
+                audio_delay: 0.0,
                 buffered: 0.0,
                 chapters: Vec::new(),
                 buffering: false,
@@ -802,6 +822,11 @@ fn apply_event(
                 status.lock().unwrap().sub_delay = d;
             }
         }
+        "audio-delay" => {
+            if let Some(d) = data.and_then(|v| v.as_f64()) {
+                status.lock().unwrap().audio_delay = d;
+            }
+        }
         // mpv reports the cache as a duration ahead of the play position on
         // some demuxers and as an absolute timestamp on others; both are
         // covered by taking whichever reading is further into the file.
@@ -913,6 +938,7 @@ fn status_payload(st: &Status) -> Value {
             "mute": st.mute,
             "speed": st.speed,
             "sub_delay": st.sub_delay,
+            "audio_delay": st.audio_delay,
             // The scrubber's buffer band and chapter marks read these two; they
             // were tracked here but never sent, so the band sat on the playhead
             // and no chapter ever drew.

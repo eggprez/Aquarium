@@ -2241,3 +2241,21 @@ h1.page-title { font-size: var(--fs-2xl); margin-bottom: 20px; }
 .qc-outcome.ok { color: var(--ok, #3fb37f); }
 .qc-outcome.warn { color: var(--warn, #d08a2c); }
 .qc-outcome.bad { color: var(--danger); }
+
+/* ---------- Player bar: stream info, chapters, time remaining ---------- */
+/* Label over value, cells running along the bar; the panel scrolls sideways
+   when the window is too narrow for all of them. */
+.pb-panel.pb-info { gap: 18px; }
+.pb-info-cell { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; max-width: 260px; }
+.pb-info-label {
+  font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim);
+}
+.pb-info-value {
+  font-size: var(--fs-sm); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pb-chapter { display: inline-flex; gap: 6px; align-items: baseline; }
+.pb-chapter-time { font-variant-numeric: tabular-nums; opacity: 0.7; font-size: var(--fs-xs); }
+.pb-dur { cursor: pointer; border-radius: 4px; }
+.pb-dur:hover { color: var(--text); }
+.pb-queue-tile.queued .pb-queue-status { color: var(--accent); }

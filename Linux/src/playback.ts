@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as api from "./api";
-import { openDialog, toast } from "./ui";
+import { el, openDialog, toast } from "./ui";
 
 // ---------- Audio level ----------
 // mpv starts every session at 100% and forgets what came before, so the level
@@ -90,6 +90,8 @@ let nowPlaying: {
   /** The finished download of whatever is playing, streamed or not — what
    *  the quality menu's "Downloaded" row switches back to. */
   download: any | null;
+  /** How the server is sending it, for the stream info panel. */
+  source?: api.PlaybackSource;
 } | null = null;
 let lastPosition = 0;
 // Set synchronously when a finished playback is about to autoplay its next
@@ -117,6 +119,239 @@ export function isAutoplayCancelled(): boolean {
 export function resumeAutoplay(): void {
   autoplayCancelled = false;
   document.dispatchEvent(new CustomEvent("aquarium-upnext-changed"));
+}
+
+// ---------- Playback preferences ----------
+// Settings → Playback. Read where they apply rather than cached, so a change
+// takes hold on the next press without anything to invalidate.
+
+/** How far the skip buttons, ←/→ and a double-tap jump, in seconds. */
+export const SKIP_INTERVALS = [10, 15, 30];
+
+export function skipInterval(): number {
+  const v = Number(api.getConfig().player_skip_interval);
+  return SKIP_INTERVALS.includes(v) ? v : 10;
+}
+
+/** Seconds the fullscreen controls stay up after the last pointer move. */
+export const HIDE_AFTER_CHOICES = [2, 4, 6, 10];
+
+export function hideControlsAfter(): number {
+  const v = Number(api.getConfig().player_hide_after);
+  return HIDE_AFTER_CHOICES.includes(v) ? v : 2;
+}
+
+/** Whether the time at the right of the timeline counts down. */
+export function showsRemaining(): boolean {
+  return api.getConfig().player_show_remaining === true;
+}
+
+export function setShowsRemaining(on: boolean): void {
+  saveConfigSoon({ player_show_remaining: on });
+  api.getConfig().player_show_remaining = on;
+}
+
+/** Off: the Up Next card still appears, it just doesn't start on its own. */
+export function autoplayNextEnabled(): boolean {
+  return api.getConfig().autoplay_next !== false;
+}
+
+/** Off: everything opens at the beginning, even what was started before. */
+export function resumeEnabled(): boolean {
+  return api.getConfig().resume_playback !== false;
+}
+
+// ---------- Up Next: the user's queue ----------
+//
+// Titles queued by hand with Play Next / Play Later. They play ahead of
+// whatever the series would offer next, in order, and a queue started while
+// nothing is playing starts at once.
+
+let userQueue: any[] = [];
+
+/** True while something is on screen (the last player-status said so). */
+let playerRunning = false;
+
+export function getUserQueue(): any[] {
+  return userQueue;
+}
+
+function queueChanged(): void {
+  nextPeek = null;
+  document.dispatchEvent(new CustomEvent("aquarium-queue-changed"));
+}
+
+/** A season queues its episodes; films and episodes queue themselves. */
+async function queueable(items: any[]): Promise<any[]> {
+  const out: any[] = [];
+  for (const item of items) {
+    if (item.Type === "Season" && item.SeriesId) {
+      out.push(...(await api.getEpisodes(item.SeriesId, item.Id).catch(() => [])));
+    } else if (item.Type === "Movie" || item.Type === "Episode" || item.Type === "Video" || item.Type === "MusicVideo") {
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+export async function queueNext(items: any[]): Promise<number> {
+  const fresh = await queueable(items);
+  if (!fresh.length) return 0;
+  userQueue = [...fresh, ...userQueue.filter((q) => !fresh.some((f) => f.Id === q.Id))];
+  queueChanged();
+  startQueueIfIdle();
+  return fresh.length;
+}
+
+export async function queueLater(items: any[]): Promise<number> {
+  const fresh = await queueable(items);
+  if (!fresh.length) return 0;
+  userQueue = [...userQueue.filter((q) => !fresh.some((f) => f.Id === q.Id)), ...fresh];
+  queueChanged();
+  startQueueIfIdle();
+  return fresh.length;
+}
+
+export function removeFromQueue(id: string): void {
+  userQueue = userQueue.filter((q) => q.Id !== id);
+  queueChanged();
+}
+
+export function clearQueue(): void {
+  if (!userQueue.length) return;
+  userQueue = [];
+  queueChanged();
+}
+
+/** Play one queued title now; the ones ahead of it are passed over. */
+export async function playQueued(id: string): Promise<void> {
+  const i = userQueue.findIndex((q) => q.Id === id);
+  if (i < 0) return;
+  const next = userQueue[i];
+  userQueue = userQueue.slice(i + 1);
+  queueChanged();
+  const np = nowPlaying;
+  await playItem(
+    next,
+    { resume: true, maxBitrate: np && !np.isLocal ? np.opts.maxBitrate : undefined },
+    { inherited: !!np && !np.isLocal, continuation: !!np }
+  );
+}
+
+function startQueueIfIdle(): void {
+  if (playerRunning || autoplayPending || !userQueue.length) return;
+  const first = userQueue[0];
+  userQueue = userQueue.slice(1);
+  queueChanged();
+  void playItem(first, { resume: true }).catch(() => {});
+}
+
+// ---------- Opening the next stream early ----------
+//
+// About 90 seconds before the end, the next title's PlaybackInfo is asked
+// for and its stream opened on the server (`player_warm`), so the transcode
+// is already running when autoplay — or Play now — reaches it, and mpv opens
+// a stream that is ready instead of waiting on the server to start one.
+
+const PREFETCH_LEAD = 90;
+/** A prefetched PlaybackInfo older than this is asked for again. */
+const PREFETCH_TTL_MS = 10 * 60_000;
+
+let prefetched: {
+  itemId: string;
+  maxBitrate?: number;
+  startTicks: number;
+  src: api.PlaybackSource;
+  at: number;
+} | null = null;
+/** The file a prefetch was last tried for, so it is tried once per file. */
+let prefetchTriedFor: string | null = null;
+
+async function maybePrefetch(st: any): Promise<void> {
+  const np = nowPlaying;
+  if (!np || np.opts.live || !(st.duration > 0)) return;
+  const left = st.duration - (st.position ?? 0);
+  if (left > PREFETCH_LEAD || left <= 5) return;
+  const playingId = np.isLocal ? np.item.item_id : np.item.Id;
+  if (!playingId || prefetchTriedFor === playingId) return;
+  prefetchTriedFor = playingId;
+  if (autoplayCancelled) return;
+  const next = await peekNextEpisode().catch(() => null);
+  // Only a server item streams; a downloaded next episode plays from disk.
+  if (!next?.Id || nowPlaying !== np) return;
+  if (await findDownload(next.Id)) return;
+  const maxBitrate = np.isLocal ? undefined : np.opts.maxBitrate;
+  const startTicks = resumeEnabled() ? next.UserData?.PlaybackPositionTicks ?? 0 : 0;
+  try {
+    const src = await api.resolvePlayback(next.Id, {
+      maxBitrate,
+      forceTranscode: maxBitrate !== undefined,
+      startTicks,
+    });
+    if (nowPlaying !== np) return;
+    prefetched = { itemId: next.Id, maxBitrate, startTicks, src, at: Date.now() };
+    invoke("ui_log", { msg: `prefetch ${next.Id} method=${src.playMethod}` }).catch(() => {});
+    await invoke("player_warm", { url: src.url }).catch((e) =>
+      invoke("ui_log", { msg: `prefetch warm failed: ${e}` }).catch(() => {})
+    );
+  } catch (e) {
+    invoke("ui_log", { msg: `prefetch failed: ${e}` }).catch(() => {});
+  }
+}
+
+/** The prefetched source for this start, if it is still the right one. */
+function takePrefetched(itemId: string, maxBitrate: number | undefined, startTicks: number): api.PlaybackSource | null {
+  const p = prefetched;
+  prefetched = null;
+  if (!p || p.itemId !== itemId || p.maxBitrate !== maxBitrate || p.startTicks !== startTicks) return null;
+  if (Date.now() - p.at > PREFETCH_TTL_MS) return null;
+  return p.src;
+}
+
+// ---------- When playback fails ----------
+
+/** What to offer when a stream didn't play: the same again, a smaller one,
+ *  or giving up. Shown once the player has torn down, so the page is
+ *  visible and the card can be an ordinary dialog. */
+function showPlaybackError(message: string, np: NonNullable<typeof nowPlaying> | null, position: number): void {
+  const canRetry = !!np && !np.opts.live && !!np.item;
+  const smaller = np && !np.isLocal && !np.opts.live && np.item?.Id ? smallerStream(np.opts.maxBitrate) : null;
+  const body = [el("p", {}, [message])];
+  const actions: { label: string; primary?: boolean; run?: () => void }[] = [];
+  if (np && (canRetry || np.opts.live)) {
+    actions.push({
+      label: "Try Again",
+      primary: true,
+      run: () => {
+        if (np.opts.live && !np.serverItem) {
+          void playChannelUrl(np.item).catch(() => {});
+        } else if (np.isLocal) {
+          void playLocal(np.item, { serverItem: np.serverItem, startSeconds: position }).catch(() => {});
+        } else {
+          void playItem(np.item, { ...np.opts, startSeconds: np.opts.live ? undefined : position }, { stream: true }).catch(() => {});
+        }
+      },
+    });
+  }
+  if (smaller !== null && np) {
+    actions.push({
+      label: "Try a Smaller Stream",
+      primary: !actions.length,
+      run: () => {
+        void playItem(np.item, { ...np.opts, maxBitrate: smaller, startSeconds: position }, { stream: true }).catch(() => {});
+      },
+    });
+  }
+  actions.push({ label: "Close", primary: !actions.length });
+  openDialog({ title: "This didn't play", body, actions });
+}
+
+/** The next rung down from `current` (Direct Play counts as the top). */
+function smallerStream(current: number | undefined): number | null {
+  const rungs = QUALITY_CHOICES.map((q) => q.maxBitrate).filter((b): b is number => typeof b === "number");
+  if (current === undefined) return rungs[1] ?? rungs[0] ?? null;
+  const lower = rungs.find((b) => b < current);
+  return lower ?? null;
 }
 
 // ---------- Picture adjustments ----------
@@ -335,6 +570,7 @@ let nextPeek: { forId: string; item: any | null } | null = null;
  */
 export async function peekNextEpisode(): Promise<any | null> {
   const np = nowPlaying;
+  if (userQueue.length) return userQueue[0];
   if (!np || isShuffling()) return null;
   const id = np.isLocal ? np.item.item_id : np.item.Id;
   if (!id) return null;
@@ -431,7 +667,7 @@ export async function playItem(
   const startTicks =
     opts.startSeconds != null
       ? Math.max(0, Math.floor(opts.startSeconds * 10_000_000))
-      : opts.resume
+      : opts.resume && resumeEnabled()
         ? item.UserData?.PlaybackPositionTicks ?? 0
         : 0;
   // A finished download beats any stream: no server transcode, no network to
@@ -478,12 +714,15 @@ export async function playItem(
       : opts.maxBitrate;
   if (nowPlaying === startedPlaying) nowPlaying = { ...nowPlaying, opts: { ...opts, maxBitrate } };
   try {
-    const src = await api.resolvePlayback(item.Id, {
-      maxBitrate,
-      forceTranscode: maxBitrate !== undefined,
-      live: opts.live,
-      startTicks,
-    });
+    const src =
+      (!opts.live && takePrefetched(item.Id, maxBitrate, startTicks)) ||
+      (await api.resolvePlayback(item.Id, {
+        maxBitrate,
+        forceTranscode: maxBitrate !== undefined,
+        live: opts.live,
+        startTicks,
+      }));
+    if (nowPlaying === startedPlaying) nowPlaying.source = src;
     invoke("ui_log", { msg: `playItem ${item.Id} method=${src.playMethod} startTicks=${startTicks} maxBitrate=${maxBitrate}` }).catch(() => {});
     await invoke("player_play", {
       req: {
@@ -511,7 +750,8 @@ export async function playItem(
     );
   } catch (e: any) {
     invoke("ui_log", { msg: `playItem FAILED: ${e?.message ?? e}` }).catch(() => {});
-    toast(`Playback failed: ${e.message ?? e}`, "error");
+    if (nowPlaying === startedPlaying) showPlaybackError(e?.message ?? String(e), startedPlaying, startTicks / 10_000_000);
+    else toast(`Playback failed: ${e.message ?? e}`, "error");
     throw e;
   }
 }
@@ -758,6 +998,18 @@ function nextFromServer(np: NonNullable<typeof nowPlaying>): any | null {
 
 /** Returns true when a next episode was found and playback started. */
 async function autoplayNext(np: NonNullable<typeof nowPlaying>): Promise<boolean> {
+  if (userQueue.length) {
+    const next = userQueue[0];
+    userQueue = userQueue.slice(1);
+    queueChanged();
+    toast(`Up next: ${itemTitle(next)}`);
+    await playItem(
+      next,
+      { resume: true, maxBitrate: np.isLocal ? undefined : np.opts.maxBitrate },
+      { inherited: !np.isLocal, continuation: true, quiet: true }
+    );
+    return true;
+  }
   const server = nextFromServer(np);
   if (!server) {
     const shuffling = isShuffling();
@@ -801,13 +1053,17 @@ function maybeAutoplay(st: any): void {
     if (st.requested_stop) shuffleState = null;
     return;
   }
-  if (np.opts.live) return;
-  if (!(st.duration > 0) || st.position / st.duration < 0.9) return;
+  if (np.opts.live && !userQueue.length) return;
+  if (!np.opts.live && (!(st.duration > 0) || st.position / st.duration < 0.9)) return;
   const playingId = np.isLocal ? np.item.item_id : np.item.Id;
   if (st.item_id && playingId && st.item_id !== playingId) return;
-  const server = nextFromServer(np);
-  const isEpisode = server ? server.Type === "Episode" && server.SeriesId : isLocalEpisode(np.item);
-  if (!isEpisode) return;
+  if (!userQueue.length) {
+    // Settings → Playback: the card still showed; it just doesn't start.
+    if (!autoplayNextEnabled() && !isShuffling()) return;
+    const server = nextFromServer(np);
+    const isEpisode = server ? server.Type === "Episode" && server.SeriesId : isLocalEpisode(np.item);
+    if (!isEpisode) return;
+  }
 
   autoplayPending = true;
   void (async () => {
@@ -1611,6 +1867,22 @@ async function handlePlayerMessage(args: any[]): Promise<void> {
       // WM-level fullscreen) — exit fullscreen but never enter it.
       document.dispatchEvent(new CustomEvent("aquarium-fullscreen-exit"));
       break;
+    case "aquarium-key":
+    case "aquarium-gesture":
+    case "aquarium-context":
+      // Pointer, touch and keys over the picture: the player bar (main.ts)
+      // owns what they do.
+      document.dispatchEvent(new CustomEvent("aquarium-player-input", { detail: { name, arg, rest: args.slice(2) } }));
+      break;
+    case "aquarium-queue-play":
+      await playQueued(arg);
+      break;
+    case "aquarium-chapter":
+      await playerCtl.seek(parseFloat(arg), true);
+      break;
+    case "aquarium-ctl":
+      document.dispatchEvent(new CustomEvent("aquarium-player-input", { detail: { name: "aquarium-ctl", arg } }));
+      break;
     case "aquarium-play-local": {
       // Diagnostic hook (see AQUARIUM_TEST_PLAY in lib.rs): starts a
       // downloaded item through the real frontend path — unlike TEST_PLAY it
@@ -1627,14 +1899,27 @@ async function handlePlayerMessage(args: any[]): Promise<void> {
 export async function registerPlayerBridge(): Promise<void> {
   await listen("player-status", (ev) => {
     const st = ev.payload as any;
+    playerRunning = !!st.active;
     if (st.active && typeof st.position === "number") lastPosition = st.position;
+    if (st.active) void maybePrefetch(st);
     if (!st.active) {
-      // mpv couldn't open what it was given. Without this the player simply
-      // vanishes, which for a live channel looks like nothing happened at
-      // all. ("redirect" is mpv having fallen back to reading the address as
-      // a playlist after the real demuxer refused it.)
+      prefetchTriedFor = null;
+      // mpv couldn't open what it was given, or the stream died under it.
+      // Without this the player simply vanishes, which for a live channel
+      // looks like nothing happened at all. ("redirect" is mpv having fallen
+      // back to reading the address as a playlist after the real demuxer
+      // refused it.)
       if (st.ended && !st.requested_stop && (st.error || st.reason === "redirect")) {
-        toast(`Playback failed: ${st.error ?? "the stream couldn't be opened"}`, "error");
+        const np = nowPlaying;
+        const nearEnd = st.duration > 0 && st.position / st.duration >= 0.98;
+        if (!nearEnd) {
+          showPlaybackError(st.error ?? "The stream couldn't be opened.", np, lastPosition);
+          lastPosition = 0;
+          lastTracks = [];
+          // A failure is not an ending: nothing next starts on its own.
+          document.dispatchEvent(new CustomEvent("aquarium-autoplay-none"));
+          return;
+        }
       }
       // Runs before main.ts's status listener (registered first), so the
       // pending flag is visible when the player bar decides to tear down.
@@ -1693,7 +1978,29 @@ export const playerCtl = {
   /** Shift subtitles in time; negative shows them earlier. */
   setSubDelay: (seconds: number) =>
     mpvCommand(["set_property", "sub-delay", Math.round(seconds * 100) / 100]),
+  /** Shift the sound in time; positive plays it later. Saved, so the next
+   *  file starts with it too (a headset's lag is the headset's, not the
+   *  file's). */
+  setAudioDelay: (seconds: number) => {
+    const v = Math.max(-10, Math.min(10, Math.round(seconds * 1000) / 1000));
+    saveConfigSoon({ audio_delay: v });
+    api.getConfig().audio_delay = v;
+    return mpvCommand(["set_property", "audio-delay", v]);
+  },
 };
+
+/** One press of the audio-delay buttons and keys. */
+export const AUDIO_DELAY_STEP = 0.05;
+
+/** The stream as the server is sending it, for the stream info panel. */
+export function getStreamSource(): api.PlaybackSource | null {
+  return nowPlaying?.source ?? null;
+}
+
+export function getNowPlayingFull(): { item: any; isLocal: boolean; serverItem: any | null; live: boolean; maxBitrate?: number } | null {
+  const np = nowPlaying;
+  return np ? { item: np.item, isLocal: np.isLocal, serverItem: np.serverItem, live: !!np.opts.live, maxBitrate: np.opts.maxBitrate } : null;
+}
 
 export async function syncOfflineProgress(showToast = false): Promise<void> {
   const s = api.getSession();

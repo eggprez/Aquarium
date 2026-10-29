@@ -15,6 +15,8 @@ import {
   openMenu,
   toast,
   attachContextMenu,
+  openActionMenu,
+  queueActions,
   itemActions,
   downloadLabel,
   emptyState,
@@ -197,6 +199,16 @@ function playButtons(item: any): HTMLElement {
         "Play",
       ])
     );
+  }
+
+  // Up Next: queue it to play after what's on now.
+  const queue = queueActions(item);
+  if (queue.length) {
+    const uWrap = el("div", { class: "menu-wrap" });
+    const uBtn = el("button", { class: "btn", title: "Play next, or later, after what's playing" }, ["Up Next", icon("chevron-down")]);
+    uBtn.addEventListener("click", () => openActionMenu(uBtn, null, queue));
+    uWrap.append(uBtn);
+    actions.append(uWrap);
   }
 
   // Stream quality menu
@@ -664,6 +676,8 @@ function paintItem(page: HTMLElement, data: ItemData): void {
     seasons.forEach((season: any, idx: number) => {
       const btn = el("button", { class: "btn small" }, [season.Name ?? `Season ${season.IndexNumber}`]);
       btn.addEventListener("click", () => showSeason(season, btn));
+      // Right-click a season for Play Season Next / Later.
+      attachContextMenu(btn, season.Name ?? null, () => queueActions({ ...season, SeriesId: season.SeriesId ?? item.Id }));
       tabs.append(btn);
       if (idx === openIdx) showSeason(season, btn);
     });

@@ -368,6 +368,68 @@ pub async fn bitrate_test(size: u32) -> Result<f64, String> {
     Ok((bytes.len() as f64 * 8.0) / elapsed)
 }
 
+/// Open the next title's stream ahead of time, so the server has it running
+/// by the time the current one ends.
+///
+/// A transcode is the slow part of starting anything: the server only starts
+/// ffmpeg when the playlist is first asked for, and the first segments take
+/// seconds to appear. Asking for the playlist (and the variant playlist it
+/// names) 90 seconds early means mpv later opens a session that is already
+/// producing segments — Jellyfin reuses the job for the same play session. A
+/// direct file just has its first half-megabyte read, which wakes the disk
+/// and fills the server's page cache. Only addresses on the signed-in server
+/// get the token.
+pub async fn warm(url: &str) -> Result<(), String> {
+    let server = configured_server()?;
+    if !url.starts_with(&format!("{}/", server)) {
+        return Err(err("config", "Not a stream on this server"));
+    }
+    ensure_verified(&server).await?;
+    let token = secret::token().ok_or_else(|| err("auth", "Not signed in"))?;
+    let auth = jellyfin::auth_header(&token, &config::device_id());
+    let get = |u: String, range: Option<&str>| {
+        let mut r = jellyfin::http()
+            .get(u)
+            .header("Authorization", auth.clone())
+            .timeout(Duration::from_secs(30));
+        if let Some(range) = range {
+            r = r.header(reqwest::header::RANGE, range);
+        }
+        r
+    };
+
+    let resp = get(url.to_string(), None).send().await.map_err(|e| offline_err(&e))?;
+    let final_url = resp.url().clone();
+    let playlist = final_url.path().ends_with(".m3u8")
+        || resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.to_ascii_lowercase().contains("mpegurl"));
+    if !playlist {
+        // A file: never read it all. Drop the connection after the first part.
+        drop(resp);
+        let _ = get(url.to_string(), Some("bytes=0-524287"))
+            .send()
+            .await
+            .map_err(|e| offline_err(&e))?
+            .bytes()
+            .await;
+        return Ok(());
+    }
+    let text = resp.text().await.map_err(|e| offline_err(&e))?;
+    // The master playlist names the variant playlist; asking for that is
+    // what starts the transcode.
+    if let Some(variant) = text.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with('#')) {
+        if let Ok(next) = final_url.join(variant) {
+            if next.as_str().starts_with(&server) {
+                let _ = get(next.to_string(), None).send().await.map(|r| drop(r));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Is the saved server reachable — and still the right one? Used for the
 /// offline indicator and the startup check.
 pub async fn ping() -> Result<bool, String> {
@@ -485,9 +547,6 @@ fn install(server: &str, probed: &Value, data: &Value) -> Result<Value, String> 
     stash_current();
     secret::store(&token)?;
     let key = account_key(server_id.as_deref(), server, &user_id);
-    if let Err(e) = secret::store_account(&key, &token) {
-        crate::debug_log_line(&format!("server: couldn't file the account's own token: {}", e));
-    }
     // The identity recorded here is what every later launch is checked against.
     config::merge(json!({
         "server": server,
@@ -506,6 +565,10 @@ fn install(server: &str, probed: &Value, data: &Value) -> Result<Value, String> 
         "user_id": user_id,
         "user_name": user_name,
     }))?;
+    // After the entry exists: without a keyring the token is filed in it.
+    if let Err(e) = secret::store_account(&key, &token) {
+        crate::debug_log_line(&format!("server: couldn't file the account's own token: {}", e));
+    }
     remember_server(server, server_name.as_deref());
     *VERIFIED.lock().unwrap() = Some(server.to_string());
 
@@ -547,9 +610,6 @@ fn stash_current() {
     let cfg = config::load();
     let Some(key) = current_key(&cfg) else { return };
     let Some(token) = secret::token() else { return };
-    if let Err(e) = secret::store_account(&key, &token) {
-        crate::debug_log_line(&format!("server: couldn't keep the current account's token: {}", e));
-    }
     let _ = config::upsert_account(json!({
         "key": key,
         "server": cfg.get("server").cloned().unwrap_or(Value::Null),
@@ -558,6 +618,10 @@ fn stash_current() {
         "user_id": cfg.get("user_id").cloned().unwrap_or(Value::Null),
         "user_name": cfg.get("user_name").cloned().unwrap_or(Value::Null),
     }));
+    // After the entry exists: without a keyring the token is filed in it.
+    if let Err(e) = secret::store_account(&key, &token) {
+        crate::debug_log_line(&format!("server: couldn't keep the current account's token: {}", e));
+    }
 }
 
 /// Servers this device has signed in to, newest first, for the sign-in

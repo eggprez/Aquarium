@@ -205,6 +205,21 @@ async fn jf_discover() -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// mpv properties as display strings, for the stream info panel.
+#[tauri::command]
+async fn player_get_properties(
+    player: State<'_, player::Player>,
+    names: Vec<String>,
+) -> Result<Value, String> {
+    Ok(player.properties(&names).await)
+}
+
+/// Start the next title's stream on the server before this one ends.
+#[tauri::command]
+async fn player_warm(url: String) -> Result<(), String> {
+    server::warm(&url).await
+}
+
 #[tauri::command(async)]
 fn accounts_list() -> Value {
     server::accounts()
@@ -979,6 +994,8 @@ pub fn run() {
             jf_discover,
             accounts_list,
             account_switch,
+            player_get_properties,
+            player_warm,
             account_forget,
             jf_request,
             jf_image,
