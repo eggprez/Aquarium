@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as api from "./api";
+import { iptvUserAgent } from "./iptv";
 import { el, openDialog, toast } from "./ui";
 
 // ---------- Audio level ----------
@@ -765,7 +766,10 @@ export async function playItem(
  * being reported to a server that has never heard of this channel. `live` still
  * has to be set, so the player bar shows Live rather than a scrubber.
  */
-export async function playChannelUrl(ch: any, opts: { quiet?: boolean } = {}): Promise<void> {
+export async function playChannelUrl(
+  ch: any,
+  opts: { quiet?: boolean; continuation?: boolean } = {}
+): Promise<void> {
   shuffleState = null;
   nowPlaying = { item: ch, opts: { live: true }, isLocal: false, queue: null, serverItem: null, download: null };
   autoplayCancelled = false;
@@ -784,7 +788,10 @@ export async function playChannelUrl(ch: any, opts: { quiet?: boolean } = {}): P
     : window.setTimeout(() => toast(`Still waiting for “${ch.Name}” to start…`), 5000);
   try {
     invoke("ui_log", { msg: `playChannelUrl ${ch.Id}` }).catch(() => {});
-    const url = await invoke<string>("resolve_stream", { url: ch.StreamUrl }).finally(
+    // Some stream servers vary what they serve by the client they see; the
+    // same string goes to the warm-up request and to mpv.
+    const userAgent = iptvUserAgent();
+    const url = await invoke<string>("resolve_stream", { url: ch.StreamUrl, userAgent }).finally(
       () => clearTimeout(slow)
     );
     // The user moved on to something else while the channel was starting.
@@ -795,6 +802,7 @@ export async function playChannelUrl(ch: any, opts: { quiet?: boolean } = {}): P
         title: ch.Name ?? "Live TV",
         start_seconds: null,
         volume,
+        user_agent: userAgent,
         ctx: {
           item_id: ch.Id,
           is_local: false,
@@ -802,7 +810,9 @@ export async function playChannelUrl(ch: any, opts: { quiet?: boolean } = {}): P
         },
       },
     });
-    document.dispatchEvent(new CustomEvent("aquarium-player-started", { detail: {} }));
+    document.dispatchEvent(
+      new CustomEvent("aquarium-player-started", { detail: { continuation: !!opts.continuation } })
+    );
   } catch (e: any) {
     clearTimeout(slow);
     invoke("ui_log", { msg: `playChannelUrl FAILED: ${e?.message ?? e}` }).catch(() => {});
