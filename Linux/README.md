@@ -66,6 +66,36 @@ query parameter, all of which Jellyfin 12 disables by default), and the
   re-encoding it is a loss twice over. Before anything is queued the estimated
   size is checked against the free space on that volume; a season that won't fit
   says so, with the numbers, and offers the quality rungs that would.
+  - Every download, single or season, goes through one queue: **Pause all** /
+    **Resume all** stops transfers where they are (the `.part` file is kept and
+    resumed with an HTTP Range request), and a pause holds across a restart.
+  - A dropped connection, a stall or a server error puts the download back in
+    the queue by itself after 5 s, 15 s, 45 s, 2 min and 5 min, then leaves it in
+    Failed; an attempt that fetched 4 MB or more resets the count. Retry and
+    Retry all still work at any time. A 4xx answer isn't retried unasked.
+  - **Integrity check:** a direct file must match its Content-Length, and a
+    transcode (chunked, no length, no duration in the header) must reach the
+    item's runtime, read from the timestamp of its last Matroska cluster. A
+    short copy is thrown away and fetched once more ("The first copy arrived
+    incomplete — fetching it again").
+  - Settings → Downloads: **Only download on unmetered connections** (GNOME's
+    metered flag via GNetworkMonitor; running transfers are set aside and the
+    queue says what it's waiting for), **Transcode one at a time** (originals
+    still run in parallel up to the Parallel limit), and **Keep the laptop
+    awake while downloading** (a gnome-session suspend inhibitor, or logind's
+    sleep lock elsewhere; the screen still blanks).
+  - Text subtitles are saved next to the video (`sub.<index>.<lang>.srt|ass`,
+    indexed in `subtitles.json`) and handed to mpv with the file. A transcode
+    gets every text track; an original gets the server's external files (its
+    embedded tracks are already inside it). Picture subtitles are skipped.
+  - Names, overviews and artwork of downloaded items are refreshed from the
+    server at most every six hours when the Downloads page opens; watched state
+    is reconciled on every visit.
+  - **Manage** menu: Retry All Failed, Clear Queue, Delete Watched Downloads,
+    Delete All Downloads, each confirmed. Series and seasons offer Play Next
+    (the next unwatched episode), Shuffle this season and **Show in Files**
+    (FileManager1 `ShowItems`, or the folder via `xdg-open`). The Delete key
+    removes the selected card or episode row, after asking.
 - **Detail pages** — cast (each name searches for itself), "More like this" from
   the server's own recommendations, and a line describing what the source file
   actually is (`1080p · HEVC · EAC3 · 5.1 · 8.4 GiB`) beside the quality menu.
