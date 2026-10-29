@@ -8,6 +8,7 @@ import {
   playerCtl,
   PICTURE_CONTROLS,
   setLiveSetting,
+  downloadPrefsChanged,
 } from "../playback";
 import { getThemePref, setThemePref, type ThemePref } from "../theme";
 
@@ -184,6 +185,36 @@ const DECODER_NAMES: Record<string, string> = {
   drm: "DRM (GPU)",
   no: "Software (CPU)",
 };
+
+/** How downloads behave on this laptop: the network they use, the server's
+ *  encoder, and whether the machine stays up for them. */
+function downloadsBlock(cfg: any): HTMLElement {
+  const changed = (): void => downloadPrefsChanged();
+  return el("div", { class: "settings-block" }, [
+    el("h3", {}, ["Downloads"]),
+    row(
+      "Only download on unmetered connections",
+      "Downloads wait while the connection is metered — a phone hotspot, mobile broadband, or a network marked metered in GNOME's settings — and carry on from where they stopped when it isn't.",
+      toggle(cfg, "downloads_unmetered_only", ["Off", "On"], changed)
+    ),
+    row(
+      "Transcode one at a time",
+      "Converted downloads run one after another so the server's encoder isn't shared between them. Original-quality files still download side by side, up to the Parallel limit on the Downloads page.",
+      toggle(cfg, "downloads_transcode_serial", ["Off", "On"], changed)
+    ),
+    row(
+      "Keep the laptop awake while downloading",
+      "Stops the laptop suspending on idle while a download runs. The screen still dims and locks.",
+      // On unless turned off, so the toggle reads an unset key as on.
+      toggle(
+        { downloads_keep_awake: cfg.downloads_keep_awake !== false },
+        "downloads_keep_awake",
+        ["Off", "On"],
+        changed
+      )
+    ),
+  ]);
+}
 
 export async function renderSettings(root: HTMLElement, onLogout: () => void): Promise<void> {
   clear(root);
@@ -686,6 +717,8 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
       ]),
     ])
   );
+
+  root.append(downloadsBlock(cfg));
 
   // Storage block
   root.append(

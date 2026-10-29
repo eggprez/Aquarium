@@ -29,6 +29,8 @@ const PATHS = {
   "star-outline": `<path ${STROKE} d="${STAR_PATH}"/>`,
   close: `<path ${STROKE} stroke-width="2.1" d="M6.6 6.6l10.8 10.8M17.4 6.6 6.6 17.4"/>`,
   trash: `<path ${STROKE} d="M4 6.8h16M9.2 6.8V5.4A1.4 1.4 0 0 1 10.6 4h2.8a1.4 1.4 0 0 1 1.4 1.4v1.4"/><path ${STROKE} d="m6.6 6.8.85 11.4A2 2 0 0 0 9.45 20h5.1a2 2 0 0 0 2-1.8l.85-11.4"/><path ${STROKE} d="M10.4 10.6v5.6m3.2-5.6v5.6"/>`,
+  pause: `<path ${SOLID} d="M7 5.5A1 1 0 0 1 8 4.5h1.6a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1zm6.4 0a1 1 0 0 1 1-1H16a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-1.6a1 1 0 0 1-1-1z"/>`,
+  folder: `<path ${STROKE} stroke-width="1.6" d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>`,
   shuffle: `<path ${STROKE} d="M4 6.8h2.1a4.5 4.5 0 0 1 3.7 1.95l4.4 6.5a4.5 4.5 0 0 0 3.7 1.95H20"/><path ${STROKE} d="m17.2 14.4 2.8 2.8-2.8 2.8"/><path ${STROKE} d="M4 17.2h2.1a4.5 4.5 0 0 0 3.7-1.95l.5-.75m3.4-5 .5-.75a4.5 4.5 0 0 1 3.7-1.95H20"/><path ${STROKE} d="M17.2 4 20 6.8l-2.8 2.8"/>`,
 
   // ---- Direction ----

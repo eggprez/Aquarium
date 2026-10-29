@@ -367,7 +367,7 @@ export async function playNextNow(): Promise<boolean> {
   }
 }
 
-function itemTitle(item: any): string {
+export function itemTitle(item: any): string {
   if (item.Type === "Episode" && item.SeriesName) {
     const s = item.ParentIndexNumber, e = item.IndexNumber;
     const code = s != null && e != null ? ` Season ${s}, Episode ${e}` : "";
@@ -909,8 +909,35 @@ async function resolveSpace(
   });
 }
 
+/**
+ * Download one item. It goes through the same queue as a season, so a pause,
+ * the unmetered-only setting, one-transcode-at-a-time and the parallel limit
+ * all hold for it too; with nothing in the way it starts at once.
+ */
 export async function startDownload(item: any, q: api.DownloadQuality): Promise<void> {
+  ensureQueueBridge();
+  if (dlActive.has(item.Id) || dlQueue.some((e) => entryId(e) === item.Id)) {
+    toast(`“${item.Name}” is already in the download queue`);
+    return;
+  }
   const chosen = await resolveSpace([item], q, itemTitle(item));
+  if (!chosen) return;
+  dlQueue.push({ item, q: chosen, spaceChecked: true });
+  notifyQueueChanged();
+  await pumpQueue();
+  if (dlQueue.some((e) => entryId(e) === item.Id)) {
+    const why = downloadHoldReason();
+    toast(`Queued: ${item.Name}${why ? ` · ${why.toLowerCase()}` : ""}`, "ok");
+  }
+}
+
+/** Start one transfer now. Only the queue calls this. */
+async function beginDownload(
+  item: any,
+  q: api.DownloadQuality,
+  spaceChecked = false
+): Promise<void> {
+  const chosen = spaceChecked ? q : await resolveSpace([item], q, itemTitle(item));
   if (!chosen) return;
   // Last stop before the request is built, so every path in — a single item, a
   // season, the queue restored from a previous run — gets the original file
@@ -941,6 +968,11 @@ export async function startDownload(item: any, q: api.DownloadQuality): Promise<
         episode: item.IndexNumber ?? null,
         year: item.ProductionYear ?? null,
         run_time_ticks: item.RunTimeTicks ?? null,
+        // Kept so the Downloads view has them offline; refreshed from the
+        // server at most every six hours after that.
+        overview: item.Overview ?? null,
+        image_tag: item.ImageTags?.Primary ?? null,
+        series_image_tag: item.SeriesPrimaryImageTag ?? null,
         quality: q.label,
         // Seed watch state from the server so an already-watched episode
         // shows its ✓ / resume point immediately; kept fresh afterwards by
@@ -981,14 +1013,42 @@ export interface BatchResult {
  * share the queue so a bulk retry obeys the same concurrency limit — firing
  * twelve stalled downloads at once is what got them stalled.
  */
+type RetryEntry = {
+  kind: "retry";
+  id: string;
+  title: string;
+  /** Not before this (ms since the epoch): a retry the app scheduled itself,
+   *  waiting out its back-off. */
+  retryAt?: number;
+  /** Why it is back in the queue, for its row ("Paused", "stalled … — trying
+   *  again"). */
+  reason?: string;
+  /** Someone pressed Retry: the backend starts its attempt count over. */
+  manual?: boolean;
+  /** Fetches a server transcode rather than the original file. */
+  transcode?: boolean;
+};
+
 type QueueEntry =
-  | { kind?: "new"; item: any; q: api.DownloadQuality }
-  | { kind: "retry"; id: string; title: string };
+  | { kind?: "new"; item: any; q: api.DownloadQuality; spaceChecked?: boolean }
+  | RetryEntry;
 
 /** Queue entries predating the retry kind have no discriminant; they're all
  *  new downloads, so absent `kind` reads as "new". */
-function isRetry(e: QueueEntry): e is { kind: "retry"; id: string; title: string } {
+function isRetry(e: QueueEntry): e is RetryEntry {
   return e.kind === "retry";
+}
+
+/** Whether an entry will make the server transcode. */
+function isTranscodeEntry(e: QueueEntry): boolean {
+  return isRetry(e) ? !!e.transcode : !api.effectiveDownloadQuality(e.item, e.q).original;
+}
+
+/** Whether a download's stored meta.json fetches a transcode. */
+export function isTranscodeDownload(dl: any): boolean {
+  const url: string = dl?.request?.url ?? "";
+  if (url) return !url.split("?")[0]!.endsWith("/Download");
+  return dl?.quality !== "Original quality";
 }
 
 function entryId(e: QueueEntry): string {
@@ -997,7 +1057,111 @@ function entryId(e: QueueEntry): string {
 
 const dlQueue: QueueEntry[] = [];
 const dlActive = new Set<string>();
+/** The running downloads that are server transcodes, for "one transcode at a
+ *  time". */
+const dlActiveTranscodes = new Set<string>();
 let dlBridgeReady = false;
+/** The connection is metered (GNetworkMonitor, via the backend). */
+let dlMetered = false;
+/** Wakes the pump when the soonest scheduled retry falls due. */
+let retryWake = 0;
+
+/** Paused from the Downloads page. Kept in config.json, so a pause holds
+ *  across a restart; the backend reads it too, and doesn't resume interrupted
+ *  transfers while it's set. */
+export function isDownloadsPaused(): boolean {
+  return api.getConfig()?.downloads_paused === true;
+}
+
+function unmeteredOnly(): boolean {
+  return api.getConfig()?.downloads_unmetered_only === true;
+}
+
+function transcodeSerial(): boolean {
+  return api.getConfig()?.downloads_transcode_serial === true;
+}
+
+const PAUSED_REASON = "Paused";
+const METERED_REASON = "Waiting for an unmetered connection";
+
+/** Why nothing new starts, or null when the queue is free to run. */
+export function downloadHoldReason(): string | null {
+  if (isDownloadsPaused()) return "Downloads are paused";
+  if (unmeteredOnly() && dlMetered) return METERED_REASON;
+  return null;
+}
+
+/**
+ * Take the running transfers down without losing them: each stops keeping its
+ * .part file and goes back to the front of the queue to carry on from it.
+ * Used by Pause and by the connection turning metered.
+ */
+function setAsideRunning(reason: string): void {
+  const running = [...dlActive];
+  if (!running.length) return;
+  const back: RetryEntry[] = [];
+  for (const id of running) {
+    void invoke("download_pause", { itemId: id }).catch(() => {});
+    if (dlQueue.some((e) => entryId(e) === id)) continue;
+    back.push({
+      kind: "retry",
+      id,
+      title: activeTitles.get(id) ?? id,
+      reason,
+      transcode: dlActiveTranscodes.has(id),
+    });
+  }
+  dlQueue.unshift(...back);
+  notifyQueueChanged();
+}
+
+/** Titles of what is running, so an entry set aside can still be named. */
+const activeTitles = new Map<string, string>();
+
+/** Pause or resume every download. */
+export async function setDownloadsPaused(paused: boolean): Promise<void> {
+  ensureQueueBridge();
+  if (paused === isDownloadsPaused()) return;
+  await api.saveConfig({ downloads_paused: paused }).catch(() => {});
+  invoke("ui_log", { msg: `downloads ${paused ? "paused" : "resumed"}` }).catch(() => {});
+  if (paused) {
+    setAsideRunning(PAUSED_REASON);
+  } else {
+    for (const e of dlQueue) {
+      if (isRetry(e) && e.reason === PAUSED_REASON) {
+        e.reason = undefined;
+        e.retryAt = undefined;
+      }
+    }
+    notifyQueueChanged();
+    void pumpQueue();
+  }
+}
+
+/** A download setting changed in Settings: re-apply the holds. */
+export function downloadPrefsChanged(): void {
+  ensureQueueBridge();
+  applyMeteredHold();
+  void invoke("downloads_sync_keep_awake").catch(() => {});
+  void pumpQueue();
+}
+
+function applyMeteredHold(): void {
+  if (unmeteredOnly() && dlMetered) {
+    setAsideRunning(METERED_REASON);
+    return;
+  }
+  let changed = false;
+  for (const e of dlQueue) {
+    if (isRetry(e) && e.reason === METERED_REASON) {
+      e.reason = undefined;
+      e.retryAt = undefined;
+      changed = true;
+    }
+  }
+  if (changed) notifyQueueChanged();
+  void pumpQueue();
+}
 
 // The queue is persisted so closing the app mid-season doesn't silently drop
 // the episodes that hadn't started yet (the backend only resumes the one
@@ -1048,6 +1212,12 @@ export interface PendingDownload {
   /** A re-run of a failed download rather than a first attempt. Its quality
    *  and episode numbering live in the stored meta, not here. */
   retry?: boolean;
+  /** Why it's waiting, when that's more than its turn. */
+  reason?: string;
+  /** A scheduled retry's due time (ms since the epoch). */
+  retryAt?: number;
+  /** Will make the server transcode. */
+  transcode: boolean;
 }
 
 /**
@@ -1067,6 +1237,9 @@ export function getQueuedDownloads(): PendingDownload[] {
           episode: null,
           quality: "retrying",
           retry: true,
+          reason: e.reason,
+          retryAt: e.retryAt,
+          transcode: !!e.transcode,
         }
       : {
           id: e.item.Id,
@@ -1075,6 +1248,7 @@ export function getQueuedDownloads(): PendingDownload[] {
           season: e.item.ParentIndexNumber ?? null,
           episode: e.item.IndexNumber ?? null,
           quality: e.q.label,
+          transcode: isTranscodeEntry(e),
         }
   );
 }
@@ -1101,14 +1275,22 @@ export function cancelQueuedDownload(id: string): void {
  * Anything already running or already queued is skipped, so a double-click
  * can't queue the same download twice.
  */
-function queueRetriesFirst(entries: { item_id: string; title?: string }[]): string[] {
+function queueRetriesFirst(
+  entries: { item_id: string; title?: string; transcode?: boolean }[]
+): string[] {
   const fresh: QueueEntry[] = [];
   const queued: string[] = [];
   for (const d of entries) {
     if (!d?.item_id) continue;
     if (dlActive.has(d.item_id) || dlQueue.some((e) => entryId(e) === d.item_id)) continue;
     if (fresh.some((e) => entryId(e) === d.item_id)) continue;
-    fresh.push({ kind: "retry", id: d.item_id, title: d.title ?? d.item_id });
+    fresh.push({
+      kind: "retry",
+      id: d.item_id,
+      title: d.title ?? d.item_id,
+      manual: true,
+      transcode: d.transcode,
+    });
     queued.push(d.item_id);
   }
   if (fresh.length) {
@@ -1131,9 +1313,18 @@ function queueRetriesFirst(entries: { item_id: string; title?: string }[]): stri
  * opened three connections, which is generally what had stalled them in the
  * first place.
  */
-export function retryDownload(itemId: string, title?: string): boolean {
+export function retryDownload(itemId: string, title?: string, transcode?: boolean): boolean {
   ensureQueueBridge();
-  return queueRetriesFirst([{ item_id: itemId, title }]).length > 0;
+  // A retry already waiting out its back-off: pressing Retry means now.
+  const waiting = dlQueue.find((e) => entryId(e) === itemId);
+  if (waiting && isRetry(waiting) && waiting.retryAt) {
+    waiting.retryAt = undefined;
+    waiting.manual = true;
+    notifyQueueChanged();
+    void pumpQueue();
+    return true;
+  }
+  return queueRetriesFirst([{ item_id: itemId, title, transcode }]).length > 0;
 }
 
 /**
@@ -1145,7 +1336,9 @@ export function retryDownload(itemId: string, title?: string): boolean {
  * everything else: retrying a dozen at once would open a dozen connections and
  * strand them exactly as before. Returns how many were queued.
  */
-export function retryFailedDownloads(failed: { item_id: string; title?: string }[]): number {
+export function retryFailedDownloads(
+  failed: { item_id: string; title?: string; transcode?: boolean }[]
+): number {
   ensureQueueBridge();
   return queueRetriesFirst(failed).length;
 }
@@ -1156,6 +1349,7 @@ export function clearDownloadQueue(): number {
   const n = dlQueue.length;
   dlQueue.length = 0;
   dlActive.clear();
+  dlActiveTranscodes.clear();
   notifyQueueChanged();
   return n;
 }
@@ -1170,40 +1364,120 @@ function ensureQueueBridge(): void {
   dlBridgeReady = true;
   listen("download-progress", (ev) => {
     const p = ev.payload as any;
-    if (!dlActive.has(p.item_id)) return;
-    if (p.state === "complete" || p.state === "error" || p.state === "canceled") {
-      dlActive.delete(p.item_id);
-      void pumpQueue();
+    const terminal = ["complete", "error", "canceled", "paused"].includes(p.state);
+    if (!terminal) return;
+    const wasOurs = dlActive.delete(p.item_id);
+    const transcode = dlActiveTranscodes.delete(p.item_id);
+    const title = activeTitles.get(p.item_id);
+    activeTitles.delete(p.item_id);
+    // The backend's word on a failure includes whether to go again, and
+    // when: a dropped link or a stall waits a few seconds and is put back,
+    // climbing to five minutes, five times; a short copy is fetched again at
+    // once. Anything it gives up on stays in Failed with a Retry button.
+    if (p.state === "error" && typeof p.retry_in === "number") {
+      scheduleAutomaticRetry(p.item_id, title ?? p.item_id, p.message, p.retry_in, transcode);
     }
+    if (wasOurs || p.state === "error") void pumpQueue();
   });
   // A queue restored while offline waits here until the server is back.
   document.addEventListener("aquarium-connectivity", (ev) => {
     if (!(ev as CustomEvent).detail?.offline) void pumpQueue();
   });
+  void invoke<boolean>("network_metered")
+    .then((m) => {
+      dlMetered = !!m;
+      applyMeteredHold();
+    })
+    .catch(() => {});
+  listen("network-metered", (ev) => {
+    dlMetered = !!ev.payload;
+    applyMeteredHold();
+  });
+}
+
+/** Put a failed download back at the front of the queue after a wait — the
+ *  app's own retry, as against the one behind the Retry button. */
+function scheduleAutomaticRetry(
+  id: string,
+  title: string,
+  reason: string,
+  delaySeconds: number,
+  transcode: boolean
+): void {
+  if (dlActive.has(id) || dlQueue.some((e) => entryId(e) === id)) return;
+  dlQueue.unshift({
+    kind: "retry",
+    id,
+    title,
+    reason,
+    retryAt: Date.now() + delaySeconds * 1000,
+    transcode,
+  });
+  invoke("ui_log", { msg: `download ${id}: retry in ${delaySeconds}s (${reason})` }).catch(() => {});
+  notifyQueueChanged();
+}
+
+/** Sleep until the soonest scheduled retry falls due, then pump. */
+function armRetryWake(): void {
+  clearTimeout(retryWake);
+  const now = Date.now();
+  const due = dlQueue
+    .map((e) => (isRetry(e) ? e.retryAt ?? 0 : 0))
+    .filter((t) => t > now);
+  if (!due.length) return;
+  retryWake = window.setTimeout(() => void pumpQueue(), Math.min(...due) - now + 50);
+}
+
+/**
+ * The next entry allowed to start now, or -1: the first one that is due (a
+ * retry waiting out its back-off isn't) and, with "one transcode at a time"
+ * on, isn't a second transcode. Originals still run side by side up to the
+ * parallel limit.
+ */
+function nextStartable(): number {
+  const now = Date.now();
+  const transcoding = transcodeSerial() && dlActiveTranscodes.size > 0;
+  return dlQueue.findIndex((e) => {
+    if (dlActive.has(entryId(e))) return false;
+    if (isRetry(e) && e.retryAt && e.retryAt > now) return false;
+    if (transcoding && isTranscodeEntry(e)) return false;
+    return true;
+  });
+}
+
+/** Whether a waiting entry is held back only by another transcode running. */
+export function isWaitingForTranscode(p: PendingDownload): boolean {
+  return transcodeSerial() && p.transcode && dlActiveTranscodes.size > 0;
 }
 
 async function pumpQueue(): Promise<void> {
   // Download URLs are built against the live session; offline they'd all just
   // error out one after another and drain the queue. The connectivity listener
   // in ensureQueueBridge re-pumps when the server comes back.
-  if (api.isOffline()) return;
+  armRetryWake();
+  if (api.isOffline() || downloadHoldReason()) return;
   while (dlActive.size < dlConcurrency) {
-    const next = dlQueue.shift();
-    if (!next) return;
+    const at = nextStartable();
+    if (at < 0) return;
+    const next = dlQueue.splice(at, 1)[0]!;
     const id = entryId(next);
     dlActive.add(id);
+    activeTitles.set(id, isRetry(next) ? next.title : itemTitle(next.item));
+    if (isTranscodeEntry(next)) dlActiveTranscodes.add(id);
     try {
       if (isRetry(next)) {
         // The backend rebuilds the request from meta.json and resumes from the
-        // .part file a stalled run left behind.
-        await invoke("download_retry", { itemId: next.id });
+        // .part file a stalled or paused run left behind.
+        await invoke("download_retry", { itemId: next.id, manual: !!next.manual });
       } else {
-        await startDownload(next.item, next.q);
+        await beginDownload(next.item, next.q, next.spaceChecked);
       }
     } catch (e) {
       // Couldn't start (e.g. already in progress) — skip and continue, but say
       // so: silently dropping an episode looks exactly like a stalled queue.
       dlActive.delete(id);
+      dlActiveTranscodes.delete(id);
+      activeTitles.delete(id);
       toast(`Couldn't start ${isRetry(next) ? next.title : itemTitle(next.item)}: ${e}`, "error");
     }
     // Notify only once the backend has written meta.json. Any earlier and the
@@ -1293,7 +1567,10 @@ export async function restoreDownloadQueue(): Promise<void> {
   } catch {
     // Corrupted entry — drop it.
   }
-  if (!Array.isArray(saved) || !saved.length) return;
+  // Carried on with even when nothing was saved: the bridge is what puts a
+  // failed transfer back in line, and what the backend resumed at launch has
+  // to be adopted for that.
+  if (!Array.isArray(saved)) saved = [];
   ensureQueueBridge();
 
   const existing = await invoke<any[]>("downloads_list").catch(() => []);
@@ -1316,7 +1593,15 @@ export async function restoreDownloadQueue(): Promise<void> {
     void pumpQueue();
     return;
   }
-  for (const d of active) dlActive.add(d.item_id);
+  for (const d of active) {
+    dlActive.add(d.item_id);
+    activeTitles.set(d.item_id, d.title ?? d.name ?? d.item_id);
+    if (isTranscodeDownload(d)) dlActiveTranscodes.add(d.item_id);
+  }
+  // The backend resumed these before the holds were known here (a metered
+  // connection is only checked from this side).
+  const held = downloadHoldReason();
+  if (held) setAsideRunning(held === METERED_REASON ? METERED_REASON : PAUSED_REASON);
   // A terminal event could slip past before our listener was registered,
   // which would stall the queue for good — recheck once shortly after.
   window.setTimeout(async () => {

@@ -449,6 +449,12 @@ impl Player {
             }
         }
 
+        // A downloaded file brings the subtitles saved beside it (see
+        // download_extras.rs), added once the file has loaded: `sub-add` is
+        // refused before then, and it is the only way to give each track its
+        // language and name (`sub-files` leaves both to the file name).
+        let local = req.ctx.as_ref().is_some_and(|c| c.is_local);
+        let mut local_subs = if local { crate::download_extras::subtitles_for(&req.url) } else { Vec::new() };
         if let Err(e) = session.command(json!(["loadfile", &req.url])) {
             let _ = session.command(json!(["quit"]));
             surface_arc.detach();
@@ -544,6 +550,24 @@ impl Player {
                                 // the file: unlike the old external process,
                                 // end-file does not shut anything down by
                                 // itself, so ask for real.
+                                if msg.get("event").and_then(|v| v.as_str()) == Some("file-loaded")
+                                    && !local_subs.is_empty()
+                                {
+                                    let embedded_on = session_task
+                                        .handle()
+                                        .get_property::<String>("sid")
+                                        .is_ok_and(|s| s != "no");
+                                    let slang = crate::config::load()["sub_lang"].as_str().unwrap_or("").to_string();
+                                    for cmd in crate::download_extras::sub_add_commands(
+                                        &std::mem::take(&mut local_subs),
+                                        &slang,
+                                        embedded_on,
+                                    ) {
+                                        if let Err(e) = session_task.command(cmd) {
+                                            crate::debug_log_line(&format!("player: sub-add failed: {e}"));
+                                        }
+                                    }
+                                }
                                 if msg.get("event").and_then(|v| v.as_str()) == Some("end-file") {
                                     end_reason = msg.get("reason").and_then(|v| v.as_str()).map(str::to_string);
                                     end_error = msg.get("file_error").and_then(|v| v.as_str()).map(str::to_string);
