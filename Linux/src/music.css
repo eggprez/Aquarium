@@ -241,7 +241,9 @@
   z-index: 70;
   display: flex; align-items: center; gap: 14px;
   padding: 0 16px;
-  background: var(--player-bg);
+  /* Follows the theme, unlike the video bar: nothing sits behind it but
+     the page. */
+  background: var(--bg-raised);
   border-top: 1px solid var(--border);
   color: var(--text);
 }
@@ -282,6 +284,8 @@
   overflow: hidden;
 }
 #now-playing.hidden { display: none; }
+/* `.btn` sets its own display, which beats the attribute's. */
+#now-playing [hidden], #music-bar [hidden] { display: none !important; }
 .np-backdrop {
   position: absolute; inset: -60px;
   background-size: cover; background-position: center;

@@ -18,8 +18,9 @@ import {
 } from "../smartPlaylists";
 import {
   mi, musicCard, shelf, grid, songList, songRow, pageHeader, playButtons, link, askName, newPlaylistWith,
-  playlistsChanged, startStation, markPlaying, iconButton, musicActions,
+  playlistsChanged, startStation, primePlaylists, markPlaying, iconButton, musicActions,
 } from "./musicCommon";
+import { renderDownloaded } from "./musicDownloads";
 
 function report(e: any): void {
   toast(e?.message ?? String(e), "error");
@@ -33,11 +34,14 @@ function trackPlaying(root: HTMLElement): void {
   });
 }
 
-export async function renderMusic(root: HTMLElement, arg: string): Promise<void> {
+export async function renderMusic(content: HTMLElement, arg: string): Promise<void> {
   const [page, ...rest] = (arg || "discover").split("/");
   const id = decodeURIComponent(rest.join("/"));
-  clear(root);
-  root.classList.add("mu-page");
+  clear(content);
+  // A wrapper rather than a class on #content, which every page shares.
+  const root = el("div", { class: "mu-page" });
+  content.append(root);
+  void primePlaylists();
   switch (page) {
     case "library": return renderLibrary(root, id || "albums");
     case "album": return renderAlbum(root, id);
@@ -48,6 +52,7 @@ export async function renderMusic(root: HTMLElement, arg: string): Promise<void>
     case "smart-edit": return renderSmartEditor(root, id);
     case "songs": return renderSongChart(root, id);
     case "search": return renderMusicSearch(root, id);
+    case "downloaded": return renderDownloaded(root, musicTabs("downloaded"));
     default: return renderDiscover(root);
   }
 }
@@ -98,7 +103,9 @@ async function fetchDiscover(): Promise<DiscoverData> {
     for (const g of s.Genres ?? []) genreCount.set(g, (genreCount.get(g) ?? 0) + 1);
   }
   const stations: DiscoverData["stations"] = [];
-  for (const { a } of [...artistCount.values()].sort((x, y) => y.n - x.n).slice(0, 4)) {
+  // A compilation's billing isn't an artist to build a station from.
+  const notAnArtist = /^(various( artists)?|va|unknown artist|soundtrack)$/i;
+  for (const { a } of [...artistCount.values()].filter(({ a }) => !notAnArtist.test(String(a.Name ?? "").trim())).sort((x, y) => y.n - x.n).slice(0, 4)) {
     stations.push({ title: `${a.Name} Station`, sub: "Built from an artist you play", seed: { Id: a.Id, Name: a.Name, Type: "MusicArtist", ImageTags: {} } });
   }
   for (const [name] of [...genreCount.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3)) {
@@ -145,6 +152,7 @@ function musicTabs(active: string): HTMLElement {
     ["library/songs", "Songs"],
     ["library/genres", "Genres"],
     ["search", "Search"],
+    ["downloaded", "Downloaded"],
   ];
   return el("nav", { class: "mu-tabs", "aria-label": "Music" }, tabs.map(([r, label]) =>
     el("a", { class: `mu-tab${r === active ? " active" : ""}`, href: `#/music/${r}`, "aria-current": r === active ? "page" : null }, [label])

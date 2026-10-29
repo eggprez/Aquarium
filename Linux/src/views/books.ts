@@ -11,17 +11,19 @@ import * as m from "../musicApi";
 import * as audio from "../audio";
 import { getCached, setCached, itemSignature } from "../cache";
 import { el, clear, toast, emptyState, errorState, spinner, skeletonRow, openActionMenu, attachContextMenu } from "../ui";
+import { downloadBookAction } from "./musicDownloads";
 import { mi, musicCard, shelf, grid, pageHeader, iconButton, link } from "./musicCommon";
 
 function report(e: any): void {
   toast(e?.message ?? String(e), "error");
 }
 
-export async function renderBooks(root: HTMLElement, arg: string): Promise<void> {
+export async function renderBooks(content: HTMLElement, arg: string): Promise<void> {
   const [page, ...rest] = (arg || "").split("/");
   const id = decodeURIComponent(rest.join("/"));
-  clear(root);
-  root.classList.add("mu-page");
+  clear(content);
+  const root = el("div", { class: "mu-page" });
+  content.append(root);
   switch (page) {
     case "all": return renderAll(root);
     case "author": return renderAuthor(root, id);
@@ -81,6 +83,7 @@ function bookActions(book: any): any[] {
         } catch (e) { report(e); }
       },
     },
+    downloadBookAction(book),
     { label: "Go to Author", icon: "people", run: () => void (location.hash = `#/books/author/${encodeURIComponent(author(book))}`) },
   ];
 }

@@ -7,6 +7,7 @@ import * as m from "../musicApi";
 import * as audio from "../audio";
 import { buildStation } from "../stations";
 import { smartPlaylistSongs, getSmartPlaylists } from "../smartPlaylists";
+import { downloadMusicAction } from "./musicDownloads";
 import { el, art, toast, openDialog, attachContextMenu, openActionMenu, type MenuAction, noart } from "../ui";
 
 // ---------- Icons the shared set doesn't have ----------
@@ -184,12 +185,24 @@ async function addTo(playlist: any, item: any): Promise<void> {
 }
 
 let playlistCache: any[] | null = null;
-playlistsChanged.addEventListener("change", () => (playlistCache = null));
+let playlistFetch: Promise<void> | null = null;
+
+/** Fetch the playlist list for the Add to Playlist menus. Menus are built
+ *  synchronously, so this runs ahead of them: when a music page opens and
+ *  after any playlist change. */
+export function primePlaylists(force = false): Promise<void> {
+  if (playlistFetch && !force) return playlistFetch;
+  playlistFetch = m.audioPlaylists()
+    .then((p) => void (playlistCache = p))
+    .catch(() => void (playlistFetch = null));
+  return playlistFetch;
+}
+playlistsChanged.addEventListener("change", () => void primePlaylists(true));
 
 /** "Add to Playlist" as a submenu: New Playlist…, then every playlist. Built
  *  from what was last fetched so the menu opens at once; refetched behind. */
 export function addToPlaylistAction(item: any, label = "Add to Playlist"): MenuAction {
-  if (!playlistCache) void m.audioPlaylists().then((p) => (playlistCache = p)).catch(() => {});
+  void primePlaylists();
   return {
     label,
     icon: "library",
@@ -249,6 +262,7 @@ export function musicActions(item: any, opts: ActionOpts = {}): (MenuAction | nu
     const artist = item.AlbumArtists?.[0] ?? item.ArtistItems?.[0];
     if (artist?.Id) out.push({ label: "Go to Artist", icon: "people", run: () => void (location.hash = `#/music/artist/${artist.Id}`) });
   }
+  out.push(downloadMusicAction(item));
   if (isSong) out.push({ label: "Song Info", run: () => void showSongInfo(item) });
   if (opts.onRemove) out.push({ label: "Remove from Playlist", icon: "trash", danger: true, run: opts.onRemove });
   return out;
@@ -525,7 +539,7 @@ function selectionActions(songs: any[]): MenuAction[] {
 function updateSelectionBar(row: HTMLElement): void {
   const list = row.closest(".mu-songs") as HTMLElement | null;
   if (!list) return;
-  if (!playlistCache) void m.audioPlaylists().then((p) => (playlistCache = p)).catch(() => {});
+  void primePlaylists();
   list.querySelector(".mu-selbar")?.remove();
   const songs = selectedSongs(row);
   if (songs.length < 2) return;

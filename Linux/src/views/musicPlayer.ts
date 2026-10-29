@@ -165,7 +165,10 @@ let lyricLines: m.LyricLine[] | null = null;
 let queueSig = "";
 
 export function openNowPlaying(tab?: "queue" | "lyrics" | "chapters" | MouseEvent): void {
+  const book = audio.queueState().book;
   if (typeof tab === "string") npTab = tab;
+  // A book opens on its chapters; music on Up Next unless lyrics were up.
+  else npTab = book ? "chapters" : npTab === "chapters" ? "queue" : npTab;
   if (!np) {
     np = buildNowPlaying();
     document.getElementById("app")?.append(np);

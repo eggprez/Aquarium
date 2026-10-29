@@ -437,7 +437,8 @@ async function route(): Promise<void> {
   void content.offsetWidth;
   content.classList.add("view-in");
 
-  if (api.isOffline() && SERVER_PAGES.includes(page || "home")) {
+  // Downloaded music is the one music page that works with no server.
+  if (api.isOffline() && SERVER_PAGES.includes(page || "home") && !(page === "music" && arg === "downloaded")) {
     renderOffline(content);
     settleScroll(content, 0);
     return;

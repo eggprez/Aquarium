@@ -380,7 +380,17 @@ fn serve(app: AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // `false, true, false` — don't allow replacement, do replace an existing
     // owner, don't queue. A previous instance that died without releasing the
     // name must not stop this one from taking it.
-    c.request_name(BUS_NAME, false, true, false)?;
+    //
+    // A test instance (any AQUARIUM_TEST_* hook set) takes an instance name
+    // instead, as the spec allows, so it never takes the shell's controls
+    // away from the copy of the app the user is actually running.
+    let testing = std::env::vars().any(|(k, _)| k.starts_with("AQUARIUM_TEST_"));
+    let name = if testing {
+        format!("{}.instance{}", BUS_NAME, std::process::id())
+    } else {
+        BUS_NAME.to_string()
+    };
+    c.request_name(name.as_str(), false, !testing, false)?;
 
     let mut cr = Crossroads::new();
 

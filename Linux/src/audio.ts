@@ -248,6 +248,21 @@ async function topUp(): Promise<void> {
   }
 }
 
+// ---------- Downloaded copies ----------
+
+/** Item id → downloaded file, so a downloaded song plays from disk even when
+ *  started from a server page. Read at each start: the list is a directory
+ *  scan, cheap next to opening a stream. */
+async function attachLocal(items: any[]): Promise<void> {
+  const list = await invoke<any[]>("downloads_list").catch(() => [] as any[]);
+  const paths = new Map<string, string>();
+  for (const d of list) if (d?.status === "complete" && d.path) paths.set(d.item_id, d.path);
+  for (const i of items) {
+    const p = paths.get(i.Id);
+    if (p) i.__localPath = p;
+  }
+}
+
 // ---------- Starting things ----------
 
 export interface PlayOptions {
@@ -262,6 +277,7 @@ export interface PlayOptions {
 export async function play(items: any[], start = 0, opts: PlayOptions = {}): Promise<void> {
   const list = items.filter((i) => i && i.Id);
   if (!list.length) return;
+  await attachLocal(list);
   q.title = opts.title ?? "";
   q.source = opts.source ?? null;
   q.book = opts.book ?? list[0].Type === "AudioBook";
@@ -283,6 +299,7 @@ export async function play(items: any[], start = 0, opts: PlayOptions = {}): Pro
 /** Put items straight after the current one. */
 export async function playNext(items: any[]): Promise<void> {
   if (!isActive()) return play(items);
+  await attachLocal(items);
   q.items.splice(q.index + 1, 0, ...items);
   if (q.original) q.original.push(...items);
   publishQueue();
@@ -293,6 +310,7 @@ export async function playNext(items: any[]): Promise<void> {
 /** Put items at the end of the queue. */
 export async function playLater(items: any[]): Promise<void> {
   if (!isActive()) return play(items);
+  await attachLocal(items);
   q.items.push(...items);
   if (q.original) q.original.push(...items);
   publishQueue();

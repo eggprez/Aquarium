@@ -90,6 +90,52 @@ query parameter, all of which Jellyfin 12 disables by default), and the
   follows the desktop's colour scheme (read from the XDG desktop portal, so it
   tracks GNOME/KDE's dark-style toggle rather than the GTK theme name) and
   updates live when it changes.
+- **Music** — a sidebar section whenever the server has a music library,
+  modelled on the iPhone/iPad app's Music tab. **Listen Now**: Recently Played,
+  stations built from the artists and genres you play most, Your Top Songs,
+  New in Your Library, favourite albums and artists, a random draw, and
+  **Surprise Me**. **Library**: playlists, artists, albums, songs and genres,
+  each with a filter field and a sort; album, artist (top songs, albums,
+  Appears On, about, similar artists), genre and playlist pages; a music
+  search; and Downloaded, which plays with no server. Click selects a song,
+  double-click plays it, Ctrl/Shift-click selects more for Play Next or
+  **New Playlist…**.
+- **Playing music** — a mini player along the bottom of every page, opening
+  into Now Playing: cover, scrubber, shuffle, repeat (all / one), volume, a
+  sleep timer (minutes, or the end of the song), Sound Check (ReplayGain),
+  an Up Next you can drag to reorder, and timed lyrics that light the line
+  being sung (click a line to go there). Every song, album, artist and
+  playlist menu has Play Next, Play Later, Start Station, Add to Playlist and,
+  for a song, **Song Info** (tags, plays, format, bitrate; a missing artist,
+  genre or year is called out). Songs join gaplessly: music plays in an
+  audio-only mpv core of its own (`src-tauri/src/audio.rs`, with
+  `gapless-audio` and `prefetch-playlist`), holding the current song and the
+  next. Plays are reported to Jellyfin as video's are. Starting a video stops
+  the music and the other way round. The desktop's media controls (MPRIS)
+  show title, artist, album and cover art, and Next/Previous and the track
+  list follow the queue.
+- **Stations** — Jellyfin's Instant Mix of the seed, of its artist and of
+  similar artists, scored the way the Apple app scores them: twenty points
+  across seven dials (same artist, genre, era, favourites, most played,
+  discovery, surprise), with Balanced, Familiar and Discovery presets
+  (Listen Now → Station Mix…). Dealt so one artist or album doesn't come back
+  to back, and topped up as the queue runs low.
+- **Playlists** — create, rename and delete on the server; add songs, albums,
+  artists or genres from any menu; Edit drags to reorder and removes, each
+  change saved as it's made. **Smart playlists** are rules (genres, artists,
+  years, added in the last N days, played/never played, a play-count floor,
+  favourites, an order and a limit) kept in `config.json`, answered from the
+  library every time they're opened, and saveable to the server as a real
+  playlist.
+- **Audiobooks** — a sidebar entry when the server has a books library, kept
+  apart from music: Continue Listening with time left, Recently Added,
+  Authors, All Books (by title, author, date added or last played), its own
+  search, and a book page with chapters, resume point and speed. The player
+  skips 15 s back and 30 s forward, and the mini player names the chapter.
+- **Music downloads** — songs, whole albums and audiobooks, always the
+  original file, through the same throttled queue as video. A downloaded song
+  plays from disk wherever it's started from; an audiobook's position played
+  offline syncs back like a film's.
 - Home (Continue Watching / Next Up / Latest), library browsing with sorting and
   paging, series → season → episode navigation, search, watched toggles, and
   playback progress reported to the server every 10 s like any first-class client.
