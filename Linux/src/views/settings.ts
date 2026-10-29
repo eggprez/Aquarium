@@ -474,6 +474,35 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     ])
   );
 
+  // Next Up: what the server's Next Up offers, and for how long. Sent with
+  // every Next Up request, so the row follows at once.
+  root.append(
+    el("div", { class: "settings-block" }, [
+      el("h3", {}, ["Next Up"]),
+      row(
+        "Keep shows on Next Up",
+        "How long a show stays on Next Up after you last watched anything in it. Past that, Aquarium takes it off Next Up on the server as well, so Jellyfin's other apps stop showing it too; nothing is marked watched. Playing an episode or adding the show to Next Up brings it back. Forever keeps a show for as long as it has an episode left.",
+        choice(
+          { next_up_days: String(cfg.next_up_days ?? "0") },
+          "next_up_days",
+          api.NEXT_UP_DAY_CHOICES.map((d) => [String(d), api.nextUpDaysLabel(d)] as [string, string]).sort((a, b) =>
+            a[0] === "0" ? 1 : b[0] === "0" ? -1 : Number(a[0]) - Number(b[0])
+          )
+        )
+      ),
+      row(
+        "Include episodes in progress",
+        "Lets Next Up offer an episode you're partway through, as Continue Watching does. Off, a show whose next episode you've started is left to Continue Watching until you finish it.",
+        toggle({ next_up_in_progress: cfg.next_up_in_progress !== false }, "next_up_in_progress", ["Off", "On"])
+      ),
+      row(
+        "Include shows you're rewatching",
+        "Keeps a show you're watching again on Next Up: after an episode you've already seen, it offers the one after it, watched or not.",
+        toggle(cfg, "next_up_rewatching", ["Off", "On"])
+      ),
+    ])
+  );
+
   // Playback block
   const adaptiveSelect = el("select", {
     class: "control md",

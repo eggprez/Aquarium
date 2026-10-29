@@ -1051,18 +1051,18 @@ function togglePlaybackPanel(): void {
       el("button", {
         class: "btn small",
         title: `Sound ${AUDIO_DELAY_STEP * 1000} ms earlier (Ctrl+−)`,
-        onClick: () => playerCtl.setAudioDelay(pbState.audioDelay - AUDIO_DELAY_STEP).catch(() => {}),
+        onClick: () => nudgeAudioDelay(-1, true),
       }, ["−"]),
       audioDelay,
       el("button", {
         class: "btn small",
         title: `Sound ${AUDIO_DELAY_STEP * 1000} ms later (Ctrl+=)`,
-        onClick: () => playerCtl.setAudioDelay(pbState.audioDelay + AUDIO_DELAY_STEP).catch(() => {}),
+        onClick: () => nudgeAudioDelay(1, true),
       }, ["+"]),
       el("button", {
         class: "btn small",
         title: "No audio delay (Ctrl+0)",
-        onClick: () => playerCtl.setAudioDelay(0).catch(() => {}),
+        onClick: () => nudgeAudioDelay(0, true),
       }, ["Reset"])
     );
     panel.sync = (st) => {
@@ -1070,7 +1070,8 @@ function togglePlaybackPanel(): void {
         b.classList.toggle("primary", Math.abs(parseFloat(b.dataset.speed!) - st.speed) < 0.001);
       }
       delay.textContent = `${st.subDelay > 0 ? "+" : ""}${st.subDelay.toFixed(1)}s`;
-      audioDelay.textContent = `${st.audioDelay > 0 ? "+" : ""}${Math.round(st.audioDelay * 1000)} ms`;
+      const ms = Math.round(st.audioDelay * 1000);
+      audioDelay.textContent = `${ms > 0 ? "+" : ""}${ms} ms`;
     };
   });
 }
@@ -2107,11 +2108,15 @@ function skipBy(dir: -1 | 1): void {
   flashBarNote(`${dir < 0 ? "−" : "+"}${n} s`);
 }
 
-function nudgeAudioDelay(dir: -1 | 0 | 1): void {
-  const v = dir === 0 ? 0 : pbState.audioDelay + dir * AUDIO_DELAY_STEP;
+function nudgeAudioDelay(dir: -1 | 0 | 1, quiet = false): void {
+  // Rounded to the millisecond: mpv reports 0.050000-ish floats, and the sum
+  // of a few of them is otherwise "+0 ms" rather than 0.
+  const v = dir === 0 ? 0 : Math.round((pbState.audioDelay + dir * AUDIO_DELAY_STEP) * 1000) / 1000;
+  // Set here as well as from the next status, so two quick presses are two steps.
   pbState.audioDelay = v;
   playerCtl.setAudioDelay(v).catch(() => {});
-  flashBarNote(`Audio delay ${v > 0 ? "+" : ""}${Math.round(v * 1000)} ms`);
+  if (!quiet) flashBarNote(`Audio delay ${v > 0 ? "+" : ""}${Math.round(v * 1000)} ms`);
+  ($("player-bar").querySelector(".pb-panel") as BarPanel | null)?.sync?.(pbState);
 }
 
 function openInfo(): void {
@@ -2803,6 +2808,12 @@ async function boot(): Promise<void> {
   });
   await listen("player-stall", () => {
     stallsThisFile++;
+  });
+
+  // Next Up was changed on the server from a menu: Home redraws from a fresh
+  // request rather than waiting for the next visit.
+  document.addEventListener("aquarium-next-up-changed", () => {
+    if (atHome() && !playerActive) route();
   });
 
   document.addEventListener("aquarium-account-switch", (ev) => {

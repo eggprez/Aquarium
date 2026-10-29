@@ -518,12 +518,284 @@ export async function getResume(): Promise<any[]> {
   return r.Items ?? [];
 }
 
-export async function getNextUp(): Promise<any[]> {
+// ---------- Next Up ----------
+//
+// Shaped by the account's Next Up settings (Settings → Home): how long a show
+// stays, whether episodes in progress count, whether rewatches do. The day
+// limit is the app's to enforce: Next Up is asked for twice, cut at the limit
+// and not, and a show only the wider answer has is taken off Next Up *on the
+// server* (`removeFromNextUp`), so Jellyfin's other apps stop offering it
+// too. A server that ignores the cutoff, or two answers both at their length
+// limit, removes nothing — the same rule as the Apple app.
+
+/** Choices for "Keep shows on Next Up", in days; 0 is Forever. */
+export const NEXT_UP_DAY_CHOICES = [0, 7, 14, 30, 90, 180, 365];
+
+export function nextUpDaysLabel(days: number): string {
+  switch (days) {
+    case 0: return "Forever";
+    case 7: return "1 week";
+    case 14: return "2 weeks";
+    case 30: return "1 month";
+    case 365: return "1 year";
+    default: return `${days / 30} months`;
+  }
+}
+
+function nextUpDays(): number {
+  const v = Number(appConfig.next_up_days ?? 0);
+  return NEXT_UP_DAY_CHOICES.includes(v) ? v : 0;
+}
+
+/** On unless turned off, which is what the server does when it isn't told. */
+function nextUpInProgress(): boolean {
+  return appConfig.next_up_in_progress !== false;
+}
+
+function nextUpRewatching(): boolean {
+  return appConfig.next_up_rewatching === true;
+}
+
+async function nextUpQuery(limit: number, cutoff: Date | null, light = false): Promise<any[]> {
   const s = session!;
-  const r = await api(
-    `/Shows/NextUp?userId=${s.userId}&Limit=16&Fields=${ITEM_FIELDS}&EnableImageTypes=Primary,Backdrop,Thumb,Logo`
-  );
+  const p = new URLSearchParams({
+    userId: s.userId,
+    Limit: String(limit),
+    enableResumable: String(nextUpInProgress()),
+    enableRewatching: String(nextUpRewatching()),
+  });
+  if (light) {
+    p.set("enableImages", "false");
+    p.set("enableUserData", "false");
+  } else {
+    p.set("Fields", ITEM_FIELDS);
+    p.set("EnableImageTypes", "Primary,Backdrop,Thumb,Logo");
+  }
+  if (cutoff) p.set("nextUpDateCutoff", cutoff.toISOString());
+  const r = await api(`/Shows/NextUp?${p}`);
   return r.Items ?? [];
+}
+
+/** The last-played date Jellyfin reads as never: its earliest. */
+export const NOT_PLAYED_DATE = "0001-01-01T00:00:00Z";
+
+/** Whether the server has a real last-played date for an item. */
+export function hasPlayedDate(item: any): boolean {
+  const raw = item?.UserData?.LastPlayedDate;
+  if (!raw) return false;
+  const t = Date.parse(raw);
+  return isFinite(t) && new Date(t).getUTCFullYear() > 1;
+}
+
+/**
+ * Shows added from their first episode go to the front, newest first.
+ * Jellyfin orders Next Up by when each show's last watched episode was
+ * played; a show with nothing watched has none and goes last — past the
+ * row's 16 on a busy account. They are recognised by the episode offered
+ * carrying a last-played date while unwatched and not started, which only
+ * Add to Next Up writes.
+ */
+export function newStartsFirst(row: any[]): any[] {
+  const addedAt = (item: any): number | null => {
+    if (item.Type !== "Episode" || item.UserData?.Played || (item.UserData?.PlaybackPositionTicks ?? 0) > 0) return null;
+    if (!hasPlayedDate(item)) return null;
+    return Date.parse(item.UserData.LastPlayedDate);
+  };
+  const added = row.map((i) => [i, addedAt(i)] as const).filter(([, t]) => t !== null) as [any, number][];
+  if (!added.length) return row;
+  const ids = new Set(added.map(([i]) => i.Id));
+  return [...added.sort((a, b) => b[1] - a[1]).map(([i]) => i), ...row.filter((i) => !ids.has(i.Id))];
+}
+
+/** The shows the wider answer has that the cut one doesn't. */
+export function expiredFromNextUp(everything: any[], kept: any[]): string[] {
+  if (kept.length >= everything.length) return [];
+  const keptSeries = new Set(kept.map((i) => i.SeriesId).filter(Boolean));
+  const out: string[] = [];
+  for (const i of everything) {
+    if (i.SeriesId && !keptSeries.has(i.SeriesId) && !out.includes(i.SeriesId)) out.push(i.SeriesId);
+  }
+  return out;
+}
+
+/** Shows being taken off for the day limit, so two loads don't race. */
+const nextUpExpiring = new Set<string>();
+
+function reportExpired(seriesIds: string[]): void {
+  const fresh = seriesIds.filter((id) => !nextUpExpiring.has(id));
+  if (!fresh.length) return;
+  fresh.forEach((id) => nextUpExpiring.add(id));
+  void (async () => {
+    for (const id of fresh) {
+      try {
+        await removeFromNextUp(id);
+      } catch (e) {
+        void invoke("ui_log", { msg: `next up: couldn't take ${id} off: ${e}` }).catch(() => {});
+      }
+      nextUpExpiring.delete(id);
+    }
+  })();
+}
+
+export async function getNextUp(): Promise<any[]> {
+  const days = nextUpDays();
+  // At the server's most rather than the row's 16: a show started over from
+  // its first episode is at the end of the server's answer.
+  if (days <= 0) return newStartsFirst(await nextUpQuery(100, null)).slice(0, 16);
+  const cutoff = new Date(Date.now() - days * 86_400_000);
+  const [kept, everything] = await Promise.all([
+    nextUpQuery(100, cutoff),
+    nextUpQuery(100, null, true).catch(() => null),
+  ]);
+  if (everything) reportExpired(expiredFromNextUp(everything, kept));
+  return newStartsFirst(kept).slice(0, 16);
+}
+
+async function seriesEpisodesWithUserData(seriesId: string): Promise<any[]> {
+  const s = session!;
+  const r = await api(`/Shows/${seriesId}/Episodes?userId=${s.userId}&Fields=${ITEM_FIELDS}`);
+  return r.Items ?? [];
+}
+
+/** Specials are season zero and sit outside Next Up's order, unless a show
+ *  is nothing but. */
+function walked(all: any[]): any[] {
+  const regular = all.filter((e) => (e.ParentIndexNumber ?? 1) !== 0);
+  return regular.length ? regular : all;
+}
+
+/** The episode Next Up will offer: the first unwatched one after the last
+ *  watched, or the first unwatched when nothing is. */
+export function nextUpTarget(all: any[]): any | null {
+  const eps = walked(all);
+  let last = -1;
+  eps.forEach((e, i) => {
+    if (e.UserData?.Played) last = i;
+  });
+  return eps.slice(last + 1).find((e) => !e.UserData?.Played) ?? null;
+}
+
+/**
+ * Take a show off Next Up on the server without touching what has been
+ * watched: each of its dated episodes gets Jellyfin's earliest date as its
+ * last-played date, which the server reads as never. It comes back when an
+ * episode is played or the show is added again. A server before 10.9 can't
+ * write the date alone and answers 404.
+ */
+export async function removeFromNextUp(seriesId: string): Promise<void> {
+  const s = session!;
+  const episodes = await seriesEpisodesWithUserData(seriesId);
+  for (const ep of episodes) {
+    if (!hasPlayedDate(ep)) continue;
+    await api(`/UserItems/${ep.Id}/UserData?userId=${s.userId}`, {
+      method: "POST",
+      body: { LastPlayedDate: NOT_PLAYED_DATE },
+    });
+  }
+}
+
+/**
+ * Put a show on Next Up, on the server, so every app on the account shows it.
+ * Jellyfin has no call for this: it builds Next Up from episodes with a
+ * last-played date and orders the row by the last watched one's date.
+ *
+ * - "last": today's date on the last watched episode, so the show goes to the
+ *   front everywhere and back inside the day limit.
+ * - "first": the whole show marked unwatched (play counts, positions and dates
+ *   go), then today's date on its first episode.
+ *
+ * The episode's whole state goes with the date; sent alone, the date is
+ * written over what the server last cached of it. Returns the episode the
+ * show will be offered at, or null when there is nothing to offer.
+ */
+export async function addToNextUp(seriesId: string, from: "last" | "first"): Promise<any | null> {
+  const s = session!;
+  const all = await seriesEpisodesWithUserData(seriesId);
+  let target: any;
+  let dated: any;
+  if (from === "last") {
+    target = nextUpTarget(all);
+    if (!target) return null;
+    dated = [...walked(all)].reverse().find((e) => e.UserData?.Played) ?? target;
+  } else {
+    target = walked(all)[0];
+    if (!target) return null;
+    await api(`/UserPlayedItems/${seriesId}?userId=${s.userId}`, { method: "DELETE" });
+    dated = target;
+  }
+  const started = from === "last";
+  await api(`/UserItems/${dated.Id}/UserData?userId=${s.userId}`, {
+    method: "POST",
+    body: {
+      LastPlayedDate: new Date().toISOString(),
+      Played: started && !!dated.UserData?.Played,
+      PlayCount: started ? dated.UserData?.PlayCount ?? 0 : 0,
+      PlaybackPositionTicks: started ? dated.UserData?.PlaybackPositionTicks ?? 0 : 0,
+    },
+  });
+  return target;
+}
+
+// ---------- Home layout ----------
+
+/** A kind of row Home can draw. */
+export type HomeSection = "libraries" | "resume" | "nextUp" | "latest" | "liveTv";
+
+function homeSectionFor(name: string): HomeSection | null {
+  switch (name.toLowerCase()) {
+    case "librarybuttons":
+    case "smalllibrarytiles":
+    case "librarytiles":
+      return "libraries";
+    case "resume":
+    case "resumevideo":
+      return "resume";
+    case "nextup":
+      return "nextUp";
+    case "latestmedia":
+      return "latest";
+    case "livetv":
+      return "liveTv";
+    default:
+      // "none", and rows this client has nothing for (music, books, recordings).
+      return null;
+  }
+}
+
+/** What Jellyfin itself puts in a slot the account has never set, copied
+ *  from the web client so an untouched account looks the same in both. */
+function jellyfinDefaultSection(slot: number): string {
+  return ["smalllibrarytiles", "resume", "resumeaudio", "livetv", "nextup", "latestmedia"][slot] ?? "none";
+}
+
+export const HOME_FALLBACK: HomeSection[] = [0, 1, 2, 3, 4, 5, 6]
+  .map((i) => homeSectionFor(jellyfinDefaultSection(i)))
+  .filter((x): x is HomeSection => !!x);
+
+/**
+ * The home screen the account has arranged, from its display preferences
+ * (`usersettings`, client `emby`): seven numbered slots, each naming a kind of
+ * row, read the same way by every Jellyfin client. Anything unreadable comes
+ * back as Jellyfin's own default order.
+ */
+export async function getHomeSections(): Promise<HomeSection[]> {
+  const s = session!;
+  let prefs: any;
+  try {
+    prefs = await api(`/DisplayPreferences/usersettings?userId=${s.userId}&client=emby`);
+  } catch {
+    return HOME_FALLBACK;
+  }
+  const custom: Record<string, any> = prefs?.CustomPrefs ?? {};
+  // Lower-cased by the web client, camel-cased by some others.
+  const byLower = new Map<string, string>();
+  for (const [k, v] of Object.entries(custom)) if (typeof v === "string") byLower.set(k.toLowerCase(), v);
+  const out: HomeSection[] = [];
+  for (let slot = 0; slot < 7; slot++) {
+    const section = homeSectionFor(byLower.get(`homesection${slot}`) ?? jellyfinDefaultSection(slot));
+    if (section && !out.includes(section)) out.push(section);
+  }
+  return out.length ? out : HOME_FALLBACK;
 }
 
 /**

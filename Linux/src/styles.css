@@ -2259,3 +2259,16 @@ h1.page-title { font-size: var(--fs-2xl); margin-bottom: 20px; }
 .pb-dur { cursor: pointer; border-radius: 4px; }
 .pb-dur:hover { color: var(--text); }
 .pb-queue-tile.queued .pb-queue-status { color: var(--accent); }
+
+/* ---------- Home: library chips, On Now ---------- */
+.home-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 28px; }
+.home-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 14px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg-raised); color: var(--text);
+  font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+}
+.home-chip:hover, .home-chip:focus-visible { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.onnow-poster { display: grid; place-items: center; background: var(--bg-raised); }
+.onnow-live { display: inline-flex; align-items: center; }
+.onnow-live .live-dot { margin-right: 5px; }

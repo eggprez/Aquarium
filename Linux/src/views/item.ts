@@ -17,6 +17,7 @@ import {
   attachContextMenu,
   openActionMenu,
   queueActions,
+  askAddToNextUp,
   itemActions,
   downloadLabel,
   emptyState,
@@ -582,6 +583,11 @@ function paintItem(page: HTMLElement, data: ItemData): void {
   // play/quality/download/watched bar.
   const actionBar = item.Type !== "Series" ? playButtons(item) : null;
   const actionNodes = actionBar ? [actionBar] : seriesHeroActions(playTarget);
+  // A show's page can put it on Next Up, on the server (see api.addToNextUp).
+  if (!actionBar) {
+    const bar = actionNodes[actionNodes.length - 1];
+    bar?.append(el("button", { class: "btn", title: "Put this show on Next Up, here and in Jellyfin's other apps", onClick: () => askAddToNextUp(item) }, [icon("episodes"), "Add to Next Up…"]));
+  }
 
   // The backdrop moves, so it gets its own clipping frame. Putting the clip on
   // the hero itself would cut off the Quality and Download dropdowns, which

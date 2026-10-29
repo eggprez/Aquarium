@@ -861,9 +861,84 @@ export function queueActions(item: any): MenuAction[] {
  * card grids, episode lists and the detail page. `onChanged` runs after
  * anything that alters state the caller is drawing (watched, favorite).
  */
+/** The show an item stands for: itself, or the one a season or an episode
+ *  belongs to. Null for anything that isn't television. */
+function showIdOf(item: any): string | null {
+  if (item.Type === "Series") return item.Id;
+  if (item.Type !== "Season" && item.Type !== "Episode") return null;
+  return item.SeriesId || (item.Type === "Season" ? item.ParentId : null) || null;
+}
+
+function showNameOf(item: any): string {
+  return item.Type === "Series" ? item.Name ?? "This show" : item.SeriesName ?? item.Name ?? "This show";
+}
+
+/** Tell the pages that show Next Up that it changed under them. */
+function nextUpChanged(): void {
+  document.dispatchEvent(new CustomEvent("aquarium-next-up-changed"));
+}
+
+/**
+ * Add a show to Next Up, on the server, after asking where to pick it up:
+ * after the last episode watched, or from the first with everything before
+ * forgotten. Starting over wipes what has been watched, so it is the red one.
+ */
+export function askAddToNextUp(item: any): void {
+  const seriesId = showIdOf(item);
+  if (!seriesId) return;
+  const name = showNameOf(item);
+  const add = async (from: "last" | "first"): Promise<void> => {
+    try {
+      const ep = await api.addToNextUp(seriesId, from);
+      if (!ep) {
+        toast(from === "last"
+          ? `Every episode of ${name} has been watched — add it from the first episode instead`
+          : `${name} has no episodes to add`, "error");
+        return;
+      }
+      const s = ep.ParentIndexNumber, e = ep.IndexNumber;
+      const at = s != null && e != null ? ` at S${s}:E${e}` : "";
+      if ((ep.UserData?.PlaybackPositionTicks ?? 0) > 0 && from === "last" && api.getConfig().next_up_in_progress === false) {
+        toast(`${name} is partway through${at}, so it's in Continue Watching`, "ok");
+      } else {
+        toast(`Added ${name} to Next Up${at}`, "ok");
+      }
+      nextUpChanged();
+    } catch (err: any) {
+      toast(/ 404 /.test(String(err?.message)) ? "This server is too old to add shows to Next Up" : `Couldn't add ${name} to Next Up`, "error");
+    }
+  };
+  openDialog({
+    title: `Add ${name} to Next Up`,
+    body: [el("p", {}, ["From the first episode marks every episode unwatched on the server, and clears play counts and saved positions."])],
+    actions: [
+      { label: "Cancel" },
+      { label: "Add from First Episode", danger: true, run: () => void add("first") },
+      { label: "Add from Last Watched Episode", primary: true, run: () => void add("last") },
+    ],
+  });
+}
+
+/** Take a show off Next Up on the server, without marking anything watched. */
+async function removeShowFromNextUp(item: any, seriesId: string): Promise<void> {
+  const name = showNameOf(item);
+  try {
+    await api.removeFromNextUp(seriesId);
+    toast(`Removed ${name} from Next Up`, "ok");
+    nextUpChanged();
+  } catch {
+    toast(`Couldn't remove ${name} from Next Up`, "error");
+  }
+}
+
 export function itemActions(
   item: any,
-  opts: { onChanged?: () => void; includeDetails?: boolean } = {}
+  opts: {
+    onChanged?: () => void;
+    includeDetails?: boolean;
+    /** On the Next Up row: offer Remove from Next Up rather than Add. */
+    nextUp?: boolean;
+  } = {}
 ): MenuAction[] {
   const isSeries = item.Type === "Series";
   const playable = !isSeries && item.Type !== "Season";
@@ -922,6 +997,19 @@ export function itemActions(
     },
   });
 
+  // Next Up, on the server: off it from the Next Up row, onto it anywhere a
+  // show (or a season or an episode of one) is offered.
+  const showId = showIdOf(item);
+  if (opts.nextUp && item.Type === "Episode" && showId) {
+    out.push({ label: "Remove from Next Up", icon: "close", run: () => removeShowFromNextUp(item, showId) });
+  } else if (showId) {
+    out.push({
+      label: item.Type === "Series" ? "Add to Next Up…" : "Add Show to Next Up…",
+      icon: "episodes",
+      run: () => askAddToNextUp(item),
+    });
+  }
+
   if (item.Type === "Episode" && item.SeriesId) {
     out.push({
       label: "Go to series",
@@ -972,6 +1060,8 @@ export function itemCard(
      * season) rather than the episode's own page.
      */
     art?: "automatic" | "season";
+    /** A card on the Next Up row (see `itemActions`). */
+    nextUp?: boolean;
   } = {}
 ): HTMLElement {
   const seasonArt = opts.art === "season" && item.Type === "Episode";
@@ -1090,7 +1180,7 @@ export function itemCard(
   );
   if (item.Type !== "TvChannel") {
     attachContextMenu(card, item.Name ?? null, () =>
-      itemActions(item, { onChanged: refresh, includeDetails: true })
+      itemActions(item, { onChanged: refresh, includeDetails: true, nextUp: opts.nextUp })
     );
   }
   return card;
@@ -1142,7 +1232,7 @@ export function scrollRow(row: HTMLElement): HTMLElement {
 
 export function cardRow(
   items: any[],
-  opts: { wide?: boolean; art?: "automatic" | "season" } = {}
+  opts: { wide?: boolean; art?: "automatic" | "season"; nextUp?: boolean } = {}
 ): HTMLElement {
   return scrollRow(el("div", { class: "card-row" }, items.map((i) => itemCard(i, opts))));
 }

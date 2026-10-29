@@ -13,8 +13,11 @@ import {
   icon,
   heroTitle,
   ambientTint,
+  scrollRow,
 } from "../ui";
 import { favoritesRow } from "./favorites";
+import { onNow, onNowCard } from "./livetv";
+import * as iptv from "../iptv";
 import { getCached, setCached, itemSignature } from "../cache";
 
 const CACHE_KEY = "home";
@@ -26,6 +29,12 @@ interface HomeData {
   mediaViews: any[];
   /** Only libraries whose Latest row came back non-empty. */
   latest: Map<string, any[]>;
+  /** The account's home-screen order (Jellyfin display preferences). */
+  sections?: api.HomeSection[];
+  /** What's airing, channel by channel, where there is Live TV. */
+  onNow?: { channel: any; program: any }[];
+  /** Every library, for the chips: video ones and Live TV. */
+  libraries?: any[];
 }
 
 /** Whether the Continue Watching row is turned off in Settings. */
@@ -42,24 +51,49 @@ function homeSignature(d: HomeData): string {
     itemSignature(d.nextUp),
     itemSignature(d.favorites),
     [...d.latest.entries()].map(([id, items]) => `${id}=${itemSignature(items)}`).join("|"),
+    (d.sections ?? []).join(","),
+    (d.onNow ?? []).map((o) => `${o.channel.Id}:${o.program.Id ?? o.program.Name}:${o.program.StartDate}`).join(","),
+    (d.libraries ?? []).map((v) => `${v.Id}:${v.Name}`).join(","),
   ].join("#");
 }
 
 async function fetchHomeData(): Promise<HomeData> {
-  const [resume, nextUp, views, favorites] = await Promise.all([
+  const [resume, nextUp, views, favorites, sections] = await Promise.all([
     api.getResume().catch(() => []),
     api.getNextUp().catch(() => []),
     api.getViews().catch(() => []),
     favoritesRow().catch(() => []),
+    api.getHomeSections().catch(() => api.HOME_FALLBACK),
   ]);
   const mediaViews = views.filter((v: any) => api.VIDEO_COLLECTION_TYPES.includes(v.CollectionType));
-  const pairs = await Promise.all(
-    mediaViews.map(
-      async (v: any) => [v.Id, await api.getLatest(v.Id).catch(() => [])] as [string, any[]]
-    )
-  );
+  const hasLiveTv = iptv.isCustom() || views.some((v: any) => v.CollectionType === "livetv");
+  const [pairs, airing] = await Promise.all([
+    Promise.all(
+      mediaViews.map(
+        async (v: any) => [v.Id, await api.getLatest(v.Id).catch(() => [])] as [string, any[]]
+      )
+    ),
+    sections.includes("liveTv") && hasLiveTv ? onNow().catch(() => []) : Promise.resolve([]),
+  ]);
   const latest = new Map(pairs.filter(([, items]) => items.length));
-  return { resume, nextUp, favorites, mediaViews, latest };
+  const libraries = views.filter(
+    (v: any) => api.VIDEO_COLLECTION_TYPES.includes(v.CollectionType) || v.CollectionType === "livetv"
+  );
+  return { resume, nextUp, favorites, mediaViews, latest, sections, onNow: airing, libraries };
+}
+
+/** The library chips: one per library, straight to its page. */
+function libraryChips(libraries: any[]): HTMLElement | null {
+  if (!libraries.length) return null;
+  return el("div", { class: "home-chips", role: "list" }, libraries.map((v: any) =>
+    el("button", {
+      class: "home-chip",
+      role: "listitem",
+      onClick: () => {
+        location.hash = v.CollectionType === "livetv" ? "#/livetv" : `#/lib/${v.Id}`;
+      },
+    }, [icon(v.CollectionType === "livetv" ? "tv" : "library", 15), v.Name ?? "Library"])
+  ));
 }
 
 /**
@@ -285,37 +319,77 @@ function paintHome(page: HTMLElement, data: HomeData): void {
   const hero = heroRotator(picks, fromNextUp ? "Next up" : "Continue watching");
   page.append(hero ?? el("h1", { class: "page-title" }, ["Home"]));
 
-  // Continue Watching is a row of stills, because it points at a moment you
-  // were in the middle of. It can be switched off in Settings for anyone who
-  // only wants the one row.
-  if (resume.length && !continueWatchingHidden()) {
-    page.append(section("Continue Watching", cardRow(resume, { wide: true })));
+  // The rows, in the order the account's Jellyfin home screen has them
+  // (Settings → Home in Jellyfin's own apps), with Jellyfin's default where
+  // the account never set one. Favorites isn't one of Jellyfin's rows; it
+  // goes after Next Up, or before the Latest rows when there is no Next Up.
+  const order = data.sections?.length ? data.sections : api.HOME_FALLBACK;
+  let favoritesPlaced = false;
+  const placeFavorites = (): void => {
+    if (favoritesPlaced) return;
+    favoritesPlaced = true;
+    // Starred items, newest first — the row is the shortcut, the Favorites
+    // page is the whole list.
+    if (favorites.length) {
+      page.append(
+        section("Favorites", cardRow(favorites), () => {
+          location.hash = "#/favorites";
+        })
+      );
+    }
+  };
+  for (const kind of order) {
+    switch (kind) {
+      case "libraries": {
+        const chips = libraryChips(data.libraries ?? mediaViews);
+        if (chips) page.append(chips);
+        break;
+      }
+      case "resume":
+        // Continue Watching is a row of stills, because it points at a moment
+        // you were in the middle of. It can be switched off in Settings for
+        // anyone who only wants the one row.
+        if (resume.length && !continueWatchingHidden()) {
+          page.append(section("Continue Watching", cardRow(resume, { wide: true })));
+        }
+        break;
+      case "nextUp":
+        // Portrait, and a picture of the *season* rather than of the episode
+        // — see the `art` option on itemCard, and the same row in the Apple
+        // app's HomeView.
+        if (nextUp.length) {
+          page.append(section("Next Up", cardRow(nextUp, { art: "season", nextUp: true })));
+        }
+        placeFavorites();
+        break;
+      case "liveTv":
+        if (data.onNow?.length) {
+          page.append(
+            section(
+              "On Now",
+              scrollRow(el("div", { class: "card-row" }, data.onNow.map((o) => onNowCard(o.channel, o.program)))),
+              () => {
+                location.hash = "#/livetv";
+              }
+            )
+          );
+        }
+        break;
+      case "latest":
+        placeFavorites();
+        for (const view of mediaViews) {
+          const items = latest.get(view.Id);
+          if (!items?.length) continue;
+          page.append(
+            section(`Latest in ${view.Name}`, cardRow(items), () => {
+              location.hash = `#/lib/${view.Id}`;
+            })
+          );
+        }
+        break;
+    }
   }
-  // Next Up is portrait, and a picture of the *season* rather than of the
-  // episode — see the `art` option on itemCard, and the same row in the Apple
-  // app's HomeView.
-  if (nextUp.length) {
-    page.append(section("Next Up", cardRow(nextUp, { art: "season" })));
-  }
-  // Starred items, newest first — the row is the shortcut, the Favorites page
-  // is the whole list.
-  if (favorites.length) {
-    page.append(
-      section("Favorites", cardRow(favorites), () => {
-        location.hash = "#/favorites";
-      })
-    );
-  }
-
-  for (const view of mediaViews) {
-    const items = latest.get(view.Id);
-    if (!items?.length) continue;
-    page.append(
-      section(`Latest in ${view.Name}`, cardRow(items), () => {
-        location.hash = `#/lib/${view.Id}`;
-      })
-    );
-  }
+  placeFavorites();
 
   if (!resume.length && !nextUp.length && !favorites.length && !latest.size) {
     page.append(
