@@ -2374,6 +2374,11 @@ async function boot(): Promise<void> {
   });
 
   await listen("player-status", (ev) => updatePlayerBar(ev.payload as any));
+  // Something other than mpv changed what the bar says (a channel switch
+  // starting from the Channels panel); redraw now, not on the next tick.
+  document.addEventListener("aquarium-bar-refresh", () => {
+    if (lastBarStatus) updatePlayerBar(lastBarStatus);
+  });
   // The offline-progress queue changed (queued, or pushed to the server): the
   // footer's "Syncing N items" is otherwise only re-read on navigation.
   await listen("progress-queue-changed", () => void updateSidebarFooter());

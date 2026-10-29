@@ -764,6 +764,14 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
     windowStart = start;
     windowMin = WINDOW_MIN;
     scroll.scrollLeft = 0;
+    // The selection keeps its row and comes along to the new window — to
+    // now when that's in it, else its start — unless an arrow press off the
+    // edge already said where it lands.
+    if (sel && !pendingSelect && rowIndex() >= 0) {
+      const now = Date.now();
+      const inWindow = now >= windowStart && now < windowEnd();
+      pendingSelect = { row: rowIndex(), t: inWindow ? now : windowStart };
+    }
     void load();
   }
   const shift = (minutes: number): void => jumpTo(windowStart + minutes * 60_000);

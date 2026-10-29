@@ -81,12 +81,15 @@ export function switchChannel(ch: any): void {
   failed = null;
   const mine = { ch, started: Date.now() };
   switching = mine;
+  const redraw = (): void => void document.dispatchEvent(new CustomEvent("aquarium-bar-refresh"));
+  redraw();
   playChannel(ch, { continuation: true })
     .catch((e: any) => {
       if (switching === mine) failed = { ch, msg: e?.message ?? String(e), at: Date.now() };
     })
     .finally(() => {
       if (switching === mine) switching = null;
+      redraw();
     });
 }
 
