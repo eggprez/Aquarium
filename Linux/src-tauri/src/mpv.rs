@@ -186,6 +186,10 @@ pub struct Options {
     /// `Authorization:` for the stream, when it goes to the Jellyfin server
     /// this token belongs to. See `player::http_auth_header`.
     pub auth_header: Option<String>,
+    /// `user-agent` for the stream's HTTP requests. Set for a channel from a
+    /// custom playlist (the same string `resolve_stream` warmed it up with);
+    /// `None` keeps mpv's own.
+    pub user_agent: Option<String>,
     /// `--name=value` strings from the Settings page.
     pub prefs: Vec<String>,
 }
@@ -230,6 +234,9 @@ impl Session {
             set("terminal", "no");
             set("keep-open", "no");
             set("ytdl", "no");
+            if let Some(ua) = opts.user_agent.as_deref().filter(|s| !s.trim().is_empty()) {
+                set("user-agent", ua.trim());
+            }
             set("cache", "yes");
             // Read the stream in bursts rather than a trickle. With a plain
             // byte cap the demuxer tops the cache up the moment playback eats
@@ -882,6 +889,7 @@ mod tests {
             volume: 0.0,
             start: None,
             auth_header: None,
+            user_agent: None,
             // No audio output in a test runner, and nothing to render into.
             prefs: vec!["--ao=null".into(), "--vo=null".into()],
         };
@@ -955,6 +963,7 @@ mod tests {
             // list option and a plain assignment would split this into
             // malformed continuation lines.
             auth_header: Some("MediaBrowser Token=\"abc\", Device=\"Linux\"".into()),
+            user_agent: Some("VLC/3.0.20 LibVLC/3.0.20".into()),
             prefs: vec![
                 "--ao=null".into(),
                 "--hwdec=vaapi,nvdec".into(),
@@ -1008,6 +1017,7 @@ mod tests {
             assert_eq!(read("input-default-bindings"), "yes");
             // uosc waits for `ensure_ui` rather than loading with the core.
             assert_eq!(read("load-scripts"), "no");
+            assert_eq!(read("user-agent"), "VLC/3.0.20 LibVLC/3.0.20");
         }
         let _ = session.command(json!(["quit"]));
     }

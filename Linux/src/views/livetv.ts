@@ -1,6 +1,7 @@
 import * as api from "../api";
 import * as iptv from "../iptv";
-import { playItem, playChannelUrl, getNowPlaying } from "../playback";
+import { getNowPlaying } from "../playback";
+import { loadLineup, lineupKey, playChannel } from "../lineup";
 import { el, clear, art, emptyState, icon, openDialog, skeletonRows } from "../ui";
 import { getCached, setCached } from "../cache";
 import { invoke } from "@tauri-apps/api/core";
@@ -26,9 +27,9 @@ interface GuideSource {
 
 const jellyfinSource: GuideSource = {
   custom: false,
-  channels: () => api.getChannels(),
+  channels: () => loadLineup(),
   programs: (ids, from, to) => api.getPrograms(ids, from, to),
-  play: (ch) => playItem(ch, { live: true }, { quiet: true }),
+  play: (ch) => playChannel(ch),
   emptyBody:
     "This server has a Live TV library but no channels in it. Add a tuner and a guide source in the Jellyfin dashboard, then reload.",
   noGuide:
@@ -37,9 +38,9 @@ const jellyfinSource: GuideSource = {
 
 const customSource: GuideSource = {
   custom: true,
-  channels: () => iptv.getChannels(),
+  channels: () => loadLineup(),
   programs: (_ids, from, to) => iptv.getPrograms(from, to),
-  play: (ch) => playChannelUrl(ch, { quiet: true }),
+  play: (ch) => playChannel(ch),
   emptyBody:
     "Your M3U playlist loaded but has no channels in it. Check the address in Settings → Live TV.",
   noGuide:
@@ -141,9 +142,13 @@ function tune(src: GuideSource, ch: any): void {
  *  title worth reading. */
 const PX_PER_MIN = 5;
 const SLOT_MIN = 30;
-/** How much of the schedule one window holds, and how far the arrows move it. */
+/** How much of the schedule one window holds, and how far the arrows move it.
+ *  More hours adds another window's worth to the end, up to a day. */
 const WINDOW_MIN = 6 * 60;
+const MAX_WINDOW_MIN = 24 * 60;
 const SHIFT_MIN = 2 * 60;
+/** How far ahead the day-and-time jump reaches; guides rarely hold more. */
+const MAX_AHEAD_DAYS = 14;
 /** The guide can be walked backwards, but only as far as a server typically
  *  keeps aired entries for — past that every lane comes back empty. */
 const MAX_BACK_MIN = 12 * 60;
@@ -153,6 +158,28 @@ const fmtTime = (d: Date): string =>
 
 const fmtDay = (d: Date): string =>
   d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+
+const startOfDay = (ms: number): number => {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+
+/** "Today", "Tomorrow", "Yesterday", or the weekday and date. */
+export function dayLabel(d: Date): string {
+  const days = Math.round((startOfDay(d.getTime()) - startOfDay(Date.now())) / 86_400_000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Tomorrow";
+  if (days === -1) return "Yesterday";
+  return fmtDay(d);
+}
+
+/** `yyyy-mm-ddThh:mm` in local time, for a datetime-local input. */
+function localInputValue(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 /** The half-hour mark at or before `ms` — where a guide window always starts. */
 function floorToSlot(ms: number): number {
@@ -259,16 +286,25 @@ export async function renderLiveTv(root: HTMLElement): Promise<void> {
 
   // The channel line-up barely changes, so the last known one draws the guide
   // straight away — the schedule inside it is fetched fresh regardless — and
-  // the page is only rebuilt if the line-up itself came back different. With
-  // nothing cached (a first visit on this account, or a source just switched
-  // over in Settings) the skeleton stands in.
-  const cacheKey = `livetv:${src.custom ? "custom" : "jellyfin"}`;
+  // the page is only rebuilt if the line-up itself came back different. The
+  // app reads it in the background at launch (see lineup.ts), so this is the
+  // usual case even on a first visit. With nothing cached (a new account, or
+  // a source just switched over in Settings) the skeleton stands in.
+  const cacheKey = lineupKey();
   const cached = getCached<any[]>(cacheKey);
   if (cached?.length) {
     paintLiveTv(root, heading, src, cached);
   } else {
     root.append(skeletonRows(8, "channel-row", "channel-logo"));
   }
+
+  // Settings' Refresh now, or the custom source's refresh interval, read the
+  // line-up again: repaint if this page is still the one showing.
+  const onChanged = (): void => {
+    document.removeEventListener("aquarium-lineup-changed", onChanged);
+    if (document.contains(heading)) void renderLiveTv(root);
+  };
+  document.addEventListener("aquarium-lineup-changed", onChanged);
 
   // A custom source fails in ways worth reading — a wrong address, a host that
   // won't answer — where Jellyfin's own failure is almost always "no tuner".
@@ -277,7 +313,10 @@ export async function renderLiveTv(root: HTMLElement): Promise<void> {
     loadError = e?.message ?? String(e);
     return [] as any[];
   });
-  if (!document.contains(heading)) return; // navigated away while loading
+  if (!document.contains(heading)) {
+    document.removeEventListener("aquarium-lineup-changed", onChanged);
+    return; // navigated away while loading
+  }
 
   if (loadError) {
     // A cached guide is still a working guide; the error only replaces a
@@ -297,11 +336,20 @@ export async function renderLiveTv(root: HTMLElement): Promise<void> {
     return;
   }
 
-  setCached(cacheKey, channels);
   if (cached?.length && channelSignature(cached) === channelSignature(channels)) return;
   clear(root);
   root.append(heading);
   paintLiveTv(root, heading, src, channels);
+}
+
+/** Where the keyboard is in the grid: a row, and the programme in it (null on
+ *  a lane with nothing scheduled). Separate from what's playing — moving it
+ *  tunes nothing; Enter does. */
+interface Selection {
+  chId: string;
+  /** The programme's start and end, or a point in time on an empty lane. */
+  start: number;
+  end: number;
 }
 
 /** Everything below the heading, for a known channel list. `root` already
@@ -325,56 +373,118 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
   const range = el("span", { class: "guide-range" }, [""]);
   const earlier = el("button", {
     class: "btn small icon",
-    title: "Earlier",
+    title: "Earlier (Ctrl+←)",
     "aria-label": "Earlier",
   }, [icon("chevron-left")]);
   const later = el("button", {
     class: "btn small icon",
-    title: "Later",
+    title: "Later (Ctrl+→)",
     "aria-label": "Later",
   }, [icon("chevron-right")]);
-  const nowBtn = el("button", { class: "btn small" }, ["Now"]);
+  const nowBtn = el("button", { class: "btn small", title: "Back to what's on now (Ctrl+T)" }, ["Now"]);
+  const jumpInput = el("input", {
+    class: "control guide-jump",
+    type: "datetime-local",
+    title: "Jump to a day and time",
+    "aria-label": "Jump to a day and time",
+    step: String(SLOT_MIN * 60),
+  }) as HTMLInputElement;
+  const moreBtn = el("button", {
+    class: "btn small guide-more",
+    title: "Load the next six hours of the schedule",
+  }, ["More hours", icon("chevron-right", 14)]);
+  const filterInput = el("input", {
+    class: "control guide-filter",
+    type: "search",
+    placeholder: "Filter channels",
+    "aria-label": "Filter channels",
+    spellcheck: "false",
+  }) as HTMLInputElement;
 
   const head = el("div", { class: "guide-head" });
   const rows = el("div", { class: "guide-rows" });
   const nowLine = el("div", { class: "guide-now" });
   const body = el("div", { class: "guide-body" }, [head, rows, nowLine]);
-  const scroll = el("div", { class: "guide-scroll" }, [body]);
+  // The grid is one stop on the Tab key, not a few thousand: the arrows are
+  // what move between programmes inside it. `data-own-arrows` keeps
+  // spatial.ts out of the way.
+  const scroll = el("div", {
+    class: "guide-scroll",
+    tabindex: "0",
+    role: "grid",
+    "aria-label": "TV guide. Arrows move, Enter watches, Space shows details.",
+    "data-own-arrows": "",
+  }, [body]);
   const guide = el("div", { class: "guide" }, [
-    el("div", { class: "guide-toolbar" }, [earlier, nowBtn, later, range]),
+    el("div", { class: "guide-toolbar" }, [
+      earlier, nowBtn, later, range, jumpInput,
+      el("span", { class: "guide-toolbar-gap" }),
+      filterInput, moreBtn,
+    ]),
     scroll,
   ]);
 
   // Everything drawn against the window: the slot ticks, the lane geometry and
-  // the "now" line all read this one number.
+  // the "now" line all read these.
   let windowStart = floorToSlot(Date.now());
-  const floorNow = floorToSlot(Date.now());
+  let windowMin = WINDOW_MIN;
+  const earliest = (): number => floorToSlot(Date.now()) - MAX_BACK_MIN * 60_000;
+  const windowEnd = (): number => windowStart + windowMin * 60_000;
 
   const offsetPx = (ms: number): number => ((ms - windowStart) / 60_000) * PX_PER_MIN;
-  const laneWidth = WINDOW_MIN * PX_PER_MIN;
+  const laneWidth = (): number => windowMin * PX_PER_MIN;
+
+  let programs: any[] = [];
+  let filter = "";
+  let sel: Selection | null = null;
+  /** The drawn rows, by channel, for the keyboard to walk. */
+  let drawn: { ch: any; cell: HTMLElement; lane: HTMLElement; blocks: { p: any; el: HTMLElement; s: number; e: number }[] }[] = [];
+
+  const visibleChannels = (): any[] => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return channels;
+    return channels.filter((c) =>
+      `${c.ChannelNumber ?? ""} ${c.Name ?? ""} ${c.Group ?? ""}`.toLowerCase().includes(q)
+    );
+  };
 
   function renderHead(): void {
     clear(head);
     const corner = el("div", { class: "guide-corner" }, ["Channel"]);
     const times = el("div", { class: "guide-times" });
-    for (let m = 0; m < WINDOW_MIN; m += SLOT_MIN) {
+    for (let m = 0; m < windowMin; m += SLOT_MIN) {
       const t = new Date(windowStart + m * 60_000);
-      const tick = el("div", { class: "guide-tick" }, [fmtTime(t)]);
+      // A window that runs past midnight says so where it does.
+      const midnight = t.getHours() === 0 && t.getMinutes() === 0;
+      const tick = el("div", { class: `guide-tick${midnight ? " day" : ""}` }, [
+        midnight ? `${dayLabel(t)} ${fmtTime(t)}` : fmtTime(t),
+      ]);
       tick.style.left = `${m * PX_PER_MIN}px`;
       tick.style.width = `${SLOT_MIN * PX_PER_MIN}px`;
       times.append(tick);
     }
     head.append(corner, times);
-    const end = new Date(windowStart + WINDOW_MIN * 60_000);
-    range.textContent = `${fmtDay(new Date(windowStart))} · ${fmtTime(new Date(windowStart))} – ${fmtTime(end)}`;
-    earlier.toggleAttribute("disabled", windowStart <= floorNow - MAX_BACK_MIN * 60_000);
+    const start = new Date(windowStart);
+    const end = new Date(windowEnd());
+    const endDay = startOfDay(end.getTime() - 1) !== startOfDay(windowStart) ? `${dayLabel(end)} ` : "";
+    range.textContent = `${dayLabel(start)} · ${fmtTime(start)} – ${endDay}${fmtTime(end)}`;
+    earlier.toggleAttribute("disabled", windowStart <= earliest());
+    nowBtn.toggleAttribute("disabled", windowStart === floorToSlot(Date.now()) && windowMin === WINDOW_MIN);
+    moreBtn.toggleAttribute("disabled", windowMin >= MAX_WINDOW_MIN);
+    moreBtn.title = windowMin >= MAX_WINDOW_MIN
+      ? "The guide holds a day at most"
+      : "Load the next six hours of the schedule";
+    jumpInput.min = localInputValue(earliest());
+    jumpInput.max = localInputValue(Date.now() + MAX_AHEAD_DAYS * 86_400_000);
+    if (document.activeElement !== jumpInput) jumpInput.value = localInputValue(windowStart);
+    body.style.setProperty("--lane-w", `${laneWidth()}px`);
   }
 
   /** Position the red "you are here" line, and hide it when the window being
    *  looked at isn't the one happening. */
   function syncNow(): void {
     const x = offsetPx(Date.now());
-    const inside = x >= 0 && x <= laneWidth;
+    const inside = x >= 0 && x <= laneWidth();
     nowLine.style.display = inside ? "" : "none";
     if (inside) nowLine.style.left = `${x}px`;
     for (const b of Array.from(rows.querySelectorAll<HTMLElement>(".guide-prog"))) {
@@ -383,8 +493,9 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
     }
   }
 
-  function renderRows(programs: any[]): void {
+  function renderRows(): void {
     clear(rows);
+    drawn = [];
     const byChannel = new Map<string, any[]>();
     for (const p of programs) {
       const list = byChannel.get(p.ChannelId);
@@ -392,9 +503,14 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
       else byChannel.set(p.ChannelId, [p]);
     }
 
-    const windowEnd = windowStart + WINDOW_MIN * 60_000;
-    for (const ch of channels) {
+    const end = windowEnd();
+    const shown = visibleChannels();
+    if (!shown.length) {
+      rows.append(el("p", { class: "guide-empty" }, [`No channels match “${filter.trim()}”.`]));
+    }
+    for (const ch of shown) {
       const lane = el("div", { class: "guide-lane" });
+      const blocks: { p: any; el: HTMLElement; s: number; e: number }[] = [];
       const progs = (byChannel.get(ch.Id) ?? []).sort(
         (a, b) => Date.parse(a.StartDate) - Date.parse(b.StartDate)
       );
@@ -406,11 +522,15 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
         const e = Date.parse(p.EndDate);
         if (!(e > s)) continue;
         const left = offsetPx(Math.max(s, windowStart));
-        const right = offsetPx(Math.min(e, windowEnd));
+        const right = offsetPx(Math.min(e, end));
         const block = el("button", {
           class: "guide-prog",
+          tabindex: "-1",
           title: `${p.Name ?? ""} · ${fmtTime(new Date(s))} – ${fmtTime(new Date(e))}`,
-          onClick: () => showProgram(p, ch, watch),
+          onClick: () => {
+            select({ chId: ch.Id, start: s, end: e }, false);
+            showProgram(p, ch, watch);
+          },
         }, [
           el("span", { class: "guide-prog-title" }, [p.Name ?? "Programme"]),
           el("span", { class: "guide-prog-sub" }, [
@@ -422,32 +542,185 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
         block.style.left = `${left}px`;
         block.style.width = `${Math.max(2, right - left)}px`;
         lane.append(block);
+        blocks.push({ p, el: block, s, e });
       }
-      rows.append(
-        el("div", { class: "guide-row" }, [
-          channelCell(ch, () => watch(ch)),
-          lane,
-        ])
-      );
+      const cell = channelCell(ch, () => watch(ch));
+      cell.tabIndex = -1;
+      rows.append(el("div", { class: "guide-row" }, [cell, lane]));
+      drawn.push({ ch, cell, lane, blocks });
     }
     syncNow();
+    paintSelection(false);
   }
 
+  // ---------- Keyboard selection ----------
+
+  /** The programme on `row` covering `t`, else the nearest one to it. */
+  function blockAt(row: (typeof drawn)[number], t: number): (typeof row.blocks)[number] | null {
+    let best: (typeof row.blocks)[number] | null = null;
+    let bestDist = Infinity;
+    for (const b of row.blocks) {
+      if (b.s <= t && b.e > t) return b;
+      const d = Math.min(Math.abs(b.s - t), Math.abs(b.e - t));
+      if (d < bestDist) {
+        bestDist = d;
+        best = b;
+      }
+    }
+    return best;
+  }
+
+  /** Select the programme on a row at a time, or the lane itself if empty. */
+  function selectAt(rowIndex: number, t: number, reveal = true): void {
+    const row = drawn[rowIndex];
+    if (!row) return;
+    const b = blockAt(row, t);
+    select(b ? { chId: row.ch.Id, start: b.s, end: b.e } : { chId: row.ch.Id, start: t, end: t }, reveal);
+  }
+
+  function select(next: Selection | null, reveal = true): void {
+    sel = next;
+    paintSelection(reveal);
+  }
+
+  function paintSelection(reveal: boolean): void {
+    for (const x of Array.from(rows.querySelectorAll(".selected"))) x.classList.remove("selected");
+    if (!sel) return;
+    const row = drawn.find((r) => r.ch.Id === sel!.chId);
+    if (!row) return;
+    row.cell.classList.add("selected");
+    const b = row.blocks.find((x) => x.s === sel!.start && x.e === sel!.end);
+    const target = b?.el ?? row.lane;
+    target.classList.add("selected");
+    if (b) {
+      scroll.setAttribute("aria-label",
+        `${channelLabel(row.ch)}: ${b.p.Name ?? "Programme"}, ${fmtTime(new Date(b.s))} to ${fmtTime(new Date(b.e))}`);
+    }
+    if (reveal) target.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  const rowIndex = (): number => (sel ? drawn.findIndex((r) => r.ch.Id === sel!.chId) : -1);
+  /** The time a vertical move keeps to: the selected programme's start,
+   *  or now when that was before the window. */
+  const anchor = (): number => {
+    if (!sel) return Math.max(windowStart, Math.min(Date.now(), windowEnd() - 1));
+    return Math.max(windowStart, sel.start);
+  };
+
+  /** After the window moves, land the selection back on a programme. */
+  let pendingSelect: { row: number; t: number } | null = null;
+
+  function moveSel(dRow: number, dCol: number): void {
+    if (!drawn.length) return;
+    let i = rowIndex();
+    if (i < 0) {
+      selectAt(0, anchor());
+      return;
+    }
+    if (dRow) {
+      selectAt(Math.max(0, Math.min(drawn.length - 1, i + dRow)), anchor());
+      return;
+    }
+    const row = drawn[i]!;
+    const at = row.blocks.findIndex((b) => b.s === sel!.start && b.e === sel!.end);
+    const nb = at >= 0 ? row.blocks[at + dCol] : undefined;
+    // The next programme along, when it starts (or ends) inside the window.
+    if (nb && (dCol > 0 ? nb.s < windowEnd() : nb.e > windowStart)) {
+      select({ chId: row.ch.Id, start: nb.s, end: nb.e });
+      return;
+    }
+    // Off the edge: move the window and pick up from where the selection was.
+    const t = dCol > 0 ? Math.max(sel!.end, windowEnd()) : Math.min(sel!.start, windowStart) - 1;
+    if (dCol < 0 && windowStart <= earliest()) return;
+    pendingSelect = { row: i, t };
+    shift(dCol * SHIFT_MIN);
+  }
+
+  function selectedChannel(): any | null {
+    return sel ? drawn.find((r) => r.ch.Id === sel!.chId)?.ch ?? null : null;
+  }
+
+  /** Letters typed on the grid: jump to the channel whose name starts with
+   *  them. The prefix resets after a second's pause. */
+  let typed = "";
+  let typedAt = 0;
+  function typeSelect(ch: string): void {
+    typed = Date.now() - typedAt > 1000 ? ch : typed + ch;
+    typedAt = Date.now();
+    const q = typed.toLowerCase();
+    const i = drawn.findIndex((r) =>
+      String(r.ch.Name ?? "").toLowerCase().startsWith(q) || String(r.ch.ChannelNumber ?? "") === q
+    );
+    if (i >= 0) selectAt(i, anchor());
+  }
+
+  scroll.addEventListener("keydown", (ev: KeyboardEvent) => {
+    if (ev.altKey || ev.metaKey) return;
+    if (ev.ctrlKey) return; // Ctrl+arrows and Ctrl+T are the page's, below.
+    if (document.body.classList.contains("video-covered")) return;
+    let handled = true;
+    switch (ev.key) {
+      case "ArrowUp": moveSel(-1, 0); break;
+      case "ArrowDown": moveSel(1, 0); break;
+      case "ArrowLeft": moveSel(0, -1); break;
+      case "ArrowRight": moveSel(0, 1); break;
+      case "Home": selectAt(0, anchor()); break;
+      case "End": selectAt(drawn.length - 1, anchor()); break;
+      case "PageUp": moveSel(-8, 0); break;
+      case "PageDown": moveSel(8, 0); break;
+      case "Enter": {
+        const ch = selectedChannel();
+        if (ch) watch(ch);
+        else handled = false;
+        break;
+      }
+      case " ": {
+        const row = sel ? drawn.find((r) => r.ch.Id === sel!.chId) : null;
+        const b = row?.blocks.find((x) => x.s === sel!.start && x.e === sel!.end);
+        if (row && b) showProgram(b.p, row.ch, watch);
+        else handled = false;
+        break;
+      }
+      case "Escape":
+        if (sel) select(null);
+        else handled = false;
+        break;
+      default:
+        if (ev.key.length === 1 && /[\p{L}\p{N}]/u.test(ev.key)) typeSelect(ev.key);
+        else handled = false;
+    }
+    if (handled) {
+      ev.preventDefault();
+      ev.stopPropagation();
+    }
+  });
+  // Focus arriving by Tab lands on what's on now on the first row; arriving
+  // by a click on a programme, that programme (its click handler selects it).
+  scroll.addEventListener("focus", () => {
+    if (!sel) queueMicrotask(() => { if (!sel && document.activeElement === scroll) selectAt(0, anchor()); });
+  });
+  // A click on a programme or channel focuses the button under it; hand the
+  // keyboard back to the grid so the arrows keep walking it.
+  rows.addEventListener("click", () => scroll.focus({ preventScroll: true }));
+
+  // ---------- Loading ----------
+
   let loading = false;
+  let again = false;
   async function load(): Promise<void> {
-    if (loading) return;
+    if (loading) {
+      again = true;
+      return;
+    }
     loading = true;
     guide.classList.add("busy");
     renderHead();
+    const floorNow = floorToSlot(Date.now());
     try {
-      const programs = await src.programs(
-        ids,
-        new Date(windowStart),
-        new Date(windowStart + WINDOW_MIN * 60_000)
-      );
+      programs = await src.programs(ids, new Date(windowStart), new Date(windowEnd()));
       if (!document.contains(guide)) return;
       // Nothing scheduled anywhere means no guide source, not an empty evening.
-      if (!programs.length && windowStart === floorNow) {
+      if (!programs.length && windowStart === floorNow && windowMin === WINDOW_MIN) {
         clear(root);
         root.append(
           heading,
@@ -456,7 +729,12 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
         );
         return;
       }
-      renderRows(programs);
+      renderRows();
+      if (pendingSelect) {
+        const p = pendingSelect;
+        pendingSelect = null;
+        selectAt(Math.min(p.row, drawn.length - 1), p.t);
+      }
     } catch (e: any) {
       clear(rows);
       rows.append(
@@ -471,25 +749,84 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
     } finally {
       loading = false;
       guide.classList.remove("busy");
+      if (again) {
+        again = false;
+        void load();
+      }
     }
   }
 
-  const shift = (minutes: number): void => {
-    windowStart = Math.max(floorNow - MAX_BACK_MIN * 60_000, windowStart + minutes * 60_000);
+  /** Put the window's start at a time, rounded down to the half hour so the
+   *  ruler's marks stay on real boundaries. Moving resets More hours. */
+  function jumpTo(ms: number): void {
+    const start = Math.max(earliest(), floorToSlot(ms));
+    if (start === windowStart && windowMin === WINDOW_MIN) return;
+    windowStart = start;
+    windowMin = WINDOW_MIN;
+    scroll.scrollLeft = 0;
     void load();
-  };
-  earlier.addEventListener("click", () => shift(-SHIFT_MIN));
-  later.addEventListener("click", () => shift(SHIFT_MIN));
-  nowBtn.addEventListener("click", () => {
-    if (windowStart === floorToSlot(Date.now())) {
+  }
+  const shift = (minutes: number): void => jumpTo(windowStart + minutes * 60_000);
+  const toNow = (): void => {
+    if (windowStart === floorToSlot(Date.now()) && windowMin === WINDOW_MIN) {
       scroll.scrollTo({ left: 0, behavior: "smooth" });
       return;
     }
-    windowStart = floorToSlot(Date.now());
+    jumpTo(Date.now());
+  };
+
+  earlier.addEventListener("click", () => shift(-SHIFT_MIN));
+  later.addEventListener("click", () => shift(SHIFT_MIN));
+  nowBtn.addEventListener("click", toNow);
+  moreBtn.addEventListener("click", () => {
+    if (windowMin >= MAX_WINDOW_MIN) return;
+    windowMin = Math.min(MAX_WINDOW_MIN, windowMin + WINDOW_MIN);
     void load();
   });
+  jumpInput.addEventListener("change", () => {
+    const ms = new Date(jumpInput.value).getTime();
+    if (Number.isFinite(ms)) jumpTo(ms);
+  });
+  filterInput.addEventListener("input", () => {
+    filter = filterInput.value;
+    renderRows();
+  });
+  filterInput.addEventListener("keydown", (ev: KeyboardEvent) => {
+    // Down from the field goes into what it left.
+    if (ev.key === "ArrowDown" || ev.key === "Enter") {
+      ev.preventDefault();
+      scroll.focus();
+      if (!sel && drawn.length) selectAt(0, anchor());
+    } else if (ev.key === "Escape" && filterInput.value) {
+      ev.preventDefault();
+      filterInput.value = "";
+      filter = "";
+      renderRows();
+    }
+  });
 
-  body.style.setProperty("--lane-w", `${laneWidth}px`);
+  // Ctrl+←/→ and Ctrl+T move the window from anywhere on the page, as the
+  // toolbar buttons' tooltips say. Not from a text field, where Ctrl+arrows
+  // are word jumps.
+  const onKey = (ev: KeyboardEvent): void => {
+    if (!document.contains(guide)) {
+      document.removeEventListener("keydown", onKey);
+      return;
+    }
+    if (!ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey) return;
+    // The guide is behind the picture; the keys are the player's.
+    if (document.body.classList.contains("video-covered")) return;
+    const t = ev.target as HTMLElement | null;
+    const inText = !!t && ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName);
+    if (ev.key === "ArrowLeft" && !inText) shift(-SHIFT_MIN);
+    else if (ev.key === "ArrowRight" && !inText) shift(SHIFT_MIN);
+    else if (ev.key === "t" || ev.key === "T") toNow();
+    else return;
+    ev.preventDefault();
+  };
+  document.addEventListener("keydown", onKey);
+
+  renderHead();
   root.append(guide);
   void load();
 

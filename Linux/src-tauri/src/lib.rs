@@ -70,6 +70,15 @@ fn config_save(cfg: Value) -> Result<(), String> {
     config::merge(secret::dehydrate(cfg))
 }
 
+/// The Live TV settings' User-Agent on a request to a playlist's host, in
+/// place of the client's own. Jellyfin requests never come through here.
+fn with_user_agent(req: reqwest::RequestBuilder, ua: Option<&str>) -> reqwest::RequestBuilder {
+    match ua.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(ua) => req.header(reqwest::header::USER_AGENT, ua),
+        None => req,
+    }
+}
+
 /// Read a Live TV source — an M3U playlist or an XMLTV guide — as text.
 ///
 /// Goes through the backend rather than `fetch()` in the webview for two
@@ -78,7 +87,7 @@ fn config_save(cfg: Value) -> Result<(), String> {
 /// as a URL. Gzip is unwrapped here because XMLTV is very commonly published as
 /// `.xml.gz`, and asking the user to notice that would be a poor trade.
 #[tauri::command]
-async fn fetch_source(url: String) -> Result<String, String> {
+async fn fetch_source(url: String, user_agent: Option<String>) -> Result<String, String> {
     // An XMLTV guide for a few hundred channels runs to tens of megabytes;
     // this is a stop against a wrong URL pointing at something enormous, not a
     // limit anyone should meet in normal use.
@@ -90,8 +99,7 @@ async fn fetch_source(url: String) -> Result<String, String> {
     }
 
     let raw: Vec<u8> = if url.starts_with("http://") || url.starts_with("https://") {
-        let mut res = jellyfin::http()
-            .get(url)
+        let mut res = with_user_agent(jellyfin::http().get(url), user_agent.as_deref())
             .send()
             .await
             .map_err(|e| format!("Couldn't reach {}: {}", url, e))?;
@@ -224,7 +232,7 @@ async fn jf_bitrate_test(size: u32) -> Result<f64, String> {
 /// when it is a playlist (both of mpv's opens then skip the redirect chain, a
 /// second or more each on a distant server), and the original otherwise.
 #[tauri::command]
-async fn resolve_stream(url: String) -> Result<String, String> {
+async fn resolve_stream(url: String, user_agent: Option<String>) -> Result<String, String> {
     const ATTEMPTS: u32 = 4;
     const PER_REQUEST: std::time::Duration = std::time::Duration::from_secs(60);
     const BETWEEN: std::time::Duration = std::time::Duration::from_millis(1500);
@@ -241,7 +249,11 @@ async fn resolve_stream(url: String) -> Result<String, String> {
     let mut last_err = String::new();
     for attempt in 1..=ATTEMPTS {
         let started = std::time::Instant::now();
-        match jellyfin::http().get(&url).timeout(PER_REQUEST).send().await {
+        match with_user_agent(jellyfin::http().get(&url), user_agent.as_deref())
+            .timeout(PER_REQUEST)
+            .send()
+            .await
+        {
             Ok(res) => {
                 let status = res.status();
                 if status.is_success() {
@@ -775,6 +787,7 @@ pub fn run() {
                         known_duration_seconds: None,
                         volume: None,
                         ctx: None,
+                        user_agent: None,
                     };
                     if let Err(e) = player.play(handle.clone(), req).await {
                         eprintln!("aquarium: test playback failed: {e}");
@@ -799,6 +812,7 @@ pub fn run() {
                             known_duration_seconds: None,
                             volume: None,
                             ctx: None,
+                            user_agent: None,
                         };
                         if let Err(e) = player.play(handle.clone(), req2).await {
                             eprintln!("aquarium: replay test failed: {e}");
@@ -874,6 +888,7 @@ pub fn run() {
                                     known_duration_seconds: None,
                                     volume: None,
                                     ctx: None,
+                                    user_agent: None,
                                 };
                                 if let Err(e) = player.play(handle.clone(), req).await {
                                     eprintln!("aquarium: test sequence: play failed: {e}");

@@ -1125,8 +1125,13 @@ img.art.has-ph {
 .guide.busy { opacity: 0.55; pointer-events: none; transition: opacity 0.15s; }
 .guide-note { color: var(--text-dim); font-size: var(--fs-sm); margin-bottom: 14px; max-width: 62ch; }
 
-.guide-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.guide-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .guide-range { font-size: var(--fs-sm); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.guide-toolbar-gap { flex: 1; }
+.guide-jump { padding: 5px 8px; font-size: var(--fs-sm); color-scheme: light dark; }
+.guide-filter { padding: 6px 10px; font-size: var(--fs-sm); width: 180px; }
+.guide-more { display: inline-flex; align-items: center; gap: 4px; }
+.guide-empty { padding: 24px 16px; color: var(--text-dim); font-size: var(--fs-sm); }
 
 .guide-scroll {
   overflow: auto;
@@ -1136,7 +1141,12 @@ img.art.has-ph {
   border-radius: var(--radius);
   background: var(--bg-raised);
   overscroll-behavior: contain;
+  /* Keeps a selected programme out from under the sticky column and header
+     when the keyboard scrolls it into view. */
+  scroll-padding: 34px 0 0 var(--guide-ch-w);
 }
+.guide-scroll:focus { outline: none; }
+.guide-scroll:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 #content.has-player .guide-scroll { max-height: calc(100vh - var(--topbar-h) - var(--player-h) - 190px); }
 /* Sized by its content so the sticky channel column has a row wider than the
    viewport to stick inside of. */
@@ -1204,6 +1214,12 @@ img.art.has-ph {
 /* What's on right now, which is the only row anyone scans for on arrival. */
 .guide-prog.on-now { background: var(--accent-soft); border-color: transparent; }
 .guide-prog.on-now:hover { border-color: var(--accent); }
+/* The keyboard's place in the grid, separate from what's playing. Drawn only
+   while the grid has focus, so a mouse user never sees a stray outline. */
+.guide-scroll:focus-within .guide-prog.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.guide-scroll:focus-within .guide-lane.selected { box-shadow: inset 0 0 0 2px var(--accent); }
+.guide-scroll:focus-within .guide-ch.selected { background: var(--bg-hover); }
+.guide-tick.day { color: var(--text); font-weight: 600; }
 .guide-prog-title { font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .guide-prog-sub { font-size: var(--fs-micro); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .guide-gap {

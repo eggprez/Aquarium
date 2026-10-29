@@ -103,6 +103,9 @@ pub struct PlayRequest {
     pub volume: Option<f64>,
     #[serde(default)]
     pub ctx: Option<PlayContext>,
+    /// HTTP User-Agent for the stream (custom playlist channels only).
+    #[serde(default)]
+    pub user_agent: Option<String>,
 }
 
 struct SessionHandle {
@@ -373,6 +376,7 @@ impl Player {
             // parameter, so the token never lands in Jellyfin's access log or
             // in our own mpv log for every stream we open.
             auth_header: http_auth_header(&req),
+            user_agent: req.user_agent.clone(),
             prefs: crate::prefs::Prefs::load().args(),
         };
 
