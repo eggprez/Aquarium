@@ -72,6 +72,8 @@ extension WatchDownloads {
     }
 
     func cancel(_ group: Group) {
+        // Cancelled by hand: the wants that would bring it back go first.
+        forgetWants(for: group.kind, id: group.id, among: group.itemIds)
         for id in group.itemIds where isQueuedOrRunning(id) { cancel(id) }
         if group.kind == .playlist, playlists.first(where: { $0.id == group.id })?.automatic == false,
            !group.itemIds.contains(where: { isComplete($0) }) {
@@ -481,8 +483,9 @@ struct WatchSettingsView: View {
                     syncing = true
                     Task {
                         await client.checkOnline()
+                        WatchLink.shared.requestContext()
                         await sync.flush()
-                        downloads.mirror(force: true)
+                        downloads.syncNow()
                         await WatchActions.refreshBookPositions()
                         syncing = false
                     }

@@ -77,6 +77,9 @@ struct MiniPlayerBar: View {
                             .frame(width: 40, height: 40)
                             .contentShape(Rectangle())
                     }
+                    // The symbol's own name is "Go To Start", which is the
+                    // opposite of what the button does.
+                    .accessibilityLabel(song.isAudiobook ? "Skip forward 30 seconds" : "Next")
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.text)
                     .disabled(!song.isAudiobook && !music.hasNext)
@@ -118,9 +121,14 @@ struct NowPlayingView: View {
     @Environment(AppModel.self) private var app
     @Environment(JellyfinClient.self) private var client
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #if os(iOS)
+    @Environment(\.devicePose) private var pose
+    #endif
 
     @State private var showQueue = false
     @State private var showLyrics = false
+    @State private var showLeanings = false
     @State private var scrubbing: Double?
 
     /// What sits where the cover normally is.
@@ -131,32 +139,36 @@ struct NowPlayingView: View {
         ZStack {
             background
             if let song = music.current {
-                VStack(spacing: 0) {
-                    topBar(song)
-                        .padding(.bottom, 8)
-                    switch panel {
-                    case .lyrics:
-                        LyricsView()
-                            .transition(.opacity)
-                    case .art:
-                        Spacer(minLength: 12)
-                        artwork(song)
-                        Spacer(minLength: 16)
+                Group {
+                    #if os(iOS)
+                    // Half-folded on a table: the cover, or the lyrics, stand
+                    // up on the top half and the controls lie flat on the
+                    // bottom — see `DevicePose`.
+                    if pose == .halfFolded {
+                        FoldSplit(split: true) {
+                            VStack(spacing: 0) {
+                                upperColumn(song)
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.top, 18)
+                            .padding(.bottom, 12)
+                            .frame(maxWidth: columnWidth)
+                        } lower: {
+                            VStack(spacing: 0) {
+                                Spacer(minLength: 0)
+                                lowerColumn(song)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 24)
+                            .frame(maxWidth: columnWidth)
+                        }
+                    } else {
+                        column(song)
                     }
-                    titleBlock(song)
-                        .padding(.top, panel == .art ? 0 : 6)
-                    scrubber
-                        .padding(.top, 14)
-                    transport(song)
-                        .padding(.top, 10)
-                    volume
-                        .padding(.top, 16)
-                    bottomBar(song)
-                        .padding(.top, 14)
-                        .padding(.bottom, 20)
+                    #else
+                    column(song)
+                    #endif
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 18)
                 .animation(.easeInOut(duration: 0.25), value: showLyrics)
                 // The player is still there under the card, just out of reach.
                 .accessibilityHidden(showQueue)
@@ -171,6 +183,7 @@ struct NowPlayingView: View {
                     .accessibilityHidden(true)
                     .transition(.opacity)
                 QueueCard { setQueue(false) }
+                    .frame(maxWidth: columnWidth.map { $0 + 80 })
                     .padding(.top, Self.queueCardTop)
                     .transition(.move(edge: .bottom))
                     .zIndex(1)
@@ -180,11 +193,74 @@ struct NowPlayingView: View {
         .interactiveDismissDisabled(showQueue)
         .preferredColorScheme(.dark)
         .modifier(SongInfoHost(overNowPlaying: true))
+        .sheet(isPresented: $showLeanings) {
+            if let station = music.station {
+                StationLeaningsSheet(station: station)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+                    .preferredColorScheme(.dark)
+            }
+        }
+    }
+
+    /// The whole screen as one column: the cover above, the controls below.
+    private func column(_ song: BaseItem) -> some View {
+        VStack(spacing: 0) {
+            upperColumn(song)
+            lowerColumn(song)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 18)
+        .frame(maxWidth: columnWidth)
+    }
+
+    /// The top bar and the cover — or the lyrics in its place.
+    @ViewBuilder
+    private func upperColumn(_ song: BaseItem) -> some View {
+        topBar(song)
+            .padding(.bottom, 8)
+        switch panel {
+        case .lyrics:
+            LyricsView()
+                .transition(.opacity)
+        case .art:
+            Spacer(minLength: 12)
+            artwork(song)
+            Spacer(minLength: 16)
+        }
+    }
+
+    /// Everything under the cover: what is playing, and the controls.
+    @ViewBuilder
+    private func lowerColumn(_ song: BaseItem) -> some View {
+        titleBlock(song)
+            .padding(.top, panel == .art ? 0 : 6)
+        scrubber
+            .padding(.top, 14)
+        transport(song)
+            .padding(.top, 10)
+        volume
+            .padding(.top, 16)
+        bottomBar(song)
+            .padding(.top, 14)
+            .padding(.bottom, 20)
     }
 
     /// Where the queue card's top edge sits: just under the top bar, so where
     /// this is playing from stays in view above it.
     private static let queueCardTop: CGFloat = 62
+
+    /// How wide the player may grow, or nil for the whole width.
+    ///
+    /// On an iPad this is a full-screen cover (see `NowPlayingPresenter`),
+    /// and the phone's layout stretched across it put a cover nine hundred
+    /// points wide over a scrubber and a row of transport spread from edge to
+    /// edge. Held to a column instead, the way the rest of the app holds its
+    /// cards and forms to a readable width, the cover is sized by the column
+    /// — or by the height that is left, in landscape — and the controls stay
+    /// within a thumb's reach of each other. The room's colour still fills
+    /// the screen behind it. Split View's compact width is the phone layout.
+    private var columnWidth: CGFloat? { sizeClass == .regular ? 600 : nil }
 
     private func setQueue(_ shown: Bool) {
         withAnimation(.spring(response: 0.38, dampingFraction: 0.88)) { showQueue = shown }
@@ -291,10 +367,6 @@ struct NowPlayingView: View {
                 .disabled(song.isAudiobook)
             }
             Spacer()
-            if music.canThumb {
-                thumbButton(value: -1)
-                thumbButton(value: 1)
-            }
             Button {
                 Task { await toggleFavorite(song) }
             } label: {
@@ -306,29 +378,6 @@ struct NowPlayingView: View {
             }
             .buttonStyle(.plain)
         }
-    }
-
-    /// Advice to the station playing, and only there: down skips the song
-    /// and steers away from it, up steers towards it. Both are forgotten when
-    /// the station ends. Tapped again, either is taken back.
-    private func thumbButton(value: Int) -> some View {
-        let on = music.thumb == value
-        let symbol = value > 0 ? "hand.thumbsup" : "hand.thumbsdown"
-        return Button {
-            music.setThumb(on ? nil : value)
-            guard !on else { return }
-            app.toast(value > 0 ? "More like this" : "Less like this", tone: .ok)
-        } label: {
-            Image(systemName: on ? symbol + ".fill" : symbol)
-                .font(.title3)
-                .foregroundStyle(on ? Theme.accent : .white.opacity(0.8))
-                .frame(width: 36, height: 36)
-                .background(.white.opacity(0.12), in: Circle())
-                .contentTransition(.symbolEffect(.replace))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(value > 0 ? "Thumbs Up" : "Thumbs Down")
-        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     @ViewBuilder
@@ -452,6 +501,7 @@ struct NowPlayingView: View {
                     .frame(width: 60, height: 64)
                     .contentShape(Rectangle())
             }
+            .accessibilityLabel(song.isAudiobook ? "Skip forward 30 seconds" : "Next")
             .buttonStyle(.plain)
             .foregroundStyle(.white)
             .disabled(!song.isAudiobook && !music.hasNext)
@@ -502,6 +552,15 @@ struct NowPlayingView: View {
                 }
                 .disabled(song.isAudiobook)
                 .opacity(song.isAudiobook ? 0.3 : 1)
+            }
+            // A station only: what it has come to lean toward, by points —
+            // the artists and genres what was played out and skipped has
+            // put ahead.
+            if music.station != nil, song.isSong {
+                Spacer()
+                toggle("chart.bar.xaxis", isOn: showLeanings, label: "What's leading in the mix") {
+                    showLeanings = true
+                }
             }
             Spacer()
             AirPlayButton()
@@ -554,6 +613,116 @@ struct NowPlayingView: View {
         } catch {
             app.toast("Couldn't update favorites", tone: .error)
         }
+    }
+}
+
+// MARK: - What's leading
+
+/// The station's standings: the genres and artists that are ahead on
+/// points right now, and the ones falling behind, read off
+/// `StationSession`. Every finished song and skip moves them, and
+/// the last few move them most, so this is the mix's mood at this moment
+/// rather than a record of taste.
+private struct StationLeaningsSheet: View {
+    let station: LiveStation
+
+    private var session: StationSession { station.session }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if station.profile.isSurprise, !MoodMemory.describe(session.prior).isEmpty, session.reactions < 9 {
+                    // The remembered mood, while it still has a say — see
+                    // `StationSession.priorLean`.
+                    Section {
+                        Text("Started with a lean toward \(MoodMemory.describe(session.prior).formatted(.list(type: .and))), from what you've played at this time of day. It fades as you skip and let songs play.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if session.reactions == 0 {
+                    Section {
+                        Text("Nothing is ahead yet. Let a few songs play out and skip the ones that don't fit, and the mix starts to lean.")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    standings("Genres", session.genreLeanings.map { Leaning(name: MusicNames.genreName($0.name), points: $0.points) })
+                    standings("Artists", session.artistLeanings.map { Leaning(name: MusicNames.artistName($0.name), points: $0.points) })
+                }
+            }
+            .navigationTitle("What's leading")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 1) {
+                        Text("What's leading").font(.headline)
+                        Text(station.title).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Text("After \(session.reactions) reaction\(session.reactions == 1 ? "" : "s") in this station. The newest count most, and it all resets when the station ends.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 10)
+            }
+        }
+    }
+
+    private struct Leaning: Identifiable {
+        let name: String
+        let points: Double
+        var id: String { name }
+    }
+
+    /// Ahead first, then whatever has slipped below zero — a skipped artist,
+    /// a genre skipped a few times — so the card says what the mix is steering away
+    /// from as well as toward.
+    @ViewBuilder
+    private func standings(_ title: String, _ all: [Leaning]) -> some View {
+        let scale = all.map { abs($0.points) }.max() ?? 1
+        let ahead = all.filter { $0.points > 0.05 }.prefix(8)
+        let behind = all.filter { $0.points < -0.05 }.suffix(5).reversed()
+        if !ahead.isEmpty {
+            Section(title) {
+                ForEach(Array(ahead)) { row($0, scale: scale) }
+            }
+        }
+        if !behind.isEmpty {
+            Section("\(title) losing ground") {
+                ForEach(Array(behind)) { row($0, scale: scale) }
+            }
+        }
+    }
+
+    private func row(_ leaning: Leaning, scale: Double) -> some View {
+        let fraction = max(0.04, min(1, abs(leaning.points) / max(scale, 0.01)))
+        let positive = leaning.points > 0
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(leaning.name)
+                    .lineLimit(1)
+                Spacer()
+                Text(Self.points(leaning.points))
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(positive ? Theme.link : .secondary)
+            }
+            GeometryReader { geo in
+                Capsule()
+                    .fill(positive ? Theme.link : Color.secondary.opacity(0.5))
+                    .frame(width: geo.size.width * fraction)
+            }
+            .frame(height: 5)
+            .background(Capsule().fill(.white.opacity(0.08)))
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+    }
+
+    private static func points(_ value: Double) -> String {
+        let sign = value < 0 ? "−" : "+"
+        return sign + String(format: "%.1f", abs(value))
     }
 }
 

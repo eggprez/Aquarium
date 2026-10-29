@@ -1338,6 +1338,13 @@ img.art.has-ph {
 .card:focus-visible .dl-shuffle-badge,
 .card:focus-within .dl-shuffle-badge { opacity: 1; }
 .dl-shuffle-badge:hover { background: var(--accent-strong); }
+/* A finger has no hover to reveal them with, and an invisible badge still
+   takes the tap: on a touchscreen (even one beside a trackpad, hence
+   `any-pointer`) they're always shown. */
+@media (hover: none), (any-pointer: coarse) {
+  .dl-del-badge,
+  .dl-shuffle-badge { opacity: 1; }
+}
 
 /* ---------- Settings ---------- */
 .settings-block {
@@ -1398,6 +1405,9 @@ img.art.has-ph {
   --text: #ececf4;
   --text-dim: #9a9ab0;
   --bg-hover: #1e1e2a;
+  /* Behind the scrubber's time bubble (`.pb-tip`): left to the theme, the
+     light one drew it white under this subtree's light text. */
+  --bg-raised: #16161f;
   --border: #262635;
   --btn-hover-filter: brightness(1.15);
   --track-empty: #34344a;

@@ -256,13 +256,35 @@ extension View {
     /// The bar above the tab bar that shows what is playing, on every tab.
     func withMiniPlayer() -> some View {
         safeAreaInset(edge: .bottom, spacing: 0) { MiniPlayerBar() }
-            .modifier(PlaylistPromptHost())
+            .withMusicHosts()
+    }
+
+    /// The prompts the music menus raise — a new playlist's name, a song's
+    /// info — without the bar. For a shell that draws what is playing
+    /// somewhere else: an iPad's sidebar has a card for it (see
+    /// `PadSidebar`), and a bar across the page as well would be two of
+    /// the same thing.
+    func withMusicHosts() -> some View {
+        modifier(PlaylistPromptHost())
             .modifier(SongInfoHost(overNowPlaying: false))
     }
 
     /// The full Now Playing screen, presented over the whole shell.
     func nowPlayingSheet() -> some View {
         modifier(NowPlayingPresenter())
+    }
+
+    /// The sidebar shell's share of the music player. What is playing is a
+    /// card in the sidebar while the sidebar is up (see `PadSidebar`); with
+    /// it put away the bar comes back across the page, so that collapsing
+    /// the column never takes the controls with it.
+    @ViewBuilder
+    func withShellMusic(sidebarShowing: Bool) -> some View {
+        if sidebarShowing {
+            withMusicHosts()
+        } else {
+            withMiniPlayer()
+        }
     }
 
     /// On a navigation stack, inside the mini player and the offline strip:
@@ -402,6 +424,8 @@ extension View {
     /// The music player is iPhone and iPad only for now; the other shells
     /// keep their layout unchanged.
     func withMiniPlayer() -> some View { self }
+    func withMusicHosts() -> some View { self }
+    func withShellMusic(sidebarShowing: Bool) -> some View { self }
     func nowPlayingSheet() -> some View { self }
     func measuresBottomChrome() -> some View { self }
     func clearsBottomChrome() -> some View { self }

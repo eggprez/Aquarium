@@ -239,9 +239,11 @@ final class WatchLink: NSObject {
             downloads.notePhoneProgress(itemId: itemId, fraction: fraction)
         case .fetchFailed(let itemId, let reason):
             downloads.phoneFailed(itemId: itemId, reason: reason)
+        case .deleteWant(let request):
+            downloads.deleteWant(request)
         case .phonePlayback(let state):
             take(playback: state)
-        case .progress, .fetch, .fetchMany, .cancelFetch, .playlistRemoved, .requestContext, .logs, .requestPlayback, .remote:
+        case .progress, .fetch, .fetchMany, .cancelFetch, .playlistRemoved, .wantRemoved, .requestContext, .logs, .requestPlayback, .remote:
             break
         }
     }
@@ -303,16 +305,21 @@ final class WatchLink: NSObject {
         remoteError = nil
         // What the phone will do, drawn now rather than when it says so.
         if var guess = phonePlayback {
+            // Carried forward to now first. `at` moves to now below, and a
+            // guess that kept the old position wound the clock back by
+            // however long the track had played since the phone last said.
+            let now = Date()
+            guess.position = guess.position(now: now)
             switch command {
             case .play: guess.isPlaying = true
             case .pause: guess.isPlaying = false
             case .togglePlayPause: guess.isPlaying.toggle()
             case .seekTo(let seconds): guess.position = seconds
-            case .seekBy(let delta): guess.position = max(0, guess.position(now: Date()) + delta)
+            case .seekBy(let delta): guess.position = max(0, guess.position + delta)
             case .setSpeed(let speed): guess.speed = speed
             case .next, .previous: break
             }
-            guess.at = Date()
+            guess.at = now
             phonePlayback = guess
         }
         WCSession.default.sendMessage(WatchSync.pack(WatchMessage.remote(command)), replyHandler: { _ in
@@ -411,6 +418,7 @@ final class WatchLink: NSObject {
                 inventory: WatchDownloads.shared.inventory(),
                 awaitingPhone: WatchDownloads.shared.awaitingPhone,
                 playlistIds: WatchDownloads.shared.playlists.map(\.id),
+                wants: WatchDownloads.shared.wantStates(),
                 signedIn: JellyfinClient.shared.isSignedIn
             )
             do {
@@ -483,6 +491,37 @@ extension WatchLink: WCSessionDelegate {
     /// the item's folder here and now — the system deletes it when this
     /// returns — and then measured before it is believed.
     nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
+        if file.metadata?[WatchFileTransfer.kindKey] as? String == WatchFileTransfer.playlistKind {
+            // Read now: the system deletes the file when this returns.
+            guard let data = try? Data(contentsOf: file.fileURL),
+                  let contents = try? JSONDecoder().decode(WatchPlaylistContents.self, from: data) else {
+                WatchLog.error("link", "a playlist from the phone would not read")
+                return
+            }
+            WatchLog.note("link", "playlist \(contents.id) from the phone: \(contents.songs.count) songs")
+            Task { @MainActor in WatchDownloads.shared.receivedFromPhone(playlist: contents) }
+            return
+        }
+        if file.metadata?[WatchFileTransfer.kindKey] as? String == WatchFileTransfer.downloadKind {
+            guard let data = try? Data(contentsOf: file.fileURL),
+                  let contents = try? JSONDecoder().decode(WatchDownloadContents.self, from: data) else {
+                WatchLog.error("link", "a download from the phone would not read")
+                return
+            }
+            WatchLog.note("link", "download of \(contents.request.kind.rawValue) \(contents.request.id) from the phone: \(contents.items.count) items")
+            Task { @MainActor in WatchDownloads.shared.keep(contents.request, items: contents.items) }
+            return
+        }
+        if file.metadata?[WatchFileTransfer.kindKey] as? String == WatchFileTransfer.booksKind {
+            guard let data = try? Data(contentsOf: file.fileURL),
+                  let contents = try? JSONDecoder().decode(WatchBooksContents.self, from: data) else {
+                WatchLog.error("link", "the books from the phone would not read")
+                return
+            }
+            WatchLog.note("link", "\(contents.books.count) books in progress from the phone")
+            Task { @MainActor in WatchDownloads.shared.receivedFromPhone(books: contents) }
+            return
+        }
         guard let itemId = file.metadata?[WatchFileTransfer.itemKey] as? String else {
             WatchLog.error("link", "a file with no item id arrived from the phone: \(String(describing: file.metadata))")
             return
@@ -491,7 +530,12 @@ extension WatchLink: WCSessionDelegate {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         // The server's own file keeps its type: an .mp3 named .m4a won't open.
         let ext = (file.metadata?[WatchFileTransfer.extensionKey] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "m4a"
-        let destination = folder.appendingPathComponent("audio.\(ext)")
+        // Set down beside whatever is already here, not over it: the store
+        // decides whether it is wanted, and a song already complete keeps
+        // the file it has. Cleared out first, it was left with none.
+        // A name of its own, so two deliveries of the same item at once don't
+        // remove each other's file before it is moved.
+        let destination = folder.appendingPathComponent("received-\(UUID().uuidString).\(ext)")
         let source: URL
         if let send = file.metadata?[WatchFileTransfer.sendKey] as? String {
             guard let whole = Self.takePiece(file.fileURL, metadata: file.metadata, send: send, itemId: itemId, folder: folder) else {
@@ -502,10 +546,6 @@ extension WatchLink: WCSessionDelegate {
         } else {
             WatchLog.note("link", "file for \(itemId) arrived from the phone")
             source = file.fileURL
-        }
-        for old in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        where old.lastPathComponent.hasPrefix("audio.") {
-            try? FileManager.default.removeItem(at: old)
         }
         do {
             try FileManager.default.moveItem(at: source, to: destination)

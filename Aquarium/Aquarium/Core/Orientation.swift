@@ -16,6 +16,7 @@
 import SwiftUI
 
 #if os(iOS)
+import os
 import UIKit
 
 @MainActor
@@ -31,7 +32,14 @@ final class OrientationLock {
     /// The mask UIKit was last actually asked for, and whether a request is
     /// already queued. Both exist for the same reason — see `scheduleApply`.
     private var lastRequested: UIInterfaceOrientationMask?
+    /// The mask last put into effect, kept across hinge changes (which
+    /// forget `lastRequested` so the mask is asked for again) — so the lock
+    /// going back on can be told from the first answer of the process.
+    private var lastApplied: UIInterfaceOrientationMask?
     private var pendingApply: Task<Void, Never>?
+    /// Whether the queued request came from a screen asking for the turn
+    /// (or giving it back) rather than from the hinge — see `apply`.
+    private var pendingTurn = false
     /// Waiting for a scene to become active — see `apply`.
     private var activationObserver: NSObjectProtocol?
 
@@ -40,19 +48,81 @@ final class OrientationLock {
     /// What UIKit is told when it asks the delegate. A phone is portrait unless
     /// something on screen has asked otherwise; anything larger was never
     /// locked.
+    ///
+    /// A foldable is asked about its hinge rather than its pose, and the
+    /// difference matters: the tent — part-open, stood on its edges — is
+    /// recognised by the front screen being landscape, and the front screen
+    /// can only be landscape if landscape was allowed first. So any part-open
+    /// hinge frees the phone to turn, and the pose follows the turn.
+    ///
+    /// What this mask is to each of a foldable's screens is Apple's rule, not
+    /// this app's ("Prepare your app for iPhone Duo"): the outer display
+    /// "behaves like any other iPhone" and honours it; the inner display
+    /// "doesn't honor your supported interface orientations" and turns as
+    /// the system pleases. So fully open the answer is a formality, and the
+    /// app must not try to steer the inner display by other means either —
+    /// see `apply`.
     var mask: UIInterfaceOrientationMask {
         guard UIDevice.current.userInterfaceIdiom == .phone else { return .all }
-        return wanting > 0 ? .allButUpsideDown : .portrait
+        // Upright as well as sideways, even for a wide film: the player used
+        // to hold a wide picture to landscape, and a phone in bed or on a
+        // stand wants it upright between the bars, with the controls against
+        // the picture (`PlayerChrome.letterbox`).
+        //
+        // The inner screen turns every way, upside down included, as an iPad
+        // does; the front screen never upside down, as no phone does. Told by
+        // the screen rather than the hinge, which has not spoken yet when the
+        // app is launched open: it reports only once the root view is up, and
+        // UIKit asks this while it is still making the window. "Portrait"
+        // then put a portrait window on an inner screen held sideways —
+        // black, or stuck upright until the app was left and come back to.
+        if Self.innerDisplayIsOn { return .all }
+        switch FoldState.shared.effectiveHinge {
+        case .fullyOpen, .partiallyOpen:
+            return .allButUpsideDown
+        case .closed, nil:
+            guard wanting > 0 else { return .portrait }
+            return .allButUpsideDown
+        }
+    }
+
+    /// Whether the app's screen is a foldable's inner one, told by its size
+    /// alone: no phone screen held upright is anywhere near 600 points across
+    /// (the largest is about 440), and the inner screen is 669. See `mask`.
+    private static var innerDisplayIsOn: Bool {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let screen = scenes.first?.screen else { return false }
+        return min(screen.bounds.width, screen.bounds.height) >= 600
+    }
+
+    /// The hinge has moved between closed, part-open and open — or Settings ›
+    /// Layout has said it did (`DevicePoseProvider`). The last answer may now
+    /// be stale — a change of display is a change of what the mask means —
+    /// so it is forgotten and UIKit is asked again, deferred like every other
+    /// request here: a fold is a burst of hinge and trait changes and one
+    /// update at the end of it is what is wanted.
+    ///
+    /// Asked again, not turned: the display that is on decides which way the
+    /// app faces as the phone opens, and the orientation it carries across
+    /// the fold is the one the person was already holding. The app used to
+    /// request a geometry update on every hinge change, and for a while the
+    /// orientation the device sensor reported — which on a foldable is
+    /// relative to the body, not the screen, and is on Apple's list of
+    /// things not to read. Opened, the inner display came up turned the
+    /// wrong way and then could not be turned back. See `apply`.
+    func hingeChanged() {
+        lastRequested = nil
+        scheduleApply(turn: false)
     }
 
     func allowLandscape() {
         wanting += 1
-        scheduleApply()
+        scheduleApply(turn: true)
     }
 
     func releaseLandscape() {
         wanting = max(0, wanting - 1)
-        scheduleApply()
+        scheduleApply(turn: true)
     }
 
     /// Tell UIKit what the count now means — but not this instant.
@@ -70,13 +140,16 @@ final class OrientationLock {
     /// settling back to where it started there is nothing to ask for, and a
     /// redundant `requestGeometryUpdate` mid-rotation is exactly the disruption
     /// this is avoiding.
-    private func scheduleApply() {
+    private func scheduleApply(turn: Bool) {
         pendingApply?.cancel()
+        pendingTurn = pendingTurn || turn
         pendingApply = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled, let self else { return }
             self.pendingApply = nil
-            self.apply()
+            let turn = self.pendingTurn
+            self.pendingTurn = false
+            self.apply(turn: turn)
         }
     }
 
@@ -85,7 +158,23 @@ final class OrientationLock {
     /// phone sideways until it was physically turned back. The geometry update
     /// is what actually rotates it, and the second call is what makes UIKit ask
     /// the delegate again rather than trusting what it last heard.
-    private func apply() {
+    ///
+    /// The geometry update is asked for with the whole mask, never one
+    /// orientation picked from a sensor, and only when something on screen
+    /// asked for the turn or gave it back (`turn`), or when the phone has
+    /// just closed onto a screen that is portrait-only again — the lock going
+    /// back on. A hinge opening gets no request at all: the outer display
+    /// honours the mask and turns itself as the phone turns, and the inner
+    /// display ignores both the mask and the request.
+    ///
+    /// Nor does the first answer of the process. Launched closed, the hinge's
+    /// first report ran the "lock going back on" path and requested portrait
+    /// — and a geometry request is a preference the scene keeps. Opened, the
+    /// window took that preference to the inner display with it and sat
+    /// upright, locked, until the scene was reactivated (Home and back),
+    /// which is what cleared it. Portrait is requested only when a wider
+    /// mask was in effect before it.
+    private func apply(turn: Bool) {
         let wanted = mask
         guard wanted != lastRequested else { return }
         // Active first; an inactive one (a notification pulled down, the
@@ -97,17 +186,24 @@ final class OrientationLock {
         guard let scene = scenes.first(where: { $0.activationState == .foregroundActive })
             ?? scenes.first(where: { $0.activationState == .foregroundInactive })
         else {
-            applyWhenActive()
+            applyWhenActive(turn: turn)
             return
         }
+        let previous = lastApplied
+        lastApplied = wanted
         lastRequested = wanted
+        let lockingBack = wanted == .portrait && previous != nil && previous != .portrait
+        let request = turn || lockingBack
+        FoldState.log.debug("orientation mask=\(wanted.rawValue) request=\(request) turn=\(turn) now=\(scene.effectiveGeometry.interfaceOrientation.rawValue) bounds=\(scene.coordinateSpace.bounds.width, format: .fixed(precision: 0))×\(scene.coordinateSpace.bounds.height, format: .fixed(precision: 0)) hinge=\(String(describing: FoldState.shared.effectiveHinge))")
         scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-        scene.requestGeometryUpdate(.iOS(interfaceOrientations: wanted))
+        if request {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: wanted))
+        }
     }
 
     /// Try again the next time a scene is activated. Once: the observer goes
     /// as soon as it fires.
-    private func applyWhenActive() {
+    private func applyWhenActive(turn: Bool) {
         guard activationObserver == nil else { return }
         activationObserver = NotificationCenter.default.addObserver(
             forName: UIScene.didActivateNotification, object: nil, queue: .main
@@ -118,7 +214,7 @@ final class OrientationLock {
                     NotificationCenter.default.removeObserver(observer)
                     lock.activationObserver = nil
                 }
-                lock.apply()
+                lock.apply(turn: turn)
             }
         }
     }

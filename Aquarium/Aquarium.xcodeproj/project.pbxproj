@@ -15,7 +15,6 @@
 		FE11A5D00000000000000121 /* LiveActivityTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000106 /* LiveActivityTypes.swift */; };
 		FE11A5D00000000000000122 /* LiveActivitiesBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000102 /* LiveActivitiesBundle.swift */; };
 		FE11A5D00000000000000123 /* ListeningLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000103 /* ListeningLiveActivity.swift */; };
-		FE11A5D00000000000000124 /* DownloadsLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000104 /* DownloadsLiveActivity.swift */; };
 		FE11A5D00000000000000125 /* LiveActivities.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000101 /* LiveActivities.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FE11A5D00000000000000126 /* WidgetTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000107 /* WidgetTypes.swift */; };
 		FE11A5D00000000000000127 /* WidgetTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000107 /* WidgetTypes.swift */; };
@@ -27,7 +26,10 @@
 		FE11A5D00000000000000224 /* AquariumWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000201 /* AquariumWatch.app */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FE11A5D00000000000000225 /* WatchWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000301 /* WatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FE11A5D00000000000000226 /* WatchWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000302 /* WatchWidgets.swift */; };
-		FE11A5D00000000000000401 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; platformFilters = (tvos, ); productRef = FE11A5D00000000000000402 /* MPVKit */; };
+		FE11A5D00000000000000401 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; platformFilters = (ios, macos, tvos, ); productRef = FE11A5D00000000000000402 /* MPVKit */; };
+		FE11A5D00000000000000611 /* FollowTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000601 /* FollowTypes.swift */; };
+		FE11A5D00000000000000612 /* FollowTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000601 /* FollowTypes.swift */; };
+		FE11A5D00000000000000613 /* FollowWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000602 /* FollowWidget.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -58,6 +60,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = FE11A5D00000000000000340;
 			remoteInfo = WatchWidgets;
+		};
+		FE11A5D00000000000000745 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D296FAAF302815340097E3E7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D296FAB6302815340097E3E7;
+			remoteInfo = Aquarium;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -110,7 +119,6 @@
 		FE11A5D00000000000000101 /* LiveActivities.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LiveActivities.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		FE11A5D00000000000000102 /* LiveActivitiesBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivitiesBundle.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000103 /* ListeningLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningLiveActivity.swift; sourceTree = "<group>"; };
-		FE11A5D00000000000000104 /* DownloadsLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsLiveActivity.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000105 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		FE11A5D00000000000000106 /* LiveActivityTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityTypes.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000107 /* WidgetTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetTypes.swift; sourceTree = "<group>"; };
@@ -123,6 +131,9 @@
 		FE11A5D00000000000000302 /* WatchWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchWidgets.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000303 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		FE11A5D00000000000000304 /* WatchWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WatchWidgets.entitlements; sourceTree = "<group>"; };
+		FE11A5D00000000000000601 /* FollowTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowTypes.swift; sourceTree = "<group>"; };
+		FE11A5D00000000000000602 /* FollowWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowWidget.swift; sourceTree = "<group>"; };
+		FE11A5D00000000000000701 /* AquariumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AquariumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -158,6 +169,11 @@
 				FE11A5D00000000000000251 /* Exceptions for "Watch" folder in "AquariumWatch" target */,
 			);
 			path = Watch;
+			sourceTree = "<group>";
+		};
+		FE11A5D00000000000000710 /* AquariumTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AquariumTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -199,6 +215,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FE11A5D00000000000000731 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -210,6 +233,7 @@
 				FE11A5D00000000000000010 /* TopShelf */,
 				FE11A5D00000000000000110 /* LiveActivities */,
 				FE11A5D00000000000000210 /* Watch */,
+				FE11A5D00000000000000710 /* AquariumTests */,
 				FE11A5D00000000000000310 /* WatchWidgets */,
 				FE11A5D00000000000000006 /* Aquarium-tvOS.entitlements */,
 				FE11A5D00000000000000007 /* Aquarium-iOS.entitlements */,
@@ -224,6 +248,7 @@
 				FE11A5D00000000000000001 /* TopShelf.appex */,
 				FE11A5D00000000000000101 /* LiveActivities.appex */,
 				FE11A5D00000000000000201 /* AquariumWatch.app */,
+				FE11A5D00000000000000701 /* AquariumTests.xctest */,
 				FE11A5D00000000000000301 /* WatchWidgets.appex */,
 			);
 			name = Products;
@@ -247,6 +272,7 @@
 				FE11A5D00000000000000206 /* WatchSyncTypes.swift */,
 				FE11A5D00000000000000207 /* WatchWidgetSnapshot.swift */,
 				FE11A5D00000000000000107 /* WidgetTypes.swift */,
+				FE11A5D00000000000000601 /* FollowTypes.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -256,8 +282,8 @@
 			children = (
 				FE11A5D00000000000000102 /* LiveActivitiesBundle.swift */,
 				FE11A5D00000000000000103 /* ListeningLiveActivity.swift */,
-				FE11A5D00000000000000104 /* DownloadsLiveActivity.swift */,
 				FE11A5D00000000000000108 /* NowPlayingWidget.swift */,
+				FE11A5D00000000000000602 /* FollowWidget.swift */,
 				FE11A5D00000000000000105 /* Info.plist */,
 				FE11A5D00000000000000109 /* LiveActivities.entitlements */,
 			);
@@ -387,6 +413,29 @@
 			productReference = FE11A5D00000000000000301 /* WatchWidgets.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		FE11A5D00000000000000740 /* AquariumTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FE11A5D00000000000000741 /* Build configuration list for PBXNativeTarget "AquariumTests" */;
+			buildPhases = (
+				FE11A5D00000000000000730 /* Sources */,
+				FE11A5D00000000000000731 /* Frameworks */,
+				FE11A5D00000000000000732 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FE11A5D00000000000000744 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				FE11A5D00000000000000710 /* AquariumTests */,
+			);
+			name = AquariumTests;
+			packageProductDependencies = (
+			);
+			productName = AquariumTests;
+			productReference = FE11A5D00000000000000701 /* AquariumTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -412,6 +461,10 @@
 					FE11A5D00000000000000340 = {
 						CreatedOnToolsVersion = 27.0;
 					};
+					FE11A5D00000000000000740 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = D296FAB6302815340097E3E7;
+					};
 				};
 			};
 			buildConfigurationList = D296FAB2302815340097E3E7 /* Build configuration list for PBXProject "Aquarium" */;
@@ -435,6 +488,7 @@
 				FE11A5D00000000000000040 /* TopShelf */,
 				FE11A5D00000000000000140 /* LiveActivities */,
 				FE11A5D00000000000000240 /* AquariumWatch */,
+				FE11A5D00000000000000740 /* AquariumTests */,
 				FE11A5D00000000000000340 /* WatchWidgets */,
 			);
 		};
@@ -476,6 +530,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FE11A5D00000000000000732 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
@@ -508,6 +569,7 @@
 				FE11A5D00000000000000020 /* TopShelfSnapshot.swift in Sources */,
 				FE11A5D00000000000000120 /* LiveActivityTypes.swift in Sources */,
 				FE11A5D00000000000000126 /* WidgetTypes.swift in Sources */,
+				FE11A5D00000000000000611 /* FollowTypes.swift in Sources */,
 				FE11A5D00000000000000220 /* WatchSyncTypes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -527,10 +589,11 @@
 			files = (
 				FE11A5D00000000000000122 /* LiveActivitiesBundle.swift in Sources */,
 				FE11A5D00000000000000123 /* ListeningLiveActivity.swift in Sources */,
-				FE11A5D00000000000000124 /* DownloadsLiveActivity.swift in Sources */,
 				FE11A5D00000000000000128 /* NowPlayingWidget.swift in Sources */,
 				FE11A5D00000000000000121 /* LiveActivityTypes.swift in Sources */,
 				FE11A5D00000000000000127 /* WidgetTypes.swift in Sources */,
+				FE11A5D00000000000000612 /* FollowTypes.swift in Sources */,
+				FE11A5D00000000000000613 /* FollowWidget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -549,6 +612,13 @@
 			files = (
 				FE11A5D00000000000000226 /* WatchWidgets.swift in Sources */,
 				FE11A5D00000000000000223 /* WatchWidgetSnapshot.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FE11A5D00000000000000730 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -579,6 +649,11 @@
 			isa = PBXTargetDependency;
 			target = FE11A5D00000000000000340 /* WatchWidgets */;
 			targetProxy = FE11A5D00000000000000345 /* PBXContainerItemProxy */;
+		};
+		FE11A5D00000000000000744 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D296FAB6302815340097E3E7 /* Aquarium */;
+			targetProxy = FE11A5D00000000000000745 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -717,7 +792,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletv*]" = "Aquarium-tvOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphone*]" = "Aquarium-iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 96;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				ENABLE_APP_SANDBOX = YES;
@@ -729,12 +804,17 @@
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=appletvsimulator*]" = "*.icon";
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphoneos*]" = "SyncTest-*.mov";
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*]" = "SyncTest-*.mov";
-				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = "AppIcon-*.icon SyncTest-*.mov";
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = (
+					"AppIcon-*.icon",
+					"SyncTest-*.mov",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Aquarium films the Apple TV's audio sync clip to time its flash against its beep, only while you measure.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Aquarium connects to your Jellyfin server, which is usually on your own network.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Aquarium listens for the Apple TV's sync clip beep to time it against the flash, only while you measure.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
@@ -743,13 +823,13 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.4;
-				"OTHER_LDFLAGS[sdk=appletv*]" = (
+				MARKETING_VERSION = 1.5;
+				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
 					AVKit,
@@ -782,7 +862,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=appletv*]" = "Aquarium-tvOS.entitlements";
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphone*]" = "Aquarium-iOS.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 96;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				ENABLE_APP_SANDBOX = YES;
@@ -794,12 +874,17 @@
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=appletvsimulator*]" = "*.icon";
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphoneos*]" = "SyncTest-*.mov";
 				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*]" = "SyncTest-*.mov";
-				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = "AppIcon-*.icon SyncTest-*.mov";
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = (
+					"AppIcon-*.icon",
+					"SyncTest-*.mov",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Aquarium films the Apple TV's audio sync clip to time its flash against its beep, only while you measure.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Aquarium connects to your Jellyfin server, which is usually on your own network.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Aquarium listens for the Apple TV's sync clip beep to time it against the flash, only while you measure.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
@@ -808,13 +893,13 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.4;
-				"OTHER_LDFLAGS[sdk=appletv*]" = (
+				MARKETING_VERSION = 1.5;
+				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-framework",
 					AVKit,
@@ -840,7 +925,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 96;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TopShelf/Info.plist;
@@ -848,7 +933,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.TopShelf;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -871,7 +956,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TopShelf/TopShelf.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 96;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = TopShelf/Info.plist;
@@ -879,7 +964,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.TopShelf;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -902,7 +987,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LiveActivities/LiveActivities.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 96;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LiveActivities/Info.plist;
@@ -911,7 +996,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.LiveActivities;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -932,7 +1017,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = LiveActivities/LiveActivities.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 96;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LiveActivities/Info.plist;
@@ -941,7 +1026,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.LiveActivities;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -964,7 +1049,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Watch/Watch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 96;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -974,7 +1059,7 @@
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = scottai.FellyJin;
 				INFOPLIST_KEY_WKRunsIndependentlyWithCompanionApp = YES;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -999,7 +1084,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Watch/Watch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 96;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1009,7 +1094,7 @@
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = scottai.FellyJin;
 				INFOPLIST_KEY_WKRunsIndependentlyWithCompanionApp = YES;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1032,7 +1117,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = WatchWidgets/WatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 96;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = WatchWidgets/Info.plist;
@@ -1040,7 +1125,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1063,7 +1148,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = WatchWidgets/WatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 96;
 				DEVELOPMENT_TEAM = 6S26L64S3C;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = WatchWidgets/Info.plist;
@@ -1071,7 +1156,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1086,6 +1171,56 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 4;
 				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+		FE11A5D00000000000000742 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 96;
+				DEVELOPMENT_TEAM = 6S26L64S3C;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.5;
+				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.AquariumTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator appletvos appletvsimulator macosx";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,3";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Aquarium.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Aquarium";
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+			};
+			name = Debug;
+		};
+		FE11A5D00000000000000743 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 96;
+				DEVELOPMENT_TEAM = 6S26L64S3C;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.5;
+				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.AquariumTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator appletvos appletvsimulator macosx";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,3";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Aquarium.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Aquarium";
+				TVOS_DEPLOYMENT_TARGET = 17.0;
 			};
 			name = Release;
 		};
@@ -1142,6 +1277,15 @@
 			buildConfigurations = (
 				FE11A5D00000000000000342 /* Debug */,
 				FE11A5D00000000000000343 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FE11A5D00000000000000741 /* Build configuration list for PBXNativeTarget "AquariumTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FE11A5D00000000000000742 /* Debug */,
+				FE11A5D00000000000000743 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

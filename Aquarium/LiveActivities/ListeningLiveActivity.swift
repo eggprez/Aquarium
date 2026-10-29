@@ -55,7 +55,7 @@ struct ListeningLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     if clocks {
-                        SleepButtons().padding(.top, 4)
+                        SleepButtons(state: state).padding(.top, 4)
                     }
                 }
             } compactLeading: {
@@ -122,7 +122,7 @@ private struct ListeningLockScreen: View {
             // one whose app stopped speaking: its deadline has passed, and
             // the countdown would sit at 0:00.
             if !isStale {
-                SleepButtons()
+                SleepButtons(state: state)
             }
         }
         .foregroundStyle(.white)
@@ -188,11 +188,28 @@ private struct SleepCountdown: View {
     }
 }
 
+/// Pause or play, skip the intro when there is one, and the sleep timer's
+/// two: fifteen more minutes, or off. Each is an intent the app performs
+/// (Shared/LiveActivityTypes.swift), so none needs the app in front.
 private struct SleepButtons: View {
+    let state: ListeningActivityAttributes.ContentState
+
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
+            Button(intent: TogglePlayPauseActivityIntent()) {
+                Image(systemName: state.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 32)
+                    .background(ActivityPalette.accent, in: Capsule())
+            }
+            if let label = state.skipLabel {
+                Button(intent: SkipSegmentActivityIntent()) {
+                    ActivityPill(title: label, systemImage: "forward.fill")
+                }
+            }
             Button(intent: ExtendSleepTimerIntent(minutes: 15)) {
-                ActivityPill(title: "15 min", systemImage: "plus", prominent: true)
+                ActivityPill(title: "15 min", systemImage: "plus", prominent: state.skipLabel == nil)
             }
             Button(intent: CancelSleepTimerIntent()) {
                 ActivityPill(title: "Turn off", systemImage: "xmark")

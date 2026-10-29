@@ -62,6 +62,32 @@ final class ItemWindowNavigator {
     }
 }
 
+private struct RouteWindowNavigatorKey: EnvironmentKey {
+    static let defaultValue: ItemWindowNavigator? = nil
+}
+
+extension EnvironmentValues {
+    /// The pages of the title or library window a view is in; nil in the main
+    /// window. See `AppModel.isWorkingWindow`.
+    var routeWindowNavigator: ItemWindowNavigator? {
+        get { self[RouteWindowNavigatorKey.self] }
+        set { self[RouteWindowNavigatorKey.self] = newValue }
+    }
+}
+
+extension AppModel {
+    /// Whether the window with these pages — nil for the main window — is the
+    /// one being worked in: the window a click opens into (see
+    /// `keyNavigator`), which is also the one an alert, a toast and View ▸
+    /// Refresh are for. Every window shares one model, so each of those used
+    /// to happen in all of them at once: a toast in every window, Escape in
+    /// any of them dismissing it everywhere, an error from a title window
+    /// shown on the main one, and ⌘R reloading every page that was open.
+    func isWorkingWindow(_ navigator: ItemWindowNavigator?) -> Bool {
+        keyNavigator === navigator
+    }
+}
+
 /// A title, by id. The window group the poster menus open into; kept keyed
 /// by the id so those callers don't change.
 struct ItemWindow: View {
@@ -122,6 +148,28 @@ struct RouteWindow: View {
         .onDisappear { release() }
         // A window belongs to the account it was opened under.
         .onChange(of: client.session?.accountKey) { _, _ in dismissWindow() }
+        // What goes wrong on this window's pages is said on this window — a
+        // favourite that didn't stick, a library that wouldn't load — rather
+        // than on the main window behind it. Which window that is follows
+        // `keyNavigator`, the same as where a click opens: see
+        // `isWorkingWindow`. `RootView` and the app delegate stand down while
+        // this window has it.
+        .alert(
+            app.pendingAlert?.title ?? "",
+            isPresented: Binding(
+                get: { app.pendingAlert != nil && app.isWorkingWindow(navigator) },
+                set: { if !$0 { app.pendingAlert = nil } }
+            ),
+            presenting: app.pendingAlert
+        ) { _ in
+            Button("OK") {}
+        } message: { alert in
+            Text(alert.message)
+        }
+        .nextUpChoiceDialog(isMine: app.isWorkingWindow(navigator))
+        // Outermost, so the toasts' overlay and every page know which window
+        // they are in.
+        .environment(\.routeWindowNavigator, navigator)
     }
 
     private func release() {

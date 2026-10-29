@@ -13,18 +13,35 @@ enum Metrics {
     /// from thirty centimetres, so the same "five across" is a very different
     /// number of points. On a phone this is the shelf size only — grids there
     /// size their cards from the column instead, so the count is exact.
+    ///
+    /// An iPad is held further off than a phone and has two to three times
+    /// the width, and at the phone's 112 a 13-inch screen was eight and more
+    /// columns of thumbnails. It takes the Mac's narrowest column instead, and
+    /// its grids grow from there — see `PosterGrid.columns`.
     static var posterWidth: CGFloat {
         #if os(tvOS)
         return 240
         #elseif os(macOS)
         return 168
         #else
-        return 112
+        return phoneLayout ? 112 : 156
         #endif
     }
 
     /// 16:9 stills — episodes, channels, backdrops.
     static var stillWidth: CGFloat { posterWidth * 1.62 }
+
+    /// A still on a shelf. The grid's still follows the poster, so that a
+    /// page of them packs the way a page of posters does; a shelf on an iPad
+    /// has the width to draw Continue Watching at 300, where a frame of the
+    /// episode is a picture rather than a thumbnail.
+    static var shelfStillWidth: CGFloat {
+        #if os(iOS)
+        return phoneLayout ? stillWidth : 300
+        #else
+        return stillWidth
+        #endif
+    }
 
     /// Between cards in a horizontal shelf.
     static var rowSpacing: CGFloat {
@@ -33,7 +50,7 @@ enum Metrics {
         #elseif os(macOS)
         return 16
         #else
-        return 12
+        return phoneLayout ? 12 : 16
         #endif
     }
 
@@ -45,7 +62,7 @@ enum Metrics {
         #elseif os(macOS)
         return 16
         #else
-        return 10
+        return phoneLayout ? 10 : 14
         #endif
     }
 
@@ -58,7 +75,7 @@ enum Metrics {
         #elseif os(macOS)
         return 26
         #else
-        return 18
+        return phoneLayout ? 18 : 22
         #endif
     }
 
@@ -69,7 +86,7 @@ enum Metrics {
         #elseif os(macOS)
         return 30
         #else
-        return 22
+        return phoneLayout ? 22 : 32
         #endif
     }
 
@@ -80,7 +97,7 @@ enum Metrics {
         #elseif os(macOS)
         return 10
         #else
-        return 8
+        return phoneLayout ? 8 : 12
         #endif
     }
 
@@ -110,19 +127,33 @@ enum Metrics {
         #elseif os(macOS)
         return 7
         #else
-        return 6
+        return phoneLayout ? 6 : 7
         #endif
     }
 
     /// The page margin. Twenty on the Mac — the inset a system window's
-    /// content sits at — where twenty-eight was a tablet's thumb-room.
+    /// content sits at — where twenty-eight is a tablet's thumb-room: a
+    /// phone's sixteen on a 13-inch screen put the shelves hard against the
+    /// sidebar.
     static var gutter: CGFloat {
         #if os(tvOS)
         return 60
         #elseif os(macOS)
         return 20
         #else
-        return 16
+        return phoneLayout ? 16 : 28
+        #endif
+    }
+
+    /// Extra room the top bar keeps from the sides of the screen, on top of
+    /// the gutter. A foldable's inside screen has corners rounder than the
+    /// safe area allows for, and the wordmark and the buttons sat in the
+    /// curve. Nothing anywhere else.
+    static var cornerClearance: CGFloat {
+        #if os(iOS)
+        isPhone && MainActor.assumeIsolated { FoldState.shared.usesInnerDisplay } ? 12 : 0
+        #else
+        0
         #endif
     }
 
@@ -169,57 +200,59 @@ enum Metrics {
     }
 
     #if os(iOS)
-    /// Worked out once, the first time the guide asks, and a plain number from
-    /// then on.
+    /// A half hour fills a phone's screen; an iPad names a number.
     ///
-    /// A `let` rather than a computed property because this sits in the middle
-    /// of a layout pass. Asking UIKit for the screen on every cell of every row
-    /// puts a reading of live view-hierarchy state inside SwiftUI's own update
-    /// of that hierarchy — a dependency its graph cannot see and has no reason
-    /// to expect to hold still. Answered once and cached, it is the constant
-    /// the rest of the guide's arithmetic takes it for. A phone's screen does
-    /// not change size, so there is nothing to recompute anyway.
-    private static let phoneGuideMinuteWidth: CGFloat = MainActor.assumeIsolated {
-        // An iPad names a number like everything else that isn't a phone.
-        // It was 3.4, on the reasoning above that a half hour across so wide
-        // a screen shows nothing — but at 3.4 a half hour is a hundred points
-        // and a sitcom's 22 minutes is 75, and nearly every cell in the grid
-        // read "F…" or "Bo…". At 5.5 an iPad on its side still shows two hours
-        // and the titles are words.
-        guard UIDevice.current.userInterfaceIdiom == .phone else { return 5.5 }
-        return (portraitWidth - guideChannelColumnWidth) / 30
+    /// This sits in the middle of a layout pass, so it must not ask UIKit for
+    /// the screen: that puts a reading of live view-hierarchy state inside
+    /// SwiftUI's own update of that hierarchy — a dependency its graph cannot
+    /// see and has no reason to expect to hold still. It used to be answered
+    /// once and cached, on the grounds that a phone's screen does not change
+    /// size. A foldable's does: closed it is a phone, opened it is an iPad.
+    /// So the width is read from `FoldState`, which the pose provider writes
+    /// after layout from the display that is on, and reading an observable
+    /// here is a dictionary lookup, not a traversal — the same thing the Mac's
+    /// `thumbnailScale` does with its own options.
+    private static var phoneGuideMinuteWidth: CGFloat {
+        // It was 3.4 on the iPad, on the reasoning that a half hour across so
+        // wide a screen shows nothing — but at 3.4 a half hour is a hundred
+        // points and a sitcom's 22 minutes is 75, and nearly every cell in
+        // the grid read "F…" or "Bo…". At 5.5 an iPad on its side still shows
+        // two hours and the titles are words.
+        guard !wideScreen else { return 5.5 }
+        let width = MainActor.assumeIsolated { FoldState.shared.portraitWidth }
+        return (width - guideChannelColumnWidth) / 30
     }
 
-    /// This screen's width with the device held upright: the smaller of its
-    /// two dimensions, so the answer doesn't depend on which way it is being
-    /// held when the question is asked.
-    ///
-    /// Read from the connected scene rather than `UIScreen.main`, which is the
-    /// deprecated spelling and, on a device that can show two apps at once,
-    /// the wrong answer. The fallback is a small modern phone — reached only
-    /// if there is no window scene at all, in which case nothing is on screen
-    /// to measure against anyway.
-    @MainActor
-    private static var portraitWidth: CGFloat {
-        let scene = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first
-        let size = scene?.screen.bounds.size ?? CGSize(width: 375, height: 812)
-        return min(size.width, size.height)
-    }
-    #endif
-
-    #if os(iOS)
-    /// Asked once, for the same reason as `phoneGuideMinuteWidth`.
-    private static let isPhone: Bool = MainActor.assumeIsolated {
+    /// Asked once: the idiom never changes. Layout wants `phoneLayout`, not
+    /// this — a foldable's inside screen is this idiom at an iPad's size.
+    static let isPhone: Bool = MainActor.assumeIsolated {
         UIDevice.current.userInterfaceIdiom == .phone
+    }
+
+    /// Whether the pages are drawn in the phone's design: the tab bar, the
+    /// phone's poster size, the fixed-height hero. The idiom, on both of a
+    /// foldable's screens — the inside screen is the same app with more
+    /// across each row, not an iPad — see `RootView.adaptiveShell`.
+    static var phoneLayout: Bool { isPhone }
+
+    /// Whether the screen that is on has an iPad's width to spend: an iPad,
+    /// or a foldable opened to its inside screen. Decides the things that
+    /// are about room rather than design — the guide's scale, the hero's
+    /// proportion, the channel column — see `DevicePose`. Through the main
+    /// actor the way `thumbnailScale` is: every caller is a view's body,
+    /// which is already there.
+    static var wideScreen: Bool {
+        !isPhone || MainActor.assumeIsolated { FoldState.shared.usesInnerDisplay }
     }
     #endif
 
     /// Width of the guide's pinned channel column.
     static var guideChannelColumnWidth: CGFloat {
         #if os(tvOS)
-        return 280
+        // 280 left a name about 150 points beside its 104-point logo, which
+        // cut most of a line-up to a word and an ellipsis. The guide's hours
+        // have the rest of a 1920-point screen to give.
+        return 340
         #elseif os(macOS)
         return 172
         #else
@@ -235,7 +268,7 @@ enum Metrics {
         // that kind of word at the row's own font size, at the cost of a
         // fraction of a point per minute off the timeline the rest of the
         // guide draws against.
-        return isPhone ? 148 : 172
+        return wideScreen ? 172 : 148
         #endif
     }
 
@@ -336,7 +369,9 @@ struct PosterCard: View {
         let points = width ?? PosterGrid.columnMaximum(wide: wide)
         return ImageLoader.requestWidth(points: points, displayScale: displayScale)
         #else
-        return Int((width ?? Metrics.posterWidth) * 2)
+        // The widest the column can make it, which on an iPad is more than
+        // the shelf's fixed card.
+        return Int((width ?? PosterGrid.columnMaximum(wide: wide)) * 2)
         #endif
     }
 
@@ -356,7 +391,7 @@ struct PosterCard: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(cardTitle)
                         .font(titleFont)
-                        .lineLimit(1)
+                        .lineLimit(titleLines)
                         .foregroundStyle(Theme.text)
                     ForEach(Array(cardLines.enumerated()), id: \.offset) { _, line in
                         Text(line)
@@ -378,6 +413,21 @@ struct PosterCard: View {
         // a tile is a thing you select, and a ring around the picture alone
         // leaves the name looking like it belongs to the tile above.
         .macTileState(isSelected: isSelected)
+    }
+
+    #if os(iOS)
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    #endif
+
+    /// One line, except at the largest text sizes on a phone or an iPad,
+    /// where a card's width holds a word or two of the title and one line of
+    /// it was an ellipsis on nearly every poster on the page.
+    private var titleLines: Int {
+        #if os(iOS)
+        dynamicTypeSize >= .xxxLarge ? 2 : 1
+        #else
+        1
+        #endif
     }
 
     /// `.subheadline` and `.caption` were tuned for a phone; on the Mac they
@@ -505,9 +555,22 @@ struct PosterCard: View {
     /// the portrait poster it borrowed belongs to the series, and a still in
     /// Continue Watching used to print the episode's own name as its heading
     /// and then again underneath.
+    ///
+    /// A season the same, wherever the card is the only thing saying which
+    /// show it belongs to: Latest in TV Shows put a card reading "Season 4"
+    /// and nothing else on Home. The one place a season keeps its own name as
+    /// the heading is its show's page, where the page is the show and the
+    /// card says how many episodes it has instead — see `seasonShowsSeries`.
     private var cardTitle: String {
         if item.isEpisode, let series = item.SeriesName { return series }
+        if seasonShowsSeries, let series = item.SeriesName { return series }
         return item.title
+    }
+
+    /// Whether a season card leads with its show. Not where the caller has a
+    /// line of its own for it, which is the show's page listing its seasons.
+    private var seasonShowsSeries: Bool {
+        item.isSeason && subtitle == nil && !(item.SeriesName ?? "").isEmpty
     }
 
     /// The lines under the heading. An episode gets two — which one it is,
@@ -515,6 +578,8 @@ struct PosterCard: View {
     /// Pilot" on one line is what a card this narrow has no room for.
     private var cardLines: [String] {
         if let subtitle { return subtitle.isEmpty ? [] : [subtitle] }
+        // The season's own name, now that the heading went to the show.
+        if seasonShowsSeries { return [item.title] }
         if item.isEpisode {
             var lines: [String] = []
             if let label = item.episodeLabel { lines.append(label) }
@@ -552,6 +617,19 @@ struct RefreshButton: View {
         Button(action: action) {
             #if os(tvOS)
             tvLabel
+            #elseif os(iOS)
+            if overArtwork {
+                glyph
+                    .foregroundStyle(Color.white)
+                    .frame(width: Self.side, height: Self.side)
+                    .background { Circle().fill(.black.opacity(0.45)) }
+                    .contentShape(Rectangle())
+            } else {
+                // A button in the bar, drawn the way the bar's other buttons
+                // are — a bare arrow read as decoration, not something to press.
+                glyph
+                    .barButtonDisc(size: 36)
+            }
             #else
             glyph
                 .foregroundStyle(overArtwork ? Color.white : Theme.accent)
@@ -616,7 +694,7 @@ struct RefreshButton: View {
     #endif
 
     private var glyphFont: Font {
-        #if os(tvOS)
+        #if os(tvOS) || os(iOS)
         .body.weight(.semibold)
         #else
         .subheadline.weight(.semibold)
@@ -830,7 +908,7 @@ struct MediaShelf: View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: Metrics.rowSpacing) {
                 ForEach(items) { item in
-                    card(item, width: wide ? Metrics.stillWidth : Metrics.posterWidth)
+                    card(item, width: wide ? Metrics.shelfStillWidth : Metrics.posterWidth)
                 }
             }
             .padding(.horizontal, Metrics.gutter)
@@ -841,10 +919,15 @@ struct MediaShelf: View {
     #endif
 
     /// A phone fits more rows on screen with a heading the weight of a list
-    /// header than with one the weight of a page title.
+    /// header than with one the weight of a page title. An iPad has the
+    /// rows' height to spare, and its cards are big enough that a headline
+    /// over them read as a caption.
     private var titleFont: Font {
         #if os(iOS)
-        return .headline
+        return Metrics.phoneLayout ? .headline : .title2.weight(.bold)
+        #elseif os(macOS)
+        // The iPad's weight: the Mac's cards are the iPad's size and more.
+        return .title2.weight(.bold)
         #else
         return .title3.weight(.semibold)
         #endif
@@ -902,14 +985,18 @@ struct SeeAllButton: View {
             .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
             .contentShape(Capsule())
             #elseif os(macOS)
-            // A link, in Title Case, which is what a Mac calls a small
-            // accent-coloured word that goes somewhere.
+            // In Title Case, as a Mac spells a control, and dim: beside the
+            // iPad-weight headings an accent-coloured word at the end of
+            // every row was the loudest thing on the page.
             Text("See All")
-                .font(.subheadline)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
             #else
+            // Dim on an iPad, where the headings are heavier: a purple word
+            // at the end of every row was the loudest thing on the page.
             Text("See all")
-                .font(.subheadline)
-                .foregroundStyle(Theme.accent)
+                .font(Metrics.phoneLayout ? .subheadline : .subheadline.weight(.semibold))
+                .foregroundStyle(Metrics.phoneLayout ? Theme.accent : Theme.textDim)
             #endif
         }
         .seeAllStyle()
@@ -920,7 +1007,7 @@ private extension View {
     @ViewBuilder
     func seeAllStyle() -> some View {
         #if os(macOS)
-        buttonStyle(.link)
+        buttonStyle(.plain)
         #else
         chipButtonStyle()
         #endif
@@ -1073,8 +1160,8 @@ struct RowPressStyle: ButtonStyle {
 /// nothing at all until the selector reached them.
 ///
 /// Both states are drawn here instead, so a button reads the same whether or not
-/// it has focus, and the focus itself is the ring, the lift and the shadow the
-/// rest of the app already uses.
+/// it has focus, and the focus itself is a white fill with the ring, the lift
+/// and the shadow the rest of the app already uses.
 struct TVButtonStyle: ButtonStyle {
     enum Kind { case prominent, secondary }
     var kind: Kind = .secondary
@@ -1113,18 +1200,22 @@ struct TVButtonStyle: ButtonStyle {
         }
     }
 
+    /// Focus turns either kind white. The prominent one used to go from one
+    /// purple to a lighter one, which over a purple-lit backdrop left a focused
+    /// Play with nothing but its thin ring to say so, beside a Details that
+    /// went white.
     private func fill(_ isFocused: Bool) -> Color {
         switch kind {
-        case .prominent: isFocused ? Theme.accent : Theme.accentStrong
+        case .prominent: isFocused ? .white : Theme.accentStrong
         case .secondary: isFocused ? .white : Theme.raised
         }
     }
 
-    /// White on the accent either way; on the secondary style the label has to
-    /// flip with the fill, since focus turns that one white.
+    /// The label flips with the fill: white on the accent, and on white the
+    /// accent for the prominent style and near-black for the secondary.
     private func labelColour(_ isFocused: Bool) -> Color {
         switch kind {
-        case .prominent: .white
+        case .prominent: isFocused ? Theme.accentStrong : .white
         // Focus turns this one's fill white, so the label has to go dark with
         // it — a highlight colour pitched for the raised fill would be the same
         // trap the system style falls into.
@@ -1364,6 +1455,17 @@ enum PosterGrid {
         // of two fixed posters with a gulf of page between them.
         return [GridItem(.adaptive(minimum: columnMinimum(wide: wide), maximum: columnMaximum(wide: wide)),
                          spacing: Metrics.gridSpacing, alignment: .top)]
+        #elseif os(iOS)
+        // An iPad's grid is the Mac's: a range, with the cards filling the
+        // column, so the sidebar coming and going or the screen turning gets
+        // a column more or less rather than the same posters with more page
+        // around them. A phone on its side keeps the fixed width it had.
+        if !Metrics.phoneLayout {
+            return [GridItem(.adaptive(minimum: columnMinimum(wide: wide), maximum: columnMaximum(wide: wide)),
+                             spacing: Metrics.gridSpacing, alignment: .top)]
+        }
+        return [GridItem(.adaptive(minimum: wide ? Metrics.stillWidth : Metrics.posterWidth),
+                         spacing: Metrics.gridSpacing, alignment: .top)]
         #else
         return [GridItem(.adaptive(minimum: wide ? Metrics.stillWidth : Metrics.posterWidth),
                          spacing: Metrics.gridSpacing, alignment: .top)]
@@ -1377,6 +1479,10 @@ enum PosterGrid {
         return nil
         #else
         guard phoneColumns(wide: wide, compact: compact) == nil else { return nil }
+        #if os(iOS)
+        // The iPad's column is a range; the card fills whatever it came to.
+        if !Metrics.phoneLayout { return nil }
+        #endif
         return wide ? Metrics.stillWidth : Metrics.posterWidth
         #endif
     }
@@ -1394,9 +1500,9 @@ enum PosterGrid {
         #endif
     }
 
-    /// The narrowest and widest a Mac column runs. The widest is also what a
-    /// card in that column asks the server for, since the card itself has no
-    /// width of its own — see `PosterCard.requestWidth`.
+    /// The narrowest and widest a Mac or iPad column runs. The widest is also
+    /// what a card in that column asks the server for, since the card itself
+    /// has no width of its own — see `PosterCard.requestWidth`.
     static func columnMinimum(wide: Bool) -> CGFloat {
         #if os(macOS)
         (wide ? 220 : 136) * thumbnailScale
@@ -1408,6 +1514,10 @@ enum PosterGrid {
     static func columnMaximum(wide: Bool) -> CGFloat {
         #if os(macOS)
         (wide ? 360 : 210) * thumbnailScale
+        #elseif os(iOS)
+        // Half again on an iPad, the Mac's own proportion: room for the grid
+        // to fill its row whatever is left of it after the sidebar.
+        (wide ? Metrics.stillWidth : Metrics.posterWidth) * (Metrics.phoneLayout ? 1 : 1.5)
         #else
         wide ? Metrics.stillWidth : Metrics.posterWidth
         #endif
@@ -1434,9 +1544,11 @@ enum PosterGrid {
 struct SkeletonCard: View {
     var width: CGFloat?
     var wide: Bool = false
+    /// An album or a book cover rather than a poster.
+    var square: Bool = false
     var showsSubtitle: Bool = true
 
-    private var aspect: CGFloat { wide ? 16.0 / 9.0 : 2.0 / 3.0 }
+    private var aspect: CGFloat { square ? 1 : wide ? 16.0 / 9.0 : 2.0 / 3.0 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.cardTextSpacing) {
@@ -1489,10 +1601,27 @@ struct SkeletonBar: View {
 /// The hero at the top of Home and of a detail page, before it has anything in
 /// it. Same height as the real one, so nothing moves when the artwork lands.
 struct SkeletonHero: View {
+    #if os(iOS)
+    /// Measured, because an iPad's hero is as tall as its width calls for —
+    /// see `HeroHeader.height(forWidth:)`.
+    @State private var width: CGFloat = 0
+    #endif
+
+    private var height: CGFloat {
+        #if os(iOS)
+        HeroHeader.height(forWidth: width)
+        #else
+        HeroHeader.height
+        #endif
+    }
+
     var body: some View {
         Theme.heroPlaceholderFill
-            .frame(height: HeroHeader.height)
+            .frame(height: height)
             .frame(maxWidth: .infinity)
+            #if os(iOS)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            #endif
             .overlay { ShimmerOverlay() }
             .overlay(alignment: .bottomLeading) {
                 // The same blocks in the same places as the real hero's title,
@@ -1534,6 +1663,9 @@ struct SkeletonHero: View {
 struct SkeletonShelf: View {
     var wide: Bool = false
     var count: Int = 4
+    /// Square covers this wide — Music's and Audiobooks' shelves — rather
+    /// than posters, so what loads in is the shape that was waiting for it.
+    var squareWidth: CGFloat? = nil
     #if os(macOS)
     @State private var shelfWidth: CGFloat = 0
     #endif
@@ -1544,7 +1676,7 @@ struct SkeletonShelf: View {
                 .padding(.horizontal, Metrics.gutter)
             HStack(alignment: .top, spacing: Metrics.rowSpacing) {
                 ForEach(0..<cardCount, id: \.self) { _ in
-                    SkeletonCard(width: cardWidth, wide: wide)
+                    SkeletonCard(width: squareWidth ?? cardWidth, wide: wide, square: squareWidth != nil)
                 }
                 Spacer(minLength: 0)
             }
@@ -1658,6 +1790,9 @@ struct MediaGrid: View {
     /// The selected item ids, for a caller that wants them. Nil leaves the
     /// grid to keep its own. Nothing anywhere but the Mac.
     var selection: Binding<Set<String>>? = nil
+    /// Bumped by the caller each time it replaces the list whole — a reload
+    /// — even one that came back with the same items. See `reachEndAgain`.
+    var revision = 0
 
     @Environment(AppModel.self) private var app
     @Environment(\.posterZoomNamespace) private var zoomNamespace
@@ -1685,9 +1820,27 @@ struct MediaGrid: View {
     /// any of the grids, and the page is usually there before the end is.
     private static let reachAhead = 12
 
+    /// The second way the end is reached. The list replaced under a grid
+    /// that was already at its end — a reload after something was marked
+    /// watched, or after the library copy finished its first sync — left the
+    /// last tiles on screen with their one `onAppear` long spent, and if the
+    /// page that was on its way was dropped by the reload, an Apple TV sat
+    /// at "60 of 400" until the grid was scrolled away and back. So the end
+    /// is also reached whenever the list is replaced or changes while any of
+    /// its last tiles is in view. A page that merely grew doesn't qualify:
+    /// the tiles in view are no longer its last ones.
+    private func reachEndAgain() {
+        guard onReachEnd != nil, items.suffix(Self.reachAhead).contains(where: { visible.contains($0.Id) }) else { return }
+        onReachEnd?()
+    }
+
     private var columns: [GridItem] { PosterGrid.columns(wide: wide, compact: isCompact) }
 
     private var cardWidth: CGFloat? { PosterGrid.cardWidth(wide: wide, compact: isCompact) }
+
+    /// The tiles on screen, or near enough that the grid has built them.
+    /// For the second way the end is reached — see `body`.
+    @State private var visible = Set<String>()
 
     var body: some View {
         LazyVGrid(columns: columns, spacing: Metrics.gridRowSpacing) {
@@ -1695,10 +1848,12 @@ struct MediaGrid: View {
                 tile(item)
                     .id(item.Id)
                     .onAppear {
+                        visible.insert(item.Id)
                         if onReachEnd != nil, items.suffix(Self.reachAhead).contains(where: { $0.Id == item.Id }) {
                             onReachEnd?()
                         }
                     }
+                    .onDisappear { visible.remove(item.Id) }
             }
             if pendingCount > 0 {
                 ForEach(0..<pendingCount, id: \.self) { _ in
@@ -1708,6 +1863,8 @@ struct MediaGrid: View {
         }
         .padding(.horizontal, Metrics.gutter)
         .animation(.easeOut(duration: 0.2), value: pendingCount > 0)
+        .onChange(of: items.map(\.Id)) { _, _ in reachEndAgain() }
+        .onChange(of: revision) { _, _ in reachEndAgain() }
         #if os(macOS)
         .background(WidthReader(width: $gridWidth))
         .focusable()
@@ -1920,6 +2077,20 @@ struct WrappingRow: Layout {
 // skeletons above — so the layout settles once, when the request goes out,
 // rather than jumping when it lands.
 
+/// The empty, error and offline states' glyph and text column, given the
+/// phone's. A television's are its own: the phone's 420-point column under a
+/// 34-point glyph was a narrow strip in the middle of a 1920-point screen,
+/// read from across a room.
+private enum StateSize {
+    #if os(tvOS)
+    static func glyph(_ phone: CGFloat) -> CGFloat { 72 }
+    static func textWidth(_ phone: CGFloat) -> CGFloat { 960 }
+    #else
+    static func glyph(_ phone: CGFloat) -> CGFloat { phone }
+    static func textWidth(_ phone: CGFloat) -> CGFloat { phone }
+    #endif
+}
+
 struct EmptyState: View {
     var symbol: String = "tray"
     var title: String
@@ -1945,14 +2116,14 @@ struct EmptyState: View {
         #else
         VStack(spacing: 10) {
             Image(systemName: symbol)
-                .font(.system(size: 34))
+                .font(.system(size: StateSize.glyph(34)))
                 .foregroundStyle(Theme.textDim)
             Text(title).font(.headline).foregroundStyle(Theme.text)
             Text(message)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textDim)
-                .frame(maxWidth: 420)
+                .frame(maxWidth: StateSize.textWidth(420))
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .appButtonStyle()
@@ -1986,14 +2157,14 @@ struct ErrorState: View {
         #else
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 32))
+                .font(.system(size: StateSize.glyph(32)))
                 .foregroundStyle(Theme.warn)
             Text(title).font(.headline).foregroundStyle(Theme.text)
             Text(error)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textDim)
-                .frame(maxWidth: 460)
+                .frame(maxWidth: StateSize.textWidth(460))
             if let retry {
                 Button("Try again", action: retry)
                     .appButtonStyle(prominent: true)
@@ -2011,7 +2182,14 @@ struct OfflineState: View {
     var onDownloads: (() -> Void)?
     @State private var checking = false
 
+    #if os(tvOS)
+    // Nothing is downloaded to a television, so there is nothing to offer
+    // in the meantime: the app asks again on its own and comes back when the
+    // server answers.
+    private static let message = "You're signed in, but your Jellyfin server can't be reached right now. Aquarium keeps checking, and everything comes back as soon as the server answers."
+    #else
     private static let message = "You're signed in, but your Jellyfin server can't be reached right now. Downloaded media is still available, and playback will sync once you're back online."
+    #endif
 
     var body: some View {
         #if os(macOS)
@@ -2033,14 +2211,14 @@ struct OfflineState: View {
         #else
         VStack(spacing: 14) {
             Image(systemName: "wifi.slash")
-                .font(.system(size: 34))
+                .font(.system(size: StateSize.glyph(34)))
                 .foregroundStyle(Theme.warn)
             Text("Server offline").font(.title2.weight(.semibold))
             Text(Self.message)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textDim)
-                .frame(maxWidth: 460)
+                .frame(maxWidth: StateSize.textWidth(460))
             HStack(spacing: 12) {
                 if let onDownloads {
                     Button("Go to Downloads", action: onDownloads)
@@ -2161,10 +2339,18 @@ struct ToastOverlay: View {
     /// pauses on hover" comes to without a timer of this view's own to pause.
     @State private var held: Toast?
     @State private var release: Task<Void, Never>?
+    /// The title or library window this overlay is in; nil on the main
+    /// window. See `shown`.
+    @Environment(\.routeWindowNavigator) private var window
     #endif
 
     private var shown: [Toast] {
         #if os(macOS)
+        // In the window being worked in, and no other. Every window has one
+        // of these over one shared list, so a toast used to appear in all of
+        // them at once — and Escape in any of them took it down everywhere.
+        // See `AppModel.isWorkingWindow`.
+        guard app.isWorkingWindow(window) else { return [] }
         if let held, !app.toasts.contains(held) { return app.toasts + [held] }
         #endif
         return app.toasts
@@ -2345,48 +2531,138 @@ struct AppTopBar<Content: View>: View {
     var height: CGFloat = Metrics.topBar
     @ViewBuilder var content: Content
 
-    /// Room for the floating sidebar toggle on an iPad whose sidebar is
-    /// collapsed — see `sidebarToggleInset`. Zero everywhere else.
-    @Environment(\.sidebarToggleInset) private var toggleInset
+    /// The way back to an iPad's collapsed sidebar — see `showSidebar`. Nil
+    /// everywhere else.
+    @Environment(\.showSidebar) private var showSidebar
+
+    /// A foldable's inside screen held upright has a status strip deeper
+    /// than a phone's and empty but for the pill in its trailing corner —
+    /// see `FoldState.statusStrip`. There the bar *is* the strip: it rises
+    /// to the top of the screen, its content sits on the pill's line with
+    /// the buttons stopping just short of the pill, and the page starts
+    /// where the strip ends. Nil everywhere else, where the bar is fitted
+    /// below the status bar as usual.
+    private var strip: CGFloat? { FoldState.shared.statusStrip }
+
+    /// The front screen held upright: the safe area says the top is free,
+    /// and the status bar still takes the first 24 points of taps — see
+    /// `FoldState.frontTouchStrip`. The bar grows by that much and its
+    /// content keeps to the bottom, below the strip. Zero elsewhere.
+    private var touch: CGFloat { FoldState.shared.frontTouchStrip }
+
+    /// The bar's content is 36 points tall (the button discs).
+    private static var contentHalf: CGFloat { 18 }
+    /// Breathing room between the last button and the pill.
+    private static var pillGap: CGFloat { 10 }
 
     var body: some View {
-        content
-            .padding(.leading, toggleInset)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Metrics.gutter)
-            .padding(.bottom, 9)
-            .frame(height: height, alignment: .bottom)
-            // The bar is fitted below the status bar and its fill is what
-            // reaches up past it. Measuring the inset instead — a
-            // GeometryReader inside an `ignoresSafeArea`, which is the usual
-            // trick — reports zero as often as not, and a bar built on that
-            // number puts the wordmark through the middle of the clock.
-            .background {
-                Theme.background.ignoresSafeArea(edges: .top)
+        let side = Metrics.gutter + Metrics.cornerClearance
+        HStack(spacing: 8) {
+            if let showSidebar {
+                SidebarToggleButton(action: showSidebar)
             }
-            // The one thing separating an opaque bar from the artwork under it.
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(Theme.border)
-                    .frame(height: 0.5)
-            }
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, side)
+        .padding(.trailing, strip == nil ? 0 : max(0, FoldState.statusPillReach + Self.pillGap - side))
+        .padding(.bottom, strip.map { $0 - FoldState.statusPillLine - Self.contentHalf } ?? 9)
+        .frame(height: strip ?? (height + touch), alignment: .bottom)
+        .padding(.top, -(strip ?? 0))
+        // The bar is fitted below the status bar and its fill is what
+        // reaches up past it. Measuring the inset instead — a
+        // GeometryReader inside an `ignoresSafeArea`, which is the usual
+        // trick — reports zero as often as not, and a bar built on that
+        // number puts the wordmark through the middle of the clock. The fill
+        // reaches out to the sides as well: on a foldable's front screen the
+        // page stops short of the tab bar's column and the hero under this
+        // bar does not, so a bar that stopped with the page ended in mid-air.
+        .background {
+            Theme.background.ignoresSafeArea(edges: [.top, .horizontal])
+        }
+        // The one thing separating an opaque bar from the artwork under it.
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Theme.border)
+                .frame(height: 0.5)
+                .ignoresSafeArea(edges: .horizontal)
+        }
     }
 }
 
-/// How far the leading end of a self-drawn top bar has to move over to clear
-/// the floating "show sidebar" button `RootView` lays over the detail column
-/// of an iPad whose sidebar is collapsed. That button sits outside the
-/// navigation stack, in the corner `AppTopBar` puts the wordmark or the back
-/// button in, and without this the two land on top of each other. Zero when
+/// Brings back an iPad's sidebar, for the pages that draw their own bar.
+///
+/// With the sidebar collapsed the system puts a toggle in the navigation bar,
+/// and a page that hides that bar — Home, a title, Live TV — hides the toggle
+/// with it, leaving nothing on screen that brings the sidebar back. So those
+/// pages draw one of their own, at the leading end of `AppTopBar`, wherever
+/// `RootView` hands them this. It used to be a button floating over the whole
+/// detail column, which on every page that *does* have a system bar sat
+/// under the system's own toggle: two of them, one above the other. Nil when
 /// the sidebar is showing, and on anything that has no sidebar.
-private struct SidebarToggleInsetKey: EnvironmentKey {
-    static let defaultValue: CGFloat = 0
+private struct ShowSidebarKey: EnvironmentKey {
+    static let defaultValue: (() -> Void)? = nil
+}
+
+/// The way back from a page a section's stack pushed: that stack's path,
+/// one shorter. Handed down by `RootView` with each stack; nil in a page
+/// shown any other way, where `BarBackButton` uses `dismiss`.
+private struct PopPageKey: EnvironmentKey {
+    static let defaultValue: (() -> Void)? = nil
 }
 
 extension EnvironmentValues {
-    var sidebarToggleInset: CGFloat {
-        get { self[SidebarToggleInsetKey.self] }
-        set { self[SidebarToggleInsetKey.self] = newValue }
+    var popPage: (() -> Void)? {
+        get { self[PopPageKey.self] }
+        set { self[PopPageKey.self] = newValue }
+    }
+}
+
+extension EnvironmentValues {
+    var showSidebar: (() -> Void)? {
+        get { self[ShowSidebarKey.self] }
+        set { self[ShowSidebarKey.self] = newValue }
+    }
+}
+
+/// The toggle itself, drawn the way the system draws the one it stands in for.
+private struct SidebarToggleButton: View {
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "sidebar.leading")
+                .font(.body.weight(.semibold))
+                .barButtonDisc(size: 36)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Show sidebar")
+    }
+}
+
+extension View {
+    /// A bar button's own disc, so the buttons a page draws in `AppTopBar`
+    /// match the ones the system draws in a navigation bar.
+    ///
+    /// From iOS 26 every system bar button — the back button, the sidebar
+    /// toggle — is a glyph in the label colour on a disc of glass, and a bare
+    /// purple chevron on the pages that draw their own bar was the odd one
+    /// out. Before 26 it is the tinted glyph on a disc of material the
+    /// sidebar toggle has always been; the back button there keeps the bare
+    /// chevron the system's own has — see `BarBackButton`.
+    @ViewBuilder
+    func barButtonDisc(size: CGFloat) -> some View {
+        if #available(iOS 26.0, *) {
+            foregroundStyle(Theme.text)
+                .frame(width: size, height: size)
+                .glassEffect(.regular.interactive(), in: Circle())
+                .contentShape(Circle())
+        } else {
+            foregroundStyle(Theme.accent)
+                .frame(width: size, height: size)
+                .background(.thinMaterial, in: Circle())
+                .contentShape(Circle())
+        }
     }
 }
 
@@ -2455,21 +2731,108 @@ struct BackSwipe: UIViewControllerRepresentable {
     }
 }
 
+#endif
+
+#if os(iOS) || os(macOS)
+/// An action as a glass disc with its word underneath — the row under a
+/// title on an iPad and a Mac, where five spelled-out capsules were a row
+/// of web buttons. `tint` marks one that is on: the disc fills with its
+/// colour.
+struct IconDiscLabelStyle: LabelStyle {
+    var tint: Color?
+
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(spacing: 6) {
+            configuration.icon
+                .font(.body.weight(.semibold))
+                .foregroundStyle(tint ?? Theme.text)
+                .frame(width: 48, height: 48)
+                .background {
+                    if let tint {
+                        Circle().fill(tint.opacity(0.16))
+                    } else {
+                        Circle().fill(.ultraThinMaterial)
+                            .background(Theme.raised.opacity(0.5), in: Circle())
+                    }
+                }
+                .overlay(Circle().strokeBorder((tint ?? .white).opacity(tint == nil ? 0.1 : 0.4), lineWidth: 1))
+                .contentShape(Circle())
+            configuration.title
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Theme.textDim)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(width: 64)
+    }
+}
+
+extension View {
+    /// A `Menu` drawn as one of the discs above, where the label is the
+    /// whole control. `.button` with `.plain` is the one menu style on a
+    /// Mac that draws a label made of more than a title and an icon;
+    /// elsewhere a plain button style is enough.
+    @ViewBuilder
+    func discMenuStyle() -> some View {
+        #if os(macOS)
+        menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+        #else
+        buttonStyle(.plain)
+        #endif
+    }
+}
+#endif
+
+#if os(iOS)
+extension View {
+    /// The surface under an iPad's floating bar: nothing while it sits over
+    /// artwork, and a blur with a hairline once the page has scrolled up
+    /// under it. Home and a title page both draw their bar this way.
+    func padBarSurface(filled: Bool) -> some View {
+        background {
+            if filled {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(Theme.background.opacity(0.6))
+                    .overlay(alignment: .bottom) {
+                        Rectangle().fill(Theme.border).frame(height: 0.5)
+                    }
+                    .ignoresSafeArea(edges: .top)
+                    .transition(.opacity)
+            }
+        }
+    }
+}
+
 /// The way back, for a page that draws its own bar. The system's back button
 /// comes with the system's navigation bar, and that bar is the thing these
 /// pages are doing without.
+///
+/// Pops the section's own path where the shell hands one down (`popPage`),
+/// and only falls back to `dismiss` where it does not — see `AppModel.pop`
+/// for why the path and not `dismiss`.
 struct BarBackButton: View {
-    var action: () -> Void
+    @Environment(\.popPage) private var popPage
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: "chevron.backward")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(Theme.accent)
-                // The glyph keeps the gutter; the rest of the frame is
-                // somewhere to land a thumb.
-                .frame(width: 44, height: 38, alignment: .leading)
-                .contentShape(Rectangle())
+        Button(action: { if let popPage { popPage() } else { dismiss() } }) {
+            if #available(iOS 26.0, *) {
+                // The system's back button on this OS — see `barButtonDisc`.
+                Image(systemName: "chevron.backward")
+                    .font(.body.weight(.semibold))
+                    .barButtonDisc(size: 44)
+            } else {
+                Image(systemName: "chevron.backward")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                    // The glyph keeps the gutter; the rest of the frame is
+                    // somewhere to land a thumb.
+                    .frame(width: 44, height: 38, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Back")

@@ -4,8 +4,15 @@
 //  only where the server has something to put in it — as the lists CarPlay
 //  allows, and the system's own Now Playing screen over whatever is chosen,
 //  with the buttons that suit it: shuffle, repeat and a star for a song, the
-//  speed for a book, a sleep timer and Up Next for both. Everything here drives `MusicPlayer`; the lock-screen
-//  card it already keeps is what the car's screen shows too.
+//  speed for a book, a sleep timer and Up Next for both. Everything here
+//  drives `MusicPlayer`; the lock-screen card it already keeps is what the
+//  car's screen shows too.
+//
+//  A car's templates are lists, and a list of names is what every CarPlay
+//  app looks like. So every row here carries a picture — the cover where
+//  there is one, a symbol on a tile where there isn't — and Discover leads
+//  with rows of covers (`imageRow`), the one shape CarPlay draws that isn't
+//  a list: what was played lately, and the stations built from it.
 //
 //  And, parked, the films: since iOS 26.4 a car that can show video lets a
 //  CarPlay app start one from a list, and carries the picture to its own
@@ -25,6 +32,7 @@
 #if canImport(CarPlay)
 import CarPlay
 import CoreMedia
+import SwiftUI
 import UIKit
 
 final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate, CPInterfaceControllerDelegate, CPNowPlayingTemplateObserver, CPSessionConfigurationDelegate {
@@ -166,7 +174,6 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             _ = player.hasUpNext
             _ = player.sleepDeadline
             _ = player.station
-            _ = player.thumb
         }) { [weak self] in
             self?.markPlayingRows()
             self?.configureNowPlaying()
@@ -219,8 +226,21 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     private func fillListenNow() async {
         guard let listenNow, !isFillingListenNow, Date().timeIntervalSince(listenNowFilledAt) > 90 else { return }
         isFillingListenNow = true
-        defer { isFillingListenNow = false }
         listenNowFilledAt = Date()
+        await fill(listenNow)
+        isFillingListenNow = false
+        // The root was rebuilt while this was out — a sign-in, a music
+        // library turning up — and what was just filled is a tab no longer on
+        // screen. The new tab asked for its own fill meanwhile and was turned
+        // away by the one running, so it said "Loading…" for good.
+        if let current = self.listenNow, current !== listenNow {
+            listenNowFilledAt = .distantPast
+            await fillListenNow()
+        }
+    }
+
+    @MainActor
+    private func fill(_ listenNow: CPListTemplate) async {
         let client = JellyfinClient.shared
         // A car is where the server is most often out of reach, and where an
         // empty screen is least welcome: the same page, from this device.
@@ -233,10 +253,10 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         async let books = client.resumeAudio()
         let started = ((try? await books) ?? []).filter(\.isAudiobook)
         await GenreCatalog.prime()
-        let stations = ((try? await recent).map {
-            ListenNowView.stations(recent: $0, top: [], favoriteArtists: [], random: []).map { ($0.title, $0.subtitle, $0.seed) }
-        }) ?? []
-        var sections = await discoverSections(books: started, stations: stations) {
+        let recentSongs = (try? await recent) ?? []
+        let stations = ListenNowView.stations(recent: recentSongs, top: [], favoriteArtists: [], random: [])
+            .map { ($0.title, $0.subtitle, $0.seed) }
+        var sections = await discoverSections(books: started, recentAlbums: recentSongs.albumsInOrder(), stations: stations) {
             (try? await client.music(.init(types: "MusicAlbum", sort: .random, limit: 1)).items)?.first
         }
         // Asked of a server that didn't answer: the downloads are still here.
@@ -249,21 +269,26 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     @MainActor
     private func offlineListenNow() async -> [CPListSection] {
         let all = OfflineMusic.songs
+        let recent = OfflineMusic.recentlyPlayed(limit: 30)
         let stations = OfflineListenNowView.stations(
-            recent: OfflineMusic.recentlyPlayed(limit: 30), top: OfflineMusic.mostPlayed(limit: 24),
+            recent: recent, top: OfflineMusic.mostPlayed(limit: 24),
             favorites: OfflineMusic.favorites(), all: all
         ).map { ($0.title, $0.subtitle, $0.seed) }
-        return await discoverSections(books: OfflineMusic.booksInProgress, stations: stations) { all.shuffled().localAlbums().first }
+        return await discoverSections(books: OfflineMusic.booksInProgress, recentAlbums: recent.localAlbums(), stations: stations) {
+            all.shuffled().localAlbums().first
+        }
     }
 
-    /// Discover, top to bottom: the book you're partway through, then
-    /// stations (led by Shuffle All), then playlists. Nothing else — it's a
-    /// screen read at a glance. Shuffle All is the phone's Surprise Me: one
-    /// of these stations at random, or a random album where there are none,
-    /// started as a live station that re-deals as songs are skipped.
+    /// Discover, top to bottom: the book you're partway through, the covers
+    /// of what was played lately, then stations — Surprise Me, and a row of
+    /// the stations' covers — then playlists. Nothing else: it's a screen
+    /// read at a glance. Surprise Me is the phone's: one of these stations
+    /// at random, or a random album where there are none, started as a live
+    /// station that re-deals as songs are skipped.
     @MainActor
     private func discoverSections(
         books: [BaseItem],
+        recentAlbums: [BaseItem],
         stations: [(title: String, subtitle: String, seed: BaseItem)],
         randomAlbum: @escaping @MainActor () async -> BaseItem?
     ) async -> [CPListSection] {
@@ -274,26 +299,36 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                 header: "Continue Listening", sectionIndexTitle: nil
             ))
         }
-        let shuffle = CPListItem(text: "Shuffle All", detailText: nil, image: UIImage(systemName: "shuffle"))
-        shuffle.handler = { [weak self] _, done in
+        // The pictures are fetched before the rows are built — an image row
+        // is given its covers whole — the two rows' worth at once.
+        let albums = Array(recentAlbums.prefix(Self.rowImageLimit))
+        let seeds = Array(stations.prefix(Self.rowImageLimit))
+        async let albumCovers = covers(for: albums, fallback: "square.stack")
+        async let stationCovers = covers(for: seeds.map(\.seed), titles: seeds.map(\.title), fallback: "dot.radiowaves.left.and.right")
+        // Headed like the sections around it: a section with no header still
+        // gets the car's full section break, which read as a hole in the list.
+        let recentRow = imageRow(Self.headedRowText("Recently Played"), covers: await albumCovers) { [weak self] index in
+            Task { @MainActor in await self?.openAlbum(albums[index]) }
+        }
+        if let recentRow { sections.append(CPListSection(items: [recentRow], header: "Recently Played", sectionIndexTitle: nil)) }
+
+        let surprise = CPListItem(text: "Surprise Me", detailText: "A mix that learns as you skip", image: symbolTile("shuffle"))
+        surprise.handler = { [weak self] _, done in
             Task { @MainActor in
                 let started = await MusicMixes.startSurprise(cover: await randomAlbum()).started
                 if started { self?.showNowPlaying() } else { self?.alert("Couldn't build a mix", "There's nothing in the library to mix from yet.") }
                 done()
             }
         }
-        let stationRows: [CPListItem] = stations.prefix(6).map { station in
-            let item = CPListItem(text: station.title, detailText: station.subtitle)
-            item.handler = { [weak self] _, done in
-                Task { @MainActor in
-                    await MusicMixes.startStation(from: station.seed, title: station.title)
-                    self?.showNowPlaying()
-                    done()
-                }
+        var stationItems: [CPListTemplateItem] = [surprise]
+        let stationRow = imageRow(nil, covers: await stationCovers) { [weak self] index in
+            Task { @MainActor in
+                await MusicMixes.startStation(from: seeds[index].seed, title: seeds[index].title)
+                self?.showNowPlaying()
             }
-            return item
         }
-        sections.append(CPListSection(items: [shuffle] + stationRows, header: "Stations", sectionIndexTitle: nil))
+        if let stationRow { stationItems.append(stationRow) }
+        sections.append(CPListSection(items: stationItems, header: "Stations", sectionIndexTitle: nil))
         let used = sections.reduce(0) { $0 + $1.items.count }
         let playlists = await playlistRows().prefix(max(0, CPListTemplate.maximumItemCount - used))
         if !playlists.isEmpty {
@@ -386,7 +421,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             }),
         ]
         let items = doors.map { title, symbol, load in
-            let item = CPListItem(text: title, detailText: nil, image: UIImage(systemName: symbol))
+            let item = CPListItem(text: title, detailText: nil, image: symbolTile(symbol))
             item.accessoryType = .disclosureIndicator
             item.handler = { [weak self] _, done in
                 Task { @MainActor in
@@ -525,7 +560,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         if let done = item.progressFraction, let total = item.RunTimeTicks {
             parts.append("\(Format.ticks(Int64(Double(total) * (1 - done)))) left")
         }
-        let row = CPListItem(text: item.title, detailText: parts.joined(separator: " · "))
+        let row = CPListItem(text: item.title, detailText: parts.joined(separator: " · "), image: symbolTile(item.isEpisode ? "tv" : "film", tint: Self.placeholderTint))
         if let done = item.progressFraction { row.playbackProgress = CGFloat(done) }
         markAsVideo(row, elapsed: Double(item.userData.positionTicks) / 10_000_000, duration: item.runtimeSeconds)
         if let url = item.isEpisode ? Artwork.still(for: item, width: 240) : Artwork.poster(for: item, width: 160) {
@@ -542,7 +577,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     @MainActor
     private func downloadedVideoItem(_ record: DownloadRecord) -> CPListItem {
-        let row = CPListItem(text: record.title, detailText: "Downloaded")
+        let row = CPListItem(text: record.title, detailText: "Downloaded", image: symbolTile("arrow.down.circle", tint: Self.placeholderTint))
         markAsVideo(row, elapsed: 0, duration: 0)
         row.handler = { _, done in
             Task { @MainActor in
@@ -567,7 +602,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// A library: its films to play, its shows to open.
     @MainActor
     private func libraryDoor(_ library: BaseItem) -> CPListItem {
-        let row = CPListItem(text: library.title, detailText: nil, image: UIImage(systemName: library.CollectionType == "tvshows" ? "tv" : "film"))
+        let row = CPListItem(text: library.title, detailText: nil, image: symbolTile(library.CollectionType == "tvshows" ? "tv" : "film"))
         row.accessoryType = .disclosureIndicator
         row.handler = { [weak self] _, done in
             Task { @MainActor in
@@ -595,7 +630,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// offered first.
     @MainActor
     private func seriesItem(_ series: BaseItem) -> CPListItem {
-        let row = CPListItem(text: series.title, detailText: series.ProductionYear.map(String.init))
+        let row = CPListItem(text: series.title, detailText: series.ProductionYear.map(String.init), image: symbolTile("tv", tint: Self.placeholderTint))
         row.accessoryType = .disclosureIndicator
         if let url = Artwork.poster(for: series, width: 160) {
             Task { if let image = await ImageLoader.shared.load(url) { row.setImage(image) } }
@@ -620,7 +655,10 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                         CPListSection(items: list.map { self.videoItem($0, showsSeries: false) }, header: number == 0 ? "Specials" : "Season \(number)", sectionIndexTitle: nil)
                     }
                 } else {
-                    sections.append(CPListSection(items: seasons.flatMap(\.1).map { self.videoItem($0, showsSeries: false) }))
+                    sections.append(CPListSection(
+                        items: seasons.flatMap(\.1).map { self.videoItem($0, showsSeries: false) },
+                        header: sections.isEmpty ? nil : "Episodes", sectionIndexTitle: nil
+                    ))
                 }
                 let list = CPListTemplate(title: series.title, sections: sections)
                 list.emptyViewTitleVariants = ["No episodes"]
@@ -635,7 +673,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
     @MainActor
     private func albumItem(_ album: BaseItem) -> CPListItem {
-        let item = CPListItem(text: album.title, detailText: album.artistLine)
+        let item = CPListItem(text: album.title, detailText: album.artistLine, image: symbolTile("square.stack", tint: Self.placeholderTint))
         item.accessoryType = .disclosureIndicator
         loadArt(album, into: item)
         item.handler = { [weak self] _, done in
@@ -655,7 +693,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             alert("Couldn't open \(album.title)", "The server didn't answer, and the album isn't downloaded.")
             return
         }
-        let shuffle = CPListItem(text: "Shuffle", detailText: nil, image: UIImage(systemName: "shuffle"))
+        let shuffle = CPListItem(text: "Shuffle", detailText: nil, image: symbolTile("shuffle"))
         shuffle.handler = { [weak self] _, done in
             Task { @MainActor in
                 MusicPlayer.shared.play(tracks, shuffle: true, title: album.title)
@@ -663,18 +701,19 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                 done()
             }
         }
+        // One section: a second, header-less one put a section-sized gap
+        // between Shuffle and the first track.
         let list = CPListTemplate(title: album.title, sections: [
-            CPListSection(items: [shuffle]),
-            CPListSection(items: tracks.map { songItem($0, queue: tracks, title: album.title, showsArt: false) }),
+            CPListSection(items: [shuffle] + tracks.map { songItem($0, queue: tracks, title: album.title, showsArt: false, albumArtist: album.artistLine) }),
         ])
         push(list)
     }
 
     @MainActor
     private func artistItem(_ artist: BaseItem) -> CPListItem {
-        let item = CPListItem(text: artist.title, detailText: nil)
+        let item = CPListItem(text: artist.title, detailText: nil, image: symbolTile("music.mic", tint: Self.placeholderTint))
         item.accessoryType = .disclosureIndicator
-        loadArt(artist, into: item)
+        loadArt(artist, into: item, circular: true)
         item.handler = { [weak self] _, done in
             Task { @MainActor in
                 var q = JellyfinClient.MusicQuery(types: "MusicAlbum", sort: .year, limit: 100)
@@ -683,20 +722,30 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                 let albums = offline
                     ? OfflineMusic.songs(byArtist: artist).localAlbums()
                     : (try? await JellyfinClient.shared.music(q).items) ?? []
-                let shuffle = CPListItem(text: "Shuffle All", detailText: nil, image: UIImage(systemName: "shuffle"))
+                // Surprise Me here is the artist's station — their songs and
+                // the artists near them, re-dealt as songs are skipped —
+                // what the phone's "Start Station" on an artist does. Only
+                // when no station can be built (nothing of theirs on this
+                // device, say) does it fall back to a shuffle of their songs.
+                let shuffle = CPListItem(text: "Surprise Me", detailText: "A mix around \(artist.title)", image: self?.symbolTile("shuffle"))
                 shuffle.handler = { _, finished in
                     Task { @MainActor in
-                        let songs = offline
-                            ? OfflineMusic.songs(byArtist: artist)
-                            : (try? await JellyfinClient.shared.allSongs(artistId: artist.Id)) ?? []
-                        if !songs.isEmpty { MusicPlayer.shared.play(songs, shuffle: true, title: artist.title) }
+                        let started = await MusicMixes.startStation(from: artist, title: "\(artist.title) Station", localOnly: offline).started
+                        if !started {
+                            let songs = offline
+                                ? OfflineMusic.songs(byArtist: artist)
+                                : (try? await JellyfinClient.shared.allSongs(artistId: artist.Id)) ?? []
+                            if !songs.isEmpty { MusicPlayer.shared.play(songs, shuffle: true, title: artist.title) }
+                        }
                         self?.showNowPlaying()
                         finished()
                     }
                 }
+                // Surprise Me heads the list rather than sitting in a
+                // header-less section of its own, which the car spaced off
+                // from the albums like a missing heading.
                 let list = CPListTemplate(title: artist.title, sections: [
-                    CPListSection(items: [shuffle]),
-                    CPListSection(items: albums.compactMap { self?.albumItem($0) }, header: "Albums", sectionIndexTitle: nil),
+                    CPListSection(items: [shuffle] + albums.compactMap { self?.albumItem($0) }),
                 ])
                 self?.push(list)
                 done()
@@ -708,7 +757,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// A playlist or a genre: something that is played whole.
     @MainActor
     private func collectionItem(_ collection: BaseItem, songs: @escaping (BaseItem) async throws -> [BaseItem]) -> CPListItem {
-        let item = CPListItem(text: collection.title, detailText: nil)
+        let symbol = collection.type == "MusicGenre" ? "guitars" : "music.note.list"
+        let item = CPListItem(text: collection.title, detailText: nil, image: symbolTile(symbol, tint: Self.placeholderTint))
         loadArt(collection, into: item)
         item.handler = { [weak self] _, done in
             Task { @MainActor in
@@ -749,8 +799,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     }
 
     @MainActor
-    private func songItem(_ song: BaseItem, queue: [BaseItem], title: String, showsArt: Bool = true) -> CPListItem {
-        let detail: String
+    private func songItem(_ song: BaseItem, queue: [BaseItem], title: String, showsArt: Bool = true, albumArtist: String? = nil) -> CPListItem {
+        let detail: String?
         if song.isAudiobook {
             // Who wrote it, and how far in — what tells two half-heard books
             // apart from the driver's seat.
@@ -761,10 +811,15 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             } else {
                 detail = author
             }
+        } else if let albumArtist, song.artistLine == albumArtist {
+            // On an album's own page the artist is the album's, and the same
+            // name under every track says nothing. A guest still shows.
+            detail = nil
         } else {
             detail = song.artistLine
         }
-        let item = CPListItem(text: song.title, detailText: detail)
+        let item = CPListItem(text: song.title, detailText: detail,
+                              image: showsArt ? symbolTile(song.isAudiobook ? "book" : "music.note", tint: Self.placeholderTint) : nil)
         item.isPlaying = MusicPlayer.shared.current?.Id == song.Id
         item.playingIndicatorLocation = .trailing
         if let done = song.progressFraction { item.playbackProgress = CGFloat(done) }
@@ -787,11 +842,122 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     }
 
     @MainActor
-    private func loadArt(_ item: BaseItem, into row: CPListItem) {
+    private func loadArt(_ item: BaseItem, into row: CPListItem, circular: Bool = false) {
         guard let url = MusicArt.url(item, width: 160) else { return }
-        Task {
-            if let image = await ImageLoader.shared.load(url) { row.setImage(image) }
+        Task { @MainActor in
+            guard let image = await ImageLoader.shared.load(url) else { return }
+            row.setImage(rowTile(image, circular: circular))
         }
+    }
+
+    /// A picture cropped to the square the car draws a row's image in. An
+    /// album cover already is one; an artist's photo is usually a wide band
+    /// shot, which stayed the grey placeholder in the car where the phone
+    /// showed the face. Artists are cut to a circle, as the phone draws them.
+    @MainActor
+    private func rowTile(_ image: UIImage, circular: Bool) -> UIImage {
+        var size = CPListItem.maximumImageSize
+        if size.width <= 0 || size.height <= 0 { size = CGSize(width: 80, height: 80) }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = interfaceController?.carTraitCollection.displayScale ?? 2
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            let bounds = CGRect(origin: .zero, size: size)
+            // The car rounds a square cover's corners itself.
+            (circular ? UIBezierPath(ovalIn: bounds) : UIBezierPath(rect: bounds)).addClip()
+            let scale = max(size.width / max(image.size.width, 1), size.height / max(image.size.height, 1))
+            let drawn = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            image.draw(in: CGRect(x: (size.width - drawn.width) / 2, y: (size.height - drawn.height) / 2, width: drawn.width, height: drawn.height))
+        }
+    }
+
+    // MARK: - Pictures
+
+    /// How many covers an image row is given. The car draws about that
+    /// many across a wide screen; the rest would be a swipe nobody makes.
+    private static let rowImageLimit = 8
+
+    /// The tile behind a symbol that stands in for a cover: a row's own
+    /// thing — Surprise Me, a library door — in the accent, and a stand-in
+    /// for a picture still on its way in a neutral grey.
+    private static let placeholderTint = UIColor(white: 0.26, alpha: 1)
+
+    /// A symbol on a rounded square at the size the car draws a row's
+    /// image, so a row without a cover is drawn like the rows with one.
+    @MainActor
+    private func symbolTile(_ symbol: String, tint: UIColor = UIColor(Theme.accent)) -> UIImage? {
+        var size = CPListItem.maximumImageSize
+        if size.width <= 0 || size.height <= 0 { size = CGSize(width: 80, height: 80) }
+        let config = UIImage.SymbolConfiguration(pointSize: size.height * 0.42, weight: .semibold)
+        guard let glyph = UIImage(systemName: symbol, withConfiguration: config)?
+            .withTintColor(.white, renderingMode: .alwaysOriginal) else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = interfaceController?.carTraitCollection.displayScale ?? 2
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            tint.setFill()
+            UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: size.width * 0.18).fill()
+            let g = glyph.size
+            glyph.draw(in: CGRect(x: (size.width - g.width) / 2, y: (size.height - g.height) / 2, width: g.width, height: g.height))
+        }
+    }
+
+    /// The covers for a row of them, fetched together: each item's picture,
+    /// or a tile with `fallback` on it where there is none. `titles` names
+    /// the pictures where the items' own names aren't the right ones — a
+    /// station is named for what it is, not for its seed.
+    @MainActor
+    private func covers(for items: [BaseItem], titles: [String]? = nil, fallback: String) async -> [(title: String, image: UIImage)] {
+        let urls = items.map { MusicArt.url($0, width: 300) }
+        let images = await withTaskGroup(of: (Int, UIImage?).self) { group in
+            for (i, url) in urls.enumerated() {
+                group.addTask {
+                    guard let url else { return (i, nil) }
+                    return (i, await ImageLoader.shared.load(url))
+                }
+            }
+            var out = [UIImage?](repeating: nil, count: urls.count)
+            for await (i, image) in group { out[i] = image }
+            return out
+        }
+        return items.indices.compactMap { i in
+            guard let image = images[i] ?? symbolTile(fallback, tint: Self.placeholderTint) else { return nil }
+            return (titles?[i] ?? items[i].title, image)
+        }
+    }
+
+    /// A row of covers with a name under each — the one thing CarPlay draws
+    /// that isn't a list of rows. `select` is handed the index of the cover
+    /// pressed. Nil with nothing to show, so the caller leaves it out.
+    @MainActor
+    private func imageRow(_ text: String?, covers: [(title: String, image: UIImage)], select: @escaping (Int) -> Void) -> CPListImageRowItem? {
+        let covers = Array(covers.prefix(Self.rowImageLimit))
+        guard !covers.isEmpty else { return nil }
+        let row: CPListImageRowItem
+        if #available(iOS 26.0, *) {
+            let elements = covers.map {
+                CPListImageRowItemImageGridElement(image: $0.image, imageShape: .roundedRectangle, title: $0.title, accessorySymbolName: nil)
+            }
+            // Multiple lines: the car sizes the row for every cover it is
+            // given whether or not it may wrap, so a single line of four
+            // left a blank second line's worth of space under the row.
+            row = CPListImageRowItem(text: text, imageGridElements: elements, allowsMultipleLines: true)
+        } else if #available(iOS 17.4, *) {
+            row = CPListImageRowItem(text: text ?? "", images: covers.map(\.image), imageTitles: covers.map(\.title))
+        } else {
+            row = CPListImageRowItem(text: text ?? "", images: covers.map(\.image))
+        }
+        row.listImageRowHandler = { _, index, done in
+            if covers.indices.contains(index) { select(index) }
+            done()
+        }
+        return row
+    }
+
+    /// The image row's own title, where the section above it already says the
+    /// same thing. iOS 26 can leave it out; earlier rows need text, and an
+    /// empty line is quieter than the heading twice.
+    private static func headedRowText(_ text: String) -> String? {
+        if #available(iOS 26.0, *) { return nil }
+        return ""
     }
 
     /// The car allows five templates deep and raises an exception — which
@@ -845,9 +1011,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     /// The buttons under the artwork, for what is playing: a song gets
     /// shuffle, repeat and a star; a book gets its speed instead, since
     /// nobody shuffles a novel. Both get the sleep timer. A station's songs
-    /// get thumbs down and up in place of shuffle and repeat, which a
-    /// station deals for itself — the car allows five buttons. The thumbs
-    /// are the station's, and go with it.
+    /// get neither shuffle nor repeat: a station deals for itself, and
+    /// skipping is how it is steered.
     @MainActor
     private func configureNowPlaying() {
         let template = CPNowPlayingTemplate.shared
@@ -863,18 +1028,8 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         var buttons: [CPNowPlayingButton] = []
         if current.isAudiobook {
             buttons.append(CPNowPlayingPlaybackRateButton { _ in MusicPlayer.shared.stepSpeed(1) })
-        } else if player.canThumb {
-            let thumb = player.thumb
-            if let down = UIImage(systemName: thumb == -1 ? "hand.thumbsdown.fill" : "hand.thumbsdown") {
-                buttons.append(CPNowPlayingImageButton(image: down) { _ in
-                    Task { @MainActor in MusicPlayer.shared.setThumb(thumb == -1 ? nil : -1) }
-                })
-            }
-            if let up = UIImage(systemName: thumb == 1 ? "hand.thumbsup.fill" : "hand.thumbsup") {
-                buttons.append(CPNowPlayingImageButton(image: up) { _ in
-                    Task { @MainActor in MusicPlayer.shared.setThumb(thumb == 1 ? nil : 1) }
-                })
-            }
+        } else if player.station != nil, current.isSong {
+            // Nothing in place of shuffle and repeat; see above.
         } else {
             buttons.append(CPNowPlayingShuffleButton { _ in MusicPlayer.shared.toggleShuffle() })
             buttons.append(CPNowPlayingRepeatButton { _ in MusicPlayer.shared.repeatMode = MusicPlayer.shared.repeatMode.next })
@@ -942,7 +1097,9 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         Task { @MainActor [weak self] in
             let entries = Array(MusicPlayer.shared.upNext.prefix(CPListTemplate.maximumItemCount))
             let rows = entries.map { entry in
-                let row = CPListItem(text: entry.item.title, detailText: entry.item.artistLine)
+                let row = CPListItem(text: entry.item.title, detailText: entry.item.artistLine,
+                                     image: self?.symbolTile("music.note", tint: Self.placeholderTint))
+                self?.loadArt(entry.item, into: row)
                 row.handler = { [weak self] _, done in
                     Task { @MainActor in
                         MusicPlayer.shared.skip(to: entry)

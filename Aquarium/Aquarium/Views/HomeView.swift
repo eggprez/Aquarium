@@ -38,6 +38,9 @@ struct HomeView: View {
     /// rather than worked out in `body`: the bar is not allowed to change what
     /// it is showing because the page redrew.
     @State private var heroItems: [BaseItem] = []
+    /// The saved Home was drawn as the page appeared, ahead of the first load
+    /// — which must then keep the media bar it drew rather than draw again.
+    @State private var drewSavedHome = false
     /// A fingerprint of the page as it was last saved and indexed. See `load`.
     @State private var lastPublished: Int?
     /// When the media bar last drew a new set. See `load`.
@@ -63,7 +66,12 @@ struct HomeView: View {
     @State private var featured: BaseItem?
     #endif
 
-    private var hero: BaseItem? { heroItems.first ?? resume.first ?? shownNextUp.first }
+    /// What there is to carry on with, as Home shows it: nothing, with the
+    /// Continue Watching row turned off — the bar and the fallbacks below
+    /// then lead with Next Up, as the page does.
+    private var shownResume: [BaseItem] { prefs.hidesContinueWatching ? [] : resume }
+
+    private var hero: BaseItem? { heroItems.first ?? shownResume.first ?? shownNextUp.first }
 
     /// Next Up less the shows taken off it by hand. What every use of the
     /// list on this page reads — the row, the media bar's fallback, the home
@@ -73,20 +81,9 @@ struct HomeView: View {
         HomeRows.visible(nextUp, nextUp: nextUp) { prefs.nextUpHiddenEpisode(seriesId: $0) }
     }
 
-    /// Continue Watching and Next Up as one row, with the removed shows taken
-    /// out of it. See `HomeRows.combined`.
-    private var combinedRow: [BaseItem] {
-        HomeRows.visible(HomeRows.combined(resume: resume, nextUp: nextUp), nextUp: nextUp) {
-            prefs.nextUpHiddenEpisode(seriesId: $0)
-        }
-    }
-
-    /// With the two rows combined, the slot the one row is drawn in: whichever
-    /// of Continue Watching and Next Up the account's layout puts first. The
-    /// other slot draws nothing.
-    private var combinedSlot: HomeSection? {
-        guard prefs.combinesNextUp else { return nil }
-        return sections.first { $0 == .resume || $0 == .nextUp }
+    /// What `onChange` watches for the Next Up settings, as one value.
+    private var nextUpSettings: String {
+        "\(prefs.nextUpDays)|\(prefs.nextUpIncludesInProgress)|\(prefs.nextUpRewatching)"
     }
 
     private var isBare: Bool {
@@ -117,11 +114,11 @@ struct HomeView: View {
             }
         }
 
-        take(resume, limit: 2)
+        take(shownResume, limit: 2)
         take(shownNextUp, limit: 2)
         for entry in latest { take(entry.items, limit: 1) }
 
-        if out.isEmpty, let first = resume.first ?? shownNextUp.first { return [first] }
+        if out.isEmpty, let first = shownResume.first ?? shownNextUp.first { return [first] }
         return Array(out.prefix(6))
     }
 
@@ -191,6 +188,30 @@ struct HomeView: View {
         _heroDrawnAt = State(initialValue: memo.heroDrawnAt)
     }
 
+    /// Have the server forget the in-progress episodes Next Up has moved
+    /// well past — see `HomeRows.abandoned` — and take the ones it forgot off
+    /// the page. Each is its own request and its own failure: one the server
+    /// would not clear stays where it is until the next load tries again.
+    private func clearAbandonedEpisodes() async {
+        let stale = HomeRows.abandoned(resume: resume, nextUp: nextUp)
+        guard !stale.isEmpty else { return }
+        var cleared = Set<String>()
+        for item in stale {
+            do {
+                try await client.clearProgress(item.Id)
+                cleared.insert(item.Id)
+            } catch {
+                continue
+            }
+        }
+        guard !cleared.isEmpty else { return }
+        resume.removeAll { cleared.contains($0.Id) }
+        rememberPage()
+        app.toast(cleared.count == 1
+                  ? "Cleared an abandoned episode from Continue Watching"
+                  : "Cleared \(cleared.count) abandoned episodes from Continue Watching")
+    }
+
     private func rememberPage() {
         HomeMemo.save(HomeMemo(
             account: client.session?.accountKey,
@@ -206,8 +227,13 @@ struct HomeView: View {
         // scroll view, and it carries the application's name rather than the
         // page's — "Home" above a hard-edged backdrop is the seam that made the
         // top of this page look bolted on.
-        scroll()
-            .toolbar(.hidden, for: .navigationBar)
+        if Metrics.phoneLayout {
+            scroll()
+                .toolbar(.hidden, for: .navigationBar)
+        } else {
+            padHome
+                .toolbar(.hidden, for: .navigationBar)
+        }
         #elseif os(tvOS)
         // The media bar is meant to be the top of the screen, not a picture
         // sitting in the middle of one: edge to edge across, and up behind the
@@ -241,6 +267,70 @@ struct HomeView: View {
             .toolbarBackground(.hidden, for: .windowToolbar)
         #endif
     }
+
+    #if os(iOS)
+    /// What the top of the screen keeps for the clock, read from outside
+    /// the scroll view that ignores it — see `padHome`.
+    @State private var padTopInset: CGFloat = 0
+    /// Whether the hero has scrolled up under the bar, which is when the
+    /// bar earns a surface and the wordmark.
+    @State private var padScrolled = false
+    @Environment(\.showSidebar) private var showSidebar
+
+    /// An iPad's Home: the hero runs up under the status bar and the bar
+    /// floats over it — glass discs on the artwork, and only once the page
+    /// has scrolled a surface of its own with the wordmark on it. The phone
+    /// keeps its solid `AppTopBar`, whose reasons — the island, the clock
+    /// sitting on a different picture every few seconds — are a phone's.
+    ///
+    /// The scroll view ignores the top of the safe area; the stack around
+    /// it does not, so its own geometry says how much was ignored, and the
+    /// hero is told to reach up by that much plus the bar — see `scroll`.
+    private var padHome: some View {
+        ZStack(alignment: .top) {
+            scroll(bleed: EdgeInsets(top: padTopInset + Metrics.topBar, leading: 0, bottom: 0, trailing: 0))
+                .ignoresSafeArea(.container, edges: .top)
+                .modifier(HeroScrollWatcher(threshold: 180, isPast: $padScrolled))
+            padBar
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
+    }
+
+    private var padBar: some View {
+        HStack(spacing: 10) {
+            if let showSidebar {
+                Button(action: showSidebar) {
+                    Image(systemName: "sidebar.leading")
+                        .font(.body.weight(.semibold))
+                        .barButtonDisc(size: 36)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show sidebar")
+            }
+            if padScrolled {
+                BrandMark()
+                    .transition(.opacity)
+            }
+            Spacer(minLength: 12)
+            Button {
+                app.push(.search(""))
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.body.weight(.semibold))
+                    .barButtonDisc(size: 36)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Search")
+            RefreshButton(isRefreshing: isRefreshing) {
+                Task { await reload(fresh: true) }
+            }
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .frame(height: Metrics.topBar)
+        .padBarSurface(filled: padScrolled)
+        .animation(.easeOut(duration: 0.2), value: padScrolled)
+    }
+    #endif
 
     #if os(macOS)
     @ToolbarContentBuilder
@@ -308,9 +398,13 @@ struct HomeView: View {
             Spacer()
             refreshControl
         }
+        // The section is the row the button is on, not the padding above it.
+        // Taken outside the padding it reached the top of the screen, behind
+        // the tab strip, and Down from the strip — which only moves into what
+        // lies below it — went straight past it to the first shelf.
+        .focusSection()
         .padding(.top, max(bleed.top, Self.tabStripClearance))
         .padding(.horizontal, max(bleed.leading, Metrics.gutter))
-        .focusSection()
     }
 
     /// How far down the media bar the tab strip reaches, plus a gap. Measured
@@ -353,7 +447,7 @@ struct HomeView: View {
                 LazyVStack(alignment: .leading, spacing: Metrics.shelfSpacing) {
                     #if os(iOS)
                     if !heroItems.isEmpty {
-                        HeroCarousel(items: heroItems)
+                        HeroCarousel(items: heroItems, topBleed: bleed.top)
                     }
                     #elseif os(tvOS)
                     if heroItems.isEmpty {
@@ -402,11 +496,19 @@ struct HomeView: View {
                 #if os(tvOS)
                 .padding(.top, heroItems.isEmpty ? bleed.top + 12 : 0)
                 #elseif os(iOS)
-                .padding(.top, heroItems.isEmpty ? 12 : 0)
+                .padding(.top, heroItems.isEmpty ? bleed.top + 12 : 0)
                 #else
                 .padding(.top, hero == nil ? 12 : 0)
                 #endif
+                #if os(tvOS)
+                // At least the 60 points of overscan a television may crop:
+                // `bleed` reports zero as often as not (see `refreshOverHero`),
+                // and the last shelf's captions ended under 50 points from the
+                // bottom of the screen.
+                .padding(.bottom, 24 + max(bleed.bottom, 60))
+                #else
                 .padding(.bottom, 24 + bleed.bottom)
+                #endif
             }
         }
         .reloadWhenPlaybackEnds { await reload() }
@@ -415,8 +517,9 @@ struct HomeView: View {
         // View ▸ Refresh (⌘R), the sidebar row's Refresh, and the app coming
         // back to the front after a while away all arrive here as one
         // counter — see `MacCommandRequests.refresh`. Only while Home is the
-        // page in front: a title pushed over it answers its own ⌘R.
-        .onChange(of: MacCommandRequests.shared.refresh) { _, _ in
+        // page in front, in the window in front: a title pushed over it, or a
+        // title window, answers its own ⌘R. See `onMacRefresh`.
+        .onMacRefresh {
             guard isFrontmost else { return }
             Task { await reload(fresh: true) }
         }
@@ -430,6 +533,21 @@ struct HomeView: View {
         // anyway (see `isFrontmost` below), so a change made while it was
         // covered is picked up then, once, instead of twice.
         .reloadWhenItemsChange { if isFrontmost { await reload() } }
+        // The Next Up settings are the row's query (see `JellyfinClient.nextUp`),
+        // so changing one — here, in a Mac's Settings window beside this one,
+        // or on another device through iCloud — asks for the row again.
+        .onChange(of: nextUpSettings) { _, _ in
+            if isFrontmost { Task { await reload() } }
+        }
+        // The saved Home before the first frame, not after it: `.task` starts
+        // only once the page is on screen, and the frame in between was the
+        // default layout — the libraries row alone — jumping to the saved one.
+        .onAppear {
+            if drawSavedHome() {
+                drewSavedHome = true
+                Launch.mark("home from saved copy")
+            }
+        }
         .task { await reload() }
         .task(id: app.libraries.map(\.Id)) { await loadLatest() }
         .onDisappear { rememberPage() }
@@ -473,13 +591,32 @@ struct HomeView: View {
         // The bar is part of the screen rather than something drawn over it:
         // everything that scrolls arrives underneath it and is gone, and the
         // page starts where the bar ends.
+        //
+        // A phone's. An iPad's bar floats over the hero instead — see
+        // `padHome` — so here it is nothing, which takes no room.
         .safeAreaInset(edge: .top, spacing: 0) {
-            AppTopBar {
-                HStack(spacing: 0) {
-                    BrandMark()
-                    Spacer(minLength: 12)
-                    RefreshButton(isRefreshing: isRefreshing) {
-                        Task { await reload(fresh: true) }
+            if Metrics.phoneLayout {
+                AppTopBar {
+                    HStack(spacing: 0) {
+                        BrandMark()
+                        Spacer(minLength: 12)
+                        HStack(spacing: 10) {
+                            // Search lives here rather than in a tab of its
+                            // own: it opens over Home, with the field already
+                            // active.
+                            Button {
+                                app.push(.search(""))
+                            } label: {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.body.weight(.semibold))
+                                    .barButtonDisc(size: 36)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Search")
+                            RefreshButton(isRefreshing: isRefreshing) {
+                                Task { await reload(fresh: true) }
+                            }
+                        }
                     }
                 }
             }
@@ -527,47 +664,41 @@ struct HomeView: View {
     private func shelf(_ section: HomeSection) -> some View {
         switch section {
         case .libraries:
-            LibraryTilesRow(libraries: app.libraries) { library in
-                app.push(.library(
-                    id: library.Id,
-                    name: library.title,
-                    collectionType: library.CollectionType
-                ))
-            }
-        case .resume, .nextUp:
-            if let combinedSlot {
-                // The two rows as one, drawn where the first of them was: a
-                // poster per show, carrying the progress of the episode you
-                // are partway through, beside the films you have started.
-                // Posters rather than stills because a show's card stands for
-                // the show, not for a frame of it — see the Next Up row below
-                // — and a film has only ever had a poster.
-                if section == combinedSlot {
-                    MediaShelf(
-                        title: "Continue Watching",
-                        items: combinedRow,
-                        art: .season,
-                        menuOpensDetails: true,
-                        menuRemovesFromNextUp: true
-                    ) { openNextUp($0) }
-                }
-            } else if section == .resume {
-                MediaShelf(title: "Continue Watching", items: resume, wide: true) { open($0) }
+            #if os(iOS)
+            // An iPad has the libraries down its sidebar already; the slot
+            // is a strip of capsules rather than a second row of artwork
+            // before the first row of anything to watch.
+            if Metrics.phoneLayout {
+                LibraryTilesRow(libraries: app.libraries) { openLibrary($0) }
             } else {
-                // Portrait, and a picture of the *season* rather than of the
-                // episode. Continue Watching is a row of stills because it
-                // points at a moment you were in the middle of; Next Up points
-                // at the next thing in a show, and a frame from an episode
-                // nobody has seen yet is a picture of nothing in particular.
-                // See `Artwork.seasonArt`.
-                MediaShelf(
-                    title: "Next Up",
-                    items: shownNextUp,
-                    art: .season,
-                    menuOpensDetails: true,
-                    menuRemovesFromNextUp: true
-                ) { openNextUp($0) }
+                LibraryChipsRow(libraries: app.libraries) { openLibrary($0) }
             }
+            #elseif os(macOS)
+            // The same strip on the Mac, whose sidebar also lists them.
+            LibraryChipsRow(libraries: app.libraries) { openLibrary($0) }
+            #else
+            LibraryTilesRow(libraries: app.libraries) { openLibrary($0) }
+            #endif
+        case .resume:
+            // Turned off in Settings, the slot draws nothing — Next Up keeps
+            // its own place below.
+            if !prefs.hidesContinueWatching {
+                MediaShelf(title: "Continue Watching", items: resume, wide: true) { open($0) }
+            }
+        case .nextUp:
+            // Portrait, and a picture of the *season* rather than of the
+            // episode. Continue Watching is a row of stills because it
+            // points at a moment you were in the middle of; Next Up points
+            // at the next thing in a show, and a frame from an episode
+            // nobody has seen yet is a picture of nothing in particular.
+            // See `Artwork.seasonArt`.
+            MediaShelf(
+                title: "Next Up",
+                items: shownNextUp,
+                art: .season,
+                menuOpensDetails: true,
+                menuRemovesFromNextUp: true
+            ) { openNextUp($0) }
         case .latest:
             // One row per library, which is how Jellyfin draws this slot too —
             // it is a single setting that expands into as many rows as the
@@ -602,6 +733,14 @@ struct HomeView: View {
                 app.show(.liveTV)
             }
         }
+    }
+
+    private func openLibrary(_ library: BaseItem) {
+        app.push(.library(
+            id: library.Id,
+            name: library.title,
+            collectionType: library.CollectionType
+        ))
     }
 
     /// The channels with something on them, for the Live TV row. Capped: this
@@ -650,6 +789,29 @@ struct HomeView: View {
         open(item)
     }
 
+    /// Home as it was last drawn, onto a page that has none of its rows yet.
+    /// Returns whether it drew. With the server out of reach, that is the page.
+    ///
+    /// Not `isBare`: that is false as soon as the libraries are known, and at
+    /// launch they are known at once, from the saved list — so the saved rows
+    /// were never drawn and the page opened on the libraries row alone.
+    private func drawSavedHome() -> Bool {
+        guard resume.isEmpty, nextUp.isEmpty, latest.isEmpty, heroItems.isEmpty,
+              let saved = LibraryIndex.shared.homeCopy()
+        else { return false }
+        let savedSections = saved.sections.compactMap(HomeSection.init(rawValue:))
+        if !savedSections.isEmpty { sections = savedSections }
+        resume = saved.resume
+        nextUp = saved.nextUp
+        latest = saved.latest.map { (library: $0.library, items: $0.items) }
+        heroItems = client.isOffline
+            // Backdrops are saved as they are seen, so offline the bar
+            // shows the titles it showed before, whose pictures are here.
+            ? saved.hero
+            : (LibraryIndex.shared.spotlight(limit: 6) ?? saved.hero)
+        return true
+    }
+
     /// `fresh` is the Refresh button: everything is asked for again, the
     /// layout included (see `JellyfinClient.homeSections`).
     private func load(fresh: Bool = false) async {
@@ -657,33 +819,27 @@ struct HomeView: View {
         isLoading = true
         defer { isLoading = false }
 
-        // With the library copy on, Home opens on what it showed last time —
-        // brought up to date with what has been watched since — and the
+        // Home opens on what it showed last time — brought up to date with
+        // what has been watched since, where the library copy is on — and the
         // server's answers replace it row by row as they arrive. With the
         // server out of reach, that is the page.
         let index = LibraryIndex.shared
         // At launch this page starts loading alongside the shell, which is
-        // still reading the copy off disk; waiting for that is what makes the
-        // first frame of Home the saved one rather than an empty one. Returns
-        // at once when the copy is off or already read.
-        await index.prepare()
-        var drewFromCopy = false
-        if isBare, let saved = index.homeCopy() {
-            let savedSections = saved.sections.compactMap(HomeSection.init(rawValue:))
-            if !savedSections.isEmpty { sections = savedSections }
-            resume = saved.resume
-            nextUp = saved.nextUp
-            latest = saved.latest.map { (library: $0.library, items: $0.items) }
-            heroItems = client.isOffline
-                // Backdrops are saved as they are seen, so offline the bar
-                // shows the titles it showed before, whose pictures are here.
-                ? saved.hero
-                : (index.spotlight(limit: 6) ?? saved.hero)
-            drewFromCopy = true
-        }
+        // still reading the copy off disk; waiting for the saved Home is what
+        // makes the first frame of Home the saved one rather than an empty
+        // one. Only the saved Home: the rest of the copy is the whole library,
+        // and it is waited for below, after the page has been drawn. Returns
+        // at once when it has already been read — the launch reads it before
+        // the shell is drawn (`AppModel.restoreLaunchState`).
+        await index.prepareHome()
+        let drewFromCopy = drawSavedHome() || drewSavedHome
+        drewSavedHome = false
 
         async let resumeTask = client.resume()
         async let nextUpTask = client.nextUp()
+        // The rest of the copy, now the page is drawn and its requests are out:
+        // the media bar's draw below comes from it.
+        await index.prepare()
         // The media bar's random draw comes from the copy when there is one:
         // it is the same draw, without a request.
         //
@@ -714,13 +870,19 @@ struct HomeView: View {
         do { resume = try await resumeTask } catch { failure = error }
         do { nextUp = try await nextUpTask } catch { failure = failure ?? error }
 
+        // Both lists fresh is the moment to tidy the episodes Next Up has left
+        // behind. Not awaited: it is a write per episode, and the page is not
+        // kept waiting on housekeeping.
+        if failure == nil, prefs.clearsAbandonedEpisodes {
+            Task { await clearAbandonedEpisodes() }
+        }
+
         #if os(iOS)
         // The home screen icon's press-and-hold menu leads with the same
         // title this page does.
         if failure == nil { QuickActions.update(resume: resume, nextUp: shownNextUp) }
-        // And a fresh Next Up is the moment to notice an episode new to the
-        // server — see Core/NextUpAlerts.swift.
-        if failure == nil { NextUpAlerts.shared.note(nextUp: nextUp) }
+        // And the Follow tile's choices — see Core/FollowFeed.swift.
+        if failure == nil { FollowFeed.shared.update(resume: resume, nextUp: shownNextUp) }
         #elseif os(macOS)
         // The Dock icon's menu is the same list: what was left part-watched,
         // then what is next.
@@ -930,12 +1092,19 @@ struct HeroHeader: View {
     /// How tall to draw this one. The platform's fixed `height` unless the
     /// caller knows better — the Mac carousel derives it from the window's
     /// width, so a wide window gets a taller picture rather than a strip.
+    /// On iOS a hero nobody has measured (`availableWidth` zero) measures
+    /// itself and takes `height(forWidth:)` instead — see `resolvedHeight`.
     var heroHeight: CGFloat = Self.height
     /// The width the hero has been given, where the caller has measured it;
     /// zero means "unknown", and the fixed sizes below stand in. On the Mac
     /// the wordmark, the text column and the pixels asked of the server all
     /// follow it.
     var availableWidth: CGFloat = 0
+    /// What the sides of the screen keep for the system — on a foldable's
+    /// front screen the tab bar's column — when the hero has been laid out
+    /// over them rather than inside them. The picture goes under; the title
+    /// and the buttons stay this far clear. See `HeroCarousel`.
+    var sideInsets: EdgeInsets = EdgeInsets()
 
     @Environment(AppModel.self) private var app
     @Environment(PlayerModel.self) private var player
@@ -960,6 +1129,13 @@ struct HeroHeader: View {
     @State private var isHoveringBackdrop = false
     #endif
 
+    #if os(iOS)
+    @Environment(\.displayScale) private var displayScale
+    /// The width this hero was laid out at, for one whose caller didn't
+    /// measure it — a detail page's. Zero until the first layout pass.
+    @State private var measuredWidth: CGFloat = 0
+    #endif
+
     /// How tall the hero is on this platform. Shared so the skeleton that
     /// stands in for it, and the carousel that pages through several, agree
     /// with the real thing rather than each carrying their own copy of the
@@ -982,9 +1158,48 @@ struct HeroHeader: View {
         #endif
     }
 
+    /// How tall the hero is for a given width.
+    ///
+    /// The fixed `height` everywhere but an iPad. There, 300 points across a
+    /// 13-inch screen was a 4:1 strip cut out of the middle of a 16:9
+    /// backdrop; it follows the width instead, the way the Mac carousel's
+    /// does — a 2.4:1 band, between the phone's height and one that leaves
+    /// the first shelf on screen. A phone is never given more than `height`:
+    /// held upright it is narrower than the band would want, and on its side
+    /// the picture would take the whole screen.
+    static func height(forWidth width: CGFloat) -> CGFloat {
+        #if os(iOS)
+        guard width > 0 else { return Self.height }
+        if !Metrics.wideScreen {
+            // A phone on its side — which is what a foldable stood up as a
+            // tent is, browsing — has about as much height as it had width
+            // upright, and 300 of it was the whole screen, with the tab bar
+            // sitting on the hero's own buttons. Wider than it is tall, the
+            // hero takes a little over half of what the height would be.
+            let short = MainActor.assumeIsolated { FoldState.shared.portraitWidth }
+            guard width > short else { return Self.height }
+            return min(Self.height, (short * 0.62).rounded())
+        }
+        return min(560, max(Self.height, (width / 2.4).rounded()))
+        #else
+        return Self.height
+        #endif
+    }
+
+    /// The height this one is drawn at: the caller's, or — for an iOS hero
+    /// the caller didn't measure — the one its own width calls for.
+    private var resolvedHeight: CGFloat {
+        #if os(iOS)
+        guard availableWidth <= 0 else { return heroHeight }
+        return Self.height(forWidth: measuredWidth)
+        #else
+        return heroHeight
+        #endif
+    }
+
     /// The picture is taller by whatever it is bleeding through; the text block
     /// is pinned to the bottom, so it stays exactly where it was.
-    private var artHeight: CGFloat { heroHeight + topBleed }
+    private var artHeight: CGFloat { resolvedHeight + topBleed }
 
     /// The name the hero leads with: the show's for an episode or a season,
     /// the title's own for anything else. Shared with the toolbar's Play
@@ -1104,16 +1319,44 @@ struct HeroHeader: View {
             .itemContextMenu(item, allowsOpen: true)
             .accessibilityLabel(Self.displayTitle(of: item))
             .accessibilityHint("Opens the title")
+            #elseif os(iOS)
+            // Edge to edge, under whatever the system keeps at the sides — on
+            // a foldable's front screen the tab bar stands in a column down
+            // the trailing edge, and the shelves below already scroll under
+            // it. The picture goes where the shelves go; the title and the
+            // buttons, in `content`, stay inside the safe area where they
+            // can be read and reached. Clipped here, at its own full width,
+            // rather than at the stack's, which stops at the safe area.
+            backdrop
+                .clipped()
+                .ignoresSafeArea(.container, edges: .horizontal)
             #else
             backdrop
             #endif
 
             content
-                .padding(.horizontal, Metrics.gutter)
+                .padding(.leading, Metrics.gutter + sideInsets.leading)
+                .padding(.trailing, Metrics.gutter + sideInsets.trailing)
                 .padding(.bottom, textInset)
+                #if os(tvOS)
+                // A band the width of the screen around the title and the
+                // buttons, so Down from Refresh in the top right corner has
+                // them to land on. The bar's own section can't be that
+                // target: it starts at the top of the screen, around Refresh
+                // and under the tab strip, and the engine only moves into
+                // what lies below where it is — so Down passed the buttons by
+                // and went to the first shelf.
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .focusSection()
+                #endif
         }
         .frame(height: artHeight)
+        #if os(iOS)
+        // Not clipped: the backdrop reaches past this frame on purpose.
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { measuredWidth = $0 }
+        #else
         .clipped()
+        #endif
         // A sidebar's hero is one view handed a different item rather than a
         // new one per title, so a missing wordmark has to stop being missing
         // when the item under it changes.
@@ -1162,6 +1405,13 @@ struct HeroHeader: View {
         #if os(macOS)
         guard availableWidth > 0 else { return Self.backdropWidth }
         return min(3840, ImageLoader.requestWidth(points: availableWidth, displayScale: displayScale))
+        #elseif os(iOS)
+        // Never less than the fixed number, which a phone already fills, and
+        // more where the screen needs it: 1600 pixels across a 13-inch iPad
+        // was being stretched to more than 2600.
+        let width = availableWidth > 0 ? availableWidth : measuredWidth
+        guard width > 0 else { return Self.backdropWidth }
+        return max(Self.backdropWidth, min(3840, ImageLoader.requestWidth(points: width, displayScale: displayScale)))
         #else
         return Self.backdropWidth
         #endif
@@ -1223,6 +1473,18 @@ struct HeroHeader: View {
             // They used to be one line reading "S02E04 · Some Title" under the
             // wordmark, which is a filename with a full stop in the middle.
             VStack(alignment: .leading, spacing: 6) {
+                #if os(iOS) || os(macOS)
+                // Why this is here, in a small line over the title: an iPad
+                // and a Mac have the height for it, and a bar of six titles
+                // reads better when each says what kind of thing it is.
+                if style == .home, showsEyebrow {
+                    Text(eyebrow)
+                        .font(.caption.weight(.bold))
+                        .tracking(1.2)
+                        .foregroundStyle(eyebrowColor)
+                        .padding(.bottom, 2)
+                }
+                #endif
                 titleBlock
 
                 if item.isEpisode, let label = item.episodeLabel {
@@ -1305,14 +1567,18 @@ struct HeroHeader: View {
             #elseif os(macOS)
             .frame(maxWidth: logoBox.width, maxHeight: logoBox.height, alignment: .leading)
             #else
-            .frame(maxWidth: 300, maxHeight: 76, alignment: .leading)
+            .frame(
+                maxWidth: Metrics.phoneLayout ? 300 : 380,
+                maxHeight: Metrics.phoneLayout ? 76 : 96,
+                alignment: .leading
+            )
             #endif
         } else {
             // An episode and a season both belong to a show, and the show is
             // what the wordmark would have said; "Season 2" printed over the
             // artwork and again under it says nothing the second time.
             Text(Self.displayTitle(of: item))
-                .font(.system(.largeTitle, design: .default, weight: .bold))
+                .font(typesetTitleFont)
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 // A long title shrinks a little rather than wrapping to a third
@@ -1321,12 +1587,65 @@ struct HeroHeader: View {
         }
     }
 
+    /// The typeset title: the large title everywhere but an iPad, whose
+    /// hero is twice a phone's and wants a display size with the tracking
+    /// pulled in, the way a wordmark would have been set.
+    private var typesetTitleFont: Font {
+        #if os(iOS)
+        Metrics.phoneLayout
+            ? .system(.largeTitle, design: .default, weight: .bold)
+            : .system(size: 46, weight: .heavy)
+        #elseif os(macOS)
+        // The iPad's display size on a window with the room for it; a
+        // narrow window keeps the large title, which wraps sooner.
+        availableWidth >= 900
+            ? .system(size: 46, weight: .heavy)
+            : .system(.largeTitle, design: .default, weight: .bold)
+        #else
+        .system(.largeTitle, design: .default, weight: .bold)
+        #endif
+    }
+
+    #if os(iOS) || os(macOS)
+    /// The small line over the title on an iPad and a Mac: why this is here.
+    private var eyebrow: String {
+        if item.progressFraction != nil { return "CONTINUE WATCHING" }
+        if item.isEpisode { return "NEXT UP" }
+        return "FEATURED"
+    }
+
+    private var showsEyebrow: Bool {
+        #if os(iOS)
+        !Metrics.phoneLayout
+        #else
+        true
+        #endif
+    }
+
+    /// The accent's lighter step on an iPad; on the Mac, where the accent is
+    /// the user's own and may be graphite, white at most of its strength —
+    /// the line sits on a darkened photograph like the title under it.
+    private var eyebrowColor: Color {
+        #if os(macOS)
+        .white.opacity(0.85)
+        #else
+        Theme.link
+        #endif
+    }
+    #endif
+
     /// The lines under the title. `.subheadline` was tuned for a phone and is
     /// eleven points on a Mac, which over a photograph is a caption nobody
-    /// reads; the Mac gets body text, semibold where the phone was.
+    /// reads; the Mac gets body text, semibold where the phone was. An iPad
+    /// is read from further off than a phone and gets callout.
     private func metaFont(strong: Bool) -> Font {
         #if os(macOS)
         return strong ? .body.weight(.semibold) : .callout.weight(.medium)
+        #elseif os(iOS)
+        if Metrics.phoneLayout {
+            return strong ? .subheadline.weight(.semibold) : .subheadline.weight(.medium)
+        }
+        return strong ? .callout.weight(.semibold) : .callout.weight(.medium)
         #else
         return strong ? .subheadline.weight(.semibold) : .subheadline.weight(.medium)
         #endif
@@ -1362,7 +1681,7 @@ struct HeroHeader: View {
             ProgressView(value: progress)
                 .progressViewStyle(.linear)
                 .tint(Color.accentColor)
-                .frame(width: 168)
+                .frame(width: 240)
             #else
             ZStack(alignment: .leading) {
                 Capsule().fill(.white.opacity(0.28))
@@ -1375,7 +1694,7 @@ struct HeroHeader: View {
             #if os(tvOS)
             .frame(width: 320, height: 8)
             #else
-            .frame(width: 168, height: 4)
+            .frame(width: Metrics.phoneLayout ? 168 : 240, height: 4)
             #endif
             #endif
 
@@ -1437,15 +1756,34 @@ struct HeroHeader: View {
                 .controlSize(.large)
                 .help("Show details for \(Self.displayTitle(of: item))")
             #else
-            Button {
-                Task { await start() }
-            } label: {
-                Label(playLabel, systemImage: "play.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(minWidth: 92)
+            if Metrics.phoneLayout {
+                Button {
+                    Task { await start() }
+                } label: {
+                    Label(playLabel, systemImage: "play.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(minWidth: 92)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accentStrong)
+            } else {
+                // White on the artwork, not the accent: purple over a
+                // different backdrop every few seconds fights half of them,
+                // and white on a picture is what every television app puts
+                // there. The accent is for buttons that sit on the page.
+                Button {
+                    Task { await start() }
+                } label: {
+                    Label(playLabel, systemImage: "play.fill")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 20)
+                        .frame(height: 44)
+                        .background(.white, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.accentStrong)
 
             // Not `.bordered`: its fill is drawn for a page background, and over
             // a photograph it is a grey smear with the accent colour written on
@@ -1453,12 +1791,13 @@ struct HeroHeader: View {
             // buttons do, and it stays legible whatever is behind it.
             Button { app.push(.item(item.Id)) } label: {
                 Text("Details")
-                    .font(.subheadline.weight(.semibold))
+                    .font(Metrics.phoneLayout ? .subheadline.weight(.semibold) : .body.weight(.semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, Metrics.phoneLayout ? 16 : 20)
+                    .padding(.vertical, Metrics.phoneLayout ? 8 : 11)
                     .background(.ultraThinMaterial, in: Capsule())
                     .overlay(Capsule().strokeBorder(.white.opacity(0.22), lineWidth: 0.5))
+                    .contentShape(Capsule())
             }
             .buttonStyle(.plain)
             #endif
@@ -1528,57 +1867,136 @@ struct HeroHeader: View {
 /// the one that happened to be first in Continue Watching, moving on by itself
 /// if you don't.
 ///
-/// The same idea as the phone's carousel below, built differently because tvOS
-/// has no paging `TabView` and no swipe to drive one. One page is drawn at a
-/// time and crossfades to the next; the rest are fetched into the image cache up
-/// front so a change of page is a fade rather than a blur resolving again.
+/// The same idea as the phone's carousel below, built the way a television
+/// does everything: as a row the selector moves along. Each title is a page
+/// the width of the screen, and the pages sit in a horizontal scroll view that
+/// snaps to one at a time. Swiping right from a page's Details lands on the
+/// next page's Play, and the bar slides over to it; swiping left from Play
+/// brings the one before back. There is no gesture of its own to invent — the
+/// paging *is* focus moving, which is the one input a Siri Remote always has —
+/// and the dots in the corner say where you are.
 ///
 /// It stops rotating while the selector is inside it. A bar that changed title
 /// under a focused Play button would start something other than what the button
 /// said when you pressed it — and moving focus off it is exactly the moment
 /// rotating becomes harmless again.
+///
+/// The whole row is one focus section. That is what makes it the stop on the
+/// way up from the shelves: without it the selector moved by overlap alone, and
+/// a card on the right of the screen pressed up past two buttons on the left
+/// and landed in the refresh control, or the tab strip. A section the width of
+/// the screen is a target every card is under, so the way up from anywhere on
+/// the page is Play or Details, then Refresh, then the tabs.
 struct HeroCarousel: View {
     let items: [BaseItem]
     /// Passed straight through to whichever page is on screen.
     var topBleed: CGFloat = 0
 
-    @State private var index = 0
-    @State private var isFocused = false
+    /// Which page the scroll view is resting on, by the item's id. Set by the
+    /// ticker and by focus arriving on another page, and read back from the
+    /// scroll view as it settles.
+    @State private var position: String?
+    /// The page whose buttons hold the selector, if any.
+    @State private var focusedPage: String?
     /// Held in state so it belongs to the view's lifetime rather than being a
     /// fresh countdown on every redraw.
     @State private var ticker = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The set the selector is in, kept on screen after a new draw has
+    /// arrived — see `pages`.
+    @State private var held: [BaseItem]?
 
-    private var current: BaseItem? {
-        items.indices.contains(index) ? items[index] : items.first
+    /// What the bar shows: `items`, except that a new draw waits while the
+    /// selector is on one of the pages, for the same reason the ticker does.
+    /// Coming back to Home after a minute away draws again (see
+    /// `HomeView.load`), and focus comes back to the Play it left: the new set
+    /// arriving under it put another title behind a focused button, which
+    /// would have started something nobody had chosen. It goes in when the
+    /// selector moves off.
+    private var pages: [BaseItem] { held ?? items }
+
+    private var index: Int {
+        pages.firstIndex { $0.Id == position } ?? 0
     }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            if let current {
-                HeroHeader(item: current, onFocusChange: { isFocused = $0 }, topBleed: topBleed)
-                    .id(current.Id)
-                    .transition(.opacity)
+            ScrollView(.horizontal) {
+                // Eager rather than lazy, for the same reason the shelves are
+                // (see `HomeView.scroll`): the selector can only move to a
+                // button that exists, and the next page's Play has to be there
+                // before anyone swipes towards it. Six backdrops is what this
+                // costs, and `prefetch` was loading them all anyway.
+                HStack(spacing: 0) {
+                    ForEach(pages) { item in
+                        HeroHeader(
+                            item: item,
+                            onFocusChange: { inside in
+                                if inside {
+                                    focusedPage = item.Id
+                                } else if focusedPage == item.Id {
+                                    focusedPage = nil
+                                }
+                            },
+                            topBleed: topBleed
+                        )
+                        .containerRelativeFrame(.horizontal)
+                        .id(item.Id)
+                    }
+                }
+                .scrollTargetLayout()
             }
-            if items.count > 1 { pageDots }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $position)
+            .scrollIndicators(.hidden)
+            .focusSection()
+
+            if pages.count > 1 { pageDots }
         }
         .frame(height: HeroHeader.height + topBleed)
-        .onReceive(ticker) { _ in
-            guard !reduceMotion, !isFocused, items.count > 1 else { return }
-            withAnimation(.easeInOut(duration: 0.6)) {
-                index = (index + 1) % items.count
+        .onAppear {
+            if position == nil { position = pages.first?.Id }
+        }
+        // Focus landing on another page is the swipe that pages the bar. The
+        // focus engine scrolls just far enough to show the button it moved to;
+        // this finishes the move so the page sits square, not a third of the
+        // way across.
+        .onChange(of: focusedPage) { _, page in
+            guard let page else {
+                // Not at once: paging from one page to the next can pass
+                // through nil, and letting the new draw in there would swap
+                // the set out in the middle of the swipe.
+                if held != nil {
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        if focusedPage == nil { held = nil }
+                    }
+                }
+                return
             }
+            guard page != position else { return }
+            withAnimation(.easeInOut(duration: 0.45)) { position = page }
+        }
+        .onChange(of: items) { old, _ in
+            if focusedPage != nil, held == nil { held = old }
+        }
+        .onReceive(ticker) { _ in
+            guard !reduceMotion, focusedPage == nil, pages.count > 1 else { return }
+            let next = pages[(index + 1) % pages.count].Id
+            withAnimation(.easeInOut(duration: 0.6)) { position = next }
         }
         // A fresh draw is a fresh bar: it starts at the first of the new set
         // rather than at wherever the old one had got to — which would also be
-        // out of range whenever the new draw is the shorter of the two.
-        .onChange(of: items.map(\.Id)) { _, _ in index = 0 }
+        // a page that no longer exists whenever the new draw is the shorter of
+        // the two.
+        .onChange(of: pages.map(\.Id)) { _, _ in position = pages.first?.Id }
         .task(id: items.map(\.Id)) { await prefetch() }
     }
 
-    /// Everything but the page on screen, pulled into the image cache. Without
-    /// it the first turn of the bar shows a blur resolving, because `RemoteImage`
-    /// only skips its placeholder when the artwork is already cached.
+    /// Everything but the first page, pulled into the image cache. The pages
+    /// are all built, but `RemoteImage` only skips its placeholder when the
+    /// artwork is already cached, and the first slide of the bar should be a
+    /// picture arriving rather than a blur resolving.
     private func prefetch() async {
         for item in items.dropFirst() {
             guard let url = Artwork.url(item, type: "Backdrop", width: HeroHeader.backdropWidth)
@@ -1591,7 +2009,7 @@ struct HeroCarousel: View {
     /// Where you are in the set, in the corner the text block doesn't reach.
     private var pageDots: some View {
         HStack(spacing: 10) {
-            ForEach(items.indices, id: \.self) { position in
+            ForEach(pages.indices, id: \.self) { position in
                 Capsule()
                     .fill(position == index ? Theme.accent : Color.white.opacity(0.35))
                     .frame(width: position == index ? 34 : 12, height: 12)
@@ -1614,30 +2032,73 @@ struct HeroCarousel: View {
 /// says and how it is lit haven't changed; only how many of them there are.
 struct HeroCarousel: View {
     let items: [BaseItem]
+    /// Extra height on top of each page, for a bar drawn over the hero
+    /// rather than above it — an iPad's. Passed straight through to the
+    /// pages; see `HeroHeader.topBleed`.
+    var topBleed: CGFloat = 0
 
     @State private var index = 0
-    /// Held in state so it belongs to the view's lifetime: built inline it
-    /// would be a new publisher, and a fresh countdown, on every redraw.
-    @State private var ticker = Timer.publish(every: 8, on: .main, in: .common).autoconnect()
+    /// The bar's own width, which on an iPad decides its height — see
+    /// `HeroHeader.height(forWidth:)`. Zero until the first layout pass.
+    @State private var width: CGFloat = 0
+    /// What the screen keeps at its sides, which this bar is drawn over —
+    /// see `body`. Zero on an ordinary phone.
+    @State private var sideInsets = EdgeInsets()
     /// Something that moves on its own is exactly what this setting is for.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var height: CGFloat { HeroHeader.height(forWidth: width) }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             TabView(selection: $index) {
                 ForEach(Array(items.enumerated()), id: \.element.Id) { position, item in
-                    HeroHeader(item: item)
-                        .tag(position)
+                    HeroHeader(
+                        item: item,
+                        topBleed: topBleed,
+                        heroHeight: height,
+                        availableWidth: width,
+                        sideInsets: sideInsets
+                    )
+                    .tag(position)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: HeroHeader.height)
+            .frame(height: height + topBleed)
 
-            if items.count > 1 { pageDots }
+            if items.count > 1 {
+                // Thumbnails where there is room for them beside the text
+                // block — an iPad on its side — and dots everywhere else.
+                if !Metrics.phoneLayout, width >= 900 {
+                    pageThumbs
+                } else {
+                    pageDots.padding(.trailing, sideInsets.trailing)
+                }
+            }
         }
-        .frame(height: HeroHeader.height)
-        .onReceive(ticker) { _ in
-            guard !reduceMotion, items.count > 1 else { return }
+        .frame(height: height + topBleed)
+        // Edge to edge, the way the shelves under it scroll: on a foldable's
+        // front screen the tab bar stands in a column down the trailing edge
+        // and the page is laid out short of it. The page view keeps the safe
+        // area for itself, so `HeroHeader` cannot bleed from inside it; the
+        // whole bar is laid out over the column instead, and what it is now
+        // covering is measured here and handed down, so the title and the
+        // buttons stay clear of it.
+        .ignoresSafeArea(.container, edges: .horizontal)
+        .onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { sideInsets = $0 }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        // Eight seconds from whichever page is showing, however it got there.
+        //
+        // A timer running on its own clock turned the page 2–6 seconds after
+        // a swipe — whatever was left of the count when the finger landed —
+        // and it kept turning behind a title pushed over Home. Keyed on the
+        // page, the count starts again with every turn, the bar's own or a
+        // swipe; and a task ends when its view goes off screen, so nothing
+        // turns while nobody can see it, and a fresh eight seconds starts
+        // when Home is back.
+        .task(id: index) {
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled, !reduceMotion, items.count > 1 else { return }
             withAnimation(.easeInOut(duration: 0.5)) {
                 index = (index + 1) % items.count
             }
@@ -1677,6 +2138,58 @@ struct HeroCarousel: View {
         .padding(.bottom, 12)
         .animation(.easeOut(duration: 0.25), value: index)
         .accessibilityHidden(true)
+    }
+
+    /// What else is in the bar, as a row of its backdrops in the corner: the
+    /// one showing ringed in white, the rest dimmed, each a tap away. Dots
+    /// say how many; these say what.
+    private var pageThumbs: some View {
+        HStack(spacing: 8) {
+            ForEach(Array(items.enumerated()), id: \.element.Id) { position, item in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.4)) { index = position }
+                } label: {
+                    RemoteImage(
+                        url: Artwork.url(item, type: "Backdrop", width: 300),
+                        blurHash: Artwork.hash(item, type: "Backdrop") ?? Artwork.hash(item)
+                    )
+                    .frame(width: 72, height: 42)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(.white, lineWidth: position == index ? 2 : 0)
+                    )
+                    .opacity(position == index ? 1 : 0.7)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(HeroHeader.displayTitle(of: item))
+                .accessibilityAddTraits(position == index ? [.isButton, .isSelected] : .isButton)
+            }
+        }
+        .padding(.trailing, Metrics.gutter)
+        .padding(.bottom, 38)
+        .animation(.easeOut(duration: 0.25), value: index)
+    }
+}
+
+/// Whether a scroll view has gone past a point, for a bar that changes once
+/// it has. iOS 18's scroll geometry; before it the answer stays "no", and
+/// the bar stays as it opens — glass discs, which read over anything.
+private struct HeroScrollWatcher: ViewModifier {
+    let threshold: CGFloat
+    @Binding var isPast: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top > threshold
+            } action: { _, past in
+                isPast = past
+            }
+        } else {
+            content
+        }
     }
 }
 #endif

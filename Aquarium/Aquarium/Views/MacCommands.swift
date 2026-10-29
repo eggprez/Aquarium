@@ -18,7 +18,8 @@ final class MacCommandRequests {
     var focusSearch = 0
     /// Bumped by View ▸ Refresh (⌘R), and by the app coming back to the front
     /// after a while away (see `MacAppDelegate`): the page in front asks the
-    /// server again.
+    /// server again. Heard through `onMacRefresh`, which is what keeps it to
+    /// that one page.
     var refresh = 0
     /// Bumped by Go ▸ Earlier / Later / Now (⌘← / ⌘→ / ⌘T) while Live TV is
     /// showing: the guide scrolls a page back or forward in time, or to now.
@@ -109,7 +110,7 @@ struct MacCommands: Commands {
             // first there, ⌘2 opened Live TV while the sidebar's second row
             // was a library.
             ForEach(Array(sidebarOrder.prefix(9).enumerated()), id: \.element.id) { index, section in
-                Button(section.title) { app.showAtTop(section) }
+                Button(section.title) { show(section) }
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
             }
             Divider()
@@ -180,9 +181,15 @@ struct MacCommands: Commands {
     /// had been opened in it on screen: from a season you had reached
     /// through Home, Go ▸ Home and ⌘1 did nothing at all, because Home was
     /// already the section and the season was its page.
+    ///
+    /// The sections are the main window's, so it comes forward with them —
+    /// opened again if it had been closed. Pressed with a title window or
+    /// Settings in front, ⌘2 changed a window behind it and left you looking
+    /// at the same thing.
     private func show(_ section: AppSection) {
         guard app.sections.contains(section) else { return }
         app.showAtTop(section)
+        MacMainWindow.show()
     }
 
     /// Live TV in front of you, with nothing pushed over it: the only time
@@ -200,8 +207,10 @@ struct MacCommands: Commands {
 
     /// ⌘F: the cursor into the sidebar's search field. `searchFocused`, which
     /// puts it there, is macOS 15; on 14 the menu shows the Search section
-    /// instead, so the command still leads somewhere.
+    /// instead, so the command still leads somewhere. The field is the main
+    /// window's, so that window comes forward first, as for `show`.
     private func focusSearch() {
+        MacMainWindow.show()
         if #available(macOS 15.0, *) {
             MacCommandRequests.shared.focusSearch += 1
         } else {
@@ -221,6 +230,7 @@ struct MacCommands: Commands {
     /// The standard About panel, with what Settings ▸ General says under
     /// "About": the version and build, the playback engine, and the note
     /// about how the app was made.
+    @MainActor
     private func showAboutPanel() {
         let credits = NSMutableAttributedString()
         let body = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -232,7 +242,8 @@ struct MacCommands: Commands {
             .foregroundColor: NSColor.labelColor,
             .paragraphStyle: paragraph,
         ]
-        credits.append(NSAttributedString(string: "Playback engine: AVFoundation\n", attributes: attributes))
+        credits.append(NSAttributedString(
+            string: "Playback engine: \(PlayerModel.shared.engineDescription)\n", attributes: attributes))
         credits.append(NSAttributedString(
             string: "A lightweight Jellyfin client — the Apple build of the same app that ships for Linux. Written with AI assistance (Anthropic’s Claude), directed and tested by one developer, and shared as-is.",
             attributes: attributes.merging([.foregroundColor: NSColor.secondaryLabelColor]) { _, new in new }
@@ -292,6 +303,38 @@ struct FocusSearchOnRequest: ViewModifier {
                     focused = true
                 }
         }
+    }
+}
+
+extension View {
+    /// View ▸ Refresh (⌘R), and the app coming back to the front after a
+    /// while away, for this page — when it is the one in front.
+    ///
+    /// Every page that watched the counter used to answer it, in every
+    /// window: a library under a title pushed over it, the same library open
+    /// in a window of its own, Favorites, the guide. One ⌘R was a request
+    /// from each of them. Now only a page that is on screen — not covered by
+    /// one pushed over it, which takes it off screen — in the window being
+    /// worked in (see `AppModel.isWorkingWindow`) asks again.
+    func onMacRefresh(_ action: @escaping () -> Void) -> some View {
+        modifier(MacRefreshRequest(action: action))
+    }
+}
+
+private struct MacRefreshRequest: ViewModifier {
+    let action: () -> Void
+    @Environment(AppModel.self) private var app
+    @Environment(\.routeWindowNavigator) private var window
+    @State private var isOnScreen = false
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { isOnScreen = true }
+            .onDisappear { isOnScreen = false }
+            .onChange(of: MacCommandRequests.shared.refresh) { _, _ in
+                guard isOnScreen, app.isWorkingWindow(window) else { return }
+                action()
+            }
     }
 }
 #endif

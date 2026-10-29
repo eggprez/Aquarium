@@ -189,9 +189,13 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
   clear(root);
   const s = api.getSession();
   const cfg = api.getConfig();
+  // Put on the page before the first await, so a render that has since been
+  // navigated away from (or overtaken by a newer one) can tell, and stops
+  // instead of appending its blocks to someone else's page.
+  const title = el("h1", { class: "page-title" }, ["Settings"]);
+  root.append(title);
   const info: any = await invoke("app_info").catch(() => ({}));
-
-  root.append(el("h1", { class: "page-title" }, ["Settings"]));
+  if (!document.contains(title)) return;
 
   // Server block
   root.append(
@@ -592,6 +596,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
 
   // ---------- Audio ----------
   const devices = await invoke<any[]>("audio_devices").catch(() => [] as any[]);
+  if (!document.contains(title)) return;
   const deviceOptions: [string, string][] = [
     ["", "Automatic"],
     ...devices

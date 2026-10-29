@@ -738,7 +738,7 @@ struct MusicFavoritesView: View {
     var body: some View {
         ScrollView {
             if isLoading, albums.isEmpty, artists.isEmpty, songs.isEmpty {
-                VStack(alignment: .leading, spacing: Metrics.shelfSpacing) { SkeletonShelf(); SkeletonShelf() }.padding(.top, 12)
+                VStack(alignment: .leading, spacing: Metrics.shelfSpacing) { SkeletonShelf(squareWidth: MusicMetrics.tileWidth); SkeletonShelf(squareWidth: MusicMetrics.tileWidth) }.padding(.top, 12)
             } else if albums.isEmpty, artists.isEmpty, songs.isEmpty {
                 EmptyState(symbol: "star", title: "No favorites yet", message: "Press and hold anything in your music to star it.")
             } else {
