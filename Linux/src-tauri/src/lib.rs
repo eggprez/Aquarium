@@ -1,4 +1,5 @@
 mod config;
+mod download_extras;
 mod downloads;
 mod egl;
 mod gl;
@@ -8,6 +9,7 @@ mod idle;
 mod jellyfin;
 mod mpris;
 mod mpv;
+mod network;
 mod player;
 mod power;
 mod prefs;
@@ -600,8 +602,56 @@ fn download_retry(
     app: AppHandle,
     mgr: State<'_, downloads::DlManager>,
     item_id: String,
+    manual: Option<bool>,
 ) -> Result<(), String> {
-    downloads::restart(app.clone(), &mgr, &item_id)
+    downloads::restart(app.clone(), &mgr, &item_id, manual.unwrap_or(true))
+}
+
+/// Stop a running download but keep what it fetched (pause, or the network
+/// turning metered). See `DlManager::pause`.
+#[tauri::command]
+fn download_pause(mgr: State<'_, downloads::DlManager>, item_id: String) {
+    mgr.pause(&item_id);
+}
+
+/// Settings' "Keep the laptop awake while downloading" changed.
+#[tauri::command]
+fn downloads_sync_keep_awake(mgr: State<'_, downloads::DlManager>) {
+    mgr.sync_keep_awake();
+}
+
+#[tauri::command]
+fn network_metered() -> bool {
+    network::is_metered()
+}
+
+#[tauri::command]
+async fn download_fetch_subtitles(item_id: String) {
+    let original = downloads::item_dir(&item_id)
+        .ok()
+        .and_then(|d| std::fs::read_to_string(d.join("meta.json")).ok())
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|m| m["request"]["url"].as_str().map(downloads::is_original_url))
+        .unwrap_or(false);
+    download_extras::fetch_subtitles(&item_id, original).await;
+}
+
+#[tauri::command]
+async fn download_update_details(
+    item_id: String,
+    patch: Value,
+    poster_url: Option<String>,
+    series_poster_url: Option<String>,
+) -> Result<(), String> {
+    download_extras::update_details(&item_id, &patch, poster_url, series_poster_url).await
+}
+
+/// Show downloads in the file manager (Files on GNOME), selected.
+#[tauri::command]
+async fn downloads_reveal(item_ids: Vec<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || download_extras::reveal(&item_ids))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -749,6 +799,9 @@ pub fn run() {
                     let _ = handle.emit("network-changed", json!({ "available": available }));
                 });
             }
+
+            // Metered or not, for "Download only on unmetered connections".
+            network::watch(app.handle());
 
             // Media keys, the lock screen, and the shell's audio menu.
             mpris::start(app.handle().clone());
@@ -958,6 +1011,12 @@ pub fn run() {
             download_start,
             download_cancel,
             download_retry,
+            download_pause,
+            downloads_sync_keep_awake,
+            network_metered,
+            download_fetch_subtitles,
+            download_update_details,
+            downloads_reveal,
             download_delete,
             downloads_list,
             disk_free,

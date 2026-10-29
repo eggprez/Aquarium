@@ -249,6 +249,27 @@ pub async fn request(path: &str, method: Option<String>, body: Option<Value>) ->
     Ok(json!({ "status": status, "body": parsed }))
 }
 
+/// The raw body of an authenticated GET, for the few things fetched from Rust
+/// to be kept as files (a download's subtitles). Fails on any non-2xx.
+pub async fn get_bytes(path: &str) -> Result<Vec<u8>, String> {
+    if !path.starts_with('/') {
+        return Err(err("config", "API path must start with /"));
+    }
+    let server = configured_server()?;
+    ensure_verified(&server).await?;
+    let token = secret::token().ok_or_else(|| err("auth", "Not signed in"))?;
+    let resp = jellyfin::http()
+        .get(format!("{}{}", server, path))
+        .header("Authorization", jellyfin::auth_header(&token, &config::device_id()))
+        .send()
+        .await
+        .map_err(|e| offline_err(&e))?;
+    if !resp.status().is_success() {
+        return Err(err("server", format!("Request failed ({})", resp.status().as_u16())));
+    }
+    Ok(resp.bytes().await.map_err(|e| offline_err(&e))?.to_vec())
+}
+
 /// Base64, so an image fetched here can be handed to the webview as a data URL.
 /// Written out rather than pulled in as a dependency: it is twenty lines, and
 /// the build stays buildable without reaching the network for a crate.
