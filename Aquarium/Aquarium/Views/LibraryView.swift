@@ -39,18 +39,22 @@ struct LibraryView: View {
     /// The sort run the other way from its natural direction — set by clicking
     /// a column heading twice in the Mac's list view.
     @State private var reversed = false
+    /// What is typed in the search field — the Mac's toolbar field, an
+    /// iPad's in the filter header — and the copy of it the query is made
+    /// from: the field changes on every keystroke, the query a moment after
+    /// the last one, so a name typed out is one request and not one per
+    /// letter. A phone has no field, and these stay empty there.
+    @State private var searchTerm = ""
+    @State private var activeSearchTerm = ""
     #if os(macOS)
     /// Posters or a list; remembered across libraries and launches.
     @AppStorage("libraryLayout") private var layout: LibraryLayout = .grid
-    /// What is typed in the toolbar's search field, and the copy of it the
-    /// query is made from: the field changes on every keystroke, the query
-    /// a moment after the last one, so a name typed out is one request and
-    /// not one per letter.
-    @State private var searchTerm = ""
-    @State private var activeSearchTerm = ""
     /// The tiles or rows selected, shared by the grid and the table so a
     /// selection survives switching between them. The toolbar acts on it.
     @State private var selection: Set<String> = []
+    /// Whether this page is on screen rather than under one pushed over it —
+    /// see where the Item menu's value is published.
+    @State private var isOnScreen = false
     @Environment(PlayerModel.self) private var player
     @Environment(\.openWindow) private var openWindow
     #endif
@@ -101,6 +105,9 @@ struct LibraryView: View {
     /// Pages asked for so far. This, not the item count, is what ends paging:
     /// a page that adds nothing new would never move the count to the total.
     @State private var pagesLoaded = 0
+    /// Bumped each time `reload` replaces the list, for the grid — see
+    /// `MediaGrid.revision`.
+    @State private var listRevision = 0
     /// Bumped by every reload, so an answer to an older one — a late page, or a
     /// reload that was cancelled — can tell it has been overtaken.
     @State private var generation = 0
@@ -207,7 +214,11 @@ struct LibraryView: View {
         .paletteBar()
         #if os(macOS)
         .toolbar { macToolbar }
-        .navigationSubtitle(total > 0 ? "\(total) item\(total == 1 ? "" : "s")" : "")
+        // The count and the filters, pinned under the toolbar as the iPad
+        // pins them under its bar — see `macFilterHeader`. The toolbar keeps
+        // what a Mac toolbar is for: the view, the size, the selection, and
+        // the search field.
+        .safeAreaInset(edge: .top, spacing: 0) { macFilterHeader }
         // The filter, in the toolbar's own search field — a second one beside
         // the sidebar's, which searches the whole server; this one narrows
         // the library in front of you. Live TV keeps its channel filter the
@@ -221,10 +232,9 @@ struct LibraryView: View {
             }
             activeSearchTerm = searchTerm
         }
-        // View ▸ Refresh (⌘R), and the app coming back to the front.
-        .onChange(of: MacCommandRequests.shared.refresh) { _, _ in
-            Task { await reload() }
-        }
+        // View ▸ Refresh (⌘R), and the app coming back to the front — while
+        // this is the page in front. See `onMacRefresh`.
+        .onMacRefresh { Task { await reload() } }
         // The controls are the library's to remember — see `LibraryFilters`.
         .onChange(of: currentFilters) { _, filters in
             filters.save(for: parentId)
@@ -238,12 +248,33 @@ struct LibraryView: View {
         // The Item menu, for the one title selected. Only a title's own page
         // published it, so with a film picked out in the grid — "1 Selected"
         // in the toolbar — Item ▸ Play, ⌘D and ⌥⌘O were all greyed out.
-        .focusedSceneValue(\.itemMenuActions, selectedItemActions)
+        //
+        // Only while this page is on screen. A title pushed over it publishes
+        // the same value, and with both set the Item menu could act on the
+        // film still selected in the grid underneath instead of the title in
+        // front of you. A pushed page takes this one off screen, which is
+        // what `isOnScreen` follows.
+        .focusedSceneValue(\.itemMenuActions, isOnScreen ? selectedItemActions : nil)
+        .onAppear { isOnScreen = true }
+        .onDisappear { isOnScreen = false }
         #endif
         #if os(iOS)
         // The filter bar is the one place in the app where a tap changes what
         // the whole page says without moving anything under your finger.
         .sensoryFeedback(.selection, trigger: filterKey)
+        // An iPad's filters and search are pinned under the bar rather than
+        // scrolling away with the first row — see `padFilterHeader`.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !Metrics.phoneLayout { padFilterHeader }
+        }
+        .task(id: searchTerm) {
+            // Wait for the typing to pause before asking.
+            if !searchTerm.isEmpty {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+            }
+            activeSearchTerm = searchTerm
+        }
         #endif
         // "Unwatched only" and "Favorites only" are both filters a press-and-
         // hold menu can knock an item out of from the grid itself.
@@ -276,6 +307,8 @@ struct LibraryView: View {
             reversed = false
             unwatchedOnly = false
             favouritesOnly = false
+            searchTerm = ""
+            activeSearchTerm = ""
             #endif
         }
     }
@@ -336,8 +369,11 @@ struct LibraryView: View {
                 // and scrolls away with the first row of posters.
                 PageHeading(title: title)
                 #endif
-                #if !os(macOS)
-                // The Mac has these in the window's toolbar — see `macToolbar`.
+                #if os(iOS)
+                // The Mac has these in the window's toolbar — see `macToolbar`
+                // — and an iPad in the header pinned above the grid.
+                if Metrics.phoneLayout { filterBar }
+                #elseif !os(macOS)
                 filterBar
                     .hiddenOnTV()
                 #endif
@@ -355,10 +391,11 @@ struct LibraryView: View {
                         pendingCount: isPaging ? pendingTileCount : 0,
                         onSelect: { app.push(.item($0.Id)) },
                         onReachEnd: { Task { await loadMore() } },
-                        selection: gridSelection
+                        selection: gridSelection,
+                        revision: listRevision
                     )
                     #if os(macOS)
-                    // The window's subtitle already says how many there are.
+                    // The header above the grid already says how many.
                     Color.clear.frame(height: 24)
                     #else
                     Text("\(items.count) of \(total)")
@@ -450,7 +487,7 @@ struct LibraryView: View {
             symbol: emptySymbol,
             title: "Nothing here",
             message: emptyMessage,
-            actionTitle: hasFilters ? "Clear Filters" : nil
+            actionTitle: hasFilters || !activeSearchTerm.isEmpty ? "Clear Filters" : nil
         ) {
             clearFilters()
         }
@@ -461,6 +498,8 @@ struct LibraryView: View {
         unwatchedOnly = false
         favouritesOnly = false
         genre = nil
+        searchTerm = ""
+        activeSearchTerm = ""
     }
 
     /// A filter glyph would be pointing at a bar that isn't drawn on a
@@ -481,9 +520,13 @@ struct LibraryView: View {
         #else
         // Only blamed on the filters when one is on; an empty library with
         // none set was told it didn't match them.
-        hasFilters
-            ? "No items in this library match the filters above."
-            : "This library has nothing in it yet."
+        if !activeSearchTerm.isEmpty {
+            "Nothing in this library matches “\(activeSearchTerm)”."
+        } else if hasFilters {
+            "No items in this library match the filters above."
+        } else {
+            "This library has nothing in it yet."
+        }
         #endif
     }
 
@@ -499,7 +542,7 @@ struct LibraryView: View {
     /// libraries when this screen first asks.
     private var filterKey: String {
         var key = "\(parentId)|\(includeTypes ?? "")|\(sort.rawValue)|\(reversed)|\(unwatchedOnly)|\(favouritesOnly)|\(genre ?? "")"
-        #if os(macOS)
+        #if os(macOS) || os(iOS)
         key += "|\(activeSearchTerm)"
         #endif
         return key
@@ -555,105 +598,193 @@ struct LibraryView: View {
             .help("Show as posters or as a list")
         }
         if layout == .grid {
+            // The ends are buttons of our own rather than the slider's value
+            // labels. AppKit makes those into step buttons too, but SwiftUI
+            // named both of them after the first — "Photo" — so VoiceOver
+            // couldn't tell them apart. These say what they do and follow
+            // View ▸ Bigger and Smaller, which they are.
+            //
+            // Three toolbar items rather than one holding the three controls
+            // in a row. As one item the toolbar gave every control in it the
+            // first one's name — the label on the second button was never
+            // read, and both ends were "Smaller" — and a toolbar item's name
+            // comes from a `Label`'s title, not from an accessibility label.
+            // So each control is an item of its own, and each button's name
+            // is the title of its label.
             ToolbarItem(placement: .primaryAction) {
-                // The ends are buttons of our own rather than the slider's
-                // value labels. AppKit makes those into step buttons too, but
-                // SwiftUI named both of them after the first — "Photo", and
-                // then "Smaller" twice — so VoiceOver couldn't tell them
-                // apart. These say what they do and follow View ▸ Bigger and
-                // Smaller, which they are.
-                HStack(spacing: 4) {
-                    Button { MacViewOptions.shared.smaller() } label: {
+                Button { MacViewOptions.shared.smaller() } label: {
+                    Label {
+                        Text("Smaller")
+                    } icon: {
                         Image(systemName: "photo").imageScale(.small)
                     }
-                    .disabled(!MacViewOptions.shared.canShrink)
-                    .help("Smaller (⌘-)")
-                    .accessibilityLabel("Smaller")
-                    Slider(value: thumbnailSize, in: MacViewOptions.range) {
-                        Text("Thumbnail Size")
-                    }
-                    .labelsHidden()
-                    .help("Thumbnail Size")
-                    Button { MacViewOptions.shared.bigger() } label: {
-                        Image(systemName: "photo").imageScale(.large)
-                    }
-                    .disabled(!MacViewOptions.shared.canGrow)
-                    .help("Bigger (⌘=)")
-                    .accessibilityLabel("Bigger")
+                    .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
-                .frame(width: 150)
+                .disabled(!MacViewOptions.shared.canShrink)
+                .help("Smaller (⌘-)")
             }
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Menu {
-                Picker("Sort By", selection: $sort) {
-                    ForEach(SortOption.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.inline)
-                Divider()
-                Toggle("Reverse Order", isOn: $reversed)
-                    .disabled(sort == .random)
-            } label: {
-                Label("Sort: \(sort.label)", systemImage: "arrow.up.arrow.down")
-            }
-            .help("Sort by \(sort.label.lowercased())")
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Toggle(isOn: $unwatchedOnly) {
-                Label("Unwatched", systemImage: "eye.slash")
-            }
-            .help("Show only what you haven't watched")
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Toggle(isOn: $favouritesOnly) {
-                Label("Favorites", systemImage: "star")
-            }
-            .help("Show only favorites")
-        }
-        if !genres.isEmpty {
             ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    // One genre at a time, so a picker and not a row of
-                    // toggles: the check moves rather than adding up.
-                    Picker("Genre", selection: $genre) {
-                        Text("All Genres").tag(String?.none)
-                        Divider()
-                        ForEach(genres, id: \.self) { name in
-                            Text(name).tag(String?.some(name))
-                        }
-                    }
-                    .pickerStyle(.inline)
-                } label: {
-                    Label(genre ?? "Genre", systemImage: genre == nil ? "tag" : "tag.fill")
+                Slider(value: thumbnailSize, in: MacViewOptions.range) {
+                    Text("Thumbnail Size")
                 }
-                .help("Filter by genre")
+                .labelsHidden()
+                .frame(width: 100)
+                .help("Thumbnail Size")
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button { MacViewOptions.shared.bigger() } label: {
+                    Label {
+                        Text("Bigger")
+                    } icon: {
+                        Image(systemName: "photo").imageScale(.large)
+                    }
+                    .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .disabled(!MacViewOptions.shared.canGrow)
+                .help("Bigger (⌘=)")
+            }
+        }
+    }
+
+    /// The iPad's header under the bar (see `padFilterHeader`), under the
+    /// Mac's toolbar: how many there are, and the filters as chips. The
+    /// search is the toolbar's field, where a Mac keeps one.
+    private var macFilterHeader: some View {
+        HStack(spacing: 12) {
+            if total > 0 {
+                Text("\(total) \(countNoun)")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                filterChips
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.vertical, 8)
+        .background {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .overlay(Theme.background.opacity(0.6))
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.border).frame(height: 0.5)
         }
     }
     #endif
 
     private var filterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
+            filterChips
+                .padding(.horizontal, Metrics.gutter)
+        }
+    }
+
+    #if os(iOS)
+    /// An iPad's header, pinned under the bar: how many there are, the
+    /// filters, and a field that narrows the library by name.
+    private var padFilterHeader: some View {
+        HStack(spacing: 12) {
+            if total > 0 {
+                Text("\(total) \(countNoun)")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.textDim)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                filterChips
+            }
+            padSearchField
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.vertical, 10)
+        .background {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .overlay(Theme.background.opacity(0.6))
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.border).frame(height: 0.5)
+        }
+    }
+
+    private var padSearchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.textDim)
+            TextField("Search \(title)", text: $searchTerm)
+                .font(.subheadline)
+                .textFieldStyle(.plain)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+            if !searchTerm.isEmpty {
+                Button {
+                    searchTerm = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Theme.textDim)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(width: 240, height: 36)
+        .background(Theme.raised, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 0.5))
+    }
+
+    #endif
+
+    /// What the count counts, for the header an iPad and a Mac pin above
+    /// the grid.
+    private var countNoun: String {
+        switch resolvedCollectionType {
+        case "movies": total == 1 ? "film" : "films"
+        case "tvshows": total == 1 ? "show" : "shows"
+        default: total == 1 ? "item" : "items"
+        }
+    }
+
+    private var filterChips: some View {
             HStack(spacing: 10) {
                 Menu {
                     Picker("Sort", selection: $sort) {
                         ForEach(SortOption.allCases) { Text($0.label).tag($0) }
                     }
+                    #if os(macOS)
+                    // The list view's columns reverse a sort too; the chip
+                    // offers the same, where the toolbar's menu used to.
+                    Divider()
+                    Toggle("Reverse Order", isOn: $reversed)
+                        .disabled(sort == .random)
+                    #endif
                 } label: {
                     chip(label: "Sort: \(sort.label)", symbol: "arrow.up.arrow.down", active: false)
                 }
+                .macMenuAsLabel()
+                .help("Sort by \(sort.label.lowercased())")
 
                 Button { unwatchedOnly.toggle() } label: {
                     chip(label: "Unwatched", symbol: "eye.slash", active: unwatchedOnly)
                 }
                 .chipButtonStyle()
+                .help("Show only what you haven't watched")
 
                 Button { favouritesOnly.toggle() } label: {
                     chip(label: "Favorites", symbol: "star", active: favouritesOnly)
                 }
                 .chipButtonStyle()
+                .help("Show only favorites")
 
                 if !genres.isEmpty {
                     Menu {
@@ -665,10 +796,20 @@ struct LibraryView: View {
                     } label: {
                         chip(label: genre ?? "Genre", symbol: "tag", active: genre != nil)
                     }
+                    .macMenuAsLabel()
+                    .help("Filter by genre")
                 }
             }
-            .padding(.horizontal, Metrics.gutter)
-        }
+    }
+
+    /// `.subheadline` is eleven points on a Mac; a chip there is set in
+    /// callout, as the rest of the Mac's small controls are.
+    private var chipFont: Font {
+        #if os(macOS)
+        .callout
+        #else
+        .subheadline
+        #endif
     }
 
     private func chip(label: String, symbol: String, active: Bool) -> some View {
@@ -676,7 +817,7 @@ struct LibraryView: View {
             Image(systemName: symbol)
             Text(label)
         }
-        .font(.subheadline)
+        .font(chipFont)
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .background(active ? Theme.accentSoft : Theme.raised, in: Capsule())
@@ -709,11 +850,18 @@ struct LibraryView: View {
                 // The shuffled page sequence needs the page count up front.
                 knownTotal = try await fetch(query(startIndex: 0, limit: 1)).total
             }
-            let response = try await fetchPage(0, total: knownTotal)
+            // A reload with the list already deep — something was marked
+            // watched from the grid, or the library copy finished its first
+            // sync underneath you — asks for as much as was loaded, in one
+            // request, so you stay where you were in it. Only in a fixed
+            // order: a reshuffle starts over by definition.
+            let keep = sort == .random ? 1 : max(1, pagesLoaded)
+            let response = try await fetchPage(0, total: knownTotal, pages: keep)
             guard mine == generation, !Task.isCancelled else { return }
             items = response.items
             total = response.total
-            pagesLoaded = 1
+            pagesLoaded = keep
+            listRevision &+= 1
         } catch is CancellationError {
             // Overtaken by a newer reload, or the page went away.
         } catch {
@@ -737,13 +885,14 @@ struct LibraryView: View {
         items += response.items.filter { !known.contains($0.Id) }
     }
 
-    /// One page of the list. For "Random" it is a page of the name order, the
-    /// pages taken in an order shuffled by `shuffleSeed` and each page shuffled
-    /// too — stable for as long as the seed is, so paging neither repeats nor
-    /// skips anything.
-    private func fetchPage(_ page: Int, total: Int?) async throws -> (items: [BaseItem], total: Int) {
+    /// One page of the list — or `pages` of them from there, in one request,
+    /// for a reload that keeps its place. For "Random" it is a page of the
+    /// name order, the pages taken in an order shuffled by `shuffleSeed` and
+    /// each page shuffled too — stable for as long as the seed is, so paging
+    /// neither repeats nor skips anything; it is always one page.
+    private func fetchPage(_ page: Int, total: Int?, pages: Int = 1) async throws -> (items: [BaseItem], total: Int) {
         guard sort == .random, let total else {
-            let response = try await fetch(query(startIndex: page * Self.pageSize))
+            let response = try await fetch(query(startIndex: page * Self.pageSize, limit: pages * Self.pageSize))
             return (response.items, response.total)
         }
         let pageCount = max(1, (total + Self.pageSize - 1) / Self.pageSize)
@@ -762,7 +911,7 @@ struct LibraryView: View {
     /// rides along with every query — the first page, the later ones, and the
     /// count "Random" needs up front.
     private func fetch(_ q: JellyfinClient.LibraryQuery) async throws -> ItemsResponse {
-        #if os(macOS)
+        #if os(macOS) || os(iOS)
         try await client.libraryItems(parentId: parentId, query: q, searchTerm: activeSearchTerm)
         #else
         try await client.libraryItems(parentId: parentId, query: q)

@@ -12,6 +12,7 @@
 import SwiftUI
 
 struct WatchSettingsView: View {
+    @Environment(AppModel.self) private var app
     @Environment(JellyfinClient.self) private var client
     @State private var link = WatchLink.shared
     @State private var playlists = PlaylistStore.shared
@@ -45,13 +46,19 @@ struct WatchSettingsView: View {
                             WatchTransfersPage()
                                 .clearsBottomChrome()
                         } label: {
-                            LabeledContent("Transfers", value: transfersSummary)
+                            LabeledContent("Transfers", value: link.transfersSummary ?? "")
                         }
+                    }
+                    Button {
+                        link.syncNow()
+                        app.toast("Checking the watch against what it should have", tone: .ok)
+                    } label: {
+                        Label("Sync the Watch Now", systemImage: "arrow.triangle.2.circlepath")
                     }
                 } header: {
                     Text("Content")
                 } footer: {
-                    Text("Playlists on the watch follow the server. The phone fetches what the watch asks for and hands it across over Bluetooth.")
+                    Text("Playlists on the watch follow the server. The phone fetches what the watch asks for and hands it across over Bluetooth. Sync sends the kept lists and everything on the Sent list again, asks the watch what it holds, and restarts anything stuck here; it also happens on its own whenever this app or the watch app opens.")
                 }
 
                 Section {
@@ -147,6 +154,7 @@ struct WatchSettingsView: View {
         if Preferences.shared.watchKeepsBooks { parts.append("Books") }
         let lists = playlists.playlists.filter { link.keepsOnWatch($0.Id) }.count
         if lists > 0 { parts.append("\(lists) playlist\(lists == 1 ? "" : "s")") }
+        if !link.wants.isEmpty { parts.append("\(link.wants.count) sent") }
         return parts.isEmpty ? "Nothing" : parts.joined(separator: " · ")
     }
 
@@ -156,25 +164,63 @@ struct WatchSettingsView: View {
         if let free = inventory.freeBytes { parts.append("\(Format.bytes(free)) free") }
         return parts.joined(separator: " · ")
     }
-
-    private var transfersSummary: String {
-        let moving = link.relayItems.filter { $0.stage == .downloading || $0.stage == .sending }.count
-        let failed = link.relayItems.filter { $0.stage == .failed }.count
-        if moving > 0 { return "\(moving) in progress" }
-        if failed > 0 { return "\(failed) failed" }
-        return "\(link.relayItems.count) waiting"
-    }
 }
 
 // MARK: - Kept on the watch
 
 private struct WatchKeptPage: View {
+    @Environment(AppModel.self) private var app
     @Environment(Preferences.self) private var prefs
     @State private var link = WatchLink.shared
     @State private var playlists = PlaylistStore.shared
 
     var body: some View {
         Form {
+            if !link.wants.isEmpty {
+                Section {
+                    ForEach(link.wants) { want in
+                        let status = want.status(link.wantStates[want.id])
+                        HStack(spacing: 12) {
+                            Image(systemName: want.request.kind.symbol)
+                                .foregroundStyle(Theme.accent)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(want.request.title).lineLimit(1)
+                                Text("\(want.request.kind.label) · \(status.text)")
+                                    .font(.caption)
+                                    .foregroundStyle(status.done ? Theme.textDim : Theme.accent)
+                            }
+                            Spacer()
+                            if status.done {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(Theme.ok)
+                                    .accessibilityLabel("On the watch")
+                            } else if link.wantStates[want.id] != nil {
+                                ProgressView().controlSize(.small)
+                            }
+                        }
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                link.removeWant(want)
+                                app.toast("Removing \(want.request.title) from the watch", tone: .ok)
+                            } label: {
+                                Label("Remove", systemImage: "trash")
+                            }
+                        }
+                    }
+                    Button {
+                        link.syncNow()
+                        app.toast("Checking the watch against this list", tone: .ok)
+                    } label: {
+                        Label("Sync the Watch Now", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                } header: {
+                    Text("Sent to the watch")
+                } footer: {
+                    Text("Everything you've sent with Download to Apple Watch. The list is checked against the watch whenever this app or the watch app opens, and whatever is missing is sent again. Swipe a row to take it off the list and the watch; something deleted on the watch itself comes off the list too.")
+                }
+            }
+
             Section {
                 Toggle(isOn: Binding(
                     get: { prefs.watchKeepsBooks },
@@ -210,6 +256,7 @@ private struct WatchKeptPage: View {
         .formStyle(.grouped)
         .screenTitle("Kept on the Watch")
         .paletteBar()
+        .palettePage()
         .task { await playlists.ensureLoaded() }
     }
 
@@ -295,6 +342,7 @@ private struct WatchStoragePage: View {
         .formStyle(.grouped)
         .screenTitle("Storage on the Watch")
         .paletteBar()
+        .palettePage()
         .task { link.requestInventory() }
         .confirmationDialog("Remove everything from the watch?", isPresented: $confirmAll, titleVisibility: .visible) {
             Button("Remove Everything", role: .destructive) {
@@ -343,6 +391,7 @@ private struct WatchTransfersPage: View {
         .formStyle(.grouped)
         .screenTitle("Transfers")
         .paletteBar()
+        .palettePage()
     }
 
     /// Moving first, furthest along at the top; then waiting, in the order
@@ -417,6 +466,7 @@ private struct WatchDiagnosticsPage: View {
         .formStyle(.grouped)
         .screenTitle("Diagnostics")
         .paletteBar()
+        .palettePage()
         .task { link.reloadWatchLogs() }
     }
 

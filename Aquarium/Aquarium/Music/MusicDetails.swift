@@ -184,7 +184,7 @@ struct ArtistDetailView: View {
             if isLoading, artist == nil {
                 VStack(spacing: 16) {
                     SkeletonHero()
-                    SkeletonShelf()
+                    SkeletonShelf(squareWidth: MusicMetrics.tileWidth)
                 }
             } else if let error, artist == nil {
                 ErrorState(error: error) { Task { await load() } }

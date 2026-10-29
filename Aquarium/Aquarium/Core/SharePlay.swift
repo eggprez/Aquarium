@@ -159,9 +159,24 @@ final class SharePlayCoordinator: NSObject {
         Self.log.notice("joining session for \(session.activity.itemId, privacy: .public)")
 
         // The player's transport follows the group from here on.
+        // The coordinator lives on AVPlayer, which is the Apple engine's; a
+        // Watch Together session forces that engine for its length (see the
+        // plan's "SharePlay stays an AVPlayer-only feature"), so a stream on
+        // mpv is handed over first.
         let player = PlayerModel.shared
-        player.player.playbackCoordinator.delegate = self
-        player.player.playbackCoordinator.coordinateWithSession(session)
+        if player.isActive, player.engine?.kind == .mpv {
+            Task {
+                await player.prepareForSharePlay()
+                guard self.session?.id == session.id else { return }
+                let avPlayer = player.appleEngine.player
+                avPlayer.playbackCoordinator.delegate = self
+                avPlayer.playbackCoordinator.coordinateWithSession(session)
+            }
+        } else {
+            let avPlayer = player.appleEngine.player
+            avPlayer.playbackCoordinator.delegate = self
+            avPlayer.playbackCoordinator.coordinateWithSession(session)
+        }
 
         sessionTasks.append(Task { [weak self] in
             for await state in session.$state.values {
@@ -205,7 +220,7 @@ extension SharePlayCoordinator: AVPlayerPlaybackCoordinatorDelegate {
     ) -> String {
         MainActor.assumeIsolated {
             let player = PlayerModel.shared
-            if let id = player.item?.Id, player.player.currentItem === playerItem { return id }
+            if let id = player.item?.Id, (player.engine as? AVEngine)?.player.currentItem === playerItem { return id }
             return (playerItem.asset as? AVURLAsset)?.url.absoluteString ?? UUID().uuidString
         }
     }

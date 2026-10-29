@@ -43,15 +43,24 @@ struct AquariumApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {
+        Launch.mark("app init")
         // Here rather than in a view: a button on a Live Activity can start
         // the app with no window at all — see Core/LiveActivities.swift.
         LiveActivityCenter.shared.start()
+        Launch.mark("live activities started")
         // And the watch, which may be sending listening to a phone in a
         // pocket — see Core/WatchLink.swift.
         WatchLink.shared.start()
+        Launch.mark("watch link started")
+        #if DEBUG
+        // URLs from a script, past the system's prompt — see Core/DebugLinkHook.swift.
+        DebugLinkHook.start()
+        #endif
         // A film shared over FaceTime can arrive the same way — see
-        // Core/SharePlay.swift.
-        SharePlayCoordinator.shared.start()
+        // Core/SharePlay.swift. After the first frame: joining the group
+        // session stream is a round trip to another process, and a share
+        // can wait the moment that takes.
+        Launch.afterFirstFrame { SharePlayCoordinator.shared.start() }
         // The Control Centre buttons' intents run in this process and reach
         // the players through here — see Shared/WidgetTypes.swift.
         ControlActions.handler = { action in
@@ -60,9 +69,13 @@ struct AquariumApp: App {
                 case .resumeWatching: Task { await AppModel.shared.continueWatching() }
                 case .shuffleMusic: Task { await MusicActions.shuffleAll() }
                 case .resumeAudiobook: Task { await MusicActions.resumeBook() }
+                case .togglePlayPause: _ = PlayerActions.togglePlayPause()
+                case .skipSegment: _ = PlayerActions.skipSegment()
+                case .nextEpisode: Task { await PlayerActions.next() }
                 }
             }
         }
+        Launch.mark("app init done")
     }
     #endif
 
@@ -82,6 +95,8 @@ struct AquariumApp: App {
                 .environment(prefs)
                 .environment(player)
                 .environment(music)
+                // Which way a foldable is being held — see DevicePose.
+                .providesDevicePose()
                 // tvOS has no light mode here — see Theme — so it must not be
                 // told to switch to one.
                 #if !os(tvOS)
@@ -96,7 +111,7 @@ struct AquariumApp: App {
                 // The Apple TV home screen's top shelf comes back in here —
                 // see AppModel.handle.
                 .onOpenURL { app.handle($0) }
-                #if os(tvOS) && DEBUG
+                #if DEBUG
                 .task { player.playDebugStreamIfAsked() }
                 #endif
                 // A title picked from the system's search, and a film handed
@@ -106,6 +121,15 @@ struct AquariumApp: App {
                 #endif
                 #if !os(tvOS)
                 .onContinueUserActivity(PlaybackHandoff.activityType) { app.continueActivity($0) }
+                #endif
+                // The smallest the main window is worth drawing at: the page
+                // beside a full-width sidebar as wide as a title window's
+                // smallest (see `RouteWindow`), and tall enough for the hero
+                // and a shelf under it. Left to its content the window had no
+                // floor worth the name, and the Library and Live TV toolbars
+                // ran out of room long before it was reached.
+                #if os(macOS)
+                .frame(minWidth: 960, minHeight: 600)
                 #endif
         }
         #if os(macOS)
@@ -171,30 +195,64 @@ struct AquariumApp: App {
         .defaultSize(width: 1280, height: 720)
         .defaultPosition(.center)
         .windowResizability(.contentMinSize)
+        // Not in the Window menu. The window opens itself when something
+        // plays and closes when it stops (see `PlayerWindow`), so Window ▸
+        // Player with nothing playing opened a black window that shut again
+        // at once, and during Picture in Picture brought back the window the
+        // floating picture had put away. While something plays it is listed
+        // with the other open windows, under the title of what is playing.
+        .commandsRemoved()
         #endif
     }
 }
 
 #if os(iOS)
+import BackgroundTasks
+import os
 import UIKit
 
 /// What UIKit still has to answer for itself: the completion handler the
 /// system hands back when it wakes the app to finish a background download,
 /// and which orientations the app will accept.
 final class AppDelegate: NSObject, UIApplicationDelegate {
-    /// The background look for new episodes has to be registered before
-    /// launching finishes — see Core/NextUpAlerts.swift.
+    /// Coming forward is heard here as a notification, not as
+    /// `applicationDidBecomeActive`. This app runs in scenes — CarPlay needs
+    /// one — and in a scene-based app UIKit never calls that on the app
+    /// delegate. It used to be implemented here and did nothing: the watch
+    /// was never sent a fresh sign-in on coming forward. The notification is
+    /// still posted, once the app as a whole changes state.
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        MainActor.assumeIsolated { NextUpAlerts.shared.register() }
+        Launch.mark("did finish launching")
+        Self.forgetNewEpisodeAlerts()
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.appBecameActive() }
+        }
         return true
     }
 
-    /// Going behind: book the next look for new episodes.
-    func applicationDidEnterBackground(_ application: UIApplication) {
-        MainActor.assumeIsolated { NextUpAlerts.shared.schedule() }
+    /// The new-episode, new-title and upgrade notifications are gone, and
+    /// with them the background look behind them. What they left on a device
+    /// that had them goes once: the switches, the per-account memory of what
+    /// had been seen, the fingerprints of the library, and any background
+    /// look still booked with the system.
+    private static func forgetNewEpisodeAlerts() {
+        let defaults = UserDefaults.standard
+        let flag = "removed_notifications_v1"
+        guard !defaults.bool(forKey: flag) else { return }
+        defaults.set(true, forKey: flag)
+        for key in defaults.dictionaryRepresentation().keys
+        where ["new_episode_alerts", "new_title_alerts", "upgrade_alerts"].contains(key)
+            || key.hasPrefix("nextup_known_") || key.hasPrefix("nextup_checked_") {
+            defaults.removeObject(forKey: key)
+        }
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.removeItem(at: base.appendingPathComponent("ContentAlerts", isDirectory: true))
+        BGTaskScheduler.shared.cancelAllTaskRequests()
     }
 
     func application(
@@ -217,13 +275,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     /// started last night is in progress now — and whatever it handed over
     /// while the phone was asleep goes on to the server. And a holiday icon
     /// whose season is over comes off the Home Screen.
-    func applicationDidBecomeActive(_ application: UIApplication) {
-        MainActor.assumeIsolated {
-            WatchLink.shared.sendContext()
-            WatchLink.shared.forward()
-            WatchLink.shared.resumeFetches()
-            AppIconChoice.retireOutOfSeason()
-        }
+    @MainActor
+    private func appBecameActive() {
+        WatchLink.shared.checkWatch()
+        WatchLink.shared.forward()
+        WatchLink.shared.resumeFetches()
+        AppIconChoice.retireOutOfSeason()
     }
 
     /// The other job: answering which way round the app may be. The Info.plist
@@ -235,7 +292,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         supportedInterfaceOrientationsFor window: UIWindow?
     ) -> UIInterfaceOrientationMask {
-        MainActor.assumeIsolated { OrientationLock.shared.mask }
+        MainActor.assumeIsolated {
+            let mask = OrientationLock.shared.mask
+            let scene = window?.windowScene
+            FoldState.log.debug("orientation asked by UIKit → mask=\(mask.rawValue) now=\(scene?.effectiveGeometry.interfaceOrientation.rawValue ?? -1) bounds=\(Double(scene?.coordinateSpace.bounds.width ?? 0), format: .fixed(precision: 0))×\(Double(scene?.coordinateSpace.bounds.height ?? 0), format: .fixed(precision: 0)) hinge=\(String(describing: FoldState.shared.effectiveHinge))")
+            return mask
+        }
     }
 
     /// The scene delegate below is how a home screen quick action reaches

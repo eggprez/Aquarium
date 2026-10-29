@@ -10,6 +10,7 @@
 import Foundation
 import Network
 import Observation
+import os
 
 /// The kinds of failure that have to be told apart upstream: "the network is
 /// down" reads as offline mode, "that is not the server you signed in to" stops
@@ -221,6 +222,7 @@ final class JellyfinClient {
     private var recheckTask: Task<Void, Never>?
 
     private init() {
+        Launch.mark("client init")
         // tvOS suspends networking the moment the app leaves the foreground —
         // the screensaver, a Siri Remote press to Home, the system putting the
         // device to sleep — and the connections pooled in `urlSession` can come
@@ -270,7 +272,7 @@ final class JellyfinClient {
     }
 
     @ObservationIgnored
-    private var lastInterface: NWInterface.InterfaceType?
+    private(set) var lastInterface: NWInterface.InterfaceType?
 
     /// The device's network went down, came back, or changed; `AppModel`
     /// probes the server on it.
@@ -644,6 +646,39 @@ final class JellyfinClient {
     /// being on the same actor, can only run before the session is read or
     /// after the task exists. A task already made is one
     /// `finishTasksAndInvalidate` lets finish.
+    /// Bits per second from the server to here, for the speed check: Jellyfin's
+    /// own test download, read for a second and a half at most or until its
+    /// 8 MB are in, timed from the first byte to the last. Pieces of a fixed
+    /// size either spend seconds on a slow link or judge a fast one on a
+    /// sliver (the first version took six seconds at 3 Mbps), and counting
+    /// the bytes one at a time as they arrive topped out at about 1.2 Mbps
+    /// whatever the link — so whole chunks are counted, by a delegate. Nil
+    /// when the server doesn't answer.
+    func measureThroughput() async -> Double? {
+        guard identityProblem == nil, let base = prefs.session?.server,
+              let url = URL(string: base + "/Playback/BitrateTest?size=8000000") else { return nil }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 5
+        req.setValue(authorizationHeader(token: token), forHTTPHeaderField: "Authorization")
+        let counter = ThroughputCounter()
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+        cfg.waitsForConnectivity = false
+        let session = URLSession(configuration: cfg, delegate: counter, delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        session.dataTask(with: req).resume()
+        let clock = ContinuousClock()
+        let started = clock.now
+        while clock.now - started < .seconds(5) {
+            try? await Task.sleep(for: .milliseconds(100))
+            let reading = counter.reading
+            if reading.done || reading.seconds >= 1.5 { break }
+        }
+        let reading = counter.reading
+        guard reading.bytes >= 65_536, reading.seconds > 0 else { return nil }
+        return Double(reading.bytes) * 8 / reading.seconds
+    }
+
     private func perform(_ req: URLRequest, patient: Bool) async throws -> (Data, URLResponse) {
         let session = patient ? patientSession : urlSession
         let handle = TaskHandle()
@@ -1013,9 +1048,11 @@ final class JellyfinClient {
     }
 
     /// A user's picture, for the account lists. Served without a token, so it
-    /// can be drawn for an account that is not the one signed in.
+    /// can be drawn for an account that is not the one signed in. `/UserImage`
+    /// (10.9 and later) rather than `/Users/{id}/Images/Primary`, which 12.x has
+    /// dropped from its API description along with the rest of `/Users/{id}/…`.
     static func avatarURL(for account: SavedSession, width: Int = 160) -> URL? {
-        URL(string: "\(account.server)/Users/\(account.userId)/Images/Primary?maxWidth=\(width)&quality=90")
+        URL(string: "\(account.server)/UserImage?userId=\(account.userId)&maxWidth=\(width)&quality=90")
     }
 
     /// Sign out. Returns whether the server confirmed the token was revoked;
@@ -1102,7 +1139,7 @@ final class JellyfinClient {
 
     func views() async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        return try await get(ItemsResponse.self, "/Users/\(s.userId)/Views").items
+        return try await get(ItemsResponse.self, "/UserViews?userId=\(s.userId)").items
     }
 
     /// The home screen the user has already arranged, read from the server.
@@ -1192,30 +1229,240 @@ final class JellyfinClient {
         guard let s = prefs.session else { throw APIError.notConfigured }
         return try await get(
             ItemsResponse.self,
-            "/Users/\(s.userId)/Items/Resume?Limit=16&Fields=\(Self.itemFields)&MediaTypes=Video&EnableImageTypes=Primary,Backdrop,Thumb,Logo"
+            "/UserItems/Resume?userId=\(s.userId)&Limit=16&Fields=\(Self.itemFields)&MediaTypes=Video&EnableImageTypes=Primary,Backdrop,Thumb,Logo"
         ).items
     }
 
+    /// The Next Up row, as the account's Next Up settings shape it. Every
+    /// place that shows the row asks through here, so the settings — which
+    /// travel between devices — are the whole of what makes the list, and an
+    /// iPhone, an Apple TV and a Mac signed in to one account get one list.
+    ///
+    /// With a day limit set (`Preferences.nextUpDays`), the app is what
+    /// enforces it: the row is the server's Next Up cut at the limit, and a
+    /// show the server still has past it is taken off Next Up *on the
+    /// server* (`removeFromNextUp`), so Jellyfin's own apps and the Linux
+    /// one stop offering it too. Both questions go out with the same
+    /// settings, so the only thing between their answers is the limit. The
+    /// wider one failing, or a server that ignores the cutoff, leaves
+    /// nothing to remove — this never takes off a show it hasn't seen
+    /// fall outside the limit.
     func nextUp() async throws -> [BaseItem] {
+        let days = prefs.nextUpDays
+        // At the server's most rather than the row's 16: a show started over
+        // from its first episode is at the end of the server's answer, and
+        // is brought to the front (`HomeRows.newStartsFirst`).
+        guard days > 0 else { return Array(HomeRows.newStartsFirst(try await nextUpQuery(limit: 100, cutoff: nil)).prefix(16)) }
+        let cutoff = Date().addingTimeInterval(-Double(days) * 24 * 60 * 60)
+        // Both at the server's own most, not the row's 16: a show inside the
+        // limit but past the 16th is not one to remove.
+        async let within = nextUpQuery(limit: 100, cutoff: cutoff)
+        async let everything = try? nextUpQuery(limit: 100, cutoff: nil, light: true)
+        let kept = try await within
+        if let everything = await everything {
+            reportExpired(HomeRows.expiredFromNextUp(everything: everything, kept: kept))
+        }
+        return Array(HomeRows.newStartsFirst(kept).prefix(16))
+    }
+
+    /// `light` asks for the ids alone — what the wider question above needs.
+    private func nextUpQuery(limit: Int, cutoff: Date?, light: Bool = false) async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        return try await get(
+        var query: [URLQueryItem] = [
+            .init(name: "userId", value: s.userId),
+            .init(name: "Limit", value: String(limit)),
+            .init(name: "enableResumable", value: prefs.nextUpIncludesInProgress ? "true" : "false"),
+            .init(name: "enableRewatching", value: prefs.nextUpRewatching ? "true" : "false"),
+        ]
+        if light {
+            query += [.init(name: "enableImages", value: "false"), .init(name: "enableUserData", value: "false")]
+        } else {
+            query += [
+                .init(name: "Fields", value: Self.itemFields),
+                .init(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb,Logo"),
+            ]
+        }
+        if let cutoff {
+            query.append(.init(name: "nextUpDateCutoff", value: ISO8601DateFormatter().string(from: cutoff)))
+        }
+        return try await get(ItemsResponse.self, "/Shows/NextUp?\(Self.encode(query))").items
+    }
+
+    /// Shows being taken off Next Up for having run past the day limit, so
+    /// that two surfaces asking at once — Home and the top shelf, say — don't
+    /// both write the same dates.
+    @ObservationIgnored private var expiring: Set<String> = []
+
+    /// Take the shows past the day limit off Next Up on the server, one after
+    /// another and without holding up the row, which already leaves them out.
+    /// A failure is left for the next time the row is asked for.
+    private func reportExpired(_ seriesIds: [String]) {
+        let fresh = seriesIds.filter { !expiring.contains($0) }
+        guard !fresh.isEmpty else { return }
+        expiring.formUnion(fresh)
+        Task {
+            for id in fresh {
+                do {
+                    try await removeFromNextUp(seriesId: id)
+                } catch {
+                    Self.nextUpLog.error("Couldn't take \(id, privacy: .public) off Next Up: \(error.localizedDescription, privacy: .public)")
+                }
+                expiring.remove(id)
+            }
+        }
+    }
+
+    nonisolated static let nextUpLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Aquarium", category: "nextup")
+
+    /// Take a show off Next Up, on the server, without touching what has been
+    /// watched. Next Up is built from the episodes with a last-played date;
+    /// Jellyfin reads the earliest date there is as none, so each of the
+    /// show's dated episodes is given that one (`HomeRows.notPlayedDate`).
+    /// Watched marks, play counts and positions stay as they were — an
+    /// episode left partway is still in Continue Watching, at the end of it.
+    ///
+    /// The show comes back when an episode of it is played, or when it is
+    /// added to Next Up again. Not for a new episode — nothing of it counts
+    /// as watched lately — and not for an episode marked watched by hand,
+    /// which keeps the date it had.
+    ///
+    /// Servers before 10.9 have no way to write a date on its own and answer
+    /// 404, which is thrown.
+    func removeFromNextUp(seriesId: String) async throws {
+        guard let s = prefs.session else { throw APIError.notConfigured }
+        let episodes = try await get(
             ItemsResponse.self,
-            "/Shows/NextUp?userId=\(s.userId)&Limit=16&Fields=\(Self.itemFields)&EnableImageTypes=Primary,Backdrop,Thumb,Logo"
+            "/Shows/\(Self.pathId(seriesId))/Episodes?userId=\(s.userId)&Fields=\(Self.itemFields)"
         ).items
+        for episode in episodes where HomeRows.hasPlayedDate(episode) {
+            try await request(
+                "/UserItems/\(Self.pathId(episode.Id))/UserData?userId=\(s.userId)", method: "POST",
+                body: ["LastPlayedDate": HomeRows.notPlayedDate]
+            )
+            LibraryIndex.shared.patchUserData(episode.Id) { $0.LastPlayedDate = HomeRows.notPlayedDate }
+        }
+    }
+
+    /// Where "Add to Next Up" picks a show up: after what has been watched,
+    /// or from its first episode with everything watched before forgotten.
+    enum NextUpStart: Sendable {
+        case lastWatched, firstEpisode
+    }
+
+    /// Put a show on Next Up, on the server, so every app signed in to the
+    /// account — this one on other devices, Jellyfin's own, the Linux one —
+    /// shows it there. Returns the episode it will be offered at, or nil when
+    /// every episode has been watched and there is nothing to offer.
+    ///
+    /// Jellyfin has no call for this. It builds Next Up from the shows with
+    /// an episode that has a last-played date — played or not — offers the
+    /// first unwatched episode after the last one *watched*, and orders the
+    /// row by when that last watched episode was played. So:
+    ///
+    /// - `.lastWatched` gives today as the last-played date to the last
+    ///   watched episode. The show goes to the front of the row everywhere,
+    ///   and back inside the day limit (`Preferences.nextUpDays`). Writing
+    ///   the date on the episode to be offered instead, as this used to, got
+    ///   the show onto Next Up at wherever its old date put it — often past
+    ///   the row's 16 cards, so the add looked like it did nothing.
+    /// - `.firstEpisode` marks the whole show unwatched — play counts, saved
+    ///   positions and dates all go — and gives the first episode today. A
+    ///   show with nothing watched is one Jellyfin puts at the *end* of Next
+    ///   Up; `HomeRows.newStartsFirst` brings it to the front of this app's.
+    ///
+    /// Nothing is marked watched and nothing goes into Continue Watching: a
+    /// few seconds of progress would have, and Next Up leaves in-progress
+    /// episodes out unless asked for them.
+    ///
+    /// Servers before 10.9 have no way to write a date on its own and answer
+    /// 404, which is thrown.
+    private struct NextUpDating: Encodable {
+        var LastPlayedDate: String
+        var Played: Bool
+        var PlayCount: Int
+        var PlaybackPositionTicks: Int64
+    }
+
+    func addToNextUp(seriesId: String, from start: NextUpStart) async throws -> BaseItem? {
+        guard let s = prefs.session else { throw APIError.notConfigured }
+        // From the server, not the library copy: which episodes are watched
+        // is the whole question, and the copy can be behind on it.
+        let all = try await get(
+            ItemsResponse.self,
+            "/Shows/\(Self.pathId(seriesId))/Episodes?userId=\(s.userId)&Fields=\(Self.itemFields)"
+        ).items
+        let target: BaseItem
+        let dated: BaseItem
+        switch start {
+        case .lastWatched:
+            guard let next = HomeRows.nextUpTarget(all) else { return nil }
+            target = next
+            dated = HomeRows.lastWatched(all) ?? next
+        case .firstEpisode:
+            guard let first = HomeRows.firstEpisode(all) else { return nil }
+            try await request("/UserPlayedItems/\(Self.pathId(seriesId))?userId=\(s.userId)", method: "DELETE")
+            for episode in all {
+                LibraryIndex.shared.patchUserData(episode.Id) {
+                    $0.Played = false
+                    $0.PlaybackPositionTicks = 0
+                    $0.LastPlayedDate = nil
+                }
+            }
+            target = first
+            dated = first
+        }
+        // The episode's whole state goes with the date. Sent alone, the date
+        // is written over what the server last remembered of the episode —
+        // after the show was marked unwatched, that is the watched mark and
+        // play count it had a moment before.
+        let started = start == .lastWatched
+        let state = NextUpDating(
+            LastPlayedDate: ISO8601DateFormatter().string(from: Date()),
+            Played: started && dated.userData.played,
+            PlayCount: started ? dated.UserData?.PlayCount ?? 0 : 0,
+            PlaybackPositionTicks: started ? dated.userData.positionTicks : 0
+        )
+        try await request(
+            "/UserItems/\(Self.pathId(dated.Id))/UserData?userId=\(s.userId)", method: "POST",
+            body: state
+        )
+        LibraryIndex.shared.patchUserData(dated.Id) { $0.LastPlayedDate = state.LastPlayedDate }
+        prefs.unhideFromNextUp(seriesId: seriesId)
+        return target
     }
 
     /// The one episode the user should watch next in a series — the in-progress
     /// one, else the first unwatched. Nil when the server has nothing queued.
+    ///
+    /// The in-progress episode is asked of Resume, not left to Next Up. Next Up
+    /// works forward from the last episode marked *watched*, so someone who
+    /// joined a show at its latest season — half-way through S29E3, nothing
+    /// before it played — was offered S1E1, and Play started the show over.
     func seriesNextUp(seriesId: String) async throws -> BaseItem? {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        let q: [URLQueryItem] = [
+        let resumeQuery: [URLQueryItem] = [
+            .init(name: "userId", value: s.userId),
+            .init(name: "parentId", value: seriesId),
+            .init(name: "Limit", value: "1"),
+            .init(name: "MediaTypes", value: "Video"),
+            .init(name: "Fields", value: Self.itemFields),
+            .init(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb,Logo"),
+        ]
+        let nextQuery: [URLQueryItem] = [
             .init(name: "userId", value: s.userId),
             .init(name: "seriesId", value: seriesId),
             .init(name: "Limit", value: "1"),
             .init(name: "Fields", value: Self.itemFields),
             .init(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb,Logo"),
         ]
-        return try await get(ItemsResponse.self, "/Shows/NextUp?\(Self.encode(q))").items.first
+        async let resumed = try? get(ItemsResponse.self, "/UserItems/Resume?\(Self.encode(resumeQuery))").items
+        async let next = get(ItemsResponse.self, "/Shows/NextUp?\(Self.encode(nextQuery))").items.first
+        // Only an episode of this series: an older server ignoring parentId
+        // would hand back whatever was last left part-way, film or show.
+        if let inProgress = await resumed?.first(where: { $0.isEpisode && $0.SeriesId == seriesId }) {
+            return inProgress
+        }
+        return try await next
     }
 
     /// A handful of films and shows from the whole library, drawn at random —
@@ -1240,7 +1487,7 @@ final class JellyfinClient {
             URLQueryItem(name: "Fields", value: Self.listFields),
             URLQueryItem(name: "EnableImageTypes", value: "Primary,Backdrop,Thumb,Logo"),
         ]
-        let items = try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))").items
+        let items = try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))").items
         return Array(items.filter { Artwork.url($0, type: "Backdrop") != nil }.prefix(limit))
     }
 
@@ -1251,7 +1498,7 @@ final class JellyfinClient {
         guard let s = prefs.session else { throw APIError.notConfigured }
         let items = try await get(
             [BaseItem].self,
-            "/Users/\(s.userId)/Items/Latest?parentId=\(Self.pathId(parentId))&Limit=\(limit)&Fields=\(Self.itemFields)"
+            "/Items/Latest?userId=\(s.userId)&parentId=\(Self.pathId(parentId))&Limit=\(limit)&Fields=\(Self.itemFields)"
         )
         return try await foldEpisodesIntoSeries(items.filter { !$0.isNotVideo })
     }
@@ -1269,7 +1516,7 @@ final class JellyfinClient {
                 URLQueryItem(name: name, value: value),
                 URLQueryItem(name: "Limit", value: "0"),
             ]
-            return try? await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))", countsForOffline: false).total
+            return try? await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))", countsForOffline: false).total
         }
         async let video = count("MediaTypes", "Video")
         async let other = count("IncludeItemTypes", "Audio,AudioBook,Book")
@@ -1349,7 +1596,7 @@ final class JellyfinClient {
         if query.favorites { q.append(.init(name: "IsFavorite", value: "true")) }
         if let g = query.genre { q.append(.init(name: "Genres", value: g)) }
         if let letter = query.nameLessThan { q.append(.init(name: "NameLessThan", value: letter.lowercased())) }
-        return try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))")
+        return try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))")
     }
 
     /// Everything the user has starred, across every library.
@@ -1374,7 +1621,7 @@ final class JellyfinClient {
             URLQueryItem(name: "StartIndex", value: String(startIndex)),
             URLQueryItem(name: "Limit", value: String(limit)),
         ]
-        return try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))")
+        return try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))")
     }
 
     /// Genre names present in one library, for the filter bar. Empty on servers
@@ -1397,7 +1644,7 @@ final class JellyfinClient {
         // Asked of the server whenever it can be, for the cast and studios the
         // copy doesn't keep; the copy answers when it can't.
         do {
-            return try await get(BaseItem.self, "/Users/\(s.userId)/Items/\(Self.pathId(itemId))?Fields=\(Self.detailFields)")
+            return try await get(BaseItem.self, "/Items/\(Self.pathId(itemId))?userId=\(s.userId)&Fields=\(Self.detailFields)")
         } catch APIError.offline(let message) {
             if let local = LibraryIndex.shared.item(itemId) { return local }
             throw APIError.offline(message)
@@ -1418,14 +1665,14 @@ final class JellyfinClient {
             URLQueryItem(name: "Fields", value: Self.listFields),
             URLQueryItem(name: "Limit", value: String(limit)),
         ]
-        return try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))").items
+        return try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))").items
     }
 
     /// The trailer files kept beside a title on the server. Playable like any
     /// other item. Empty on any failure — a trailer is never worth an error.
     func localTrailers(for itemId: String) async -> [BaseItem] {
         guard let s = prefs.session else { return [] }
-        return (try? await get([BaseItem].self, "/Users/\(s.userId)/Items/\(Self.pathId(itemId))/LocalTrailers")) ?? []
+        return (try? await get([BaseItem].self, "/Items/\(Self.pathId(itemId))/LocalTrailers?userId=\(s.userId)")) ?? []
     }
 
     /// "More like this" — the server's own recommendation. Purely additive to
@@ -1470,15 +1717,31 @@ final class JellyfinClient {
             URLQueryItem(name: "StartIndex", value: String(startIndex)),
             URLQueryItem(name: "Limit", value: String(limit)),
         ]
-        return try await get(ItemsResponse.self, "/Users/\(s.userId)/Items?\(Self.encode(q))")
+        return try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))")
     }
 
+    /// Every channel, a page at a time. One request capped at 500 used to be
+    /// the whole of it, and a lineup bigger than that — an IPTV source behind
+    /// the server's own tuner list easily is — simply ended at channel 500.
     func channels() async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        return try await get(
-            ItemsResponse.self,
-            "/LiveTv/Channels?userId=\(s.userId)&AddCurrentProgram=true&EnableImageTypes=Primary&Limit=500"
-        ).items
+        let pageSize = 500
+        var all: [BaseItem] = []
+        while true {
+            let page = try await get(
+                ItemsResponse.self,
+                "/LiveTv/Channels?userId=\(s.userId)&AddCurrentProgram=true&EnableImageTypes=Primary"
+                    + "&StartIndex=\(all.count)&Limit=\(pageSize)"
+            )
+            all += page.items
+            // A page short of full is the last, and so is a total reached; a
+            // server that sends no total is read by the first rule alone. The
+            // ceiling is for one that ignores StartIndex and never runs out.
+            guard page.items.count == pageSize, all.count < 10_000,
+                  all.count < page.total || page.TotalRecordCount == nil
+            else { break }
+        }
+        return all
     }
 
     /// The guide: every programme airing on the given channels that overlaps
@@ -1515,7 +1778,7 @@ final class JellyfinClient {
         var out: [BaseItem] = []
         for chunk in stride(from: 0, to: ids.count, by: 50) {
             let slice = ids[chunk..<min(chunk + 50, ids.count)].joined(separator: ",")
-            var path = "/Users/\(s.userId)/Items?Ids=\(slice)"
+            var path = "/Items?userId=\(s.userId)&Ids=\(slice)"
             if !fields.isEmpty { path += "&Fields=\(fields)" }
             out += try await get(ItemsResponse.self, path, countsForOffline: countsForOffline).items
         }
@@ -1534,9 +1797,9 @@ final class JellyfinClient {
     /// only marks the item played.
     func markPlayed(_ itemId: String, played: Bool, at date: Date?) async throws {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        var path = "/Users/\(s.userId)/PlayedItems/\(Self.pathId(itemId))"
+        var path = "/UserPlayedItems/\(Self.pathId(itemId))?userId=\(s.userId)"
         if played, let date {
-            path += "?datePlayed=\(ISO8601DateFormatter().string(from: date))"
+            path += "&datePlayed=\(ISO8601DateFormatter().string(from: date))"
         }
         try await request(path, method: played ? "POST" : "DELETE")
         LibraryIndex.shared.patchUserData(itemId) {
@@ -1545,9 +1808,37 @@ final class JellyfinClient {
         }
     }
 
+    /// Forget where an item was left: its saved position goes to zero, so it
+    /// drops out of Continue Watching everywhere, while its played state,
+    /// play count and last-played date are left as they were. Nothing here
+    /// counts as a play, so a show's Next Up is not moved by it — which is
+    /// why the stale episodes Home tidies (see `HomeRows.abandoned`) are
+    /// cleared rather than marked played.
+    ///
+    /// Servers from 10.9 take the position straight into the item's user
+    /// data. An older one has no such call and answers 404, and is instead
+    /// told the item was stopped at the very start, which it records the
+    /// same way — below its minimum resume point, the position is dropped
+    /// and nothing is marked played. That fallback keeps the old
+    /// `/Users/{id}/…` spelling on purpose: it is only ever reached by a
+    /// server from before the routes everything else here now uses.
+    func clearProgress(_ itemId: String) async throws {
+        guard let s = prefs.session else { throw APIError.notConfigured }
+        let id = Self.pathId(itemId)
+        do {
+            try await request(
+                "/UserItems/\(id)/UserData?userId=\(s.userId)", method: "POST",
+                body: ["PlaybackPositionTicks": 0]
+            )
+        } catch APIError.server(let status, _) where status == 404 {
+            try await request("/Users/\(s.userId)/PlayingItems/\(id)?positionTicks=0", method: "DELETE")
+        }
+        LibraryIndex.shared.patchUserData(itemId) { $0.PlaybackPositionTicks = 0 }
+    }
+
     func setFavorite(_ itemId: String, favorite: Bool) async throws {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        try await request("/Users/\(s.userId)/FavoriteItems/\(Self.pathId(itemId))", method: favorite ? "POST" : "DELETE")
+        try await request("/UserFavoriteItems/\(Self.pathId(itemId))?userId=\(s.userId)", method: favorite ? "POST" : "DELETE")
         LibraryIndex.shared.patchUserData(itemId) { $0.IsFavorite = favorite }
     }
 
@@ -1560,7 +1851,7 @@ final class JellyfinClient {
         guard let s = prefs.session else { return nil }
         guard let env = try? await get(
             TrickplayEnvelope.self,
-            "/Users/\(s.userId)/Items/\(Self.pathId(itemId))?Fields=Trickplay"
+            "/Items/\(Self.pathId(itemId))?userId=\(s.userId)&Fields=Trickplay"
         ) else { return nil }
         return Self.trickplayInfo(env.Trickplay, sourceId: env.MediaSources?.first?.Id, itemId: itemId)
     }
@@ -1642,34 +1933,38 @@ final class JellyfinClient {
         fullEncode: Bool = false,
         audioStreamIndex: Int? = nil,
         subtitleStreamIndex: Int? = nil,
-        audio: Bool = false
+        audio: Bool = false,
+        engine: PlaybackEngineKind = .platformDefault
     ) async throws -> PlaybackSource {
         guard let s = prefs.session else { throw APIError.notConfigured }
         // A song is asked about with the music profile — a different set of
         // containers, no subtitles, an audio-only transcode — and answered
         // from the audio route. See `DeviceProfile.buildMusic`.
         //
-        // Video on Apple TV plays through mpv, which opens what AVFoundation
-        // can't — see `DeviceProfile.buildMPV`.
-        #if os(tvOS)
-        let profile = audio
-            ? DeviceProfile.buildMusic(maxBitrate: maxBitrate)
-            : DeviceProfile.buildMPV(
-                forceTranscode: forceTranscode,
-                maxBitrate: maxBitrate,
-                stereoOnly: prefs.stereoDownmix
-            )
-        #else
-        let profile = audio
-            ? DeviceProfile.buildMusic(maxBitrate: maxBitrate)
-            : DeviceProfile.build(
-                forceTranscode: forceTranscode,
-                maxBitrate: maxBitrate,
-                stereoOnly: prefs.stereoDownmix,
-                decodeAudioLocally: prefs.decodeAudioLocally,
-                subtitlesInManifest: (subtitleStreamIndex ?? -1) >= 0
-            )
-        #endif
+        // Video is asked about with the profile of the engine that will play
+        // it, which `EnginePolicy` chose before this call: mpv opens what
+        // AVFoundation can't — see `DeviceProfile.buildMPV`.
+        let profile: DeviceProfile
+        if audio {
+            profile = DeviceProfile.buildMusic(maxBitrate: maxBitrate)
+        } else {
+            switch engine {
+            case .mpv:
+                profile = DeviceProfile.buildMPV(
+                    forceTranscode: forceTranscode,
+                    maxBitrate: maxBitrate,
+                    stereoOnly: prefs.stereoDownmix
+                )
+            case .apple:
+                profile = DeviceProfile.build(
+                    forceTranscode: forceTranscode,
+                    maxBitrate: maxBitrate,
+                    stereoOnly: prefs.stereoDownmix,
+                    decodeAudioLocally: prefs.decodeAudioLocally,
+                    subtitlesInManifest: (subtitleStreamIndex ?? -1) >= 0
+                )
+            }
+        }
         let body = PlaybackInfoBody(
             UserId: s.userId,
             StartTimeTicks: startTicks,
@@ -1716,8 +2011,20 @@ final class JellyfinClient {
         // timestamps, and the client-side seek then lands somewhere other than
         // where it was asked to. It is a plausible-looking fix for a desync and
         // it makes the resume position wrong instead.
-        if let transcodingUrl = ms.TranscodingUrl,
-           forceTranscode || (ms.SupportsDirectPlay != true && ms.SupportsDirectStream != true) {
+        //
+        // The rule itself is `StreamPlan.decide`, written down once so it can
+        // be tested: mpv opens whatever the server offers untouched, so only
+        // a song, and video on AVPlayer, still go through `DeviceProfile`'s
+        // check of what this client can open.
+        let engineCanOpen: Bool = {
+            if audio { return DeviceProfile.canDirectPlayAudio(ms) }
+            switch engine {
+            case .mpv: return true
+            case .apple: return DeviceProfile.canDirectPlay(ms)
+            }
+        }()
+        let plan = StreamPlan.decide(source: ms, forceTranscode: forceTranscode, live: live, engineCanOpen: engineCanOpen)
+        if plan == .transcode, let transcodingUrl = ms.TranscodingUrl {
             // A path, and one that still leads to this server once joined to
             // its address: "@elsewhere/…" parses as a different host with the
             // server's own name as the user part, and the auth header would
@@ -1733,6 +2040,9 @@ final class JellyfinClient {
                 subtitleStreamIndex: subtitleStreamIndex,
                 in: stream
             )
+            if engine == .apple {
+                stream = Self.subtitleTimedSegments(stream, source: ms, audioStreamIndex: audioStreamIndex)
+            }
             if Self.claimsHDRItCannotCarry(ms) {
                 stream = await variantPlaylist(of: stream) ?? stream
             }
@@ -1771,15 +2081,7 @@ final class JellyfinClient {
         // built as `stream.mp4`, `static=true` would send the transport stream
         // underneath it unchanged, and AVFoundation would open a file it cannot
         // read. A live source that won't say what it is gets transcoded.
-        #if os(tvOS)
-        // mpv opens whatever the server offers untouched; only a song still
-        // goes through AVFoundation's check.
-        let playable = audio ? DeviceProfile.canDirectPlayAudio(ms) : true
-        #else
-        let playable = audio ? DeviceProfile.canDirectPlayAudio(ms) : DeviceProfile.canDirectPlay(ms)
-        #endif
-        if !forceTranscode,
-           !playable || (live && (ms.Container ?? "").isEmpty) {
+        if plan == .escalate {
             if let escalated = try? await resolvePlayback(
                 itemId: itemId,
                 maxBitrate: maxBitrate,
@@ -1789,7 +2091,8 @@ final class JellyfinClient {
                 fullEncode: fullEncode,
                 audioStreamIndex: audioStreamIndex,
                 subtitleStreamIndex: subtitleStreamIndex,
-                audio: audio
+                audio: audio,
+                engine: engine
             ), escalated.isTranscode {
                 return escalated
             }
@@ -1894,6 +2197,34 @@ final class JellyfinClient {
     /// Make sure the chosen tracks are in the address the player opens, even on
     /// a server that didn't write them into it.
     ///
+    /// MPEG-TS segments rather than fMP4 for a stream carrying its subtitles in
+    /// the manifest. Jellyfin's fMP4 segments start at zero while the WebVTT it
+    /// serves beside them maps its cues to a ten-second offset, so AVPlayer
+    /// showed every line ten seconds late — a forced track looked empty, its
+    /// lines landing after the signs they translate had gone. TS segments carry
+    /// the offset the cues expect. Only where TS can carry the stream: H.264
+    /// picture (HEVC reaches AVPlayer in fMP4 alone) and sound TS takes.
+    nonisolated static func subtitleTimedSegments(_ url: URL, source: MediaSource, audioStreamIndex: Int?) -> URL {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              var query = parts.queryItems else { return url }
+        func value(_ name: String) -> String? {
+            query.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.value
+        }
+        guard let subtitle = value("SubtitleStreamIndex").flatMap(Int.init), subtitle >= 0,
+              value("SubtitleMethod")?.lowercased() == "hls",
+              value("SegmentContainer")?.lowercased() == "mp4",
+              source.streams.first(where: { $0.type == "Video" })?.Codec?.lowercased() == "h264"
+        else { return url }
+        let audioIndex = audioStreamIndex ?? source.DefaultAudioStreamIndex
+        let audio = source.audioStreams.first { $0.Index == audioIndex } ?? source.audioStreams.first
+        guard let codec = audio?.Codec?.lowercased(), ["aac", "ac3", "mp3"].contains(codec) else { return url }
+        for i in query.indices where query[i].name.caseInsensitiveCompare("SegmentContainer") == .orderedSame {
+            query[i].value = "ts"
+        }
+        parts.queryItems = query
+        return parts.url ?? url
+    }
+
     /// Jellyfin builds `TranscodingUrl` from the very request above, so this is
     /// normally a no-op — and it is here for the case where it isn't. A
     /// transcode whose URL names no `AudioStreamIndex` re-reads the source's
@@ -1952,11 +2283,39 @@ final class JellyfinClient {
         _ = try? await request("/Sessions/Playing/Stopped", method: "POST", body: report)
     }
 
+    /// Tell the server an encode is still wanted. Jellyfin stops an HLS encode
+    /// that nobody has pinged for a minute, whatever segments are being asked
+    /// for. A player's progress reports keep it alive; a download has none,
+    /// so it pings. See `DownloadManager.measureStreamsSoon`.
+    func pingTranscode(playSessionId: String) async {
+        _ = try? await request(
+            "/Sessions/Playing/Ping?playSessionId=\(playSessionId)", method: "POST",
+            countsForOffline: false, timeout: 10
+        )
+    }
+
+    /// The `PlaySessionId` a download's URL carries — see `withPlaySession`.
+    nonisolated static func playSessionId(of url: String) -> String? {
+        URLComponents(string: url)?.queryItems?
+            .first { $0.name.caseInsensitiveCompare("PlaySessionId") == .orderedSame }?.value
+    }
+
     /// The throwing form, for a caller that needs to know the report actually
     /// reached the server before treating it as done — unlike a live session's
     /// stopped report, which is best-effort by design.
     func reportPlaybackStoppedOrThrow(_ report: PlaybackReport) async throws {
         _ = try await request("/Sessions/Playing/Stopped", method: "POST", body: report)
+    }
+
+    /// The throwing forms of the start and progress reports, for a download's
+    /// sitting — see `OfflineProgress.Session` — which only counts as told
+    /// once the server has actually heard it.
+    func reportPlaybackStartOrThrow(_ report: PlaybackReport) async throws {
+        _ = try await request("/Sessions/Playing", method: "POST", body: report)
+    }
+
+    func reportPlaybackProgressOrThrow(_ report: PlaybackReport) async throws {
+        _ = try await request("/Sessions/Playing/Progress", method: "POST", body: report)
     }
 
     /// Tell the server to tear down a transcode job we've walked away from.
@@ -2016,7 +2375,7 @@ final class JellyfinClient {
     /// writes that last. There is nothing on the wire to tell the two apart.
     /// Jellyfin's own maintainers say the same: download the HLS stream, which
     /// is built to be consumed as it is produced.
-    func downloadURL(item: BaseItem, quality: DownloadQuality)
+    func downloadURL(item: BaseItem, quality: DownloadQuality, asStream: Bool = false)
         -> (url: URL, fileName: String, transport: DownloadTransport)?
     {
         guard let s = prefs.session else { return nil }
@@ -2053,8 +2412,11 @@ final class JellyfinClient {
         let quality = Self.effectiveQuality(item: item, quality: quality)
 
         // The one case with nothing to encode and nothing to race: the file the
-        // server already holds, sent as it sits on disk.
-        if quality.original, DeviceProfile.canPlayAsFile(source) {
+        // server already holds, sent as it sits on disk. Unless the caller has
+        // already had that file and found it wouldn't open — see
+        // `DownloadManager.verifyAndComplete` — in which case the same bytes
+        // come rewrapped as a stream instead.
+        if quality.original, !asStream, DeviceProfile.canPlayAsFile(source) {
             let container = DeviceProfile.fileExtension(forContainer: source?.Container ?? item.Container, audio: false)
             guard let url = URL(string: "\(s.server)/Items/\(Self.pathId(item.Id))/Download") else { return nil }
             return (url, "\(safe).\(container)", .file)
@@ -2071,6 +2433,31 @@ final class JellyfinClient {
             URLQueryItem(name: "AudioCodec", value: "aac"),
         ]
         if let id = source?.Id { q.append(URLQueryItem(name: "MediaSourceId", value: id)) }
+
+        // An HLS download carries one audio track, so it has to be the one the
+        // player would have picked. Text subtitles travel beside it as files
+        // (see `DownloadSubtitles`); only a picture subtitle the user would
+        // have had on is asked for here, painted into an encode that is
+        // happening anyway.
+        if let source {
+            let tracks = Self.downloadTracks(
+                in: source,
+                saved: item.SeriesId.flatMap { prefs.trackChoice(seriesId: $0) },
+                settings: TrackPreference.Settings(
+                    audioLanguage: prefs.audioLanguage,
+                    subtitleLanguage: prefs.subtitleLanguage,
+                    forcedSubtitlesOnly: prefs.forcedSubtitlesOnly),
+                reencodesPicture: !quality.original)
+            if let audio = tracks.audio {
+                q.append(URLQueryItem(name: "AudioStreamIndex", value: String(audio)))
+            }
+            if let burnIn = tracks.burnIn {
+                q += [
+                    URLQueryItem(name: "SubtitleStreamIndex", value: String(burnIn)),
+                    URLQueryItem(name: "SubtitleMethod", value: "Encode"),
+                ]
+            }
+        }
 
         if quality.original {
             // Original picture, new wrapper — the source is something
@@ -2105,6 +2492,38 @@ final class JellyfinClient {
         return (Self.withPlaySession(url), "\(safe)\(suffix)", .hls)
     }
 
+    /// The tracks to ask an HLS download for, chosen the way the player
+    /// chooses them for a stream (`TrackPreference.preferredStreams`).
+    ///
+    /// `audio` is nil when the server's own default is the one wanted. A
+    /// subtitle is only ever named to be burned in, and only when it is a
+    /// picture subtitle and the picture is being re-encoded regardless: a text
+    /// one is fetched as a file and can be switched off, and burning into an
+    /// Original would turn a stream copy into a full encode. The file's
+    /// default subtitle counts as chosen, since the preference leaves that one
+    /// unnamed for the server to send.
+    static func downloadTracks(
+        in source: MediaSource, saved: Preferences.TrackChoice?, settings: TrackPreference.Settings,
+        reencodesPicture: Bool
+    ) -> (audio: Int?, burnIn: Int?) {
+        let picked = TrackPreference.preferredStreams(in: source, saved: saved, settings: settings)
+        guard reencodesPicture else { return (picked.audio, nil) }
+        let subtitle = picked.subtitle ?? source.DefaultSubtitleStreamIndex
+        guard let subtitle, subtitle >= 0,
+              let stream = source.subtitleStreams.first(where: { $0.Index == subtitle }), stream.isImageSubtitle
+        else { return (picked.audio, nil) }
+        return (picked.audio, subtitle)
+    }
+
+    /// Where the server serves one subtitle stream as a file, converted to
+    /// `format` (`srt`, `ass`, `vtt`). The same endpoint a stream's
+    /// `DeliveryUrl` names for a sidecar, but it extracts embedded text tracks
+    /// too, which is what lets a download carry subtitles the HLS remux drops.
+    /// Server-relative, for `request`, so the token goes in the header.
+    nonisolated static func subtitlePath(itemId: String, mediaSourceId: String, index: Int, format: String) -> String {
+        "/Videos/\(pathId(itemId))/\(pathId(mediaSourceId))/Subtitles/\(index)/0/Stream.\(format)"
+    }
+
     /// `url` with a `PlaySessionId` of its own, if it hasn't one already.
     ///
     /// Every encode this device asks for carries the same `deviceId`, and
@@ -2123,6 +2542,18 @@ final class JellyfinClient {
         let query = parts.percentEncodedQuery ?? ""
         parts.percentEncodedQuery = (query.isEmpty ? "" : query + "&") + "PlaySessionId=" + id
         return parts.url ?? url
+    }
+
+    /// `url` with its `PlaySessionId`, if any, swapped for a new one: a
+    /// download starting over asks for an encode of its own rather than the
+    /// one it gave up on.
+    nonisolated static func withNewPlaySession(_ url: URL) -> URL {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        let kept = (parts.percentEncodedQuery ?? "").split(separator: "&").filter {
+            !$0.lowercased().hasPrefix("playsessionid=")
+        }
+        parts.percentEncodedQuery = kept.isEmpty ? nil : kept.joined(separator: "&")
+        return withPlaySession(parts.url ?? url)
     }
 
     /// A title turned into something a file system will take. Trimmed by *bytes*
@@ -2249,10 +2680,53 @@ final class JellyfinClient {
         }
         let resolved = effectiveQuality(item: item, quality: quality)
         if resolved.original {
-            let size = item.MediaSources?.first?.Size ?? 0
+            let source = item.MediaSources?.first
+            // Rewrapped rather than sent as it sits: what comes down is the
+            // picture and one soundtrack, not the file. See `remuxSize`.
+            if !DeviceProfile.canPlayAsFile(source), let remux = remuxSize(item: item) { return remux }
+            let size = source?.Size ?? 0
             return size > 0 ? size : nil
         }
         return transcodeSize(item: item, quality: resolved)
+    }
+
+    /// What an original-quality download that has to be rewrapped will weigh.
+    ///
+    /// The source file's size was the figure used, and it is the wrong one:
+    /// an MKV carries every soundtrack and subtitle the release came with —
+    /// commentary, dubs, a lossless track beside a lossy one — and the
+    /// rewrap brings down the picture and one soundtrack, as AAC unless it
+    /// already was. Started from the whole file, the total on the Downloads
+    /// page could only fall as the transfer went on. The picture's own
+    /// bitrate and one AAC soundtrack instead; nil when the server doesn't
+    /// say what the picture's bitrate is.
+    static func remuxSize(item: BaseItem) -> Int64? {
+        guard let ticks = item.RunTimeTicks, ticks > 0,
+              let source = item.MediaSources?.first,
+              let videoBitrate = source.streams.first(where: { $0.type == "Video" })?.BitRate, videoBitrate > 0
+        else { return nil }
+        let seconds = Double(ticks) / 10_000_000
+        let audios = source.streams.filter { $0.type == "Audio" }
+        let audio = audios.first { $0.Index == source.DefaultAudioStreamIndex } ?? audios.first(where: { $0.IsDefault == true }) ?? audios.first
+        var audioBitrate = 0
+        if let audio {
+            if audio.Codec?.lowercased() == "aac", let rate = audio.BitRate, rate > 0 {
+                // Copied across as it is.
+                audioBitrate = rate
+            } else {
+                // Encoded to AAC: about 128 kbps a pair of channels, as the
+                // server does when no bitrate is asked for, and never more
+                // than the source had.
+                let channels = max(2, audio.Channels ?? 2)
+                audioBitrate = min(640_000, 128_000 * channels / 2)
+                if let rate = audio.BitRate, rate > 0 { audioBitrate = min(audioBitrate, rate) }
+            }
+        }
+        let estimate = byteCount(Double(videoBitrate + audioBitrate) / 8 * seconds * 1.02)
+        guard estimate > 0 else { return nil }
+        // Never more than the file it is made from.
+        if let size = source.Size, size > 0 { return min(estimate, size) }
+        return estimate
     }
 
     /// What an encode at this rung would weigh. Nil when there is nothing to
@@ -2345,3 +2819,44 @@ enum UIDeviceName {
     static var current: String { UIDevice.current.name }
 }
 #endif
+
+/// Counts what the speed check's test download brings in, chunk by chunk —
+/// see `JellyfinClient.measureThroughput`.
+private final class ThroughputCounter: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytes = 0
+    private var firstAt: ContinuousClock.Instant?
+    private var lastAt: ContinuousClock.Instant?
+    private var done = false
+
+    var reading: (bytes: Int, seconds: Double, done: Bool) {
+        lock.withLock {
+            let seconds = firstAt.flatMap { first in lastAt.map { ($0 - first) / .seconds(1) } } ?? 0
+            return (bytes, seconds, done)
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            lock.withLock { done = true }
+            completionHandler(.cancel)
+            return
+        }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        let now = ContinuousClock.now
+        lock.withLock {
+            // The first chunk starts the clock rather than counting: it is
+            // what arrived while the clock wasn't running.
+            if firstAt == nil { firstAt = now } else { bytes += data.count }
+            lastAt = now
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+        lock.withLock { done = true }
+    }
+}

@@ -33,7 +33,7 @@ struct MediaStream: Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case Index, Codec, Language, DisplayTitle, Title, Height, Width
         case Channels, ChannelLayout, IsDefault, IsForced, IsExternal, BitRate
-        case BitDepth, Profile, RealFrameRate, AverageFrameRate, VideoRange
+        case BitDepth, Profile, RealFrameRate, AverageFrameRate, VideoRange, VideoRangeType
         case DeliveryMethod, DeliveryUrl
         case type = "Type"
     }
@@ -57,6 +57,9 @@ struct MediaStream: Codable, Hashable, Sendable {
     var BitDepth: Int?
     /// The codec profile as ffprobe named it: `High`, `Main 10`, `High 10`.
     var Profile: String?
+    /// The four-character code the stream is stored under: `hvc1` or `hev1`
+    /// for HEVC, which decides whether Apple's player will open the file.
+    var CodecTag: String?
     /// Frames a second, as ffprobe read them. `RealFrameRate` is the stream's
     /// declared rate and the one an Apple TV matches its display to; the
     /// average is only a fallback for files that don't declare one.
@@ -66,6 +69,11 @@ struct MediaStream: Codable, Hashable, Sendable {
     /// Only ever trusted alongside the codec — see
     /// `JellyfinClient.claimsHDRItCannotCarry`.
     var VideoRange: String?
+    /// The finer reading: `SDR`, `HDR10`, `HLG`, and for Dolby Vision `DOVI`
+    /// — a file with nothing but the Dolby layer — or `DOVIWithHDR10` and the
+    /// like, whose base layer plays without it. See
+    /// `DeviceProfile.playsDolbyVision`.
+    var VideoRangeType: String?
     /// How a subtitle reaches the client — `Embed`, `External`, `Hls`,
     /// `Encode` — and, for `External`, the server path it is fetched from.
     /// Only the mpv player on Apple TV reads these: it adds an external

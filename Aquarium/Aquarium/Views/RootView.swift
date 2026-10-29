@@ -23,26 +23,20 @@ struct RootView: View {
     @Namespace private var posterZoom
 
     /// iPad/Mac sidebar visibility, held explicitly rather than left to
-    /// `NavigationSplitView`'s own state: the detail column wraps its own
-    /// `NavigationStack`, and that inner stack's toolbar can end up owning
-    /// the chrome instead of the split view's, which sometimes drops the
-    /// system's automatic sidebar-toggle button once the sidebar is
-    /// collapsed — stranding the sidebar with no way back short of force-
-    /// quitting. Driving visibility ourselves, with our own toggle in the
-    /// detail toolbar, means there is always a button that can bring it back.
+    /// `NavigationSplitView`'s own state: the system's sidebar toggle lives in
+    /// the navigation bar, and the pages that hide that bar — Home, a title,
+    /// Live TV — hide the toggle with it, stranding the sidebar with no way
+    /// back. Driving visibility ourselves lets those pages draw a toggle of
+    /// their own — see `showSidebar`.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
-
-    #if os(iOS)
-    /// The floating sidebar toggle's circle, and where it sits from the
-    /// detail column's leading edge.
-    private static let sidebarToggleSize: CGFloat = 36
-    private static let sidebarToggleLeading: CGFloat = 12
-    /// How much further in than its gutter a page's own top bar has to start
-    /// to clear that button, with a little air after it.
-    private static var sidebarToggleClearance: CGFloat {
-        max(0, sidebarToggleLeading + sidebarToggleSize + 8 - Metrics.gutter)
-    }
-    #endif
+    /// Whether the sidebar is off screen, kept apart from `sidebarVisibility`.
+    /// The split view writes its own value back into the binding once it
+    /// has collapsed the column — `.automatic` on an iPad held upright — so
+    /// "is it `.detailOnly`" was false the moment after it had been made so,
+    /// and nothing that depends on the column being gone (the toggle a page
+    /// draws, the music bar coming back across the page) ever knew. See
+    /// `onChange` in `sidebarShell`.
+    @State private var sidebarHidden = false
 
     var body: some View {
         Group {
@@ -56,15 +50,24 @@ struct RootView: View {
                     shell
                         .id(client.session?.accountKey)
                 } else {
-                    // The launch's first question to the server — see
-                    // `AppModel.launchSettled`. Under a second against a
-                    // server that answers or refuses; the probe's own timeout
-                    // (5 s) against one that never replies.
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // The saved Home and library list being read off disk —
+                    // see `AppModel.launchSettled`. A few milliseconds, so
+                    // nothing is drawn over the background: a spinner would
+                    // only flash.
+                    Color.clear
                 }
             } else {
+                #if DEBUG
+                // `-AquariumShowSettings YES`: Settings with no server signed
+                // in, for looking at it on a simulator. Debug builds only.
+                if UserDefaults.standard.bool(forKey: "AquariumShowSettings") {
+                    NavigationStack { SettingsView() }
+                } else {
+                    LoginView()
+                }
+                #else
                 LoginView()
+                #endif
             }
         }
         #if !os(tvOS)
@@ -80,6 +83,8 @@ struct RootView: View {
         // iCloud after launch (see `Preferences.adoptCloudSession`) — gets the
         // same setup as a launch that found one already saved. Without it an
         // adopted session opened onto a shell with no libraries and no copy.
+        // The first frame is up — what was waiting for it can run. See `Launch`.
+        .onAppear { Launch.firstFrameDrawn() }
         .task(id: client.session) {
             // Live TV first, and without waiting for it. A custom playlist is
             // two downloads and an XML file that can run to tens of megabytes,
@@ -89,16 +94,33 @@ struct RootView: View {
             // so it goes ahead of the guard.
             LiveTVStore.shared.warm()
             guard client.isSignedIn else { return }
-            // Read the saved library copy first, so the libraries can be shown
-            // from it if the server turns out not to answer.
-            await LibraryIndex.shared.prepare()
+            // The shell first, from what was saved last time: the tab bar and
+            // Home's rows. Nothing below is waited for before it is drawn.
+            await app.restoreLaunchState()
+            Launch.mark("shell from saved state")
+            // Then the server, behind the drawn shell: is it there, what are
+            // its libraries now, and progress both ways.
             await app.refreshConnectivity()
+            Launch.mark("server probed: \(client.isOffline ? "offline" : "online")")
             await app.loadLibraries()
-            Task { await LibraryIndex.shared.sync(force: true) }
+            Launch.mark("libraries loaded")
             #if !os(tvOS)
-            await OfflineProgress.sync()
-            await OfflineProgress.refreshFromServer()
+            if !client.isOffline {
+                await OfflineProgress.sync()
+                await OfflineProgress.refreshFromServer()
+            }
             #endif
+            app.launchCatchUpFinished()
+            Launch.mark("launch caught up")
+            // The library copy last, and a moment later. Decoding and
+            // re-syncing a whole library is the heaviest thing the launch
+            // does, and the first seconds are when someone is scrolling the
+            // page it would be competing with.
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await LibraryIndex.shared.prepare()
+            if !client.isOffline { await LibraryIndex.shared.sync(force: true) }
+            Launch.mark("library copy synced")
         }
         .onChange(of: scenePhase) { _, phase in
             // Coming back from the background is the moment to find out whether
@@ -112,7 +134,14 @@ struct RootView: View {
                 // hold the shell steady. That frame is the flash.
                 client.enterForeground()
                 client.beginRecheck()
-                Task {
+                #if !os(tvOS)
+                // Transfers kept going while the app was away; count what
+                // they wrote — see `DownloadManager.appBecameActive`.
+                DownloadManager.shared.appBecameActive()
+                #endif
+                // A launch arrives here too, and its own catch-up (the
+                // shell's `task` above) is already doing all of this.
+                if app.launchCaughtUp { Task {
                     await app.refreshConnectivity()
                     #if !os(tvOS)
                     // Both ways, each time the app is come back to: what was
@@ -125,7 +154,7 @@ struct RootView: View {
                     }
                     #endif
                     await LibraryIndex.shared.sync()
-                }
+                } }
             } else {
                 client.enterBackground()
             }
@@ -197,11 +226,13 @@ struct RootView: View {
             Text(app.blockingMessage ?? "")
         }
         // What an error toast becomes on a Mac — see `AppModel.toast` and
-        // `presentAlert`. On the main window, whichever page is in front.
+        // `presentAlert`. On the main window, whichever page is in front —
+        // unless a title window is the one being worked in, which shows its
+        // own (see `takesAlerts`).
         .alert(
             app.pendingAlert?.title ?? "",
             isPresented: Binding(
-                get: { app.pendingAlert != nil },
+                get: { app.pendingAlert != nil && takesAlerts },
                 set: { if !$0 { app.pendingAlert = nil } }
             ),
             presenting: app.pendingAlert
@@ -210,6 +241,12 @@ struct RootView: View {
         } message: { alert in
             Text(alert.message)
         }
+        // On a television a title's own screen covers this one and asks there.
+        #if os(tvOS)
+        .nextUpChoiceDialog(isMine: takesAlerts && app.detailRoot == nil)
+        #else
+        .nextUpChoiceDialog(isMine: takesAlerts)
+        #endif
         // A title opens as its own screen on a television rather than as a page
         // pushed under the tab strip — see `AppModel.detailRoot`.
         #if os(tvOS)
@@ -225,6 +262,23 @@ struct RootView: View {
         #if os(macOS)
         .onChange(of: player.isActive, initial: true) { _, active in
             if active { openWindow(id: PlayerWindow.id) }
+        }
+        #elseif os(iOS)
+        .fullScreenCover(isPresented: playerBinding) {
+            if player.isActive {
+                PlayerScreen()
+            } else {
+                // The player asks the cover for dark, and the presentation
+                // keeps that answer after the player has gone: the tent came
+                // back dark in a light app. Told the app's own appearance,
+                // read outside the cover, it comes back as it went.
+                TentIdleView()
+                    .preferredColorScheme(colorScheme)
+            }
+        }
+        // Browse lasts for the pose it was pressed in.
+        .onChange(of: pose) { _, now in
+            if now != .tent { app.tentBrowsing = false }
         }
         #else
         .fullScreenCover(isPresented: playerBinding) { PlayerScreen() }
@@ -257,6 +311,7 @@ struct RootView: View {
         }
         .background(Theme.background)
         .overlay(alignment: .bottom) { ToastOverlay() }
+        .nextUpChoiceDialog(isMine: true)
         .fullScreenCover(
             isPresented: Binding(
                 get: { player.isActive },
@@ -298,6 +353,17 @@ struct RootView: View {
         )
     }
 
+    /// Whether `pendingAlert` is this window's to show. On a Mac, only while
+    /// no title or library window is the one being worked in — that window
+    /// shows it instead; see `RouteWindow` and `AppModel.isWorkingWindow`.
+    private var takesAlerts: Bool {
+        #if os(macOS)
+        app.isWorkingWindow(nil)
+        #else
+        true
+        #endif
+    }
+
     private var addingAccountBinding: Binding<Bool> {
         Binding(get: { app.isAddingAccount }, set: { app.isAddingAccount = $0 })
     }
@@ -308,13 +374,37 @@ struct RootView: View {
                 #if os(tvOS)
                 // The title screen presents its own — see `detailScreen`.
                 player.isActive && app.detailRoot == nil
+                #elseif os(iOS)
+                // The tent's idle screen shares this cover — see `tentShowing`.
+                player.isActive || tentShowing
                 #else
                 player.isActive
                 #endif
             },
-            set: { if !$0 { player.stop(reason: "player cover dismissed") } }
+            set: {
+                guard !$0 else { return }
+                if player.isActive {
+                    player.stop(reason: "player cover dismissed")
+                    return
+                }
+                #if os(iOS)
+                if tentShowing { app.tentBrowsing = true }
+                #endif
+            }
         )
     }
+
+    #if os(iOS)
+    /// A foldable stood up like a tent, with nobody having asked to browse:
+    /// the cover shows `TentIdleView` until something plays, and the player
+    /// after. One cover for both, swapping what is in it, rather than one
+    /// presented over the other: a view presents one thing at a time, and a
+    /// player cover inside a tent cover would be torn down with it when the
+    /// phone is picked up, taking the stream with it.
+    private var tentShowing: Bool {
+        pose == .tent && !app.tentBrowsing && client.isSignedIn
+    }
+    #endif
 
     // MARK: - Platform shells
 
@@ -393,23 +483,22 @@ struct RootView: View {
     private var sidebarShell: some View {
         @Bindable var app = app
         return NavigationSplitView(columnVisibility: $sidebarVisibility) {
+            #if os(macOS)
             List(selection: sidebarSelection) {
-                #if os(macOS)
                 MacSidebarRows()
-                #else
-                ForEach(app.sections) { section in
-                    Label(section.title, systemImage: section.symbol)
-                        .tag(section)
-                }
-                #endif
             }
             .navigationTitle("Aquarium")
-            // On an iPad as well as a Mac. Left to itself an iPad's sidebar is
-            // 320 points, which held upright is two fifths of the screen spent
-            // on ten short words — and the page beside it, hero, shelves and
-            // grids, laid out in what was left.
             .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
             .safeAreaInset(edge: .bottom) { SidebarFooter() }
+            #else
+            // The app's own column — see `PadSidebar`. Its header stands in
+            // for the navigation bar, toggle included. Left to itself an
+            // iPad's sidebar is 320 points, which held upright is two fifths
+            // of the screen spent on ten short words.
+            PadSidebar { sidebarVisibility = .detailOnly }
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 300)
+            #endif
         } detail: {
             withToasts(
                 withOfflineStrip(
@@ -421,45 +510,31 @@ struct RootView: View {
                     // A stack per section, not one stack handed each
                     // section's path in turn — see `stackPath`.
                     .id(app.shownSelection)
+                    #if os(iOS)
+                    .environment(\.popPage) { [section = app.shownSelection] in app.pop(section) }
+                    #endif
                     .measuresBottomChrome()
                 )
-                .withMiniPlayer()
+                .withShellMusic(sidebarShowing: !sidebarHidden)
             )
             #if os(iOS)
-            // A floating toggle rather than a `.toolbar` item on the stack
-            // above: Home draws its own header and hides the system
-            // navigation bar outright (`.toolbar(.hidden, for: .navigationBar)`
-            // in `HomeView`), and other sections may do the same, so a
-            // toolbar-hosted button would come and go with whatever the
-            // current page decides about its own chrome — which is exactly
-            // how the sidebar ended up with no way back. This sits outside
-            // that NavigationStack entirely, so it is there no matter what
-            // page is showing or what that page does with its own toolbar.
-            //
-            // The pages underneath draw their own bars in that same corner —
-            // the wordmark on Home, the back button on a title — so while the
-            // button is there, every `AppTopBar` is told to start to the right
-            // of it. See `sidebarToggleInset`.
-            .overlay(alignment: .topLeading) {
-                if sidebarVisibility == .detailOnly {
-                    Button {
-                        sidebarVisibility = .all
-                    } label: {
-                        Image(systemName: "sidebar.leading")
-                            .font(.body.weight(.semibold))
-                            .frame(width: Self.sidebarToggleSize, height: Self.sidebarToggleSize)
-                            .background(.thinMaterial, in: Circle())
-                    }
-                    .accessibilityLabel("Show sidebar")
-                    .padding(.top, 8)
-                    .padding(.leading, Self.sidebarToggleLeading)
-                }
-            }
-            .environment(
-                \.sidebarToggleInset,
-                sidebarVisibility == .detailOnly ? Self.sidebarToggleClearance : 0
-            )
+            // The way back to a collapsed sidebar, for the pages without a
+            // navigation bar to hold the system's: each of them draws it at
+            // the leading end of its own bar (see `AppTopBar`). Every other
+            // page has the system's toggle in its bar, so this is handed down
+            // rather than floated over the column, which drew a second toggle
+            // under the system's on all of those.
+            .environment(\.showSidebar, showSidebarAction)
             #endif
+        }
+        // An explicit value is the column going or coming; `.automatic` is
+        // the split view settling after either, and says nothing new.
+        .onChange(of: sidebarVisibility) { _, now in
+            switch now {
+            case .detailOnly: sidebarHidden = true
+            case .all, .doubleColumn: sidebarHidden = false
+            default: break
+            }
         }
         #if os(macOS)
         // Search is the field at the top of the sidebar, as in Music, rather
@@ -491,6 +566,15 @@ struct RootView: View {
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.devicePose) private var pose
+    /// The app's appearance, for the tent cover — see `playerBinding`'s cover.
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Brings the sidebar back, while it is collapsed — see `showSidebar`.
+    private var showSidebarAction: (() -> Void)? {
+        guard sidebarHidden else { return nil }
+        return { sidebarVisibility = .all }
+    }
 
     /// iPad gets the sidebar, iPhone the tab bar. Same sections either way.
     ///
@@ -504,31 +588,84 @@ struct RootView: View {
     /// phone's permission to be in landscape at all: it let go halfway through
     /// the turn, the phone was told to go back to portrait, and the rotation
     /// ended up stuck between the two. See `OrientationLock`.
+    ///
+    /// A foldable's inside screen is the exception to "no iPhone shows a
+    /// sidebar": it is the phone idiom at an iPad's size, regular both ways,
+    /// which no phone on its side ever is. So the pose, not the idiom, is
+    /// what lets it through — see `DevicePose`. The model is told which it
+    /// got, because that decides where `show` sends a section — see
+    /// `AppModel.usesSidebar`.
     @ViewBuilder
     private var adaptiveShell: some View {
-        if sizeClass == .regular, UIDevice.current.userInterfaceIdiom != .phone {
-            sidebarShell
-        } else {
-            tabShell
+        // A foldable's inside screen is regular both ways and could take
+        // the sidebar; it keeps the phone's shell on purpose. The app a
+        // person opened the phone from is the app they get, bigger: the
+        // same tab bar, the same pages, with more across each row — see
+        // `Metrics.wideScreen` for what the width is spent on.
+        let sidebar = sizeClass == .regular && UIDevice.current.userInterfaceIdiom != .phone
+        Group {
+            if sidebar {
+                sidebarShell
+            } else {
+                tabShell
+            }
         }
+        .onChange(of: sidebar, initial: true) { _, now in app.shellChanged(toSidebar: now) }
+    }
+
+    /// Two tabs or fewer — Downloads and More, offline — on a system whose
+    /// bar would shrink to fit them: the app draws the bar instead. See
+    /// `WideTabBar`.
+    private var drawsOwnTabBar: Bool {
+        guard #available(iOS 26.0, *) else { return false }
+        return app.tabSections.count <= 2
+    }
+
+    /// One tab's page: its stack, inside the offline strip, the mini player
+    /// and the toasts.
+    private func tabPage(_ section: AppSection) -> some View {
+        withToasts(
+            withOfflineStrip(
+                NavigationStack(path: app.path(for: section)) {
+                    SectionView(section: section)
+                        .clearsBottomChrome()
+                        .navigationDestination(for: Route.self) { destination($0).clearsBottomChrome() }
+                }
+                // The way back for the pages with a bar of their own — see
+                // `BarBackButton`.
+                .environment(\.popPage) { app.pop(section) }
+                .measuresBottomChrome()
+            )
+            .withMiniPlayer()
+        )
     }
 
     private var tabShell: some View {
-        TabView(selection: app.shownSelectionBinding) {
-            ForEach(app.tabSections) { section in
-                withToasts(
-                    withOfflineStrip(
-                        NavigationStack(path: app.path(for: section)) {
-                            SectionView(section: section)
-                                .clearsBottomChrome()
-                                .navigationDestination(for: Route.self) { destination($0).clearsBottomChrome() }
-                        }
-                        .measuresBottomChrome()
-                    )
-                    .withMiniPlayer()
-                )
-                .tabItem { Label(section.title, systemImage: section.symbol) }
-                .tag(section)
+        Group {
+            if drawsOwnTabBar, #available(iOS 26.0, *) {
+                // No TabView at all. Its bar hidden, the system's still took
+                // the taps where it would have been, so the middle of the
+                // bar drawn here did nothing. The pages are kept, one shown.
+                ZStack {
+                    ForEach(app.tabSections) { section in
+                        let shown = section == app.shownSelection
+                        tabPage(section)
+                            // Outermost, so the offline strip and the mini
+                            // player stack above it.
+                            .safeAreaInset(edge: .bottom, spacing: 0) { WideTabBar(sections: app.tabSections) }
+                            .opacity(shown ? 1 : 0)
+                            .allowsHitTesting(shown)
+                            .accessibilityHidden(!shown)
+                    }
+                }
+            } else {
+                TabView(selection: app.shownSelectionBinding) {
+                    ForEach(app.tabSections) { section in
+                        tabPage(section)
+                            .tabItem { Label(section.title, systemImage: section.symbol) }
+                            .tag(section)
+                    }
+                }
             }
         }
         // A new tab bar whenever the set of tabs changes, not the old one
@@ -547,6 +684,14 @@ struct RootView: View {
 
     private func destination(_ route: Route) -> some View {
         RouteDestination(route: route)
+            // A pushed page on the app's own colour, as the section it was
+            // pushed from is (see `SectionView`). Left to itself a page was
+            // the system's black or white — a person's page, a library opened
+            // from Home, a title's body under its own bar — a shade off the
+            // page it had come from, and off its own bar.
+            #if os(iOS)
+            .background(Theme.background)
+            #endif
     }
 }
 
@@ -558,6 +703,18 @@ struct RouteDestination: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
+        page
+            #if os(macOS)
+            // Every pushed page, not only a title's: a person's, a library's
+            // and Search's results carry horizontal shelves too, and any of
+            // them would size the window the way a title page did — see
+            // `macWindowSizedPage`.
+            .macWindowSizedPage()
+            #endif
+    }
+
+    @ViewBuilder
+    private var page: some View {
         switch route {
         case .item(let id):
             ZoomedDestination(itemId: id, source: app.pendingZoomSource) {
@@ -745,8 +902,11 @@ struct ZoomedDestination<Content: View>: View {
 /// a pair of properties on `RootView` it made the whole shell — the split
 /// view, its stacks, the toasts — a reader of the download list, redrawn
 /// whenever a download changed state.
-private struct SidebarFooter: View {
+struct SidebarFooter: View {
     @Environment(JellyfinClient.self) private var client
+    #if os(iOS)
+    @Environment(AppModel.self) private var app
+    #endif
 
     var body: some View {
         #if os(macOS)
@@ -755,6 +915,30 @@ private struct SidebarFooter: View {
         status
         #endif
     }
+
+    #if os(iOS)
+    /// Settings is the gear beside the status, not a row in the list: a
+    /// sidebar of places to browse ends with the one place that isn't.
+    private var settingsButton: some View {
+        let selected = app.shownSelection == .settings
+        return Button {
+            if selected {
+                app.path(for: .settings).wrappedValue = NavigationPath()
+            } else {
+                app.selection = .settings
+            }
+        } label: {
+            Image(systemName: "gearshape")
+                .font(.body.weight(.medium))
+                .foregroundStyle(selected ? Theme.accent : Theme.textDim)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Settings")
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+    #endif
 
     @ViewBuilder
     private var status: some View {
@@ -776,6 +960,18 @@ private struct SidebarFooter: View {
         #if os(macOS)
         // Under the account's name in `MacSidebarFooter`, which draws the rule.
         line
+        #elseif os(iOS)
+        VStack(alignment: .leading, spacing: 4) {
+            Divider()
+            HStack(spacing: 8) {
+                line
+                Spacer(minLength: 8)
+                settingsButton
+            }
+            .padding(.leading, 18)
+            .padding(.trailing, 12)
+            .padding(.bottom, 8)
+        }
         #else
         VStack(alignment: .leading, spacing: 4) {
             Divider()

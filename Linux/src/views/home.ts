@@ -97,6 +97,7 @@ function homeHero(item: any, eyebrow: string): HTMLElement | null {
     item.OfficialRating ?? null,
   ].filter(Boolean);
   const rating = item.CommunityRating ? item.CommunityRating.toFixed(1) : null;
+  const left = resumeTicks > 0 ? api.remainingText(item.RunTimeTicks, resumeTicks) : "";
 
   const hero = el("div", { class: "home-hero" }, [
     backdropLayer(backdrop, "hero-bg"),
@@ -126,9 +127,7 @@ function homeHero(item: any, eyebrow: string): HTMLElement | null {
           onClick: () => playItem(item, { resume: resumeTicks > 0 }),
         }, [
           icon("play"),
-          resumeTicks > 0
-            ? `Resume · ${api.ticksToText(item.RunTimeTicks - resumeTicks)} left`
-            : "Play",
+          resumeTicks > 0 ? (left ? `Resume · ${left} left` : "Resume") : "Play",
         ]),
         el("button", {
           class: "btn",

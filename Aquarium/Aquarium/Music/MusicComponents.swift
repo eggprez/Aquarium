@@ -833,7 +833,7 @@ struct MusicItemMenu: View {
     }
 
     private func add(to list: BaseItem) async {
-        let songs = await songs()
+        guard let songs = await songsOrSay() else { return }
         guard !songs.isEmpty else { return app.toast("Nothing to add", tone: .error) }
         do {
             try await PlaylistStore.shared.add(songs.map(\.Id), to: list.Id)
@@ -845,24 +845,38 @@ struct MusicItemMenu: View {
 
     /// Everything this item stands for, as songs. With no server, as the
     /// songs of it that are on this device.
-    private func songs() async -> [BaseItem] {
+    private func songs() async throws -> [BaseItem] {
         if item.isSong || item.isAudiobook { return [item] }
         if client.showsOffline { return OfflineMusic.songs(for: item) }
-        if item.isAlbum { return (try? await client.albumTracks(albumId: item.Id)) ?? [] }
-        if item.isArtist { return (try? await client.allSongs(artistId: item.Id)) ?? [] }
-        if item.isPlaylist { return (try? await client.playlistItems(playlistId: item.Id)) ?? [] }
-        if item.isMusicGenre { return (try? await client.songs(genreId: item.Id)) ?? [] }
+        if item.isAlbum { return try await client.albumTracks(albumId: item.Id) }
+        if item.isArtist { return try await client.allSongs(artistId: item.Id) }
+        if item.isPlaylist { return try await client.playlistItems(playlistId: item.Id) }
+        if item.isMusicGenre { return try await client.songs(genreId: item.Id) }
         return []
     }
 
+    /// `songs`, or nil once the reason it couldn't be had is on screen. A
+    /// list the server didn't answer for is not an empty one: read as empty,
+    /// a Download did nothing at all and Play said there was nothing here.
+    private func songsOrSay() async -> [BaseItem]? {
+        do {
+            return try await songs()
+        } catch is CancellationError {
+            return nil
+        } catch {
+            app.toast("Couldn't load the songs: \(error.localizedDescription)", tone: .error)
+            return nil
+        }
+    }
+
     private func play(shuffle: Bool) async {
-        let list = await songs()
+        guard let list = await songsOrSay() else { return }
         guard !list.isEmpty else { return app.toast("Nothing to play here", tone: .error) }
         music.play(list, shuffle: shuffle, title: item.isSong ? item.Album : item.title)
     }
 
     private func queue(next: Bool) async {
-        let list = await songs()
+        guard let list = await songsOrSay() else { return }
         guard !list.isEmpty else { return app.toast("Nothing to queue here", tone: .error) }
         if next { music.playNext(list) } else { music.playLater(list) }
         app.toast(next ? "Playing next" : "Added to the queue", tone: .ok)
@@ -917,8 +931,15 @@ struct MusicItemMenu: View {
         } else if item.isAlbum || item.isPlaylist {
             Button {
                 Task {
-                    let list = await songs()
-                    await MusicDownloads.download(list)
+                    guard let list = await songsOrSay() else { return }
+                    guard !list.isEmpty else { return app.toast("Nothing to download here", tone: .error) }
+                    let went = await MusicDownloads.download(list)
+                    // A playlist downloaded whole keeps up with the server:
+                    // songs added to it later are fetched on the index's
+                    // refresh. An album doesn't grow, so isn't followed.
+                    if went, item.isPlaylist {
+                        OfflineMusicIndex.shared.follow(playlist: item.Id, itemIds: list.map(\.Id))
+                    }
                 }
             } label: {
                 Label("Download", systemImage: "arrow.down.circle")
@@ -1009,52 +1030,42 @@ enum MusicDownloads {
         return out
     }
 
+    /// Queue these. Says how it went; returns whether they are now on the
+    /// device or on their way — false when nothing could be queued.
     @MainActor
-    static func download(_ songs: [BaseItem]) async {
-        guard !songs.isEmpty else { return }
-        // The list query leaves MediaSources out; the download needs the
-        // container to decide file-or-encode, so fetch the ones that lack it —
-        // fifty to a request rather than a request per song, which for an
-        // album was a dozen round trips before anything queued. A song the
-        // batch didn't return is asked for on its own, as before.
-        let lacking = songs.filter { $0.MediaSources?.isEmpty != false }.map(\.Id)
-        var fetched: [String: BaseItem] = [:]
-        if !lacking.isEmpty, let batch = try? await JellyfinClient.shared.songs(ids: lacking, detail: true) {
-            for item in batch where item.MediaSources?.isEmpty == false { fetched[item.Id] = item }
+    @discardableResult
+    static func download(_ songs: [BaseItem]) async -> Bool {
+        guard !songs.isEmpty else { return false }
+        let (full, missing) = await MusicFiles.withSources(songs)
+        let unqueued = missing == 0 ? "" : " · \(missing) couldn't be queued"
+        guard !full.isEmpty else {
+            AppModel.shared.toast(
+                "Couldn't get \(missing == 1 ? "the file" : "the files") from the server", tone: .error
+            )
+            return false
         }
-        var full: [BaseItem] = []
-        for song in songs {
-            if song.MediaSources?.isEmpty == false {
-                full.append(song)
-            } else if let found = fetched[song.Id] {
-                full.append(found)
-            } else if let single = try? await JellyfinClient.shared.musicItem(song.Id) {
-                full.append(single)
-            } else {
-                full.append(song)
-            }
-        }
-        let original = DownloadQualities.all.first { $0.original } ?? DownloadQualities.all[0]
-        if let verdict = DownloadManager.checkSpace(for: full, quality: original), !verdict.fits {
+        if let verdict = DownloadManager.checkSpace(for: full, quality: MusicFiles.quality), !verdict.fits {
             AppModel.shared.toast(
                 "Needs about \(Format.bytes(verdict.needed)) and there is \(Format.bytes(verdict.free)) free.",
                 tone: .error
             )
-            return
+            return false
         }
         // What the offline pages will want to know about these, while the
         // full items are in hand: genres and stars for songs, chapters for
         // books. See `OfflineMusic`.
         OfflineMusicIndex.shared.note(full)
         for book in full where book.isAudiobook { OfflineBooks.keep(book) }
-        let result = DownloadManager.shared.enqueue(items: full, quality: original)
+        let result = DownloadManager.shared.enqueue(items: full, quality: MusicFiles.quality)
         if result.queued == 0 {
-            AppModel.shared.toast("Already downloaded", tone: .info)
+            AppModel.shared.toast("Already downloaded\(unqueued)", tone: missing == 0 ? .info : .error)
         } else {
             AppModel.shared.toast(
-                "Downloading \(result.queued) \(result.queued == 1 ? "track" : "tracks")", tone: .ok
+                "Downloading \(result.queued) \(result.queued == 1 ? "track" : "tracks")\(unqueued)",
+                tone: missing == 0 ? .ok : .error
             )
         }
+        return true
     }
 }
 

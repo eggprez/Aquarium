@@ -14,7 +14,9 @@
 //  codec AVFoundation genuinely can't decode — DTS, TrueHD, VP9, AV1 on older
 //  hardware — makes the server do real work.
 
+import AVFoundation
 import Foundation
+import VideoToolbox
 
 struct DeviceProfile: Encodable, Sendable {
     var Name: String
@@ -128,12 +130,49 @@ struct DeviceProfile: Encodable, Sendable {
 
     /// Video codecs AVFoundation decodes out of one of those.
     ///
-    /// `dvhe`/`dvh1` are Dolby Vision, which every Apple TV 4K plays natively
-    /// and which some servers report as a codec of its own rather than as HEVC
-    /// with a profile. Naming both spellings costs nothing and is the
+    /// `dvhe`/`dvh1` are Dolby Vision, which some servers report as a codec of
+    /// its own rather than as HEVC with a profile. Naming both spellings is the
     /// difference between a DV film direct-playing and being ground down to
-    /// H.264 SDR by ffmpeg.
-    private static let directVideo = "h264,hevc,dvhe,dvh1,hvc1,avc1,mpeg4,mjpeg"
+    /// H.264 SDR by ffmpeg — on a device that plays Dolby Vision, which is
+    /// what `playsDolbyVision` asks. Elsewhere they are left off.
+    private static let directVideo = playsDolbyVision
+        ? "h264,hevc,dvhe,dvh1,hvc1,avc1,mpeg4,mjpeg"
+        : "h264,hevc,hvc1,avc1,mpeg4,mjpeg"
+
+    /// Whether this device plays Dolby Vision, rather than only decoding the
+    /// HEVC underneath it.
+    ///
+    /// The profile used to claim Dolby Vision everywhere. A file with nothing
+    /// but the Dolby layer — profile 5, the server's `DOVI` — has no HDR10 or
+    /// SDR picture to fall back on: without the Dolby path AVFoundation
+    /// decodes it as plain HEVC and draws its colours as green and purple, and
+    /// since it is playing happily, nothing in the player's watchdog sees a
+    /// fault to escalate. `eligibleForHDRPlayback` is AVFoundation's own word
+    /// on whether the device presents HDR, and the devices that do are the
+    /// ones with the Dolby Vision path. Read once: it is a fact about the
+    /// hardware.
+    static let playsDolbyVision: Bool = AVPlayer.eligibleForHDRPlayback
+
+    /// Whether 10-bit HEVC decodes in hardware here. Every HEVC decoder this
+    /// build can run on — A10 and later, Intel from Kaby Lake, Apple silicon —
+    /// takes Main 10 as well as Main, so the hardware question is the 10-bit
+    /// one. Without it a 10-bit picture is a software decode that falls
+    /// behind, and the server is asked for 8 bits instead.
+    static let decodesHEVC10: Bool = playsDolbyVision || VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
+
+    /// The video ranges a device without Dolby Vision is offered untouched:
+    /// everything but `DOVI`, whose picture only exists through the Dolby
+    /// layer. The `DOVIWith…` kinds carry an HDR10, HLG or SDR base layer that
+    /// plays as that. Names a server doesn't know are skipped by it.
+    private static let rangesWithoutDolbyVision =
+        "SDR|HDR10|HDR10Plus|HLG|DOVIWithHDR10|DOVIWithHLG|DOVIWithSDR|DOVIWithHDR10Plus"
+
+    /// A picture that needs a Dolby Vision decoder this device doesn't have.
+    private static func needsDolbyVision(_ video: MediaStream) -> Bool {
+        guard !playsDolbyVision else { return false }
+        if let codec = video.Codec?.lowercased(), codec == "dvhe" || codec == "dvh1" { return true }
+        return video.VideoRangeType?.uppercased() == "DOVI"
+    }
 
     /// Codecs that survive a remux into HLS without being re-encoded.
     private static let remuxableVideo = "h264,hevc"
@@ -165,9 +204,19 @@ struct DeviceProfile: Encodable, Sendable {
         else { return false }
         // A video file with no video stream the server will admit to is not
         // something to gamble a gigabyte on.
-        guard let video = source.streams.first(where: { $0.type == "Video" })?.Codec?.lowercased(),
-              fileVideoCodecs.contains(video)
+        guard let stream = source.streams.first(where: { $0.type == "Video" }),
+              let video = stream.Codec?.lowercased(), fileVideoCodecs.contains(video),
+              !needsDolbyVision(stream)
         else { return false }
+        // Two that AVFoundation turns away once the whole file is on the
+        // device, which is how a download came down twice and then failed as
+        // "arrived incomplete": HEVC stored as `hev1` rather than `hvc1`, and
+        // MPEG-4 Part 2 past its Simple profile (XviD, DivX). Rewrapped or
+        // re-encoded on the way instead.
+        if video == "hevc", let tag = stream.CodecTag?.lowercased(), tag != "hvc1" { return false }
+        if video == "mpeg4", let profile = stream.Profile?.lowercased(), profile != "simple profile" {
+            return false
+        }
         // Audio is allowed to be absent — silent films exist — but not to be
         // something that won't decode.
         if let audio = source.streams.first(where: { $0.type == "Audio" })?.Codec?.lowercased(),
@@ -182,8 +231,11 @@ struct DeviceProfile: Encodable, Sendable {
     /// they are. What `JellyfinClient.downloadURL` asks for when the original is
     /// wanted and `canPlayAsFile` says no.
     static func canRemuxForDownload(_ source: MediaSource?) -> Bool {
-        guard let codec = source?.streams.first(where: { $0.type == "Video" })?.Codec?.lowercased() else { return false }
-        return codec == "h264" || codec == "hevc"
+        guard let video = source?.streams.first(where: { $0.type == "Video" }),
+              let codec = video.Codec?.lowercased() else { return false }
+        // Rewrapped, a Dolby-only picture is still one this device draws in
+        // the wrong colours — see `playsDolbyVision`.
+        return (codec == "h264" || codec == "hevc") && !needsDolbyVision(video)
     }
 
     /// A container as the server reports it, one name per entry.
@@ -249,9 +301,13 @@ struct DeviceProfile: Encodable, Sendable {
         if let video = source.streams.first(where: { $0.type == "Video" }) {
             if let codec = video.Codec?.lowercased(), !codec.isEmpty {
                 guard directVideoSet.contains(codec) else { return false }
+                // A Dolby-only picture on a device without the Dolby path plays
+                // in false colours rather than failing — see `playsDolbyVision`.
+                if needsDolbyVision(video) { return false }
                 // 10-bit H.264 has no hardware decoder on any Apple device and
-                // crawls in software; HEVC above ten bits has none at all.
-                let ceiling = (codec == "h264" || codec == "avc1") ? 8 : 10
+                // crawls in software; HEVC above ten bits has none at all, and
+                // ten itself only where `decodesHEVC10` says so.
+                let ceiling = (codec == "h264" || codec == "avc1") ? 8 : (decodesHEVC10 ? 10 : 8)
                 if let depth = video.BitDepth, depth > ceiling { return false }
                 // The bit depth is the honest test, but it is also the field
                 // most often missing. `High 10` and `Main 12` say the same thing
@@ -259,7 +315,7 @@ struct DeviceProfile: Encodable, Sendable {
                 if let profile = video.Profile?.lowercased(),
                    profile.contains("10") || profile.contains("12") {
                     if codec == "h264" || codec == "avc1" { return false }
-                    if profile.contains("12") { return false }
+                    if profile.contains("12") || !decodesHEVC10 { return false }
                 }
             }
         }
@@ -601,9 +657,18 @@ struct DeviceProfile: Encodable, Sendable {
                 // ignore a non-square pixel aspect ratio; AVFoundation honours
                 // the `pasp` box, so a DVD rip here plays at the shape it was
                 // authored in rather than being re-encoded to square pixels.
+                //
+                // Ten bits, and Dolby Vision, only where the hardware takes
+                // them — see `decodesHEVC10` and `playsDolbyVision`. Elsewhere
+                // the server is told so here rather than handing over a file
+                // that plays slowly or in the wrong colours.
                 .init(type: "Video", Codec: "hevc", Conditions: [
-                    .init(Condition: "LessThanEqual", Property: "VideoBitDepth", Value: "10", IsRequired: false),
-                ] + sizeConditions),
+                    .init(Condition: "LessThanEqual", Property: "VideoBitDepth",
+                          Value: decodesHEVC10 ? "10" : "8", IsRequired: false),
+                ] + (playsDolbyVision ? [] : [
+                    .init(Condition: "EqualsAny", Property: "VideoRangeType",
+                          Value: rangesWithoutDolbyVision, IsRequired: false),
+                ]) + sizeConditions),
             ],
             SubtitleProfiles: subtitlesInManifest ? requestedSubtitleProfiles : subtitleProfiles
         )
@@ -697,7 +762,12 @@ struct PlaybackReport: Encodable, Sendable {
         PositionTicks = Int64(max(0, positionSeconds) * 10_000_000)
         IsPaused = isPaused
         IsMuted = volume <= 0
-        PlayMethod = isTranscode ? "Transcode" : "DirectStream"
+        // Every stream this client doesn't have transcoded is the file itself,
+        // fetched with `static=true` (or a download played from disk), which
+        // is what Jellyfin calls direct play. "DirectStream" is the server
+        // remuxing it, and said here it put every direct play in the
+        // dashboard and Playback Reporting as a remux.
+        PlayMethod = isTranscode ? "Transcode" : "DirectPlay"
         PlaybackRate = rate
         VolumeLevel = Int((volume * 100).rounded())
     }

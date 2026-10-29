@@ -59,12 +59,20 @@ final class WatchRemote {
             }
         }
         watch()
+        watchClock()
     }
 
     /// Re-armed on every change: `withObservationTracking` fires once.
+    ///
+    /// What is playing and the clock are watched apart. The clock moves twice
+    /// a second, and read under the same observation as everything else —
+    /// `snapshot()` reads it — every tick restarted the settle below and built
+    /// a whole state, Up Next copied out of the queue included, to find
+    /// nothing worth sending. A tick now costs a comparison with the clock the
+    /// watch is already drawing; see `clockMoved`.
     private func watch() {
         withObservationTracking {
-            _ = snapshot()
+            observeState()
             _ = WatchLink.shared.isReachable
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -72,6 +80,66 @@ final class WatchRemote {
                 self?.watch()
             }
         }
+    }
+
+    /// Everything `snapshot()` reads except the clock and what follows from
+    /// it, for `watch` to observe.
+    private func observeState() {
+        let music = MusicPlayer.shared
+        _ = music.isActive
+        if let item = music.current {
+            _ = item
+            _ = music.queueTitle
+            _ = music.isPlaying
+            _ = music.duration
+            _ = music.speed
+            _ = music.hasNext
+            _ = music.upNextCount
+            _ = music.chapters
+            return
+        }
+        let video = PlayerModel.shared
+        _ = video.isActive
+        _ = video.item?.Id
+        _ = video.title
+        _ = video.subtitle
+        _ = video.isPaused
+        _ = video.duration
+        _ = video.speed
+    }
+
+    private func watchClock() {
+        withObservationTracking {
+            _ = MusicPlayer.shared.position
+            _ = PlayerModel.shared.position
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.clockMoved()
+                self?.watchClock()
+            }
+        }
+    }
+
+    /// A tick. Worth a state only when the clock the watch is drawing from
+    /// the last one has drifted — a seek on the phone — or when the clock has
+    /// carried the book into another chapter, or past the point where
+    /// Previous restarts the track instead of going back.
+    private func clockMoved() {
+        guard settling == nil, WatchLink.shared.isReachable, let last = lastSent else { return }
+        let music = MusicPlayer.shared
+        let position: Double
+        if music.isActive, music.current != nil {
+            position = music.position
+            if music.currentChapter?.Name != last.chapter || music.hasPrevious != last.hasPrevious {
+                return changed()
+            }
+        } else {
+            position = PlayerModel.shared.position
+        }
+        let expected = last.isPlaying
+            ? last.position + Date().timeIntervalSince(last.at) * last.speed
+            : last.position
+        if abs(expected - position) > Self.positionSlack { changed() }
     }
 
     /// Something moved. Sent once things have been still for a moment: play
@@ -108,7 +176,7 @@ final class WatchRemote {
                 speed: music.speed,
                 hasNext: music.hasNext,
                 hasPrevious: music.hasPrevious,
-                upNextCount: music.upNext.count,
+                upNextCount: music.upNextCount,
                 chapter: music.currentChapter?.Name,
                 volume: volume
             )
