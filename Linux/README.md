@@ -74,8 +74,26 @@ query parameter, all of which Jellyfin 12 disables by default), and the
   reports, watched flags via the played-items endpoint) whenever the server is
   reachable — automatically at app start, after local playback, or manually from
   the Downloads view.
-- **Live TV** — channel list with current-program info; channels play through
-  `PlaybackInfo` + `AutoOpenLiveStream` (direct or server-transcoded HLS).
+- **Live TV** — a TV guide (six hours at a time, with More hours to extend it
+  to a day, Earlier / Now / Later, a day-and-time jump, Today / Tomorrow /
+  Yesterday labels and a channel filter), or a channel list when there's no
+  guide data. Jellyfin channels play through `PlaybackInfo` +
+  `AutoOpenLiveStream`; a custom M3U playlist with an optional XMLTV guide
+  (Settings → Live TV) plays straight from the provider. The line-up loads in
+  the background at launch, so the guide opens without a wait.
+  - **Keyboard** — the guide is one Tab stop with a selection separate from
+    what's playing: arrows walk programmes, Enter watches the channel, Space
+    shows the programme, letters jump to a channel, Esc clears.
+    Ctrl+← / Ctrl+→ / Ctrl+T move Earlier / Later / Now.
+  - **In the player** — the Channels button in the player bar lists the
+    line-up (logo, number, what's on and how far through) and changes channel
+    without leaving the player; Page Up / Page Down step through channels. The
+    title shows what's on now and what's coming up.
+  - **Custom playlist settings** — a User-Agent (default
+    `VLC/3.0.20 LibVLC/3.0.20`) for the playlist, guide and streams, mpv
+    included; a guide refresh interval (default 3 hours, or Never) with
+    Refresh now and a "Last read" summary; and Check artwork, which loads
+    every channel logo and says how many came back.
 - **Power** — while the video covers the page, the app freezes the page's
   animations and stops GTK repainting the web view underneath, and WebKit is
   told to render to shared memory (see `webkit_defaults` in
