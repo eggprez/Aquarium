@@ -1,4 +1,7 @@
+mod audio;
 mod config;
+mod discovery;
+mod download_extras;
 mod downloads;
 mod egl;
 mod gl;
@@ -8,6 +11,7 @@ mod idle;
 mod jellyfin;
 mod mpris;
 mod mpv;
+mod network;
 mod player;
 mod power;
 mod prefs;
@@ -70,6 +74,15 @@ fn config_save(cfg: Value) -> Result<(), String> {
     config::merge(secret::dehydrate(cfg))
 }
 
+/// The Live TV settings' User-Agent on a request to a playlist's host, in
+/// place of the client's own. Jellyfin requests never come through here.
+fn with_user_agent(req: reqwest::RequestBuilder, ua: Option<&str>) -> reqwest::RequestBuilder {
+    match ua.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(ua) => req.header(reqwest::header::USER_AGENT, ua),
+        None => req,
+    }
+}
+
 /// Read a Live TV source — an M3U playlist or an XMLTV guide — as text.
 ///
 /// Goes through the backend rather than `fetch()` in the webview for two
@@ -78,7 +91,7 @@ fn config_save(cfg: Value) -> Result<(), String> {
 /// as a URL. Gzip is unwrapped here because XMLTV is very commonly published as
 /// `.xml.gz`, and asking the user to notice that would be a poor trade.
 #[tauri::command]
-async fn fetch_source(url: String) -> Result<String, String> {
+async fn fetch_source(url: String, user_agent: Option<String>) -> Result<String, String> {
     // An XMLTV guide for a few hundred channels runs to tens of megabytes;
     // this is a stop against a wrong URL pointing at something enormous, not a
     // limit anyone should meet in normal use.
@@ -90,8 +103,7 @@ async fn fetch_source(url: String) -> Result<String, String> {
     }
 
     let raw: Vec<u8> = if url.starts_with("http://") || url.starts_with("https://") {
-        let mut res = jellyfin::http()
-            .get(url)
+        let mut res = with_user_agent(jellyfin::http().get(url), user_agent.as_deref())
             .send()
             .await
             .map_err(|e| format!("Couldn't reach {}: {}", url, e))?;
@@ -185,6 +197,56 @@ async fn jf_logout() -> Result<Value, String> {
 }
 
 #[tauri::command]
+async fn jf_login_quick_connect(server: String, secret: String) -> Result<Value, String> {
+    server::login_quick_connect(&server, &secret).await
+}
+
+/// The unauthenticated calls the sign-in screen makes: `/Users/Public` and the
+/// Quick Connect exchange, nothing else (see `server::public_request`).
+#[tauri::command]
+async fn jf_public(server: String, path: String, method: Option<String>) -> Result<Value, String> {
+    server::public_request(&server, &path, method).await
+}
+
+/// Jellyfin servers on the local network, by UDP broadcast.
+#[tauri::command]
+async fn jf_discover() -> Vec<Value> {
+    tokio::task::spawn_blocking(|| discovery::find(std::time::Duration::from_millis(1600)))
+        .await
+        .unwrap_or_default()
+}
+
+/// mpv properties as display strings, for the stream info panel.
+#[tauri::command]
+async fn player_get_properties(
+    player: State<'_, player::Player>,
+    names: Vec<String>,
+) -> Result<Value, String> {
+    Ok(player.properties(&names).await)
+}
+
+/// Start the next title's stream on the server before this one ends.
+#[tauri::command]
+async fn player_warm(url: String) -> Result<(), String> {
+    server::warm(&url).await
+}
+
+#[tauri::command(async)]
+fn accounts_list() -> Value {
+    server::accounts()
+}
+
+#[tauri::command(async)]
+fn account_switch(key: String) -> Result<Value, String> {
+    server::switch_account(&key)
+}
+
+#[tauri::command]
+async fn account_forget(key: String) -> Result<Value, String> {
+    server::forget_account(&key).await
+}
+
+#[tauri::command]
 async fn jf_request(
     path: String,
     method: Option<String>,
@@ -224,7 +286,7 @@ async fn jf_bitrate_test(size: u32) -> Result<f64, String> {
 /// when it is a playlist (both of mpv's opens then skip the redirect chain, a
 /// second or more each on a distant server), and the original otherwise.
 #[tauri::command]
-async fn resolve_stream(url: String) -> Result<String, String> {
+async fn resolve_stream(url: String, user_agent: Option<String>) -> Result<String, String> {
     const ATTEMPTS: u32 = 4;
     const PER_REQUEST: std::time::Duration = std::time::Duration::from_secs(60);
     const BETWEEN: std::time::Duration = std::time::Duration::from_millis(1500);
@@ -241,7 +303,11 @@ async fn resolve_stream(url: String) -> Result<String, String> {
     let mut last_err = String::new();
     for attempt in 1..=ATTEMPTS {
         let started = std::time::Instant::now();
-        match jellyfin::http().get(&url).timeout(PER_REQUEST).send().await {
+        match with_user_agent(jellyfin::http().get(&url), user_agent.as_deref())
+            .timeout(PER_REQUEST)
+            .send()
+            .await
+        {
             Ok(res) => {
                 let status = res.status();
                 if status.is_success() {
@@ -305,7 +371,49 @@ async fn player_play(
     player: State<'_, player::Player>,
     req: player::PlayRequest,
 ) -> Result<(), String> {
+    // Music and video never play over each other; see audio.rs.
+    app.state::<audio::AudioPlayer>().stop(&app).await;
     player.play(app, req).await
+}
+
+// ---- Music and audiobooks (audio.rs) ----
+
+#[tauri::command]
+async fn audio_play(app: AppHandle, audio: State<'_, audio::AudioPlayer>, req: audio::PlayRequest) -> Result<(), String> {
+    audio.play(app, req).await
+}
+
+#[tauri::command]
+async fn audio_set_next(audio: State<'_, audio::AudioPlayer>, next: Option<audio::AudioTrack>) -> Result<(), String> {
+    audio.set_next(next).await
+}
+
+#[tauri::command]
+async fn audio_command(audio: State<'_, audio::AudioPlayer>, cmd: Vec<Value>) -> Result<(), String> {
+    audio.send(Value::Array(cmd)).await
+}
+
+#[tauri::command]
+async fn audio_stop(app: AppHandle, audio: State<'_, audio::AudioPlayer>) -> Result<(), String> {
+    audio.stop(&app).await;
+    Ok(())
+}
+
+#[tauri::command]
+fn audio_status(audio: State<'_, audio::AudioPlayer>) -> audio::AudioStatus {
+    audio.status()
+}
+
+/// The frontend's queue, for MPRIS's track list and Next/Previous.
+#[tauri::command]
+fn audio_set_queue(
+    audio: State<'_, audio::AudioPlayer>,
+    entries: Vec<audio::AudioTrack>,
+    index: usize,
+    can_next: bool,
+    can_prev: bool,
+) {
+    audio.set_queue(entries, index, can_next, can_prev);
 }
 
 #[tauri::command]
@@ -600,8 +708,56 @@ fn download_retry(
     app: AppHandle,
     mgr: State<'_, downloads::DlManager>,
     item_id: String,
+    manual: Option<bool>,
 ) -> Result<(), String> {
-    downloads::restart(app.clone(), &mgr, &item_id)
+    downloads::restart(app.clone(), &mgr, &item_id, manual.unwrap_or(true))
+}
+
+/// Stop a running download but keep what it fetched (pause, or the network
+/// turning metered). See `DlManager::pause`.
+#[tauri::command]
+fn download_pause(mgr: State<'_, downloads::DlManager>, item_id: String) {
+    mgr.pause(&item_id);
+}
+
+/// Settings' "Keep the laptop awake while downloading" changed.
+#[tauri::command]
+fn downloads_sync_keep_awake(mgr: State<'_, downloads::DlManager>) {
+    mgr.sync_keep_awake();
+}
+
+#[tauri::command]
+fn network_metered() -> bool {
+    network::is_metered()
+}
+
+#[tauri::command]
+async fn download_fetch_subtitles(item_id: String) {
+    let original = downloads::item_dir(&item_id)
+        .ok()
+        .and_then(|d| std::fs::read_to_string(d.join("meta.json")).ok())
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|m| m["request"]["url"].as_str().map(downloads::is_original_url))
+        .unwrap_or(false);
+    download_extras::fetch_subtitles(&item_id, original).await;
+}
+
+#[tauri::command]
+async fn download_update_details(
+    item_id: String,
+    patch: Value,
+    poster_url: Option<String>,
+    series_poster_url: Option<String>,
+) -> Result<(), String> {
+    download_extras::update_details(&item_id, &patch, poster_url, series_poster_url).await
+}
+
+/// Show downloads in the file manager (Files on GNOME), selected.
+#[tauri::command]
+async fn downloads_reveal(item_ids: Vec<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || download_extras::reveal(&item_ids))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -690,6 +846,7 @@ pub fn run() {
                 .build(),
         )
         .manage(player::Player::new())
+        .manage(audio::AudioPlayer::new())
         .manage(downloads::DlManager::default())
         .setup(|app| {
             // Reopen at the size the window was last closed at. Position,
@@ -750,6 +907,9 @@ pub fn run() {
                 });
             }
 
+            // Metered or not, for "Download only on unmetered connections".
+            network::watch(app.handle());
+
             // Media keys, the lock screen, and the shell's audio menu.
             mpris::start(app.handle().clone());
 
@@ -775,6 +935,7 @@ pub fn run() {
                         known_duration_seconds: None,
                         volume: None,
                         ctx: None,
+                        user_agent: None,
                     };
                     if let Err(e) = player.play(handle.clone(), req).await {
                         eprintln!("aquarium: test playback failed: {e}");
@@ -799,6 +960,7 @@ pub fn run() {
                             known_duration_seconds: None,
                             volume: None,
                             ctx: None,
+                            user_agent: None,
                         };
                         if let Err(e) = player.play(handle.clone(), req2).await {
                             eprintln!("aquarium: replay test failed: {e}");
@@ -874,6 +1036,7 @@ pub fn run() {
                                     known_duration_seconds: None,
                                     volume: None,
                                     ctx: None,
+                                    user_agent: None,
                                 };
                                 if let Err(e) = player.play(handle.clone(), req).await {
                                     eprintln!("aquarium: test sequence: play failed: {e}");
@@ -938,6 +1101,14 @@ pub fn run() {
             jf_probe,
             jf_login,
             jf_logout,
+            jf_login_quick_connect,
+            jf_public,
+            jf_discover,
+            accounts_list,
+            account_switch,
+            player_get_properties,
+            player_warm,
+            account_forget,
             jf_request,
             jf_image,
             jf_ping,
@@ -954,10 +1125,22 @@ pub fn run() {
             player_set_viewport,
             player_set_pip,
             player_mpv_command,
+            audio_play,
+            audio_set_next,
+            audio_command,
+            audio_stop,
+            audio_status,
+            audio_set_queue,
             quit_confirm,
             download_start,
             download_cancel,
             download_retry,
+            download_pause,
+            downloads_sync_keep_awake,
+            network_metered,
+            download_fetch_subtitles,
+            download_update_details,
+            downloads_reveal,
             download_delete,
             downloads_list,
             disk_free,
@@ -972,6 +1155,7 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 app.state::<player::Player>().stop_sync();
+                app.state::<audio::AudioPlayer>().stop_sync();
             }
         });
 }

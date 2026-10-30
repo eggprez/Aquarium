@@ -47,6 +47,30 @@ export function sourceUrls(): { m3u: string; xmltv: string } {
   };
 }
 
+/**
+ * What an empty User-Agent setting sends: the client string of a widely
+ * deployed open-source player, which most stream servers have a rule for.
+ * Some vary what they serve (bitrate, container, a redirect target) by the
+ * client they see, and a stream that stalls under one string and plays under
+ * another is usually this.
+ */
+export const DEFAULT_USER_AGENT = "VLC/3.0.20 LibVLC/3.0.20";
+
+/** The User-Agent for the playlist, the guide and every stream from them. */
+export function iptvUserAgent(): string {
+  const v = String(api.getConfig()?.livetv_user_agent ?? "").trim();
+  return v || DEFAULT_USER_AGENT;
+}
+
+/** Re-read the playlist and guide this often; 0 means only when asked. */
+export const DEFAULT_REFRESH_MIN = 180;
+
+export function refreshMinutes(): number {
+  const v = api.getConfig()?.livetv_refresh_min;
+  const n = v == null || v === "" ? DEFAULT_REFRESH_MIN : Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_REFRESH_MIN;
+}
+
 // ---------- M3U ----------
 
 const ATTR_RE = /([\w-]+)="([^"]*)"/g;
@@ -139,17 +163,22 @@ const textOf = (parent: Element, tag: string): string =>
 export function parseXmltv(text: string): {
   programs: Map<string, IptvProgram[]>;
   names: Map<string, string>;
+  /** `<icon src>` per channel id, for playlists that name no tvg-logo. */
+  icons: Map<string, string>;
 } {
   const doc = new DOMParser().parseFromString(text, "text/xml");
   const bad = doc.querySelector("parsererror");
   if (bad) throw new Error("That XMLTV file isn't valid XML");
 
   const names = new Map<string, string>();
+  const icons = new Map<string, string>();
   for (const c of Array.from(doc.getElementsByTagName("channel"))) {
     const id = c.getAttribute("id");
     if (!id) continue;
     const n = c.querySelector("display-name")?.textContent?.trim();
     if (n) names.set(id, n);
+    const icon = c.querySelector("icon")?.getAttribute("src")?.trim();
+    if (icon) icons.set(id, icon);
   }
 
   const programs = new Map<string, IptvProgram[]>();
@@ -171,7 +200,7 @@ export function parseXmltv(text: string): {
     if (list) list.push(entry);
     else programs.set(chan, [entry]);
   }
-  return { programs, names };
+  return { programs, names, icons };
 }
 
 // ---------- Loading and caching ----------
@@ -190,9 +219,12 @@ interface Loaded {
 let cache: Loaded | null = null;
 let inflight: Promise<Loaded> | null = null;
 
-/** Guides change slowly and are expensive to fetch; an hour is well inside the
- *  window where a re-fetch would return the same document. */
-const TTL_MS = 60 * 60_000;
+/** Whether the loaded copy is older than the refresh interval allows. With the
+ *  interval at 0 only a changed address or an explicit reload re-reads it. */
+function aged(c: Loaded): boolean {
+  const min = refreshMinutes();
+  return min > 0 && Date.now() - c.at > min * 60_000;
+}
 
 const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -215,6 +247,9 @@ function join(channels: IptvChannel[], parsed: ReturnType<typeof parseXmltv>): {
       (ch.GuideId && parsed.programs.has(ch.GuideId) && ch.GuideId) ||
       byName.get(norm(ch.Name)) ||
       "";
+    // The guide's own artwork stands in for a logo the playlist didn't name.
+    const guideIcon = parsed.icons.get(guideId || ch.GuideId);
+    if (!ch.LogoUrl && guideIcon) ch.LogoUrl = guideIcon;
     const progs = guideId ? parsed.programs.get(guideId) : undefined;
     if (!progs?.length) continue;
     out.set(
@@ -227,7 +262,7 @@ function join(channels: IptvChannel[], parsed: ReturnType<typeof parseXmltv>): {
 }
 
 async function fetchText(url: string): Promise<string> {
-  return await invoke<string>("fetch_source", { url });
+  return await invoke<string>("fetch_source", { url, userAgent: iptvUserAgent() });
 }
 
 async function loadFresh(m3u: string, xmltv: string): Promise<Loaded> {
@@ -261,7 +296,7 @@ export async function load(force = false): Promise<Loaded> {
     !cache ||
     cache.m3u !== m3u ||
     cache.xmltv !== xmltv ||
-    Date.now() - cache.at > TTL_MS;
+    aged(cache);
   if (!force && !stale && cache) return cache;
   if (inflight && !force) return inflight;
 
@@ -278,6 +313,34 @@ export async function load(force = false): Promise<Loaded> {
 
 export function invalidate(): void {
   cache = null;
+}
+
+/** Whether the next `load()` will go back to the network. */
+export function isDue(): boolean {
+  if (!cache) return true;
+  const { m3u, xmltv } = sourceUrls();
+  return cache.m3u !== m3u || cache.xmltv !== xmltv || aged(cache);
+}
+
+/** What the playlist and guide produced the last time they were read, for
+ *  Settings' "Last read" line. `null` before the first read this run. */
+export function lastRead(): {
+  at: number;
+  channels: number;
+  withLogos: number;
+  matched: number;
+  programs: number;
+} | null {
+  if (!cache) return null;
+  let programs = 0;
+  for (const l of cache.programs.values()) programs += l.length;
+  return {
+    at: cache.at,
+    channels: cache.channels.length,
+    withLogos: cache.channels.filter((c) => !!c.LogoUrl).length,
+    matched: cache.matched,
+    programs,
+  };
 }
 
 export async function getChannels(force = false): Promise<IptvChannel[]> {

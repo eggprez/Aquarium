@@ -26,6 +26,9 @@ pub struct Status {
     pub speed: f64,
     /// Subtitle timing offset in seconds; negative shows subtitles earlier.
     pub sub_delay: f64,
+    /// Audio timing offset in seconds; positive plays the sound later (for a
+    /// Bluetooth headset that runs behind the picture).
+    pub audio_delay: f64,
     /// Absolute position, in seconds, that the demuxer cache has read up to —
     /// the end of the buffered region drawn behind the scrubber. Zero means mpv
     /// hasn't reported one yet (or isn't caching, as with a local file).
@@ -103,6 +106,9 @@ pub struct PlayRequest {
     pub volume: Option<f64>,
     #[serde(default)]
     pub ctx: Option<PlayContext>,
+    /// HTTP User-Agent for the stream (custom playlist channels only).
+    #[serde(default)]
+    pub user_agent: Option<String>,
 }
 
 struct SessionHandle {
@@ -239,6 +245,21 @@ impl Player {
         self.status.lock().unwrap().clone()
     }
 
+    /// Several properties at once, as display strings, for the stream info
+    /// panel. Missing ones are left out rather than reported as errors.
+    pub async fn properties(&self, names: &[String]) -> Value {
+        let guard = self.session.lock().await;
+        let mut out = serde_json::Map::new();
+        if let Some(s) = guard.as_ref() {
+            for n in names {
+                if let Some(v) = s.session.get_string(n) {
+                    out.insert(n.clone(), Value::String(v));
+                }
+            }
+        }
+        Value::Object(out)
+    }
+
     pub async fn send(&self, cmd: Value) -> Result<(), String> {
         let guard = self.session.lock().await;
         match guard.as_ref() {
@@ -373,6 +394,7 @@ impl Player {
             // parameter, so the token never lands in Jellyfin's access log or
             // in our own mpv log for every stream we open.
             auth_header: http_auth_header(&req),
+            user_agent: req.user_agent.clone(),
             prefs: crate::prefs::Prefs::load().args(),
         };
 
@@ -443,12 +465,19 @@ impl Player {
             // thread's frame gaps, to tell a late frame from a held one.
             (17, "vo-delayed-frame-count"),
             (18, "mistimed-frame-count"),
+            (19, "audio-delay"),
         ] {
             if let Err(e) = session.command(json!(["observe_property", id, prop])) {
                 crate::debug_log_line(&format!("player: observe {} failed: {}", prop, e));
             }
         }
 
+        // A downloaded file brings the subtitles saved beside it (see
+        // download_extras.rs), added once the file has loaded: `sub-add` is
+        // refused before then, and it is the only way to give each track its
+        // language and name (`sub-files` leaves both to the file name).
+        let local = req.ctx.as_ref().is_some_and(|c| c.is_local);
+        let mut local_subs = if local { crate::download_extras::subtitles_for(&req.url) } else { Vec::new() };
         if let Err(e) = session.command(json!(["loadfile", &req.url])) {
             let _ = session.command(json!(["quit"]));
             surface_arc.detach();
@@ -474,6 +503,7 @@ impl Player {
                 mute: false,
                 speed: 1.0,
                 sub_delay: 0.0,
+                audio_delay: 0.0,
                 buffered: 0.0,
                 chapters: Vec::new(),
                 buffering: false,
@@ -544,6 +574,24 @@ impl Player {
                                 // the file: unlike the old external process,
                                 // end-file does not shut anything down by
                                 // itself, so ask for real.
+                                if msg.get("event").and_then(|v| v.as_str()) == Some("file-loaded")
+                                    && !local_subs.is_empty()
+                                {
+                                    let embedded_on = session_task
+                                        .handle()
+                                        .get_property::<String>("sid")
+                                        .is_ok_and(|s| s != "no");
+                                    let slang = crate::config::load()["sub_lang"].as_str().unwrap_or("").to_string();
+                                    for cmd in crate::download_extras::sub_add_commands(
+                                        &std::mem::take(&mut local_subs),
+                                        &slang,
+                                        embedded_on,
+                                    ) {
+                                        if let Err(e) = session_task.command(cmd) {
+                                            crate::debug_log_line(&format!("player: sub-add failed: {e}"));
+                                        }
+                                    }
+                                }
                                 if msg.get("event").and_then(|v| v.as_str()) == Some("end-file") {
                                     end_reason = msg.get("reason").and_then(|v| v.as_str()).map(str::to_string);
                                     end_error = msg.get("file_error").and_then(|v| v.as_str()).map(str::to_string);
@@ -802,6 +850,11 @@ fn apply_event(
                 status.lock().unwrap().sub_delay = d;
             }
         }
+        "audio-delay" => {
+            if let Some(d) = data.and_then(|v| v.as_f64()) {
+                status.lock().unwrap().audio_delay = d;
+            }
+        }
         // mpv reports the cache as a duration ahead of the play position on
         // some demuxers and as an absolute timestamp on others; both are
         // covered by taking whichever reading is further into the file.
@@ -913,6 +966,7 @@ fn status_payload(st: &Status) -> Value {
             "mute": st.mute,
             "speed": st.speed,
             "sub_delay": st.sub_delay,
+            "audio_delay": st.audio_delay,
             // The scrubber's buffer band and chapter marks read these two; they
             // were tracked here but never sent, so the band sat on the playhead
             // and no chapter ever drew.

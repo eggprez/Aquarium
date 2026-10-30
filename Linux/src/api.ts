@@ -143,7 +143,10 @@ export async function loadConfig(): Promise<any> {
 
 export async function saveConfig(patch: Record<string, any>): Promise<void> {
   appConfig = { ...appConfig, ...patch };
-  await invoke("config_save", { cfg: appConfig });
+  // Only the keys that changed: the backend merges, and a whole copy sent from
+  // here could carry stale values for keys it owns (the server, the signed-in
+  // user, the saved accounts) back over newer ones.
+  await invoke("config_save", { cfg: patch });
 }
 
 export async function api(
@@ -244,6 +247,198 @@ export async function logout(): Promise<{ revoked: boolean; pending: boolean }> 
   return { revoked: !!res.revoked, pending: !!res.pending };
 }
 
+// ---------- Before sign-in: discovery, public users, Quick Connect ----------
+
+/** A Jellyfin server that answered the LAN broadcast. */
+export interface DiscoveredServer {
+  id: string;
+  name: string;
+  address: string;
+}
+
+/** Ask the local network who is a Jellyfin server; about 1.6 s. */
+export async function discoverServers(): Promise<DiscoveredServer[]> {
+  try {
+    return await invoke<DiscoveredServer[]>("jf_discover");
+  } catch {
+    return [];
+  }
+}
+
+async function publicCall(server: string, path: string, method = "GET"): Promise<{ status: number; body: any }> {
+  try {
+    return await invoke("jf_public", { server, path, method });
+  } catch (e) {
+    throw new Error(splitError(e).message);
+  }
+}
+
+/**
+ * A user the server will name to somebody who hasn't signed in: the faces on
+ * Jellyfin's own sign-in page. An administrator can hide any or all of them,
+ * so the list is an offer and the username field stays.
+ */
+export interface PublicUser {
+  Id: string;
+  Name: string;
+  HasPassword?: boolean;
+}
+
+export async function publicUsers(server: string): Promise<PublicUser[]> {
+  try {
+    const r = await publicCall(server, "/Users/Public");
+    if (r.status !== 200 || !Array.isArray(r.body)) return [];
+    return (r.body as PublicUser[])
+      .filter((u) => u?.Id && u.Name)
+      .sort((a, b) => a.Name.localeCompare(b.Name, undefined, { sensitivity: "base" }));
+  } catch {
+    return [];
+  }
+}
+
+export async function quickConnectEnabled(server: string): Promise<boolean> {
+  try {
+    const r = await publicCall(server, "/QuickConnect/Enabled");
+    return r.status === 200 && r.body === true;
+  } catch {
+    return false;
+  }
+}
+
+export interface QuickConnectStart {
+  secret: string;
+  code: string;
+}
+
+/**
+ * Ask for a code. The server files the request under this device's name and
+ * id, and the code is what the user types into a client that is already
+ * signed in. Jellyfin 10.9 made this a POST; the GET is kept for an older
+ * server, which answers 405 to the POST.
+ */
+export async function quickConnectInitiate(server: string): Promise<QuickConnectStart> {
+  let r = await publicCall(server, "/QuickConnect/Initiate", "POST");
+  if (r.status === 405 || r.status === 404) r = await publicCall(server, "/QuickConnect/Initiate", "GET");
+  if (r.status === 401) throw new Error("Quick Connect is turned off on this server");
+  if (r.status < 200 || r.status >= 300) throw new Error(`Quick Connect failed (${r.status})`);
+  const secret = r.body?.Secret;
+  const code = r.body?.Code;
+  if (!secret || !code) throw new Error("The server didn't hand out a Quick Connect code");
+  return { secret, code };
+}
+
+/**
+ * Has someone approved this code yet? `null` means the request has expired
+ * on the server — Jellyfin forgets a code after ten minutes.
+ */
+export async function quickConnectState(server: string, secret: string): Promise<boolean | null> {
+  const r = await publicCall(server, `/QuickConnect/Connect?secret=${encodeURIComponent(secret)}`);
+  if (r.status === 404) return null;
+  if (r.status < 200 || r.status >= 300) throw new Error(`Quick Connect failed (${r.status})`);
+  return !!r.body?.Authenticated;
+}
+
+/** Turn an approved code into a session, the same way `login` does. */
+export async function loginWithQuickConnect(server: string, secret: string): Promise<Session> {
+  let res: any;
+  try {
+    res = await invoke("jf_login_quick_connect", { server, secret });
+  } catch (e) {
+    throw new Error(splitError(e).message);
+  }
+  await loadConfig();
+  session = {
+    server: res.server,
+    userId: res.user_id,
+    userName: res.user_name ?? "",
+    deviceId: res.device_id,
+    secure: !!res.secure,
+  };
+  setOffline(false);
+  return session;
+}
+
+/**
+ * The other side of the exchange: this signed-in device approving a code
+ * shown on another. True when the server recognised the code; false when it
+ * didn't (mistyped, or already expired).
+ */
+export async function authorizeQuickConnect(code: string): Promise<boolean> {
+  const digits = code.replace(/\D/g, "");
+  if (!digits) return false;
+  let res: { status: number; body: any };
+  try {
+    res = await invoke("jf_request", { path: `/QuickConnect/Authorize?code=${digits}`, method: "POST", body: null });
+  } catch (e) {
+    throw new Error(splitError(e).message);
+  }
+  if (res.status === 403) throw new Error("This account isn't allowed to approve Quick Connect requests");
+  if (res.status === 404 || res.status === 400) return false;
+  if (res.status === 401) throw new Error("Quick Connect is turned off on this server");
+  if (res.status < 200 || res.status >= 300) throw new Error(`Server error ${res.status}`);
+  return res.body === true;
+}
+
+// ---------- More than one account ----------
+
+/** One account this device can become without a password. */
+export interface SavedAccount {
+  key: string;
+  server: string;
+  server_id?: string | null;
+  server_name?: string | null;
+  server_secure?: boolean;
+  user_id: string;
+  user_name: string;
+  current: boolean;
+}
+
+export async function listAccounts(): Promise<SavedAccount[]> {
+  try {
+    return await invoke<SavedAccount[]>("accounts_list");
+  } catch {
+    return [];
+  }
+}
+
+/** Servers signed in to before, newest first. */
+export function knownServers(): { server: string; name?: string | null }[] {
+  const list = appConfig.known_servers;
+  return Array.isArray(list) ? list.filter((s: any) => typeof s?.server === "string") : [];
+}
+
+/**
+ * Become another saved account. The one being left keeps its token, so coming
+ * back to it is the same click. The caller redraws the shell for the new
+ * account; the persistent cache is keyed per account already.
+ */
+export async function switchAccount(key: string): Promise<Session> {
+  try {
+    await invoke("account_switch", { key });
+  } catch (e) {
+    throw new Error(splitError(e).message);
+  }
+  await loadConfig();
+  if (!session) throw new Error("That account couldn't be opened");
+  setOffline(false);
+  return session;
+}
+
+/** Sign an account that isn't the one in use out of this device. */
+export async function forgetAccount(key: string): Promise<{ revoked: boolean }> {
+  try {
+    const r: any = await invoke("account_forget", { key });
+    return { revoked: !!r?.revoked };
+  } catch (e) {
+    throw new Error(splitError(e).message);
+  }
+}
+
+/** A user's picture, served without a token. */
+export function avatarUrl(server: string, userId: string, width = 96): string {
+  return `${server}/UserImage?userId=${userId}&maxWidth=${width}&quality=90`;
+}
+
 /**
  * Drop a session the server has stopped honouring. Same teardown as `logout`
  * minus the Logout call (the token it would authenticate with is exactly the
@@ -323,12 +518,284 @@ export async function getResume(): Promise<any[]> {
   return r.Items ?? [];
 }
 
-export async function getNextUp(): Promise<any[]> {
+// ---------- Next Up ----------
+//
+// Shaped by the account's Next Up settings (Settings → Home): how long a show
+// stays, whether episodes in progress count, whether rewatches do. The day
+// limit is the app's to enforce: Next Up is asked for twice, cut at the limit
+// and not, and a show only the wider answer has is taken off Next Up *on the
+// server* (`removeFromNextUp`), so Jellyfin's other apps stop offering it
+// too. A server that ignores the cutoff, or two answers both at their length
+// limit, removes nothing — the same rule as the Apple app.
+
+/** Choices for "Keep shows on Next Up", in days; 0 is Forever. */
+export const NEXT_UP_DAY_CHOICES = [0, 7, 14, 30, 90, 180, 365];
+
+export function nextUpDaysLabel(days: number): string {
+  switch (days) {
+    case 0: return "Forever";
+    case 7: return "1 week";
+    case 14: return "2 weeks";
+    case 30: return "1 month";
+    case 365: return "1 year";
+    default: return `${days / 30} months`;
+  }
+}
+
+function nextUpDays(): number {
+  const v = Number(appConfig.next_up_days ?? 0);
+  return NEXT_UP_DAY_CHOICES.includes(v) ? v : 0;
+}
+
+/** On unless turned off, which is what the server does when it isn't told. */
+function nextUpInProgress(): boolean {
+  return appConfig.next_up_in_progress !== false;
+}
+
+function nextUpRewatching(): boolean {
+  return appConfig.next_up_rewatching === true;
+}
+
+async function nextUpQuery(limit: number, cutoff: Date | null, light = false): Promise<any[]> {
   const s = session!;
-  const r = await api(
-    `/Shows/NextUp?userId=${s.userId}&Limit=16&Fields=${ITEM_FIELDS}&EnableImageTypes=Primary,Backdrop,Thumb,Logo`
-  );
+  const p = new URLSearchParams({
+    userId: s.userId,
+    Limit: String(limit),
+    enableResumable: String(nextUpInProgress()),
+    enableRewatching: String(nextUpRewatching()),
+  });
+  if (light) {
+    p.set("enableImages", "false");
+    p.set("enableUserData", "false");
+  } else {
+    p.set("Fields", ITEM_FIELDS);
+    p.set("EnableImageTypes", "Primary,Backdrop,Thumb,Logo");
+  }
+  if (cutoff) p.set("nextUpDateCutoff", cutoff.toISOString());
+  const r = await api(`/Shows/NextUp?${p}`);
   return r.Items ?? [];
+}
+
+/** The last-played date Jellyfin reads as never: its earliest. */
+export const NOT_PLAYED_DATE = "0001-01-01T00:00:00Z";
+
+/** Whether the server has a real last-played date for an item. */
+export function hasPlayedDate(item: any): boolean {
+  const raw = item?.UserData?.LastPlayedDate;
+  if (!raw) return false;
+  const t = Date.parse(raw);
+  return isFinite(t) && new Date(t).getUTCFullYear() > 1;
+}
+
+/**
+ * Shows added from their first episode go to the front, newest first.
+ * Jellyfin orders Next Up by when each show's last watched episode was
+ * played; a show with nothing watched has none and goes last — past the
+ * row's 16 on a busy account. They are recognised by the episode offered
+ * carrying a last-played date while unwatched and not started, which only
+ * Add to Next Up writes.
+ */
+export function newStartsFirst(row: any[]): any[] {
+  const addedAt = (item: any): number | null => {
+    if (item.Type !== "Episode" || item.UserData?.Played || (item.UserData?.PlaybackPositionTicks ?? 0) > 0) return null;
+    if (!hasPlayedDate(item)) return null;
+    return Date.parse(item.UserData.LastPlayedDate);
+  };
+  const added = row.map((i) => [i, addedAt(i)] as const).filter(([, t]) => t !== null) as [any, number][];
+  if (!added.length) return row;
+  const ids = new Set(added.map(([i]) => i.Id));
+  return [...added.sort((a, b) => b[1] - a[1]).map(([i]) => i), ...row.filter((i) => !ids.has(i.Id))];
+}
+
+/** The shows the wider answer has that the cut one doesn't. */
+export function expiredFromNextUp(everything: any[], kept: any[]): string[] {
+  if (kept.length >= everything.length) return [];
+  const keptSeries = new Set(kept.map((i) => i.SeriesId).filter(Boolean));
+  const out: string[] = [];
+  for (const i of everything) {
+    if (i.SeriesId && !keptSeries.has(i.SeriesId) && !out.includes(i.SeriesId)) out.push(i.SeriesId);
+  }
+  return out;
+}
+
+/** Shows being taken off for the day limit, so two loads don't race. */
+const nextUpExpiring = new Set<string>();
+
+function reportExpired(seriesIds: string[]): void {
+  const fresh = seriesIds.filter((id) => !nextUpExpiring.has(id));
+  if (!fresh.length) return;
+  fresh.forEach((id) => nextUpExpiring.add(id));
+  void (async () => {
+    for (const id of fresh) {
+      try {
+        await removeFromNextUp(id);
+      } catch (e) {
+        void invoke("ui_log", { msg: `next up: couldn't take ${id} off: ${e}` }).catch(() => {});
+      }
+      nextUpExpiring.delete(id);
+    }
+  })();
+}
+
+export async function getNextUp(): Promise<any[]> {
+  const days = nextUpDays();
+  // At the server's most rather than the row's 16: a show started over from
+  // its first episode is at the end of the server's answer.
+  if (days <= 0) return newStartsFirst(await nextUpQuery(100, null)).slice(0, 16);
+  const cutoff = new Date(Date.now() - days * 86_400_000);
+  const [kept, everything] = await Promise.all([
+    nextUpQuery(100, cutoff),
+    nextUpQuery(100, null, true).catch(() => null),
+  ]);
+  if (everything) reportExpired(expiredFromNextUp(everything, kept));
+  return newStartsFirst(kept).slice(0, 16);
+}
+
+async function seriesEpisodesWithUserData(seriesId: string): Promise<any[]> {
+  const s = session!;
+  const r = await api(`/Shows/${seriesId}/Episodes?userId=${s.userId}&Fields=${ITEM_FIELDS}`);
+  return r.Items ?? [];
+}
+
+/** Specials are season zero and sit outside Next Up's order, unless a show
+ *  is nothing but. */
+function walked(all: any[]): any[] {
+  const regular = all.filter((e) => (e.ParentIndexNumber ?? 1) !== 0);
+  return regular.length ? regular : all;
+}
+
+/** The episode Next Up will offer: the first unwatched one after the last
+ *  watched, or the first unwatched when nothing is. */
+export function nextUpTarget(all: any[]): any | null {
+  const eps = walked(all);
+  let last = -1;
+  eps.forEach((e, i) => {
+    if (e.UserData?.Played) last = i;
+  });
+  return eps.slice(last + 1).find((e) => !e.UserData?.Played) ?? null;
+}
+
+/**
+ * Take a show off Next Up on the server without touching what has been
+ * watched: each of its dated episodes gets Jellyfin's earliest date as its
+ * last-played date, which the server reads as never. It comes back when an
+ * episode is played or the show is added again. A server before 10.9 can't
+ * write the date alone and answers 404.
+ */
+export async function removeFromNextUp(seriesId: string): Promise<void> {
+  const s = session!;
+  const episodes = await seriesEpisodesWithUserData(seriesId);
+  for (const ep of episodes) {
+    if (!hasPlayedDate(ep)) continue;
+    await api(`/UserItems/${ep.Id}/UserData?userId=${s.userId}`, {
+      method: "POST",
+      body: { LastPlayedDate: NOT_PLAYED_DATE },
+    });
+  }
+}
+
+/**
+ * Put a show on Next Up, on the server, so every app on the account shows it.
+ * Jellyfin has no call for this: it builds Next Up from episodes with a
+ * last-played date and orders the row by the last watched one's date.
+ *
+ * - "last": today's date on the last watched episode, so the show goes to the
+ *   front everywhere and back inside the day limit.
+ * - "first": the whole show marked unwatched (play counts, positions and dates
+ *   go), then today's date on its first episode.
+ *
+ * The episode's whole state goes with the date; sent alone, the date is
+ * written over what the server last cached of it. Returns the episode the
+ * show will be offered at, or null when there is nothing to offer.
+ */
+export async function addToNextUp(seriesId: string, from: "last" | "first"): Promise<any | null> {
+  const s = session!;
+  const all = await seriesEpisodesWithUserData(seriesId);
+  let target: any;
+  let dated: any;
+  if (from === "last") {
+    target = nextUpTarget(all);
+    if (!target) return null;
+    dated = [...walked(all)].reverse().find((e) => e.UserData?.Played) ?? target;
+  } else {
+    target = walked(all)[0];
+    if (!target) return null;
+    await api(`/UserPlayedItems/${seriesId}?userId=${s.userId}`, { method: "DELETE" });
+    dated = target;
+  }
+  const started = from === "last";
+  await api(`/UserItems/${dated.Id}/UserData?userId=${s.userId}`, {
+    method: "POST",
+    body: {
+      LastPlayedDate: new Date().toISOString(),
+      Played: started && !!dated.UserData?.Played,
+      PlayCount: started ? dated.UserData?.PlayCount ?? 0 : 0,
+      PlaybackPositionTicks: started ? dated.UserData?.PlaybackPositionTicks ?? 0 : 0,
+    },
+  });
+  return target;
+}
+
+// ---------- Home layout ----------
+
+/** A kind of row Home can draw. */
+export type HomeSection = "libraries" | "resume" | "nextUp" | "latest" | "liveTv";
+
+function homeSectionFor(name: string): HomeSection | null {
+  switch (name.toLowerCase()) {
+    case "librarybuttons":
+    case "smalllibrarytiles":
+    case "librarytiles":
+      return "libraries";
+    case "resume":
+    case "resumevideo":
+      return "resume";
+    case "nextup":
+      return "nextUp";
+    case "latestmedia":
+      return "latest";
+    case "livetv":
+      return "liveTv";
+    default:
+      // "none", and rows this client has nothing for (music, books, recordings).
+      return null;
+  }
+}
+
+/** What Jellyfin itself puts in a slot the account has never set, copied
+ *  from the web client so an untouched account looks the same in both. */
+function jellyfinDefaultSection(slot: number): string {
+  return ["smalllibrarytiles", "resume", "resumeaudio", "livetv", "nextup", "latestmedia"][slot] ?? "none";
+}
+
+export const HOME_FALLBACK: HomeSection[] = [0, 1, 2, 3, 4, 5, 6]
+  .map((i) => homeSectionFor(jellyfinDefaultSection(i)))
+  .filter((x): x is HomeSection => !!x);
+
+/**
+ * The home screen the account has arranged, from its display preferences
+ * (`usersettings`, client `emby`): seven numbered slots, each naming a kind of
+ * row, read the same way by every Jellyfin client. Anything unreadable comes
+ * back as Jellyfin's own default order.
+ */
+export async function getHomeSections(): Promise<HomeSection[]> {
+  const s = session!;
+  let prefs: any;
+  try {
+    prefs = await api(`/DisplayPreferences/usersettings?userId=${s.userId}&client=emby`);
+  } catch {
+    return HOME_FALLBACK;
+  }
+  const custom: Record<string, any> = prefs?.CustomPrefs ?? {};
+  // Lower-cased by the web client, camel-cased by some others.
+  const byLower = new Map<string, string>();
+  for (const [k, v] of Object.entries(custom)) if (typeof v === "string") byLower.set(k.toLowerCase(), v);
+  const out: HomeSection[] = [];
+  for (let slot = 0; slot < 7; slot++) {
+    const section = homeSectionFor(byLower.get(`homesection${slot}`) ?? jellyfinDefaultSection(slot));
+    if (section && !out.includes(section)) out.push(section);
+  }
+  return out.length ? out : HOME_FALLBACK;
 }
 
 /**
@@ -824,6 +1291,8 @@ export interface PlaybackSource {
   mediaSourceId: string;
   playSessionId: string;
   live: boolean;
+  /** The server's MediaSource for it: container, bitrate, streams. */
+  mediaSource?: any;
 }
 
 function deviceProfile(forceTranscode: boolean, maxBitrate?: number): any {
@@ -897,6 +1366,7 @@ export async function resolvePlayback(
       mediaSourceId: ms.Id,
       playSessionId,
       live: !!opts.live,
+      mediaSource: ms,
     };
   }
 
@@ -917,7 +1387,7 @@ export async function resolvePlayback(
   // Live channels that direct-play expose an open stream path instead.
   if (opts.live && ms.TranscodingUrl) {
     url = s.server + ms.TranscodingUrl;
-    return { url, playMethod: "Transcode", mediaSourceId: ms.Id, playSessionId, live: true };
+    return { url, playMethod: "Transcode", mediaSourceId: ms.Id, playSessionId, live: true, mediaSource: ms };
   }
   return {
     url,
@@ -925,6 +1395,7 @@ export async function resolvePlayback(
     mediaSourceId: ms.Id,
     playSessionId,
     live: !!opts.live,
+    mediaSource: ms,
   };
 }
 

@@ -1,13 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "../api";
 import * as iptv from "../iptv";
-import { el, clear, toast } from "../ui";
+import { cachedLineup, loadLineup, refreshNow as refreshLineup } from "../lineup";
+import { el, clear, toast, openDialog } from "../ui";
 import {
   isAdaptiveEnabled,
   setAdaptiveEnabled,
   playerCtl,
   PICTURE_CONTROLS,
   setLiveSetting,
+  downloadPrefsChanged,
 } from "../playback";
 import { getThemePref, setThemePref, type ThemePref } from "../theme";
 
@@ -185,6 +187,36 @@ const DECODER_NAMES: Record<string, string> = {
   no: "Software (CPU)",
 };
 
+/** How downloads behave on this laptop: the network they use, the server's
+ *  encoder, and whether the machine stays up for them. */
+function downloadsBlock(cfg: any): HTMLElement {
+  const changed = (): void => downloadPrefsChanged();
+  return el("div", { class: "settings-block" }, [
+    el("h3", {}, ["Downloads"]),
+    row(
+      "Only download on unmetered connections",
+      "Downloads wait while the connection is metered — a phone hotspot, mobile broadband, or a network marked metered in GNOME's settings — and carry on from where they stopped when it isn't.",
+      toggle(cfg, "downloads_unmetered_only", ["Off", "On"], changed)
+    ),
+    row(
+      "Transcode one at a time",
+      "Converted downloads run one after another so the server's encoder isn't shared between them. Original-quality files still download side by side, up to the Parallel limit on the Downloads page.",
+      toggle(cfg, "downloads_transcode_serial", ["Off", "On"], changed)
+    ),
+    row(
+      "Keep the laptop awake while downloading",
+      "Stops the laptop suspending on idle while a download runs. The screen still dims and locks.",
+      // On unless turned off, so the toggle reads an unset key as on.
+      toggle(
+        { downloads_keep_awake: cfg.downloads_keep_awake !== false },
+        "downloads_keep_awake",
+        ["Off", "On"],
+        changed
+      )
+    ),
+  ]);
+}
+
 export async function renderSettings(root: HTMLElement, onLogout: () => void): Promise<void> {
   clear(root);
   const s = api.getSession();
@@ -297,6 +329,146 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     ])
   );
 
+  // Accounts: everyone signed in on this device, switched between without a
+  // password, each with its own token in the keyring.
+  const accountsBlock = el("div", { class: "settings-block" }, [el("h3", {}, ["Accounts"])]);
+  root.append(accountsBlock);
+  const drawAccounts = async (): Promise<void> => {
+    const list = await api.listAccounts();
+    if (!document.contains(accountsBlock)) return;
+    accountsBlock.querySelectorAll(".settings-row").forEach((n) => n.remove());
+    for (const a of list) {
+      const where = a.server_name || a.server.replace(/^https?:\/\//, "");
+      const controls = a.current
+        ? el("span", { class: "sync-pill ok" }, ["In use"])
+        : el("div", { class: "settings-actions" }, [
+            el("button", {
+              class: "btn small",
+              title: "Sign in as this account. Switching is instant and needs no password.",
+              onClick: () => document.dispatchEvent(new CustomEvent("aquarium-account-switch", { detail: { key: a.key } })),
+            }, ["Switch"]),
+            el("button", {
+              class: "btn small danger",
+              onClick: () =>
+                openDialog({
+                  title: `Sign ${a.user_name} out of this device?`,
+                  body: [el("p", {}, [`Their session on ${where} is ended and the account is removed from this device. The account in use isn't touched.`])],
+                  actions: [
+                    { label: "Cancel", primary: true },
+                    {
+                      label: "Sign Out",
+                      danger: true,
+                      run: async () => {
+                        try {
+                          const r = await api.forgetAccount(a.key);
+                          if (!r.revoked) toast("Removed here, but the server couldn't be reached to end that session.", "error");
+                        } catch (e: any) {
+                          toast(e.message ?? "Couldn't sign that account out", "error");
+                        }
+                        void drawAccounts();
+                      },
+                    },
+                  ],
+                }),
+            }, ["Sign Out of This Device"]),
+          ]);
+      accountsBlock.append(
+        el("div", { class: "settings-row" }, [
+          el("div", {}, [
+            el("div", { class: "lbl" }, [a.user_name || "Unnamed user"]),
+            el("div", { class: "sub" }, [where]),
+          ]),
+          controls,
+        ])
+      );
+    }
+    accountsBlock.append(
+      row(
+        "Add Account…",
+        "Sign in to another user on this server, or to a different server, without signing this one out. Switching is instant and needs no password: each account keeps its own token in the keyring.",
+        el("button", {
+          class: "btn small",
+          onClick: () => document.dispatchEvent(new CustomEvent("aquarium-add-account")),
+        }, ["Add Account…"])
+      )
+    );
+  };
+  await drawAccounts();
+  if (!document.contains(title)) return;
+
+  // Quick Connect, the approving side: a device signing in to this server
+  // shows a code, and entering it here signs that device in as this user.
+  const qcInput = el("input", {
+    class: "control md qc-code",
+    type: "text",
+    inputmode: "numeric",
+    autocomplete: "off",
+    placeholder: "6-digit code",
+    maxlength: "6",
+    "aria-label": "Quick Connect code",
+  }) as HTMLInputElement;
+  const qcOutcome = el("div", { class: "sub", hidden: "" });
+  const qcButton = el("button", { class: "btn small", disabled: "" }, ["Approve…"]) as HTMLButtonElement;
+  const qcSay = (text: string, tone: "ok" | "warn" | "bad") => {
+    qcOutcome.textContent = text;
+    qcOutcome.className = `sub qc-outcome ${tone}`;
+    qcOutcome.removeAttribute("hidden");
+  };
+  qcInput.addEventListener("input", () => {
+    // Digits only, and the six of them.
+    const digits = qcInput.value.replace(/\D/g, "").slice(0, 6);
+    if (digits !== qcInput.value) qcInput.value = digits;
+    qcButton.disabled = digits.length !== 6 || api.isOffline();
+    qcOutcome.setAttribute("hidden", "");
+  });
+  const qcConfirm = () => {
+    const code = qcInput.value;
+    if (code.length !== 6) return;
+    openDialog({
+      title: `Sign another device in as ${s?.userName ?? "you"}?`,
+      body: [el("p", {}, ["Only approve a code you can see on your own device's screen right now. Whoever holds the device showing it gets full access to your account."])],
+      actions: [
+        { label: "Cancel", primary: true },
+        {
+          label: `Approve ${code}`,
+          run: async () => {
+            qcButton.disabled = true;
+            try {
+              if (await api.authorizeQuickConnect(code)) {
+                qcInput.value = "";
+                qcSay("The other device is signing in now.", "ok");
+              } else {
+                qcSay("The server doesn't know that code. Check the digits, or ask for a new code — they expire after ten minutes.", "warn");
+              }
+            } catch (e: any) {
+              qcSay(e.message ?? String(e), "bad");
+            }
+            qcButton.disabled = qcInput.value.length !== 6;
+          },
+        },
+      ],
+    });
+  };
+  qcButton.addEventListener("click", qcConfirm);
+  qcInput.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") qcConfirm();
+  });
+  root.append(
+    el("div", { class: "settings-block" }, [
+      el("h3", {}, ["Quick Connect"]),
+      el("div", { class: "settings-row" }, [
+        el("div", {}, [
+          el("div", { class: "lbl" }, ["Approve a code"]),
+          el("div", { class: "sub" }, [
+            "Another device signing in to this server — a TV, say — can show a code instead of asking for a password. Enter the code here and it is signed in as you.",
+          ]),
+          qcOutcome,
+        ]),
+        el("div", { class: "settings-actions" }, [qcInput, qcButton]),
+      ]),
+    ])
+  );
+
   // Appearance block — applied immediately, no Save needed.
   const themeSelect = el("select", {
     class: "control md",
@@ -334,6 +506,35 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     ])
   );
 
+  // Next Up: what the server's Next Up offers, and for how long. Sent with
+  // every Next Up request, so the row follows at once.
+  root.append(
+    el("div", { class: "settings-block" }, [
+      el("h3", {}, ["Next Up"]),
+      row(
+        "Keep shows on Next Up",
+        "How long a show stays on Next Up after you last watched anything in it. Past that, Aquarium takes it off Next Up on the server as well, so Jellyfin's other apps stop showing it too; nothing is marked watched. Playing an episode or adding the show to Next Up brings it back. Forever keeps a show for as long as it has an episode left.",
+        choice(
+          { next_up_days: String(cfg.next_up_days ?? "0") },
+          "next_up_days",
+          api.NEXT_UP_DAY_CHOICES.map((d) => [String(d), api.nextUpDaysLabel(d)] as [string, string]).sort((a, b) =>
+            a[0] === "0" ? 1 : b[0] === "0" ? -1 : Number(a[0]) - Number(b[0])
+          )
+        )
+      ),
+      row(
+        "Include episodes in progress",
+        "Lets Next Up offer an episode you're partway through, as Continue Watching does. Off, a show whose next episode you've started is left to Continue Watching until you finish it.",
+        toggle({ next_up_in_progress: cfg.next_up_in_progress !== false }, "next_up_in_progress", ["Off", "On"])
+      ),
+      row(
+        "Include shows you're rewatching",
+        "Keeps a show you're watching again on Next Up: after an episode you've already seen, it offers the one after it, watched or not.",
+        toggle(cfg, "next_up_rewatching", ["Off", "On"])
+      ),
+    ])
+  );
+
   // Playback block
   const adaptiveSelect = el("select", {
     class: "control md",
@@ -359,6 +560,40 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
   root.append(
     el("div", { class: "settings-block" }, [
       el("h3", {}, ["Playback"]),
+      row(
+        "Resume where I left off",
+        "Opens something you have already started at the point you stopped, instead of from the beginning.",
+        toggle({ resume_playback: cfg.resume_playback !== false }, "resume_playback", ["Off — always from the start", "On"])
+      ),
+      row(
+        "Play the next episode automatically",
+        "The Up Next card appears over the closing stretch of an episode either way — turning this off just means it won't start on its own.",
+        toggle({ autoplay_next: cfg.autoplay_next !== false }, "autoplay_next", ["Off", "On"])
+      ),
+      row(
+        "Skip by",
+        "How far the two skip buttons jump, along with ← and → and a double-tap on the left or right of the picture.",
+        choice({ player_skip_interval: String(cfg.player_skip_interval ?? "10") }, "player_skip_interval", [
+          ["10", "10 seconds"],
+          ["15", "15 seconds"],
+          ["30", "30 seconds"],
+        ])
+      ),
+      row(
+        "Hide controls after",
+        "How long the controls stay up in fullscreen after the pointer last moved. They never hide while a panel is open or the pointer is over them.",
+        choice({ player_hide_after: String(cfg.player_hide_after ?? "2") }, "player_hide_after", [
+          ["2", "2 seconds"],
+          ["4", "4 seconds"],
+          ["6", "6 seconds"],
+          ["10", "10 seconds"],
+        ])
+      ),
+      row(
+        "Show time remaining",
+        "Whether the time at the right of the timeline counts down to the end or shows the whole length. Clicking it in the player flips this too.",
+        toggle(cfg, "player_show_remaining", ["Off — the whole length", "On — time left"])
+      ),
       row(
         "Streaming quality",
         "Adapting drops to a smaller stream when playback keeps stalling or the machine can't decode fast enough, and climbs back after the connection has been steady for a while. It never goes above the quality you picked, and never touches downloaded files or Live TV.",
@@ -423,8 +658,110 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     value: cfg.livetv_xmltv ?? "",
   }) as HTMLInputElement;
 
+  const uaInput = el("input", {
+    class: "control lg",
+    type: "text",
+    placeholder: iptv.DEFAULT_USER_AGENT,
+    value: cfg.livetv_user_agent ?? "",
+    spellcheck: "false",
+  }) as HTMLInputElement;
+  uaInput.addEventListener("change", () => {
+    void api
+      .saveConfig({ livetv_user_agent: uaInput.value.trim() || null })
+      .then(() => iptv.invalidate())
+      .catch(() => toast("Couldn't save that setting", "error"));
+  });
+
+  const refreshChoice = choice(
+    { livetv_refresh_min: String(iptv.refreshMinutes()) },
+    "livetv_refresh_min",
+    [
+      ["0", "Never — only when asked"],
+      ["15", "Every 15 minutes"],
+      ["30", "Every 30 minutes"],
+      ["60", "Every hour"],
+      ["180", "Every 3 hours"],
+      ["360", "Every 6 hours"],
+      ["720", "Every 12 hours"],
+      ["1440", "Every 24 hours"],
+    ]
+  );
+
   const liveStatus = el("div", { class: "sub" }, [""]);
   const customRows = el("div", { class: "settings-sub" });
+
+  /** "Last read: 124 channels · 98 with artwork · 3,410 programmes in the
+   *  guide · 2:14 PM". A column of blank logos has two causes — the artwork
+   *  wouldn't load, or the playlist never named any — and this tells them
+   *  apart. */
+  const lastReadLine = el("div", { class: "sub" }, [""]);
+  const syncLastRead = (): void => {
+    if (!iptv.isCustom()) {
+      const n = cachedLineup()?.length;
+      lastReadLine.textContent = n != null ? `${n} channel${n === 1 ? "" : "s"} from the server.` : "";
+      return;
+    }
+    const r = iptv.lastRead();
+    if (!r) {
+      lastReadLine.textContent = "Not read yet this session — open Live TV, or Refresh now.";
+      return;
+    }
+    const art =
+      r.withLogos === 0
+        ? "no channel artwork — the playlist has no tvg-logo and the guide no <icon>"
+        : r.withLogos < r.channels
+          ? `${r.withLogos} with artwork`
+          : "all with artwork";
+    const when = new Date(r.at).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+    lastReadLine.textContent =
+      `Last read: ${r.channels} channel${r.channels === 1 ? "" : "s"} · ${art} · ` +
+      `${r.programs.toLocaleString()} programme${r.programs === 1 ? "" : "s"} in the guide · ${when}.`;
+  };
+
+  const refreshNow = async (btn: HTMLButtonElement): Promise<void> => {
+    btn.disabled = true;
+    const was = btn.textContent;
+    btn.textContent = "Refreshing…";
+    try {
+      await refreshLineup();
+      syncLastRead();
+      toast("Live TV refreshed", "ok");
+    } catch (e: any) {
+      lastReadLine.textContent = e?.message ?? String(e);
+      toast("Couldn't refresh Live TV", "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = was;
+    }
+  };
+
+  /** Load every channel's logo the way the guide does and count what came
+   *  back, so "why are my logos blank" has an answer rather than a guess. */
+  const artStatus = el("div", { class: "sub" }, [""]);
+  const checkArtwork = async (btn: HTMLButtonElement): Promise<void> => {
+    btn.disabled = true;
+    const was = btn.textContent;
+    btn.textContent = "Checking…";
+    artStatus.textContent = "";
+    try {
+      const channels = await loadLineup();
+      const r = await probeArtwork(channels, (done, total) => {
+        artStatus.textContent = `Checking ${done} of ${total}…`;
+      });
+      const parts = [`${r.loaded} of ${r.channels} channel logos loaded`];
+      if (r.missing) parts.push(`${r.missing} name no logo`);
+      if (r.failed.length) {
+        const some = r.failed.slice(0, 3).join(", ");
+        parts.push(`${r.failed.length} wouldn't load (${some}${r.failed.length > 3 ? ", …" : ""})`);
+      }
+      artStatus.textContent = parts.join(" · ") + ".";
+    } catch (e: any) {
+      artStatus.textContent = e?.message ?? String(e);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = was;
+    }
+  };
 
   const syncLiveRows = (v: string): void => {
     customRows.style.display = v === "custom" ? "" : "none";
@@ -440,6 +777,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     (v) => {
       syncLiveRows(v);
       iptv.invalidate();
+      syncLastRead();
       document.dispatchEvent(new CustomEvent("aquarium-nav-refresh"));
     }
   );
@@ -459,6 +797,9 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
       });
       iptv.invalidate();
       const r = await iptv.describe();
+      // The guide and the player's Channels panel read the new line-up.
+      await refreshLineup().catch(() => {});
+      syncLastRead();
       const guide = r.programs
         ? `${r.programs.toLocaleString()} programmes across ${r.matched} of them`
         : "no guide data matched";
@@ -484,6 +825,29 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
       "The schedule, as a URL or a path. Optional: without it you get a channel list rather than a guide. Gzipped files are handled, so a .xml.gz address works as-is. Channels are joined on tvg-id, falling back to matching names.",
       xmltvInput
     ),
+    row(
+      "User agent",
+      `Sent when fetching the playlist, the guide and every channel's stream. Some stream servers serve differently — or not at all — depending on the client they see; a channel that stalls here and plays in VLC is usually this. Empty sends ${iptv.DEFAULT_USER_AGENT}.`,
+      uaInput
+    ),
+    row(
+      "Refresh the guide",
+      "How often the playlist and guide are read again while the app is open. Never means only when you press Refresh now or change an address.",
+      refreshChoice
+    ),
+    el("div", { class: "settings-row" }, [
+      el("div", {}, [
+        el("div", { class: "lbl" }, ["Channel artwork"]),
+        el("div", { class: "sub" }, [
+          "Loads every channel's logo the way the guide does and says how many came back, which ones the playlist never named, and which hosts wouldn't serve them.",
+        ]),
+        artStatus,
+      ]),
+      el("button", {
+        class: "btn",
+        onClick: (ev: Event) => void checkArtwork(ev.currentTarget as HTMLButtonElement),
+      }, ["Check artwork"]),
+    ]),
     el("div", { class: "settings-row" }, [
       el("div", {}, [
         el("div", { class: "lbl" }, ["Check and load"]),
@@ -496,6 +860,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     ])
   );
   syncLiveRows(cfg.livetv_source === "custom" ? "custom" : "jellyfin");
+  syncLastRead();
 
   root.append(
     el("div", { class: "settings-block" }, [
@@ -506,6 +871,19 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
         sourceSelect
       ),
       customRows,
+      el("div", { class: "settings-row" }, [
+        el("div", {}, [
+          el("div", { class: "lbl" }, ["Channel list and guide"]),
+          el("div", { class: "sub" }, [
+            "Read the channels and schedule again now, rather than waiting for the next refresh.",
+          ]),
+          lastReadLine,
+        ]),
+        el("button", {
+          class: "btn",
+          onClick: (ev: Event) => void refreshNow(ev.currentTarget as HTMLButtonElement),
+        }, ["Refresh now"]),
+      ]),
     ])
   );
 
@@ -687,6 +1065,8 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     ])
   );
 
+  root.append(downloadsBlock(cfg));
+
   // Storage block
   root.append(
     el("div", { class: "settings-block" }, [
@@ -717,4 +1097,48 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
       ]),
     ])
   );
+}
+
+/**
+ * Fetch every channel's logo through an `<img>`, as the guide would, a few at
+ * a time and each with a deadline: one host that never answers must not hold
+ * the report up for the whole line-up.
+ */
+async function probeArtwork(
+  channels: any[],
+  progress: (done: number, total: number) => void
+): Promise<{ channels: number; loaded: number; missing: number; failed: string[] }> {
+  const TIMEOUT_MS = 8000;
+  const PARALLEL = 8;
+  let loaded = 0, missing = 0, done = 0;
+  const failed: string[] = [];
+  const urls = channels.map((ch) => (ch.LogoUrl ?? (ch.ImageTags?.Primary ? api.imageUrl(ch, "Primary", 160) : null)) as string | null);
+
+  const one = (url: string): Promise<boolean> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      const timer = window.setTimeout(() => finish(false), TIMEOUT_MS);
+      const finish = (ok: boolean): void => {
+        clearTimeout(timer);
+        img.onload = img.onerror = null;
+        resolve(ok);
+      };
+      img.onload = () => finish(img.naturalWidth > 0);
+      img.onerror = () => finish(false);
+      img.src = url;
+    });
+
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < channels.length) {
+      const i = next++;
+      const url = urls[i];
+      if (!url) missing++;
+      else if (await one(url)) loaded++;
+      else failed.push(channels[i].Name ?? `Channel ${i + 1}`);
+      progress(++done, channels.length);
+    }
+  };
+  await Promise.all(Array.from({ length: PARALLEL }, worker));
+  return { channels: channels.length, loaded, missing, failed };
 }

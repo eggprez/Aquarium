@@ -197,3 +197,65 @@ pub fn device_id() -> String {
         .unwrap_or("aquarium")
         .to_string()
 }
+
+/// The accounts this device can switch between without a password, as stored:
+/// `{ key, server, server_id, server_name, server_secure, user_id, user_name }`
+/// and, only when there is no keyring, `token`.
+pub fn accounts() -> Vec<Value> {
+    load()
+        .get("accounts")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
+pub fn save_accounts(list: Vec<Value>) -> Result<(), String> {
+    merge(json!({ "accounts": list }))
+}
+
+/// Add or update one account, keyed by `key`. Fields already stored and not
+/// in `entry` (a file-mode token, say) are kept.
+pub fn upsert_account(entry: Value) -> Result<(), String> {
+    let key = entry.get("key").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    if key.is_empty() {
+        return Err("account has no key".into());
+    }
+    let mut list = accounts();
+    match list.iter_mut().find(|a| a.get("key").and_then(|v| v.as_str()) == Some(&key)) {
+        Some(existing) => {
+            if let (Some(dst), Some(src)) = (existing.as_object_mut(), entry.as_object()) {
+                for (k, v) in src {
+                    dst.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        None => list.push(entry),
+    }
+    save_accounts(list)
+}
+
+pub fn remove_account(key: &str) -> Result<(), String> {
+    let list: Vec<Value> = accounts()
+        .into_iter()
+        .filter(|a| a.get("key").and_then(|v| v.as_str()) != Some(key))
+        .collect();
+    save_accounts(list)
+}
+
+/// Set (or, with `null`, drop) one field of one stored account.
+pub fn set_account_field(key: &str, field: &str, value: Value) -> Result<(), String> {
+    let mut list = accounts();
+    let Some(entry) = list
+        .iter_mut()
+        .find(|a| a.get("key").and_then(|v| v.as_str()) == Some(key))
+        .and_then(|a| a.as_object_mut())
+    else {
+        return Ok(());
+    };
+    if value.is_null() {
+        entry.remove(field);
+    } else {
+        entry.insert(field.to_string(), value);
+    }
+    save_accounts(list)
+}
