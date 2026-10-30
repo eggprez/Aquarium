@@ -38,6 +38,9 @@ struct PlayerScreen: View {
     @State private var pictureInPicture = PictureInPicture()
     #if os(iOS)
     @Environment(\.devicePose) private var pose
+    /// The frame the chrome was laid out in while the status bar was up —
+    /// see `framed`.
+    @State private var heldFrame: HeldFrame?
     #endif
 
     /// How far down a foldable's front screen the status bar still takes
@@ -98,7 +101,17 @@ struct PlayerScreen: View {
         #if os(iOS)
         if FoldState.shared.isFoldable {
             GeometryReader { geo in
-                let insets = geo.safeAreaInsets
+                let live = geo.safeAreaInsets
+                let screen = CGSize(width: geo.size.width + live.leading + live.trailing,
+                                    height: geo.size.height + live.top + live.bottom)
+                // A Duo's clock column and strip are safe area, and they
+                // change as the status bar goes. The bar is gone in a blink
+                // while the chrome takes a quarter second to fade, so the
+                // title row's buttons slid across the gap before they went.
+                // While the bar is hidden the chrome keeps the frame it had
+                // with the bar up — unless the screen itself has changed.
+                let held = statusBarHidden ? heldFrame.flatMap { $0.screen == screen ? $0 : nil } : nil
+                let insets = held?.insets ?? live
                 // The front screen reports no top inset — its clock is in
                 // the column down the trailing edge — yet the top 24 points
                 // still belong to the status bar's touch strip: measured on
@@ -119,10 +132,11 @@ struct PlayerScreen: View {
                 // does the same with its clock column: only the pill at its
                 // head is in the way, so the timeline runs to the edge under
                 // it while the title row and the pills keep the column.
-                let clearance = pose == .front
+                let clearance = held.map(\.clearance) ?? (pose == .front
                     ? PlayerSideClearance(geo, titleRowFoot: top + PlayerSideClearance.titleRowDepth,
                                           pillRowHead: insets.top + geo.size.height - PlayerSideClearance.pillRowDepth)
-                    : FoldState.shared.innerSideways ? PlayerSideClearance(keeping: insets) : nil
+                    : FoldState.shared.innerSideways ? PlayerSideClearance(keeping: insets) : nil)
+                let frame = HeldFrame(screen: screen, insets: insets, clearance: clearance)
                 FoldSplit(split: foldsBelow, crease: .black) {
                     stage
                         .safeAreaPadding(EdgeInsets(top: top, leading: clearance == nil ? insets.leading : 0,
@@ -144,6 +158,9 @@ struct PlayerScreen: View {
                 }
                 .background(Color.black)
                 .ignoresSafeArea()
+                .onChange(of: frame, initial: true) { _, frame in
+                    if !statusBarHidden { heldFrame = frame }
+                }
             }
         } else {
             stage
@@ -152,6 +169,16 @@ struct PlayerScreen: View {
         stage
         #endif
     }
+
+    #if os(iOS)
+    private var statusBarHidden: Bool { !chrome.controlsVisible && !player.isPaused }
+
+    private struct HeldFrame: Equatable {
+        var screen: CGSize
+        var insets: EdgeInsets
+        var clearance: PlayerSideClearance?
+    }
+    #endif
 
     var body: some View {
         framed
@@ -162,7 +189,7 @@ struct PlayerScreen: View {
         #if os(iOS)
         // The status bar comes and goes with the controls, as in Apple's
         // player; the home indicator dims on its own over a full-screen video.
-        .statusBarHidden(!chrome.controlsVisible && !player.isPaused)
+        .statusBarHidden(statusBarHidden)
         .persistentSystemOverlays(.hidden)
         // The shell is portrait on a phone; a film is the reason the phone gets
         // turned, so the player follows the phone either way up. See
