@@ -1,9 +1,9 @@
 //  The screen held on while something is worth watching: the Downloads page
 //  through a long batch. One place for the system's idle timer so that two
 //  reasons to hold it don't let go of each other: the flag is set while any
-//  reason holds, and cleared when the last lets go. (The video player's own
-//  picture keeps the screen on by itself on iPhone and iPad, so it doesn't
-//  come through here.)
+//  reason holds, and cleared when the last lets go. The video player comes
+//  through here only on mpv: AVPlayer's own picture keeps the screen on by
+//  itself.
 
 #if os(iOS)
 import UIKit

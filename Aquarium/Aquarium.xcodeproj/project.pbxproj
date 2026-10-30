@@ -477,7 +477,7 @@
 			mainGroup = D296FAAE302815340097E3E7;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				FE11A5D00000000000000403 /* XCRemoteSwiftPackageReference "MPVKit" */,
+				FE11A5D00000000000000403 /* XCLocalSwiftPackageReference "Vendor/MPVKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D296FAB8302815340097E3E7 /* Products */;
@@ -1292,21 +1292,17 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		FE11A5D00000000000000403 /* XCRemoteSwiftPackageReference "MPVKit" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/mpvkit/MPVKit.git";
-			requirement = {
-				kind = upToNextMinorVersion;
-				minimumVersion = 1.0.0;
-			};
+/* Begin XCLocalSwiftPackageReference section */
+		FE11A5D00000000000000403 /* XCLocalSwiftPackageReference "Vendor/MPVKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/MPVKit;
 		};
-/* End XCRemoteSwiftPackageReference section */
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		FE11A5D00000000000000402 /* MPVKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = FE11A5D00000000000000403 /* XCRemoteSwiftPackageReference "MPVKit" */;
+			package = FE11A5D00000000000000403 /* XCLocalSwiftPackageReference "Vendor/MPVKit" */;
 			productName = MPVKit;
 		};
 /* End XCSwiftPackageProductDependency section */

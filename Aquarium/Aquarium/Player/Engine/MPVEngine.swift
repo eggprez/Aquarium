@@ -24,6 +24,16 @@
 //  Decoding is VideoToolbox where the hardware takes the codec and software
 //  where it doesn't.
 //
+//  On an iPhone or iPad mpv draws instead, by default, into an
+//  `AVSampleBufferDisplayLayer` (`vo=avfoundation`, a patch of our own in
+//  `Vendor/MPVKit`). Picture in Picture takes only that layer or an
+//  `AVPlayerLayer`, never a Metal one, so this is what lets mpv's picture
+//  float without the stream being reopened on AVPlayer. The frames go
+//  straight from VideoToolbox to the layer, so gpu-next's shaders don't run:
+//  a picture adjustment, a zoom or an aspect override, and Dolby Vision
+//  profile 5 — whose colours only libplacebo puts right — draw through
+//  gpu-next instead. The two are swapped on the running stream (`setOutput`).
+//
 //  Compiled wherever MPVKit is linked: iPhone, iPad, Mac and Apple TV since
 //  phase 4 of the overhaul opened the package's platform filter. The two view
 //  classes at the top are the only parts tied to a platform rather than to the
@@ -42,6 +52,10 @@ import Foundation
 import Libmpv
 import OSLog
 import QuartzCore
+#if os(iOS)
+import AVFoundation
+import CoreMedia
+#endif
 
 #if canImport(UIKit)
 import UIKit
@@ -127,7 +141,63 @@ final class MPVVideoView: UIView {
         }
     }
 }
-#elseif canImport(AppKit)
+#endif
+
+#if os(iOS)
+/// Which layer mpv draws into on an iPhone or iPad.
+enum MPVOutput: Sendable {
+    /// gpu-next into `MPVMetalLayer`: every shader, no Picture in Picture.
+    case metal
+    /// `vo=avfoundation` into `MPVSampleBufferLayer`: what Picture in
+    /// Picture can lift out.
+    case sampleBuffer
+}
+
+/// The layer mpv's `avfoundation` output enqueues frames on. Each frame is
+/// stamped with the layer's clock as it is drawn, so it shows at once; the
+/// clock is kept at the playhead and stopped while paused only so that
+/// Picture in Picture has a time to show and a rate to read.
+final class MPVSampleBufferLayer: AVSampleBufferDisplayLayer, @unchecked Sendable {
+    let clock: CMTimebase
+
+    override init() {
+        var timebase: CMTimebase?
+        CMTimebaseCreateWithSourceClock(
+            allocator: kCFAllocatorDefault, sourceClock: CMClockGetHostTimeClock(), timebaseOut: &timebase)
+        // Cannot fail with the host clock.
+        clock = timebase!
+        super.init()
+        CMTimebaseSetTime(clock, time: .zero)
+        CMTimebaseSetRate(clock, rate: 0)
+        controlTimebase = clock
+        videoGravity = .resizeAspect
+        backgroundColor = CGColor(gray: 0, alpha: 1)
+    }
+
+    /// Core Animation's copies for presentation share the original's clock.
+    override init(layer: Any) {
+        // Cannot fail: Core Animation copies a layer as its own class.
+        clock = (layer as! MPVSampleBufferLayer).clock
+        super.init(layer: layer)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    /// Keep the clock at the playhead. Moved only when it has drifted, since
+    /// setting it back would hold the frame just enqueued until the clock
+    /// caught up with its stamp. Any thread: a timebase is thread-safe.
+    func follow(position: Double, running: Bool) {
+        let rate = running ? 1.0 : 0.0
+        if CMTimebaseGetRate(clock) != rate { CMTimebaseSetRate(clock, rate: rate) }
+        let now = CMTimebaseGetTime(clock).seconds
+        if !now.isFinite || abs(now - position) > 0.5 {
+            CMTimebaseSetTime(clock, time: CMTime(seconds: position, preferredTimescale: 90_000))
+        }
+    }
+}
+#endif
+
+#if canImport(AppKit) && !canImport(UIKit)
 /// The AppKit twin: a layer-backed view whose backing layer is the Metal
 /// layer mpv draws into, given the window's backing scale so it draws at
 /// Retina size. Takes no clicks of its own; the chrome above it does.
@@ -193,6 +263,19 @@ final class MPVEngine: @unchecked Sendable {
     /// The layer mpv draws into, kept so a load can wait for it to have a
     /// size — see `load`.
     private let layer: MPVMetalLayer
+    #if os(iOS)
+    /// The other surface, and which of the two mpv is drawing into.
+    private let sampleLayer: MPVSampleBufferLayer?
+    private(set) var output: MPVOutput = .metal
+    /// Something about the stream itself needs gpu-next — Dolby Vision
+    /// profile 5 — whatever the viewer has set. `onRequirementsChanged`
+    /// is called on the main thread when it changes.
+    private(set) var requiresMetal = false
+    var onRequirementsChanged: (() -> Void)?
+    /// Whether mpv is paused or waiting on the cache, on `queue`: the
+    /// sample layer's clock runs only while neither.
+    private var clockHeld = (paused: false, buffering: false)
+    #endif
     /// A `loadfile` held back until the layer has a size, and the resize
     /// nudge waiting to run; both on the main thread.
     private var pendingLoad: [String]?
@@ -214,12 +297,17 @@ final class MPVEngine: @unchecked Sendable {
     }
 
     /// Create the handle and point it at `layer`. Returns nil if libmpv
-    /// couldn't be started at all.
-    init?(layer: MPVMetalLayer, tuning: Tuning = .plugged) {
+    /// couldn't be started at all. `sampleLayer`, an `MPVSampleBufferLayer`
+    /// on an iPhone or iPad (typed loosely so the signature is the same on
+    /// every platform), is the layer `setOutput` can move the picture to.
+    init?(layer: MPVMetalLayer, sampleLayer: Any? = nil, tuning: Tuning = .plugged) {
         (events, continuation) = AsyncStream.makeStream(of: EngineEvent.self)
         guard let h = mpv_create() else { return nil }
         handle = h
         self.layer = layer
+        #if os(iOS)
+        self.sampleLayer = sampleLayer as? MPVSampleBufferLayer
+        #endif
 
         var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
         mpv_set_option(h, "wid", MPV_FORMAT_INT64, &wid)
@@ -282,6 +370,13 @@ final class MPVEngine: @unchecked Sendable {
             ("audio-file-auto", "no"),
             ("network-timeout", "30"),
         ]
+        #if os(iOS)
+        // Subtitles drawn into each frame rather than on a layer of their
+        // own above it: Picture in Picture shows the frames and nothing else.
+        if self.sampleLayer != nil {
+            mpv_set_option_string(h, "avfoundation-composite-osd", "yes")
+        }
+        #endif
         for (name, value) in options {
             let status = mpv_set_option_string(h, name, value)
             if status < 0 {
@@ -449,7 +544,16 @@ final class MPVEngine: @unchecked Sendable {
     }
 
     private var layerIsSized: Bool {
-        layer.superlayer != nil && layer.bounds.width >= 2 && layer.bounds.height >= 2
+        let surface = drawingLayer
+        return surface.superlayer != nil && surface.bounds.width >= 2 && surface.bounds.height >= 2
+    }
+
+    /// The layer mpv is drawing into now.
+    var drawingLayer: CALayer {
+        #if os(iOS)
+        if output == .sampleBuffer, let sampleLayer { return sampleLayer }
+        #endif
+        return layer
     }
 
     private func loadWhenSized(deadline: ContinuousClock.Instant) {
@@ -482,6 +586,10 @@ final class MPVEngine: @unchecked Sendable {
     }
 
     private func reconfigureOutput() {
+        #if os(iOS)
+        // The sample layer scales what it is given to its bounds itself.
+        if output == .sampleBuffer { return }
+        #endif
         guard handle != nil, queue.sync(execute: { fileIsOpen }),
               let w = getInt("width"), let h = getInt("height"), w > 2, h > 2 else { return }
         Self.log.info("surface resized to \(Int(self.layer.bounds.width), privacy: .public)×\(Int(self.layer.bounds.height), privacy: .public); reconfiguring the output")
@@ -628,6 +736,12 @@ final class MPVEngine: @unchecked Sendable {
     /// everything opened after.
     var framing: Framing = .fit {
         didSet {
+            #if os(iOS)
+            // Fit and Fill on the sample layer are its gravity; a zoom or an
+            // aspect override sends the picture through gpu-next instead.
+            let gravity: AVLayerVideoGravity = framing == .fill ? .resizeAspectFill : .resizeAspect
+            if let sampleLayer, sampleLayer.videoGravity != gravity { sampleLayer.videoGravity = gravity }
+            #endif
             switch framing {
             case .fit:
                 setDouble("panscan", 0)
@@ -725,8 +839,72 @@ final class MPVEngine: @unchecked Sendable {
     /// carries on. What keeps the picture from coming back black after the
     /// background is picking the track up again on the way in.
     var pictureDecode = true {
-        didSet { setString("vid", pictureDecode ? "auto" : "no") }
+        didSet {
+            #if os(iOS)
+            // A sample layer that was handed frames as the app went behind
+            // another is left failed, and shows nothing more until flushed.
+            if pictureDecode, let sampleLayer, sampleLayer.status == .failed || sampleLayer.requiresFlushToResumeDecoding {
+                sampleLayer.flush()
+            }
+            #endif
+            setString("vid", pictureDecode ? "auto" : "no")
+        }
     }
+
+    #if os(iOS)
+    /// Draw into the other layer, on the running stream. mpv remakes its
+    /// output when `vo` or `wid` changes, so the video track is let go of
+    /// first — with it gone there is no output to remake against the wrong
+    /// layer — and picked up again once both are set, which seeks to where
+    /// it was. The sound plays on throughout. Main thread.
+    func setOutput(_ wanted: MPVOutput) {
+        guard wanted != output, let sampleLayer, let handle else { return }
+        let track = getString("vid") ?? "auto"
+        let restore = queue.sync(execute: { fileIsOpen }) && pictureDecode && track != "no"
+        if restore { setString("vid", "no") }
+        let driver = wanted == .sampleBuffer ? "avfoundation" : "gpu-next"
+        let status = mpv_set_property_string(handle, "vo", driver)
+        if status < 0 {
+            // A libmpv without the patch: stay on gpu-next for good.
+            Self.log.error("mpv vo=\(driver, privacy: .public): \(String(cString: mpv_error_string(status)), privacy: .public)")
+            if restore { setString("vid", track) }
+            return
+        }
+        let surface: AnyObject = wanted == .sampleBuffer ? sampleLayer : layer
+        var wid = Int64(Int(bitPattern: Unmanaged.passUnretained(surface).toOpaque()))
+        mpv_set_property(handle, "wid", MPV_FORMAT_INT64, &wid)
+        output = wanted
+        if wanted == .sampleBuffer { sampleLayer.flush() }
+        if restore { setString("vid", track) }
+        Self.log.info("drawing into the \(wanted == .sampleBuffer ? "sample-buffer" : "Metal", privacy: .public) layer")
+    }
+
+    /// The selected video track's Dolby Vision profile, read on `queue` as
+    /// the track list changes. Profile 5 has no HDR10 base: its colours are
+    /// right only after libplacebo's reshaping, which only gpu-next does.
+    private func checkDolbyVision() {
+        let count = getInt("track-list/count") ?? 0
+        var profile: Int?
+        for i in 0..<count where getString("track-list/\(i)/type") == "video" && getFlag("track-list/\(i)/selected") {
+            profile = getInt("track-list/\(i)/dolby-vision-profile")
+        }
+        let needs = profile == 5
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.requiresMetal != needs else { return }
+            self.requiresMetal = needs
+            if needs { Self.log.info("Dolby Vision profile 5: drawing through gpu-next") }
+            self.onRequirementsChanged?()
+        }
+    }
+
+    /// The sample layer's clock follows the playhead; see `MPVSampleBufferLayer`.
+    private func moveClock(position: Double? = nil) {
+        guard let sampleLayer else { return }
+        let at = position ?? lastPosition.value
+        guard at >= 0 else { return }
+        sampleLayer.follow(position: at, running: !clockHeld.paused && !clockHeld.buffering)
+    }
+    #endif
 
     /// How frames are timed. Given the rate the display is known to be
     /// running at, `display-resample` times them to its refreshes and nudges
@@ -902,8 +1080,16 @@ final class MPVEngine: @unchecked Sendable {
         case ("duration", MPV_FORMAT_DOUBLE):
             deliver(.duration(double(p)))
         case ("pause", MPV_FORMAT_FLAG):
+            #if os(iOS)
+            clockHeld.paused = flag(p)
+            moveClock()
+            #endif
             deliver(.paused(flag(p)))
         case ("paused-for-cache", MPV_FORMAT_FLAG):
+            #if os(iOS)
+            clockHeld.buffering = flag(p)
+            moveClock()
+            #endif
             deliver(.buffering(flag(p)))
         case ("seeking", MPV_FORMAT_FLAG):
             deliver(.seeking(flag(p)))
@@ -912,6 +1098,9 @@ final class MPVEngine: @unchecked Sendable {
         case ("track-list", _):
             let list = readTracks()
             lastTracks = list
+            #if os(iOS)
+            if sampleLayer != nil { checkDolbyVision() }
+            #endif
             deliver(.tracks(list))
         case ("dwidth", MPV_FORMAT_INT64), ("dheight", MPV_FORMAT_INT64):
             if let w = getInt("dwidth"), let h = getInt("dheight"), w > 0, h > 0 {
@@ -935,6 +1124,9 @@ final class MPVEngine: @unchecked Sendable {
     /// The playhead moves every frame, and the screen needs it four or five
     /// times a second. A jump — a seek landing — goes through at once.
     private func deliverPosition(_ value: Double) {
+        #if os(iOS)
+        moveClock(position: value)
+        #endif
         let now = CACurrentMediaTime()
         let jumped = abs(value - lastPosition.value) > 1
         guard jumped || now - lastPosition.at >= 0.2 else { return }

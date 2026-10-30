@@ -237,6 +237,18 @@ final class PlayerModel {
     /// engine is the one playing. One for the life of the app; the handle
     /// drawing into it is made per stream.
     let mpvLayer = MPVMetalLayer()
+    #if os(iOS)
+    /// The surface mpv draws into for Picture in Picture's sake, and which
+    /// of the two it is drawing into — what `VideoSurface` hosts. See
+    /// `applyMPVOutput`.
+    let mpvSampleLayer = MPVSampleBufferLayer()
+    var mpvOutput: MPVOutput = .metal
+    #endif
+    #endif
+    #if os(iOS)
+    /// Picture in Picture is starting or up: the picture is the floating
+    /// window's, so going to the background mustn't let go of the video track.
+    var pictureInPictureHoldsPicture = false
     #endif
 
     // MARK: - Internals
@@ -436,6 +448,10 @@ final class PlayerModel {
     var displayRequested = false
     var lastAwakeAssert: CFTimeInterval = 0
     #endif
+    #if os(macOS)
+    /// The activity holding the display awake while mpv plays.
+    var displayAwake: (any NSObjectProtocol)?
+    #endif
 
     /// Whether the audio session has been given this app's category. Set
     /// after the first frame, or by the first playback — see
@@ -488,13 +504,21 @@ final class PlayerModel {
         case .mpv:
             #if canImport(Libmpv)
             if let mpvEngine { return mpvEngine }
-            guard let made = MPVEngine(layer: mpvLayer, tuning: mpvTuning) else {
+            #if os(iOS)
+            let sampleLayer: Any? = mpvSampleLayer
+            #else
+            let sampleLayer: Any? = nil
+            #endif
+            guard let made = MPVEngine(layer: mpvLayer, sampleLayer: sampleLayer, tuning: mpvTuning) else {
                 Self.log.error("mpv could not be created")
                 return nil
             }
             appleEngine.stop()
             mpvEngine = made
             engine = made
+            #if os(iOS)
+            made.onRequirementsChanged = { [weak self] in self?.applyMPVOutput() }
+            #endif
             wireEngineEvents(for: made)
             configure(made)
             Self.log.info("mpv engine made (\(self.mpvTuning.demuxerMaxBytes, privacy: .public) cache)")
@@ -527,6 +551,7 @@ final class PlayerModel {
         guard let mpvEngine else { return }
         #if os(iOS)
         mpvEngine.hintContentFrameRate(nil)
+        mpvOutput = .metal
         #endif
         mpvEngine.shutdown()
         engineEventsTasks[ObjectIdentifier(mpvEngine)] = nil
@@ -560,9 +585,7 @@ final class PlayerModel {
         guard source === engine, isActive, !awaitingLoad else { return }
         switch event {
         case .position(let seconds):
-            #if os(tvOS)
             keepScreenAwake()
-            #endif
             position = seconds
             // The first frame is the usual way the cover comes off; a stream
             // whose engine says nothing of one comes out from under it on

@@ -217,7 +217,11 @@ extension PlayerModel {
     /// Whether the Picture in Picture button has anything to do on mpv:
     /// hand the stream to AVPlayer, whose layer the system can lift out.
     var canHandOverForPictureInPicture: Bool {
-        engine?.kind == .mpv && canSwitchEngine(to: .apple)
+        #if os(iOS) && canImport(Libmpv)
+        // Drawn into the sample layer, the picture floats as it is.
+        if mpvOutput == .sampleBuffer { return false }
+        #endif
+        return engine?.kind == .mpv && canSwitchEngine(to: .apple)
     }
 
     /// Reopen on AVPlayer and start Picture in Picture as soon as its layer
@@ -245,6 +249,9 @@ extension PlayerModel {
     /// Picture in Picture ended on a stream that was handed over for it: back
     /// to mpv, which is what the title was on.
     func pictureInPictureEnded() {
+        #if os(iOS)
+        pictureInPictureHoldsPicture = false
+        #endif
         guard returnsToMPV else { return }
         returnsToMPV = false
         guard isActive, engine?.kind == .apple else { return }
@@ -266,10 +273,31 @@ extension PlayerModel {
     /// when any is off neutral.
     func applyPicture(switchingIfNeeded: Bool = false) {
         engine?.picture = prefs.picture
+        #if os(iOS) && canImport(Libmpv)
+        applyMPVOutput()
+        #endif
         guard switchingIfNeeded, isActive, engine?.capabilities.contains(.pictureAdjust) == false,
               prefs.pictureIsAdjusted, canSwitchEngine(to: .mpv) else { return }
         Task { await switchEngine(to: .mpv, reason: "picture adjusted") }
     }
+
+    #if os(iOS) && canImport(Libmpv)
+    /// Which layer mpv draws into on an iPhone or iPad. The sample layer,
+    /// which Picture in Picture can lift out, unless the picture needs one
+    /// of gpu-next's shaders: an adjustment, a zoom or an aspect override, or
+    /// Dolby Vision profile 5. Changed on the running stream. Left alone
+    /// while the picture is floating, which only the sample layer can do.
+    func applyMPVOutput() {
+        guard let mpvEngine, !pictureInPictureHoldsPicture else { return }
+        let needsShaders: Bool
+        switch preferredFraming {
+        case .zoom, .aspect: needsShaders = true
+        case .fit, .fill: needsShaders = prefs.pictureIsAdjusted || mpvEngine.requiresMetal
+        }
+        mpvEngine.setOutput(needsShaders ? .metal : .sampleBuffer)
+        if mpvOutput != mpvEngine.output { mpvOutput = mpvEngine.output }
+    }
+    #endif
 
     // MARK: - Night mode
 

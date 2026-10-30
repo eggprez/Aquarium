@@ -645,7 +645,10 @@ extension PlayerModel {
     private func awaitSurface() async {
         #if canImport(Libmpv)
         let deadline = ContinuousClock.now + .milliseconds(1500)
-        while (mpvLayer.superlayer == nil || mpvLayer.bounds.width < 2 || mpvLayer.bounds.height < 2),
+        // The layer mpv will draw into, which on an iPhone or iPad is the
+        // sample layer unless something needs gpu-next.
+        var surface: CALayer { mpvEngine?.drawingLayer ?? mpvLayer }
+        while (surface.superlayer == nil || surface.bounds.width < 2 || surface.bounds.height < 2),
               ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(16))
         }
