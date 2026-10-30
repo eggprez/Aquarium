@@ -370,6 +370,17 @@ final class MPVEngine: @unchecked Sendable {
             ("audio-file-auto", "no"),
             ("network-timeout", "30"),
         ]
+        #if os(iOS) || os(tvOS)
+        // mpv's AudioUnit output sets the audio session's category itself,
+        // every time it opens — which, with `gapless-audio=no`, is every
+        // file — and without this it asks for `mixWithOthers`. A session that
+        // mixes is not the device's media player: other apps' sound plays on
+        // under the film, nothing is ducked, and the lock screen and Control
+        // Centre show no card. Exclusive here means only "don't mix"; on a
+        // Mac the same option would hog the output device, so it stays off
+        // there.
+        mpv_set_option_string(h, "audio-exclusive", "yes")
+        #endif
         #if os(iOS)
         // Subtitles drawn into each frame rather than on a layer of their
         // own above it: Picture in Picture shows the frames and nothing else.
