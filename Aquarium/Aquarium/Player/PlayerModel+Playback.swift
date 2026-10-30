@@ -55,6 +55,12 @@ extension PlayerModel {
         request.hints = hints
         request.prepared = prepared
         awaitingLoad = false
+        // The session goes active before the sound starts. AVPlayer does
+        // this itself; mpv's audio unit started into a session nothing had
+        // activated, so the system never took the stage from whatever else
+        // was playing — music carried on under the film, and the lock
+        // screen's transport didn't show it. Only `resume` had activated it.
+        if !paused { reactivateAudioSession() }
         engine?.load(request)
         // Every stream begins the way it was asked for. The engine only
         // reports a change of its pause flag, and mpv's doesn't change when
