@@ -4,3 +4,6 @@ xcuserdata/
 DerivedData/
 .DS_Store
 .claude/
+
+# SwiftPM scratch inside the vendored package
+Aquarium/Vendor/MPVKit/.build/
