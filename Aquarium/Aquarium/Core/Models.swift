@@ -467,7 +467,7 @@ struct TrickplayEnvelope: Codable, Sendable {
 // MARK: - Media segments
 
 /// A skippable stretch of an item — an opening title sequence, closing credits.
-struct MediaSegment: Hashable, Sendable, Identifiable {
+struct MediaSegment: Codable, Hashable, Sendable, Identifiable {
     var type: String
     var start: Double
     var end: Double

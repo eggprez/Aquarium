@@ -441,7 +441,10 @@ extension PlayerModel {
         artworkURL = (record.seriesArtURL ?? record.artURL).flatMap(URL.init(string:))
         currentBitrate = nil
         setChapters([])
-        segments = []
+        // The intro and credits markers kept with the download, so the skip
+        // buttons work offline. See `DownloadSegments`.
+        let folder = DownloadManager.folder(for: record.itemId)
+        segments = record.isAudio ? [] : DownloadSegments.local(in: folder)
         trickplay = nil
         fullItem = nil
         isActive = true
@@ -452,7 +455,16 @@ extension PlayerModel {
         // Downloads made before subtitles came with them get theirs the first
         // time they are played with a server in reach.
         if !record.isAudio, !JellyfinClient.shared.isOffline {
-            Task { await DownloadSubtitles.fetch(itemId: record.itemId, into: DownloadManager.folder(for: record.itemId)) }
+            Task { await DownloadSubtitles.fetch(itemId: record.itemId, into: folder) }
+            // Likewise the markers, and asked again each time: a plugin may
+            // have analysed the episode since it was downloaded.
+            let mine = generation
+            Task {
+                let fetched = await DownloadSegments.fetch(itemId: record.itemId, into: folder)
+                guard generation == mine, localRecordId == record.itemId, fetched != segments else { return }
+                segments = fetched
+                refreshCues()
+            }
         }
     }
 
