@@ -412,7 +412,7 @@ extension PlayerModel {
         releaseOutgoingServerStream()
         endLocalSession()
         localSession = OfflineProgress.Session(itemId: record.itemId)
-        if !keepShuffle { shuffleSeries = nil }
+        if keepShuffle { dealFromShuffle(record.itemId) } else { shuffleSeries = nil }
         errorMessage = nil
         noVideoTrack = false
         noVideoDetail = nil

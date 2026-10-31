@@ -52,7 +52,7 @@ extension PlayerModel {
     }
 
     func refreshUpNext() async {
-        guard let item, item.isEpisode, let seriesId = item.SeriesId else { return }
+        guard !isShuffling, let item, item.isEpisode, let seriesId = item.SeriesId else { return }
         let found = await lookUpNextEpisodes(after: item.Id, seasonId: item.SeasonId, seriesId: seriesId)
         guard self.item?.Id == item.Id else { return }
         if found.settled {
@@ -465,6 +465,10 @@ extension PlayerModel {
     #if !os(tvOS)
     func refreshLocalUpNext(after record: DownloadRecord) async {
         guard record.isEpisode else { return }
+        if isShuffling {
+            setUpNextLocalId(shuffledUpcoming(limit: 1).first?.itemId)
+            return
+        }
         setUpNextLocalId(nextPlayableDownload(after: record.itemId)?.itemId)
         // With the server reachable, Up Next is the series' real next episode
         // rather than the next one on the device, so a gap in the downloads
@@ -496,33 +500,46 @@ extension PlayerModel {
     /// Shuffle over these downloads only — a season's, when that is what was
     /// asked for — rather than everything of the series on the device.
     func startShuffle(_ records: [DownloadRecord]) {
-        let pool = records.filter { DownloadManager.shared.mediaURL(for: $0) != nil }
-        guard let first = pool.randomElement() else {
+        let pool = records.filter { DownloadManager.shared.mediaURL(for: $0) != nil }.shuffled()
+        guard let first = pool.first else {
             AppModel.shared.toast("Nothing to shuffle — no playable downloads", tone: .error)
             return
         }
         shuffleSeries = DownloadShuffleState(
-            seriesId: first.seriesId, seriesName: first.series, seen: [first.itemId],
+            seriesId: first.seriesId, seriesName: first.series, order: pool.map(\.itemId),
             pool: Set(pool.map(\.itemId)))
         playLocal(first, keepShuffle: true)
     }
 
-    private func nextShuffled(after current: String) -> DownloadRecord? {
-        guard var state = shuffleSeries else { return nil }
-        let pool = DownloadManager.shared.episodes(ofSeries: state.seriesId, seriesName: state.seriesName)
+    /// The downloads the shuffle still has to play, in its order, the ones
+    /// whose files have gone passed over.
+    func shuffledUpcoming(limit: Int = .max) -> [DownloadRecord] {
+        guard let state = shuffleSeries else { return [] }
+        let byId = Dictionary(shufflePool(state).map { ($0.itemId, $0) }, uniquingKeysWith: { a, _ in a })
+        return Array(state.order.lazy.compactMap { byId[$0] }.prefix(limit))
+    }
+
+    private func shufflePool(_ state: DownloadShuffleState) -> [DownloadRecord] {
+        DownloadManager.shared.episodes(ofSeries: state.seriesId, seriesName: state.seriesName)
             .filter { state.pool?.contains($0.itemId) ?? true }
             .filter { DownloadManager.shared.mediaURL(for: $0) != nil }
-        guard !pool.isEmpty else { return nil }
-        var choices = pool.filter { !state.seen.contains($0.itemId) }
-        if choices.isEmpty {
-            state.seen.removeAll()
-            choices = pool.filter { $0.itemId != current }
-            if choices.isEmpty { return nil }
+    }
+
+    private func nextShuffled(after current: String) -> DownloadRecord? {
+        shuffledUpcoming(limit: 1).first
+    }
+
+    /// The one now playing comes off the shuffle's order, however it was
+    /// reached: in turn, from Play Now, or picked from the Up Next list. An
+    /// order that has run out is dealt again, without this one at its head.
+    func dealFromShuffle(_ itemId: String) {
+        guard var state = shuffleSeries else { return }
+        state.order.removeAll { $0 == itemId }
+        let playable = Set(shufflePool(state).map(\.itemId))
+        if !state.order.contains(where: playable.contains) {
+            state.order = playable.filter { $0 != itemId }.shuffled()
         }
-        guard let next = choices.randomElement() else { return nil }
-        state.seen.insert(next.itemId)
         shuffleSeries = state
-        return next
     }
 
     private func reportLocalFinished(_ itemId: String) async {

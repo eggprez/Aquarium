@@ -377,7 +377,10 @@ final class PlayerModel {
     struct DownloadShuffleState {
         var seriesId: String?
         var seriesName: String?
-        var seen: Set<String>
+        /// What plays after this one, already shuffled: dealt once, so the
+        /// Up Next card and list can say what is really coming instead of
+        /// the next episode in order. Refilled, reshuffled, when it runs out.
+        var order: [String]
         /// The downloads this shuffle draws from: a season's, when it was
         /// started from a season. Nil is every download of the series.
         var pool: Set<String>? = nil

@@ -108,6 +108,8 @@ extension PlayerModel {
     /// The same list for a download: the episodes of its series on this
     /// device that come after it, at most `upNextLimit`.
     var upNextLocal: [DownloadRecord] {
+        // Shuffling, what the shuffle will play, not what follows in order.
+        if isShuffling { return shuffledUpcoming(limit: Self.upNextLimit) }
         // Online, the server's list is the one: it holds the downloaded
         // episodes too, which were otherwise listed twice.
         guard upcoming.isEmpty else { return [] }
