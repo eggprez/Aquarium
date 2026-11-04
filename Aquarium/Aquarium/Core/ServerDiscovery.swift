@@ -18,6 +18,13 @@
 //  granted on request. Without it the send fails or the reply never comes,
 //  which here means the list under the address field stays empty — the typed
 //  address always works, and nothing waits on this.
+//
+//  Nothing in the protocol proves who answered, so a reply is only ever a
+//  suggestion. An address given as an IP must be the one the reply came from,
+//  and each id-and-address pair gets a row of its own: a device copying a real
+//  server's id and name appears beside it, with its address showing, rather
+//  than taking its place. A hostname can't be checked this way, because a
+//  server with a published URL may resolve to somewhere else entirely.
 
 import Foundation
 
@@ -37,6 +44,18 @@ enum ServerDiscovery {
         var Address: String?
         var Id: String?
         var Name: String?
+    }
+
+    /// Whether an address is one this reply may offer: http(s), with a host,
+    /// and if that host is an IPv4 address, the one the reply came from.
+    static func accepts(address: String, from sender: in_addr_t) -> Bool {
+        guard let url = URL(string: address), let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty
+        else { return false }
+        var literal = in_addr()
+        guard inet_pton(AF_INET, host, &literal) == 1 else { return true }
+        return literal.s_addr == sender
     }
 
     /// Ask, and gather answers for about `timeout` seconds.
@@ -74,7 +93,13 @@ enum ServerDiscovery {
                 resent = true
                 for target in targets { _ = send(to: target, on: fd) }
             }
-            let n = recv(fd, &buffer, buffer.count, 0)
+            var sender = sockaddr_in()
+            var senderLength = socklen_t(MemoryLayout<sockaddr_in>.size)
+            let n = withUnsafeMutablePointer(to: &sender) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    recvfrom(fd, &buffer, buffer.count, 0, $0, &senderLength)
+                }
+            }
             guard n > 0 else { continue }
             guard let reply = try? JSONDecoder().decode(Reply.self, from: Data(buffer[0..<n])),
                   let address = reply.Address?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -83,10 +108,9 @@ enum ServerDiscovery {
                   // a web address, and there is a limit to how many answers a
                   // home network plausibly has — the list is drawn, and a
                   // flood of replies would otherwise be too.
-                  let url = URL(string: address), let scheme = url.scheme?.lowercased(),
-                  scheme == "http" || scheme == "https", url.host?.isEmpty == false
+                  accepts(address: address, from: sender.sin_addr.s_addr)
             else { continue }
-            let id = reply.Id ?? address
+            let id = "\(reply.Id ?? address)|\(address)"
             guard found[id] != nil || found.count < 16 else { continue }
             let name = String((reply.Name ?? address).prefix(80))
             found[id] = DiscoveredServer(id: id, name: name, address: address)

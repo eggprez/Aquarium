@@ -394,7 +394,7 @@ struct LoginView: View {
         }
         let found = discovered
             .filter { server in !known.contains { $0.address == server.address } }
-            .map { MacServerChoice(name: $0.name, address: $0.address, detail: "On your network", symbol: "server.rack") }
+            .map { MacServerChoice(name: $0.name, address: $0.address, detail: "On your network: \($0.address)", symbol: "server.rack") }
         return known + found
     }
 

@@ -153,6 +153,9 @@ enum OfflineProgress {
     final class Session {
         let itemId: String
         let playSessionId = UUID().uuidString
+        /// Who was signed in when it began. The reports below go under whoever
+        /// is signed in now, so a sitting outlasting its account stops sending.
+        let accountKey = JellyfinClient.shared.session?.accountKey
         /// Whether the server has been sent this sitting's start.
         fileprivate(set) var started = false
 
@@ -183,6 +186,7 @@ enum OfflineProgress {
     static func push(_ session: Session, paused: Bool) async {
         let client = JellyfinClient.shared
         guard !pushing, client.isSignedIn, !client.isOffline,
+              client.session?.accountKey == session.accountKey,
               let record = DownloadManager.shared.record(for: session.itemId),
               !record.progressSynced else { return }
         pushing = true
@@ -221,6 +225,7 @@ enum OfflineProgress {
         }
         let client = JellyfinClient.shared
         if session.started, client.isSignedIn,
+           client.session?.accountKey == session.accountKey,
            let record = DownloadManager.shared.record(for: session.itemId) {
             let stopped = (try? await client.reportPlaybackStoppedOrThrow(
                 session.report(for: record, paused: true)
