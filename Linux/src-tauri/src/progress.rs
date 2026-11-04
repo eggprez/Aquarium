@@ -57,7 +57,7 @@ pub fn store_local(item_id: &str, position_ticks: u64, played: bool) {
     // Mirror into download metadata for the Downloads view.
     let meta_path = dir.join("meta.json");
     if let Ok(s) = std::fs::read_to_string(&meta_path) {
-        if let Ok(mut meta) = serde_json::from_str::<Value>(&s) {
+        if let Some(mut meta) = serde_json::from_str::<Value>(&s).ok().filter(Value::is_object) {
             meta["position_ticks"] = json!(if played { 0 } else { position_ticks });
             meta["played"] = json!(played);
             if let Ok(out) = serde_json::to_string_pretty(&meta) {
