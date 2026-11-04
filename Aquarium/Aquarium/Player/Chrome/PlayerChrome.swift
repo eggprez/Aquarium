@@ -237,6 +237,13 @@ struct PlayerChrome: View {
     #if os(macOS)
     private var mac: PlayerMacState { PlayerMacState.shared }
     #endif
+    #if os(iOS)
+    /// The controls stay in the tree a moment after they start to fade. Removed
+    /// the moment the clock ran out they took no more touches, though they were
+    /// still on screen: a tap on "…" fell through to the picture, which only
+    /// brought the controls back. See `transportInTree`.
+    @State private var transportLingers = true
+    #endif
 
     /// A phone, or an iPad narrowed to one: the sheet rather than the
     /// popover, the smaller glyphs. A Mac window takes the smaller glyphs
@@ -297,6 +304,17 @@ struct PlayerChrome: View {
             || player.errorMessage != nil || voiceOver
     }
 
+    /// Whether the transport is drawn at all. Under a finger it outlasts
+    /// `showsControls` by the length of the fade (see `chromeFade`), so that
+    /// what can still be seen can still be pressed.
+    private var transportInTree: Bool {
+        #if os(iOS)
+        showsControls || transportLingers
+        #else
+        showsControls
+        #endif
+    }
+
     /// An open menu card holds these controls up when the card is one of
     /// theirs: any card, unless the pills are below the fold, where only the
     /// "…" button's card still hangs off this half.
@@ -337,13 +355,14 @@ struct PlayerChrome: View {
             // The scrims and the transport come and go together. With the
             // television's panel down, the band keeps only its timeline: the
             // panel covers where the title goes, and says everything it would.
-            if showsControls {
+            if transportInTree {
                 PlayerTransport(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork,
                                 pictureInPicture: pictureInPicture, compact: compact, usesSheet: usesSheet,
                                 timelineOnly: PlayerMetrics.television && chrome.panelOpen,
                                 panelWidth: panelWidth,
                                 part: belowFold ? .aboveFold : .whole,
                                 onInteract: interact, onDismiss: onDismiss)
+                    .chromeFade(shown: showsControls)
                     .transition(.opacity)
             }
 
@@ -398,6 +417,16 @@ struct PlayerChrome: View {
         .modifier(PlayerRemoteDriver(chrome: chrome, onInteract: interact, onHide: { chrome.hide() }))
         #endif
         #if os(iOS)
+        // The fade is a quarter second; a little longer covers a press that
+        // began just before it and lifts just after.
+        .task(id: showsControls) {
+            if showsControls {
+                transportLingers = true
+            } else {
+                try? await Task.sleep(for: .milliseconds(350))
+                if !Task.isCancelled { transportLingers = false }
+            }
+        }
         .sensoryFeedback(.impact(weight: .medium), trigger: skips)
         .sensoryFeedback(.impact(weight: .light), trigger: chrome.skipTotal) { _, now in now != 0 }
         .sensoryFeedback(trigger: player.currentBitrate) { was, _ in was == nil ? nil : .selection }
@@ -605,6 +634,18 @@ private struct PanelSheetBackground: ViewModifier {
 }
 
 private extension View {
+    /// The transport's fade under a finger. A draw-time effect, not `opacity`:
+    /// measured on iOS 27.1, a view asked for any opacity below 1, even 0.4,
+    /// stops taking touches at once, AirPlay's UIKit button included.
+    @ViewBuilder
+    func chromeFade(shown: Bool) -> some View {
+        #if os(iOS)
+        visualEffect { content, _ in content.opacity(shown ? 1 : 0) }
+        #else
+        self
+        #endif
+    }
+
     /// A sheet with medium and large detents on a phone; a popover hung off
     /// the pill that opened it on an iPad or a Mac; on a television a card
     /// down from the top of the picture, placed against the screen's edges
