@@ -220,4 +220,65 @@ struct MusicSearchView: View {
     }
 }
 
+// MARK: - The field
+
+/// The search field the music pages keep in view: a capsule under the bar,
+/// with Cancel beside it while a search is up.
+///
+/// The system's `.searchable` drawer was the field before this. Under an
+/// inline title it stays folded until the list is pulled down, and on a
+/// foldable's inside screen — a regular width — it was not drawn at all, so
+/// the Music tab and the Downloaded page had no search anyone could see.
+/// This one is drawn by the page, where the Search page already draws its
+/// own, and is there whatever the width.
+struct MusicSearchField: View {
+    @Binding var term: String
+    let prompt: String
+    @FocusState.Binding var isFocused: Bool
+
+    private var isSearching: Bool { isFocused || !term.isEmpty }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(Theme.textDim)
+                TextField(prompt, text: $term)
+                    .focused($isFocused)
+                    .submitLabel(.search)
+                    .autocorrectionDisabled()
+                if !term.isEmpty {
+                    Button {
+                        term = ""
+                        isFocused = true
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(Theme.textDim)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear")
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 40)
+            .background(Theme.raised, in: Capsule())
+            .contentShape(Capsule())
+            .onTapGesture { isFocused = true }
+            if isSearching {
+                Button("Cancel") {
+                    term = ""
+                    isFocused = false
+                }
+                .foregroundStyle(Theme.accent)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .padding(.horizontal, Metrics.gutter)
+        .padding(.top, 4)
+        .padding(.bottom, 8)
+        .background(Theme.background)
+        .animation(.easeOut(duration: 0.2), value: isSearching)
+    }
+}
+
 #endif

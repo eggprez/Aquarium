@@ -29,6 +29,11 @@ struct RootView: View {
     /// back. Driving visibility ourselves lets those pages draw a toggle of
     /// their own — see `showSidebar`.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
+    #if os(iOS)
+    /// The trailing safe-area inset of the tab shell: a foldable's status
+    /// column when there is one, else nothing to speak of. See `tabShell`.
+    @State private var trailingColumn: CGFloat = 0
+    #endif
     /// Whether the sidebar is off screen, kept apart from `sidebarVisibility`.
     /// The split view writes its own value back into the binding once it
     /// has collapsed the column — `.automatic` on an iPad held upright — so
@@ -646,18 +651,33 @@ struct RootView: View {
                 // No TabView at all. Its bar hidden, the system's still took
                 // the taps where it would have been, so the middle of the
                 // bar drawn here did nothing. The pages are kept, one shown.
-                ZStack {
+                // A foldable keeps its status column down the trailing edge
+                // (84 points, in the safe area), and the system's tab bar
+                // stands in that column rather than along the bottom. The
+                // bar drawn here does the same wherever the column is: the
+                // pages keep their full height and the bar is a sibling
+                // reaching into the column, as the system's does. Elsewhere
+                // it is the band along the bottom the system's would be.
+                let column = trailingColumn >= WideTabBar.columnMinimum
+                ZStack(alignment: .bottomTrailing) {
                     ForEach(app.tabSections) { section in
                         let shown = section == app.shownSelection
                         tabPage(section)
                             // Outermost, so the offline strip and the mini
                             // player stack above it.
-                            .safeAreaInset(edge: .bottom, spacing: 0) { WideTabBar(sections: app.tabSections) }
+                            .safeAreaInset(edge: .bottom, spacing: 0) {
+                                if !column { WideTabBar(sections: app.tabSections) }
+                            }
                             .opacity(shown ? 1 : 0)
                             .allowsHitTesting(shown)
                             .accessibilityHidden(!shown)
                     }
+                    if column {
+                        WideTabBar(sections: app.tabSections, inColumn: true)
+                            .ignoresSafeArea(.container, edges: .trailing)
+                    }
                 }
+                .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.trailing } action: { trailingColumn = $0 }
             } else {
                 TabView(selection: app.shownSelectionBinding) {
                     ForEach(app.tabSections) { section in

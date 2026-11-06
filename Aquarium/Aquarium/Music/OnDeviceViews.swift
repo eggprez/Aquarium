@@ -242,7 +242,7 @@ struct OnDeviceLibraryView: View {
     /// The Downloaded page's own search, over the downloads alone — see
     /// `MusicSearch`. As the offline Library the Music tab's field serves.
     @State private var term = ""
-    @State private var isSearchPresented = false
+    @FocusState private var isFieldFocused: Bool
 
     private let doors: [LibraryDoors.Door] = [
         .init(title: "Playlists", symbol: "music.note.list", route: .playlists),
@@ -257,19 +257,26 @@ struct OnDeviceLibraryView: View {
         // Titled only as a page of its own. As the offline Library it sits
         // inside the Music tab, whose title is the Discover / Library switch.
         if isDownloadedPage {
-            Group {
-                if isSearchPresented || !term.trimmingCharacters(in: .whitespaces).isEmpty {
+            // A stack for the same reason as the Music tab's: the field is
+            // hung on it, and must outlive the switch it causes.
+            ZStack {
+                if isFieldFocused || !term.trimmingCharacters(in: .whitespaces).isEmpty {
                     MusicSearchView(term: term, scope: .downloads)
                 } else {
                     content
                 }
             }
             .navigationTitle("Downloaded")
+            // Inline: with the field fitted under the bar the large title
+            // took the bar for scrolled and folded itself away, leaving a
+            // blank band where the name of the page had been.
+            .navigationBarTitleDisplayMode(.inline)
             .paletteBar()
-            .searchable(
-                text: $term, isPresented: $isSearchPresented, placement: .navigationBarDrawer(displayMode: .automatic),
-                prompt: "Downloaded music"
-            )
+            // In view under the title — see `MusicSearchField`.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                MusicSearchField(term: $term, prompt: "Downloaded music", isFocused: $isFieldFocused)
+            }
+            .scrollDismissesKeyboard(.immediately)
         } else {
             content
         }

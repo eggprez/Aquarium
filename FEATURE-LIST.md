@@ -42,6 +42,14 @@ field that searches the downloads alone, even online, and opens the
 on-device pages. The Music tab keeps its field, now on the shared engine.
 Not yet: Mac and Apple TV have no music results at all, as before.
 
+**Follow-up 2026-11-06** (branch `claude/music-search-field`): the field
+was the system's `.searchable` drawer, which stays folded under an inline
+title until the list is pulled down and is not drawn at all on the Duo's
+inside screen, so neither the Music tab nor the Downloaded page had a search
+anyone could see. Both now draw their own field under the bar
+(`MusicSearchField` in `MusicSearch.swift`), in view at every width, with
+Cancel beside it while a search is up.
+
 ### Artist page: top songs, then every album in a grid, then the rest
 
 **Wanted:** the artist page in this order:

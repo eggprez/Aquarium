@@ -22,10 +22,14 @@ struct MusicTabView: View {
 
     @State private var page: Page = .listenNow
     @State private var term = ""
-    @State private var isSearchPresented = false
+    @FocusState private var isFieldFocused: Bool
 
     var body: some View {
-        Group {
+        // A stack, not a Group: the field below is hung on this node, and a
+        // Group's modifiers ride on whichever branch is showing. Focusing the
+        // field swaps the branch, which rebuilt the field and lost the focus
+        // it had just taken.
+        ZStack {
             if isSearching {
                 MusicSearchView(term: term)
             } else if client.showsOffline {
@@ -44,6 +48,14 @@ struct MusicTabView: View {
         .background(Theme.background)
         // There while songs are downloading, and the way to the queue.
         .safeAreaInset(edge: .top, spacing: 0) { DownloadQueueBanner() }
+        // The search, in view under the switch — see `MusicSearchField`.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            MusicSearchField(
+                term: $term, prompt: client.showsOffline ? "Downloaded music" : "Artists, albums, songs",
+                isFocused: $isFieldFocused
+            )
+        }
+        .scrollDismissesKeyboard(.immediately)
         .navigationTitle("Music")
         // The switch *is* the title: a large "Music" over "Discover" over
         // a search field was three headings before any content.
@@ -58,10 +70,6 @@ struct MusicTabView: View {
                 .frame(maxWidth: 260)
             }
         }
-        .searchable(
-            text: $term, isPresented: $isSearchPresented, placement: .navigationBarDrawer(displayMode: .automatic),
-            prompt: client.showsOffline ? "Downloaded music" : "Artists, albums, songs"
-        )
         // The Add to Playlist menu reads this list; loaded here so it is
         // there by the time anyone holds a song down.
         .task { await PlaylistStore.shared.ensureLoaded() }
@@ -71,7 +79,7 @@ struct MusicTabView: View {
     }
 
     private var isSearching: Bool {
-        isSearchPresented || !term.trimmingCharacters(in: .whitespaces).isEmpty
+        isFieldFocused || !term.trimmingCharacters(in: .whitespaces).isEmpty
     }
 }
 
