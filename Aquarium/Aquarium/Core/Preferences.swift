@@ -1178,7 +1178,15 @@ final class Preferences {
         let wasAdopting = isAdoptingRemote
         isAdoptingRemote = true
         defer { isAdoptingRemote = wasAdopting }
-        if layoutOverride != .automatic { layoutOverride = .automatic }
+        // A debug run launched with `-layout_override <pose>` keeps it: the
+        // one way to hold the laptop or tent layout on a simulator whose
+        // hinge nobody is moving.
+        #if DEBUG
+        let heldFromLaunch = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)["layout_override"] != nil
+        #else
+        let heldFromLaunch = false
+        #endif
+        if layoutOverride != .automatic, !heldFromLaunch { layoutOverride = .automatic }
         if clearsAbandonedEpisodes { clearsAbandonedEpisodes = false }
         if !powerAwareQuality { powerAwareQuality = true }
         if stereoDownmix { stereoDownmix = false }

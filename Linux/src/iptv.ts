@@ -60,6 +60,14 @@ function attrs(line: string): Record<string, string> {
 }
 
 /**
+ * What a playlist may name as a stream: network video, nothing else. A playlist
+ * comes from a third party and mpv opens more than URLs (`av://`, `edl://`, local
+ * paths), so anything else is dropped here. `check_play_target` in Rust enforces
+ * the same list.
+ */
+const LIVE_STREAM_URL = /^(https?|rtsps?|rtmps?|udp|rtp):\/\//i;
+
+/**
  * Extended M3U: an `#EXTINF` line carrying attributes and a display name, then
  * the stream URL on the next line that isn't a directive. Other `#` lines
  * (`#EXTVLCOPT`, `#EXTGRP`, comments) sit between the two often enough that
@@ -89,6 +97,10 @@ export function parseM3u(text: string): IptvChannel[] {
     }
     if (line.startsWith("#")) continue;
 
+    if (pending && !LIVE_STREAM_URL.test(line)) {
+      pending = null;
+      continue;
+    }
     if (pending) {
       const a = pending.a;
       const name = pending.name || a["tvg-name"] || "Channel";

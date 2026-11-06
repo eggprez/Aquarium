@@ -43,8 +43,9 @@ final class WatchSyncQueue {
     /// Queue one event. A position for an item replaces the position waiting
     /// for it — a book paused ten times is one resume point, not ten.
     func add(_ event: WatchProgressEvent) {
+        let event = stamped(event)
         if !event.played {
-            pending.removeAll { $0.itemId == event.itemId && !$0.played }
+            pending.removeAll { $0.accountKey == event.accountKey && $0.itemId == event.itemId && !$0.played }
         }
         pending.append(event)
         persist()
@@ -52,6 +53,17 @@ final class WatchSyncQueue {
     }
 
     func hasPending(for itemId: String) -> Bool { pending.contains { $0.itemId == itemId } }
+
+    private var currentAccountKey: String? {
+        JellyfinClient.shared.account.map { "\($0.server)|\($0.userId)" }
+    }
+
+    /// Marked with whoever is signed in now, while that's still who heard it.
+    private func stamped(_ event: WatchProgressEvent) -> WatchProgressEvent {
+        var event = event
+        event.accountKey = event.accountKey ?? currentAccountKey
+        return event
+    }
 
     /// Try to send everything waiting. Phone first, server second.
     func flush() async {
@@ -67,7 +79,7 @@ final class WatchSyncQueue {
             // two — goes too, from its record.
             let unsent = WatchDownloads.shared.unsentBookEvents(except: Set(pending.map(\.itemId)))
             if !unsent.isEmpty {
-                pending += unsent
+                pending += unsent.map(stamped)
                 persist()
             }
             guard !pending.isEmpty else { return }
@@ -93,7 +105,8 @@ final class WatchSyncQueue {
         }
         let client = JellyfinClient.shared
         guard client.isSignedIn, WatchDownloads.shared.hasNetwork, await client.checkOnline() else { return }
-        for event in batch {
+        // Another account's events wait for the phone, or for that account.
+        for event in batch where event.belongs(to: currentAccountKey) {
             do {
                 try await client.send(event)
                 settle([event])

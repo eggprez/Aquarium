@@ -21,24 +21,67 @@ struct LetterIndexBar: View {
     /// margin after it.
     static let width: CGFloat = 26
 
+    /// The shortest row every letter is still legible in.
+    static let readableRow: CGFloat = 11.5
+
     /// Called with each letter the finger lands on.
     var onSelect: (String) -> Void
 
+    @Environment(\.bottomChromeTop) private var chromeTop
     @State private var current: String?
     @State private var dragging = false
+    /// Where the overlay's own frame ends, in global points.
+    @State private var foot: CGFloat?
+
+    /// How far past its frame the strip reaches: down to where the bars
+    /// along the bottom begin, where the shell says (`bottomChromeTop`).
+    /// The scroll view's safe area ended well above the bars on a page
+    /// with the offline strip up — the strip sat squashed in the top of
+    /// the list with a dead stretch under it.
+    private var reach: CGFloat {
+        guard let chromeTop, let foot else { return 0 }
+        return max(0, (chromeTop - foot).rounded())
+    }
 
     var body: some View {
+        Color.clear
+            .frame(width: Self.width - 2)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { foot = $0 }
+            .overlay(alignment: .top) {
+                strip.padding(.bottom, -reach)
+            }
+            .padding(.trailing, 2)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Index")
+            .accessibilityHint("Drag to jump to a letter")
+    }
+
+    private var strip: some View {
         GeometryReader { geo in
+            let height = geo.size.height
             let count = CGFloat(Self.letters.count)
-            let rowHeight = min(16, max(8.5, (geo.size.height - 24) / count))
-            let fontSize = min(11, max(6.5, rowHeight - 2.5))
+            let rowHeight = min(16, max(7, (height - 24) / count))
+            // Where the page is short — a mini player, the offline strip
+            // and the tab bar stacked under it — the letters shrank until
+            // they could not be read. Below a readable row every other
+            // letter is drawn, with a dot for the one between, as the
+            // Contacts index does; all twenty-seven still take the finger.
+            let abridged = rowHeight < Self.readableRow
+            let fontSize = abridged ? 10.5 : min(11, max(9, rowHeight - 2.5))
             let stripHeight = rowHeight * count + 8
-            let top = max(0, (geo.size.height - stripHeight) / 2)
+            let top = max(0, (height - stripHeight) / 2)
             VStack(spacing: 0) {
-                ForEach(Self.letters, id: \.self) { letter in
-                    Text(letter)
-                        .font(.system(size: fontSize, weight: .semibold, design: .rounded))
-                        .frame(width: 16, height: rowHeight)
+                ForEach(Array(Self.letters.enumerated()), id: \.offset) { index, letter in
+                    Group {
+                        if abridged, !index.isMultiple(of: 2) {
+                            Circle().frame(width: 3, height: 3)
+                        } else {
+                            Text(letter)
+                                .font(.system(size: fontSize, weight: .semibold, design: .rounded))
+                                .fixedSize()
+                        }
+                    }
+                    .frame(width: 16, height: rowHeight)
                 }
             }
             .padding(.vertical, 4)
@@ -54,6 +97,7 @@ struct LetterIndexBar: View {
                         .offset(x: -52, y: top + 4 + rowHeight * (CGFloat(i) + 0.5) - 22)
                 }
             }
+            .frame(height: height, alignment: .top)
             .frame(maxHeight: .infinity, alignment: .top)
             .contentShape(Rectangle())
             .gesture(
@@ -73,11 +117,6 @@ struct LetterIndexBar: View {
             )
             .sensoryFeedback(.selection, trigger: current)
         }
-        .frame(width: Self.width - 2)
-        .padding(.trailing, 2)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Index")
-        .accessibilityHint("Drag to jump to a letter")
     }
 
     private func bubble(_ letter: String) -> some View {

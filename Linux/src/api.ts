@@ -1072,7 +1072,13 @@ export function buildDownload(item: any, q: DownloadQuality): { url: string; fil
   const s = session!;
   const safe = (item.Name ?? item.Id).replace(/[^\w\s.\-()\[\]']/g, "_").slice(0, 120);
   if (q.original) {
-    const container = item.MediaSources?.[0]?.Container ?? item.Container ?? "mkv";
+    // Server text that becomes part of a file name. Jellyfin can report a list
+    // ("mov,mp4,m4a"); the first entry is the extension.
+    const reported = String(item.MediaSources?.[0]?.Container ?? item.Container ?? "")
+      .split(",")[0]
+      .trim()
+      .toLowerCase();
+    const container = /^[a-z0-9]{1,8}$/.test(reported) ? reported : "mkv";
     return {
       url: `${s.server}/Items/${item.Id}/Download`,
       fileName: `${safe}.${container}`,

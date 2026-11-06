@@ -775,8 +775,11 @@ final class PlayerModel {
         speed = Self.speeds[next]
     }
 
-    func stop(reason: String = "stop") {
-        Task { await finish(userRequested: true, reason: reason) }
+    /// `tellServer` false is for a stream whose account has already gone: its
+    /// closing reports would be sent with the new account's token.
+    @discardableResult
+    func stop(reason: String = "stop", tellServer: Bool = true) -> Task<Void, Never> {
+        Task { await finish(userRequested: true, reason: reason, tellServer: tellServer) }
     }
 
     /// `generation`, for a caller outside that has to act on the stream it saw
@@ -791,21 +794,21 @@ final class PlayerModel {
     /// Take the player down, then settle with the server. The player comes
     /// down first, synchronously, before anything is awaited, so a start
     /// racing it has a clean board.
-    func finish(userRequested: Bool, reason: String = "ended") async {
+    func finish(userRequested: Bool, reason: String = "ended", tellServer: Bool = true) async {
         guard isActive else { return }
         Self.log.info(
             "finish: \(reason, privacy: .public) live=\(self.isLive) external=\(self.isExternal) position=\(self.position, format: .fixed(precision: 1)) error=\(self.errorMessage ?? "none", privacy: .public)")
         generation &+= 1
 
         let finalPosition = position
-        let closingReport = isExternal || isLocal ? nil : report(paused: true, position: finalPosition)
+        let closingReport = isExternal || isLocal || !tellServer ? nil : report(paused: true, position: finalPosition)
         let closingLocalId = localRecordId
         #if !os(tvOS)
         let closingLocalSession = localSession
         localSession = nil
         #endif
         dropPrefetched()
-        let closingSource = source
+        let closingSource = tellServer ? source : nil
 
         engine?.stop()
         pictureIsStale = true

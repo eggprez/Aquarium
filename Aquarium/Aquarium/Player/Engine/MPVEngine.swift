@@ -369,7 +369,16 @@ final class MPVEngine: @unchecked Sendable {
             ("sub-auto", "no"),
             ("audio-file-auto", "no"),
             ("network-timeout", "30"),
+            // Left to itself this mpv accepts any certificate and sends the
+            // Authorization header to whatever answered. GnuTLS has no system
+            // store to read on iOS or tvOS, so it gets a root list of its own.
+            ("tls-verify", "yes"),
         ]
+        if let roots = Bundle.main.path(forResource: "tls-roots", ofType: "pem") {
+            mpv_set_option_string(h, "tls-ca-file", roots)
+        } else {
+            Self.log.error("tls-roots.pem is missing from the app, so HTTPS streams may not open")
+        }
         #if os(iOS) || os(tvOS)
         // mpv's AudioUnit output sets the audio session's category itself,
         // every time it opens — which, with `gapless-audio=no`, is every

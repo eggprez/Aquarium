@@ -285,6 +285,16 @@ struct WatchProgressEvent: Codable, Hashable, Sendable, Identifiable {
     /// play — see `WatchProgressEvent.deliver`.
     var streamed = false
     var at = Date()
+    /// `SavedSession.accountKey` of whoever was signed in on the watch. Nil on
+    /// an event from a build before this existed.
+    var accountKey: String?
+
+    /// Whether this can go to the server under `account`. An event is only ever
+    /// sent under its own account: the server files it under whoever's token it
+    /// arrives with.
+    func belongs(to account: String?) -> Bool {
+        accountKey == nil || accountKey == account
+    }
 }
 
 enum WatchMessage: Codable, Sendable {
