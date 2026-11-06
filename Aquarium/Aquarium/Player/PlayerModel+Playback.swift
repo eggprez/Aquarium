@@ -870,9 +870,13 @@ extension PlayerModel {
             playLocal(record, startAt: position)
             #endif
         case .stream(let bitrate):
+            // Not away from a download. Switching reopened the title from
+            // the server — which, offline, failed, and coming back to the
+            // download started it over. The card says why instead.
+            guard !isLocal else { return }
             prefs.adaptiveQuality = false
             prefs.defaultBitrate = bitrate
-            if isLocal || currentBitrate != bitrate {
+            if currentBitrate != bitrate {
                 await switchQuality(to: bitrate)
             }
         }

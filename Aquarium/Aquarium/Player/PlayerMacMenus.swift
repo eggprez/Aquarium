@@ -205,9 +205,13 @@ struct PlayerMenuItems: View {
                         Text(download.quality.isEmpty ? "Downloaded" : "Downloaded · \(download.quality)")
                             .tag(PlayerModel.QualitySelection.downloaded)
                     }
-                    ForEach(Quality.choices) { choice in
-                        Text(choice.maxBitrate == nil ? "Direct (original)" : choice.label)
-                            .tag(PlayerModel.QualitySelection.stream(choice.maxBitrate))
+                    // No rungs while the download plays: a stream would be
+                    // the title opened again from the server.
+                    if !player.isLocal {
+                        ForEach(Quality.choices) { choice in
+                            Text(choice.maxBitrate == nil ? "Direct (original)" : choice.label)
+                                .tag(PlayerModel.QualitySelection.stream(choice.maxBitrate))
+                        }
                     }
                 }
                 .pickerStyle(.inline)

@@ -315,7 +315,8 @@ private struct BottomChromeTopKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    fileprivate var bottomChromeTop: CGFloat? {
+    /// Read by `LetterIndexBar` too, which sizes itself down to the bars.
+    var bottomChromeTop: CGFloat? {
         get { self[BottomChromeTopKey.self] }
         set { self[BottomChromeTopKey.self] = newValue }
     }
@@ -327,9 +328,23 @@ private struct MeasuresBottomChrome: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.bottomChromeTop, top)
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.frame(in: .global).maxY - proxy.safeAreaInsets.bottom
-            } action: { top = $0 }
+            .onGeometryChange(for: CGFloat.self) { Self.barsBegin($0) } action: { top = $0 }
+    }
+
+    /// Where the bars begin, in global points. With the offline strip up
+    /// the stack's frame already stops at the strip, while its safe area
+    /// still says how far the screen's edge is below that — so the foot
+    /// less the inset put the bars 160 points higher than they were, every
+    /// page kept a dead stretch above the strip, and the A–Z index was
+    /// squashed into the top of its list. The bars begin at the lower of
+    /// the frame's foot and the screen's edge less the inset, whichever
+    /// way the stack was laid out.
+    private static func barsBegin(_ proxy: GeometryProxy) -> CGFloat {
+        let frame = proxy.frame(in: .global)
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        let edge = scene?.screen.bounds.height ?? (frame.maxY + proxy.safeAreaInsets.bottom)
+        return min(frame.maxY, edge - proxy.safeAreaInsets.bottom)
     }
 }
 

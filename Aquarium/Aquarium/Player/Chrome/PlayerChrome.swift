@@ -633,10 +633,11 @@ private struct PanelSheetBackground: ViewModifier {
     }
 }
 
-private extension View {
+extension View {
     /// The transport's fade under a finger. A draw-time effect, not `opacity`:
     /// measured on iOS 27.1, a view asked for any opacity below 1, even 0.4,
     /// stops taking touches at once, AirPlay's UIKit button included.
+    /// `PlayerFoldPanel` fades by it too.
     @ViewBuilder
     func chromeFade(shown: Bool) -> some View {
         #if os(iOS)
@@ -645,7 +646,9 @@ private extension View {
         self
         #endif
     }
+}
 
+private extension View {
     /// A sheet with medium and large detents on a phone; a popover hung off
     /// the pill that opened it on an iPad or a Mac; on a television a card
     /// down from the top of the picture, placed against the screen's edges

@@ -109,8 +109,15 @@ struct PlayerScreen: View {
                 // while the chrome takes a quarter second to fade, so the
                 // title row's buttons slid across the gap before they went.
                 // While the bar is hidden the chrome keeps the frame it had
-                // with the bar up — unless the screen itself has changed.
-                let held = statusBarHidden ? heldFrame.flatMap { $0.screen == screen ? $0 : nil } : nil
+                // with the bar up — unless the screen has changed, or been
+                // turned: the two landscapes are the same size with the
+                // camera and the clock column on opposite sides, and a
+                // frame held across that turn kept the first side's
+                // clearance, which shoved the title row's buttons in from
+                // an edge nothing was on.
+                let orientation = Self.interfaceOrientation
+                let held = statusBarHidden
+                    ? heldFrame.flatMap { $0.screen == screen && $0.orientation == orientation ? $0 : nil } : nil
                 let insets = held?.insets ?? live
                 // The front screen reports no top inset — its clock is in
                 // the column down the trailing edge — yet the top 24 points
@@ -132,11 +139,13 @@ struct PlayerScreen: View {
                 // does the same with its clock column: only the pill at its
                 // head is in the way, so the timeline runs to the edge under
                 // it while the title row and the pills keep the column.
-                let clearance = held.map(\.clearance) ?? (pose == .front
+                // The camera's clearance is read live: the lens is where it
+                // is whether or not the bar shows. Only the insets are held.
+                let clearance: PlayerSideClearance? = pose == .front
                     ? PlayerSideClearance(geo, titleRowFoot: top + PlayerSideClearance.titleRowDepth,
                                           pillRowHead: insets.top + geo.size.height - PlayerSideClearance.pillRowDepth)
-                    : FoldState.shared.innerSideways ? PlayerSideClearance(keeping: insets) : nil)
-                let frame = HeldFrame(screen: screen, insets: insets, clearance: clearance)
+                    : FoldState.shared.innerSideways ? PlayerSideClearance(keeping: insets) : nil
+                let frame = HeldFrame(screen: screen, orientation: orientation, insets: insets)
                 FoldSplit(split: foldsBelow, crease: .black) {
                     stage
                         .safeAreaPadding(EdgeInsets(top: top, leading: clearance == nil ? insets.leading : 0,
@@ -175,8 +184,15 @@ struct PlayerScreen: View {
 
     private struct HeldFrame: Equatable {
         var screen: CGSize
+        var orientation: UIInterfaceOrientation
         var insets: EdgeInsets
-        var clearance: PlayerSideClearance?
+    }
+
+    /// Which way the screen is turned, from the scene that is up.
+    private static var interfaceOrientation: UIInterfaceOrientation {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        return scene?.effectiveGeometry.interfaceOrientation ?? .unknown
     }
     #endif
 

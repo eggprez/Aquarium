@@ -277,9 +277,11 @@ private struct QualityMenu: View {
     var body: some View {
         let selection = player.qualitySelection
         let auto = selection == .auto
-        let streamable = player.offersQuality || player.isLocal
+        // A download is never swapped for a stream from here: see
+        // `PlayerModel.chooseQuality`.
+        let streamable = player.offersQuality
 
-        if let reason = player.qualityUnavailableReason, !player.isLocal {
+        if let reason = player.qualityUnavailableReason {
             PanelNote(text: reason)
         }
         // Auto first, then the rows in the order Auto tries them: the
@@ -304,7 +306,7 @@ private struct QualityMenu: View {
                      detail: playing ? (player.isTranscoding ? "Playing now · transcoding" : "Playing now")
                         : choice.maxBitrate == nil ? "The file as it is, no transcode" : nil,
                      isSelected: !auto && playing,
-                     disabledReason: streamable ? nil : "Not for this stream") {
+                     disabledReason: streamable ? nil : player.isLocal ? "Playing the download" : "Not for this stream") {
                 pick(.stream(choice.maxBitrate))
             }
         }

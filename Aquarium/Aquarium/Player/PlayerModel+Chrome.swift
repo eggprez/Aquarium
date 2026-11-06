@@ -44,7 +44,7 @@ extension PlayerModel {
 
     /// Why the quality rungs are not offered, when they aren't.
     var qualityUnavailableReason: String? {
-        if isLocal { return "This is a download: it plays the file as it was saved." }
+        if isLocal { return "Playing the download as it was saved. The server's streams aren't offered while it plays: switching would open the title again from the server." }
         if isExternal { return "This channel comes straight from its playlist; the server isn't encoding it." }
         if isLive { return "A live channel plays as the tuner sends it." }
         return nil

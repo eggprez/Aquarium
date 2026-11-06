@@ -9,8 +9,11 @@
 //  scrolling — or, on a channel, the TV guide; on the right play/pause and
 //  the skips (`PlayerTransport.Part.foldControls`); and along the foot, where
 //  the hands are, the transport's bottom band — the timeline, the times and
-//  the pills (`PlayerTransport.Part.belowFold`). None of it has a clock on
-//  it: a surface under the hands stays put.
+//  the pills (`PlayerTransport.Part.belowFold`). It keeps the chrome's
+//  clock: the whole of it fades with the controls over the picture and a
+//  touch anywhere on the flat half brings both back, so a film plays on
+//  two dark screens rather than one. The black stays; only what is drawn
+//  on it goes.
 //
 //  The pills are the same pills, dropping the same cards (`PlayerMenus`),
 //  placed here so they can rise over the panel rather than off the foot of
@@ -23,7 +26,10 @@ import SwiftUI
 struct PlayerFoldPanel: View {
     @Environment(PlayerModel.self) private var player
     @Environment(JellyfinClient.self) private var client
+    @Environment(Preferences.self) private var prefs
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let chrome: PlayerChromeState
     let trickplay: TrickplayStore
@@ -34,6 +40,9 @@ struct PlayerFoldPanel: View {
     /// Bumped by Skip intro / Skip credits, for the haptic.
     @State private var skips = 0
     @State private var width: CGFloat = 0
+    /// The panel stays touchable a moment after it starts to fade, as the
+    /// transport does (`PlayerChrome.transportInTree`).
+    @State private var lingers = true
 
     /// The phone's glyphs and insets unless the display is wide: the inside
     /// screen is, and a developer holding the pose on a plain phone isn't.
@@ -42,6 +51,25 @@ struct PlayerFoldPanel: View {
     private var panelWidth: CGFloat {
         guard width > 0 else { return 640 }
         return min(max(width * 0.74, 560), 900)
+    }
+
+    private var hideContext: PlayerChromeState.HideContext {
+        .init(isPaused: player.isPaused, voiceOver: voiceOver,
+              hideAfter: prefs.hideControlsAfter, hasError: player.errorMessage != nil)
+    }
+
+    /// The same answer as the chrome's over the picture: up while the clock
+    /// says so, or while anything that needs them is — a pause, a scrub,
+    /// the panel, a card off one of these pills, an error.
+    private var showsControls: Bool {
+        chrome.controlsVisible || player.isPaused || chrome.scrub != nil || chrome.panelOpen || chrome.menuOpen
+            || player.errorMessage != nil || voiceOver
+    }
+
+    /// A touch on anything here: the controls stay up a while longer, on
+    /// both halves.
+    private func interact() {
+        chrome.show(hideContext)
     }
 
     var body: some View {
@@ -58,7 +86,7 @@ struct PlayerFoldPanel: View {
 
                 PlayerTransport(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork,
                                 compact: compact, usesSheet: usesSheet, panelWidth: panelWidth, part: .foldControls,
-                                onInteract: {}, onDismiss: {})
+                                onInteract: interact, onDismiss: {})
                     .frame(width: Self.controlsWidth)
                     .frame(maxHeight: .infinity)
             }
@@ -74,21 +102,39 @@ struct PlayerFoldPanel: View {
 
             PlayerTransport(chrome: chrome, trickplay: trickplay, schedule: schedule, artwork: artwork,
                             compact: compact, usesSheet: usesSheet, panelWidth: panelWidth, part: .belowFold,
-                            onInteract: {}, onDismiss: {})
+                            onInteract: interact, onDismiss: {})
                 .padding(.bottom, 8)
         }
+        .chromeFade(shown: showsControls)
+        .allowsHitTesting(showsControls || lingers)
+        .animation(.easeOut(duration: reduceMotion ? 0.15 : 0.25), value: showsControls)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
+        // A tap on the flat half brings the controls back — or, while they
+        // are up, keeps them. The pills and rows take their own taps first.
+        .contentShape(Rectangle())
+        .onTapGesture { interact() }
         .background(GeometryReader { geo in
             Color.clear.onChange(of: geo.size.width, initial: true) { _, now in width = now }
         })
         // The open card, above the pill that dropped it — placed over the
         // whole half, so it has the panel's height to rise into.
         .overlayPreferenceValue(ChromeMenuAnchors.self) { anchors in
-            ChromeMenuLayer(chrome: chrome, anchors: anchors, compact: compact, onInteract: {},
+            ChromeMenuLayer(chrome: chrome, anchors: anchors, compact: compact, onInteract: interact,
                             openPanel: { tab in
                                 chrome.panelAnchor = .more
                                 chrome.panel = tab
                             })
+        }
+        // The fade is a quarter second; a little longer covers a press that
+        // began just before it and lifts just after.
+        .task(id: showsControls) {
+            if showsControls {
+                lingers = true
+            } else {
+                try? await Task.sleep(for: .milliseconds(350))
+                if !Task.isCancelled { lingers = false }
+            }
         }
         .playerChromeScheme()
         .preferredColorScheme(.dark)
