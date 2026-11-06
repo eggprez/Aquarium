@@ -206,8 +206,15 @@ struct ArtistDetailView: View {
                             }
                         }
                     }
-                    AlbumShelf(title: "Albums", items: albums, subtitleFor: { $0.ProductionYear.map(String.init) ?? "" }) {
-                        app.push(.music(.album($0.Id)))
+                    // Every album, wrapping, rather than a shelf to scroll
+                    // sideways: a discography is a thing to see whole.
+                    if !albums.isEmpty {
+                        VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
+                            ShelfHeading(title: "Albums")
+                            AlbumGrid(items: albums, subtitleFor: { $0.ProductionYear.map(String.init) ?? "" }) {
+                                app.push(.music(.album($0.Id)))
+                            }
+                        }
                     }
                     AlbumShelf(title: "Appears On", items: appearsOn) { app.push(.music(.album($0.Id))) }
                     if let overview = artist.Overview, !overview.isEmpty {
@@ -291,7 +298,8 @@ struct ArtistDetailView: View {
         defer { isLoading = false }
         do {
             let own: JellyfinClient.MusicQuery = {
-                var q = JellyfinClient.MusicQuery(types: "MusicAlbum", sort: .year, limit: 100)
+                // All of them: the grid shows the whole discography.
+                var q = JellyfinClient.MusicQuery(types: "MusicAlbum", sort: .year, limit: 500)
                 q.albumArtistIds = [artistId]
                 return q
             }()
