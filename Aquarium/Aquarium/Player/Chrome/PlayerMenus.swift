@@ -275,10 +275,21 @@ private struct QualityMenu: View {
     let close: () -> Void
 
     var body: some View {
+        // A download plays as it was saved, and the card says only that:
+        // no Auto, no rungs — see `PlayerModel.chooseQuality`.
+        if player.isLocal {
+            PanelRow(title: player.downloadedTitle, detail: "Playing from this device", isSelected: true) {
+                onInteract()
+                close()
+            }
+        } else {
+            rungs
+        }
+    }
+
+    @ViewBuilder private var rungs: some View {
         let selection = player.qualitySelection
         let auto = selection == .auto
-        // A download is never swapped for a stream from here: see
-        // `PlayerModel.chooseQuality`.
         let streamable = player.offersQuality
 
         if let reason = player.qualityUnavailableReason {
@@ -292,21 +303,19 @@ private struct QualityMenu: View {
             pick(.auto)
         }
         #if !os(tvOS)
-        if let download = player.downloadedCopy {
-            PanelRow(title: download.quality.isEmpty ? "Downloaded" : "Downloaded · \(download.quality)",
-                     detail: player.isLocal ? (auto ? "Playing now" : "Playing now · from this device") : "From this device",
-                     isSelected: !auto && player.isLocal) {
+        if player.downloadedCopy != nil {
+            PanelRow(title: player.downloadedTitle, detail: "From this device") {
                 pick(.downloaded)
             }
         }
         #endif
         ForEach(Quality.choices) { choice in
-            let playing = !player.isLocal && player.currentBitrate == choice.maxBitrate
+            let playing = player.currentBitrate == choice.maxBitrate
             PanelRow(title: choice.maxBitrate == nil ? "Direct (original)" : choice.label,
                      detail: playing ? (player.isTranscoding ? "Playing now · transcoding" : "Playing now")
                         : choice.maxBitrate == nil ? "The file as it is, no transcode" : nil,
                      isSelected: !auto && playing,
-                     disabledReason: streamable ? nil : player.isLocal ? "Playing the download" : "Not for this stream") {
+                     disabledReason: streamable ? nil : "Not for this stream") {
                 pick(.stream(choice.maxBitrate))
             }
         }
@@ -315,7 +324,7 @@ private struct QualityMenu: View {
 
     /// What Auto has landed on, in the pill's words.
     private var playingNow: String {
-        player.isLocal ? "Downloaded" : player.currentBitrate == nil ? "Direct" : Quality.shortLabel(for: player.currentBitrate)
+        player.currentBitrate == nil ? "Direct" : Quality.shortLabel(for: player.currentBitrate)
     }
 
     private func pick(_ selection: PlayerModel.QualitySelection) {

@@ -568,9 +568,11 @@ struct PlayerTransport: View {
     }
 
     /// Auto, a download, or the rung held — in the handful of characters a
-    /// pill has.
+    /// pill has. A download that is playing says so whatever Auto chose: its
+    /// card holds that one row.
     private var qualityTitle: String {
-        switch player.qualitySelection {
+        if player.isLocal { return "Downloaded" }
+        return switch player.qualitySelection {
         case .auto: "Auto"
         case .downloaded: "Downloaded"
         case .stream(let bitrate): bitrate == nil ? "Direct" : Quality.shortLabel(for: bitrate)
@@ -578,8 +580,9 @@ struct PlayerTransport: View {
     }
 
     private var qualitySpoken: String {
-        switch player.qualitySelection {
-        case .auto: player.isLocal ? "Auto, playing the download" : "Auto, playing \(Quality.label(for: player.currentBitrate))"
+        if player.isLocal { return "Downloaded copy" }
+        return switch player.qualitySelection {
+        case .auto: "Auto, playing \(Quality.label(for: player.currentBitrate))"
         case .downloaded: "Downloaded copy"
         case .stream(let bitrate): Quality.label(for: bitrate)
         }

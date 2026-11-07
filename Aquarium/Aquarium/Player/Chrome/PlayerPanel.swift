@@ -1051,20 +1051,29 @@ private struct QualityTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let reason = player.qualityUnavailableReason {
+            // A download plays as it was saved, and the page says only
+            // that — see `PlayerModel.chooseQuality`.
+            if player.isLocal {
+                PanelRows(fills: true) {
+                    PanelRow(title: player.downloadedTitle, detail: PlayerMetrics.television ? nil : "Playing from this device",
+                             isSelected: true, height: PlayerMetrics.television ? 96 : nil) {}
+                }
+            } else if let reason = player.qualityUnavailableReason {
                 PanelNote(text: reason)
             }
-            PanelRows(fills: true) {
-                ForEach(Quality.choices) { choice in
-                    let current = player.currentBitrate == choice.maxBitrate
-                    PanelRow(title: Self.title(choice),
-                             detail: PlayerMetrics.television ? nil
-                                : current && player.isTranscoding ? "Playing now · transcoding" : current ? "Playing now" : nil,
-                             isSelected: current,
-                             disabledReason: player.qualityUnavailableReason == nil ? nil : "Not for this stream",
-                             height: PlayerMetrics.television ? 96 : nil) {
-                        guard !current else { return }
-                        Task { await player.switchQuality(to: choice.maxBitrate) }
+            if !player.isLocal {
+                PanelRows(fills: true) {
+                    ForEach(Quality.choices) { choice in
+                        let current = player.currentBitrate == choice.maxBitrate
+                        PanelRow(title: Self.title(choice),
+                                 detail: PlayerMetrics.television ? nil
+                                    : current && player.isTranscoding ? "Playing now · transcoding" : current ? "Playing now" : nil,
+                                 isSelected: current,
+                                 disabledReason: player.qualityUnavailableReason == nil ? nil : "Not for this stream",
+                                 height: PlayerMetrics.television ? 96 : nil) {
+                            guard !current else { return }
+                            Task { await player.switchQuality(to: choice.maxBitrate) }
+                        }
                     }
                 }
             }
