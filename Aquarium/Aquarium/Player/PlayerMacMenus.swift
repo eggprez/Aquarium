@@ -200,13 +200,14 @@ struct PlayerMenuItems: View {
             Menu("Quality") {
                 // In the order Auto tries them — see `PlayerModel.QualitySelection`.
                 Picker("Quality", selection: qualityBinding) {
-                    Text("Auto").tag(PlayerModel.QualitySelection.auto)
-                    if let download = player.downloadedCopy {
-                        Text(download.quality.isEmpty ? "Downloaded" : "Downloaded · \(download.quality)")
-                            .tag(PlayerModel.QualitySelection.downloaded)
+                    // A download plays as it was saved, and the menu says
+                    // only that: no Auto, no rungs — see `chooseQuality`.
+                    if !player.isLocal {
+                        Text("Auto").tag(PlayerModel.QualitySelection.auto)
                     }
-                    // No rungs while the download plays: a stream would be
-                    // the title opened again from the server.
+                    if player.downloadedCopy != nil {
+                        Text(player.downloadedTitle).tag(PlayerModel.QualitySelection.downloaded)
+                    }
                     if !player.isLocal {
                         ForEach(Quality.choices) { choice in
                             Text(choice.maxBitrate == nil ? "Direct (original)" : choice.label)

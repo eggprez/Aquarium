@@ -42,9 +42,18 @@ extension PlayerModel {
     /// Jellyfin item being streamed, not a download or a playlist channel.
     var offersQuality: Bool { item != nil && !isLocal && !isExternal && !isLive }
 
-    /// Why the quality rungs are not offered, when they aren't.
+    /// The download's row in the quality card: its quality when the record
+    /// knows it.
+    var downloadedTitle: String {
+        #if !os(tvOS)
+        if let download = downloadedCopy, !download.quality.isEmpty { return "Downloaded · \(download.quality)" }
+        #endif
+        return "Downloaded"
+    }
+
+    /// Why the quality rungs are not offered, when they aren't. A download
+    /// has no reason to give: its card holds the one row and nothing else.
     var qualityUnavailableReason: String? {
-        if isLocal { return "Playing the download as it was saved. The server's streams aren't offered while it plays: switching would open the title again from the server." }
         if isExternal { return "This channel comes straight from its playlist; the server isn't encoding it." }
         if isLive { return "A live channel plays as the tuner sends it." }
         return nil
