@@ -1606,6 +1606,7 @@ private struct GuideRow: View {
                             index: index,
                             program: program,
                             title: program.title,
+                            episode: program.EpisodeTitle,
                             timeLabel: Format.programWindow(start: program.programStart, end: program.programEnd),
                             isLive: program.isAiringNow,
                             width: width
@@ -1623,7 +1624,7 @@ private struct GuideRow: View {
     }
 
     @ViewBuilder
-    private func cell(index: Int, program: BaseItem?, title: String, timeLabel: String?, isLive: Bool, width: CGFloat) -> some View {
+    private func cell(index: Int, program: BaseItem?, title: String, episode: String? = nil, timeLabel: String?, isLive: Bool, width: CGFloat) -> some View {
         #if os(macOS)
         let key = GuideSelection(row: rowIndex, column: index)
         GuideCell(
@@ -1654,6 +1655,7 @@ private struct GuideRow: View {
         #else
         GuideCell(
             title: title,
+            episode: episode,
             timeLabel: timeLabel,
             isLive: isLive,
             width: width,
@@ -1689,6 +1691,10 @@ extension GuideRow: Equatable {
 
 private struct GuideCell: View {
     let title: String
+    /// The episode's own name, for a programme that is one of a series. A
+    /// television's row has a line for it; a phone's and a Mac's do not,
+    /// and there it is in the programme's popover or not at all.
+    var episode: String? = nil
     let timeLabel: String?
     let isLive: Bool
     let width: CGFloat
@@ -1738,10 +1744,23 @@ private struct GuideCell: View {
                 #if os(macOS)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                #elseif os(tvOS)
+                .foregroundStyle(Theme.text)
+                // One line when the episode takes the next; two for a film
+                // or a one-off, which has only its own name to show.
+                .lineLimit(width < 100 || showsEpisode ? 1 : 2)
                 #else
                 .foregroundStyle(Theme.text)
                 .lineLimit(width < 100 ? 1 : 2)
                 #endif
+            #if os(tvOS)
+            if showsEpisode, let episode {
+                Text(episode)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textBody)
+                    .lineLimit(1)
+            }
+            #endif
             if let timeLabel, width > 64 {
                 Text(timeLabel)
                     .font(.caption2)
@@ -1757,6 +1776,16 @@ private struct GuideCell: View {
         .padding(.vertical, 6)
         .frame(width: width, height: height, alignment: .topLeading)
     }
+
+    #if os(tvOS)
+    /// Whether the cell has an episode name and the width to say it: the
+    /// same cut-off the times use, since a cell too narrow for "8:00 PM –
+    /// 9:00 PM" is too narrow for a title.
+    private var showsEpisode: Bool {
+        guard let episode, !episode.isEmpty else { return false }
+        return width > 64
+    }
+    #endif
 
     #if os(macOS)
     /// Selected, then hovered, then on now, then nothing — the strongest
