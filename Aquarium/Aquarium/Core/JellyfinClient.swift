@@ -1694,9 +1694,12 @@ final class JellyfinClient {
         ).items
     }
 
-    func episodes(seriesId: String, seasonId: String?) async throws -> [BaseItem] {
+    /// `fromServer` skips the device's copy of the library, for a caller
+    /// that is asking what the server has *now* — the copy may be hours
+    /// behind, still listing an episode under an id the server has dropped.
+    func episodes(seriesId: String, seasonId: String?, fromServer: Bool = false) async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        if let local = LibraryIndex.shared.episodes(seriesId: seriesId, seasonId: seasonId) { return local }
+        if !fromServer, let local = LibraryIndex.shared.episodes(seriesId: seriesId, seasonId: seasonId) { return local }
         var path = "/Shows/\(Self.pathId(seriesId))/Episodes?userId=\(s.userId)&Fields=\(Self.itemFields)"
         if let seasonId { path += "&seasonId=\(seasonId)" }
         return try await get(ItemsResponse.self, path).items
