@@ -1170,7 +1170,8 @@ struct TVGuideView: View {
                 guard let channelId = item.ChannelId else { continue }
                 map[channelId, default: []].append((item.programStart ?? .distantPast, item))
             }
-            return map.mapValues { $0.sorted { $0.start < $1.start }.map(\.item) }
+            // In order, then made to lie end to end: see `GuideSchedule`.
+            return map.mapValues { GuideSchedule.resolved($0.sorted { $0.start < $1.start }.map(\.item)) }
         }.value
     }
 

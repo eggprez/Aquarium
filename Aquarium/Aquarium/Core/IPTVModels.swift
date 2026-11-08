@@ -95,6 +95,9 @@ enum M3UParser {
 struct XMLTVProgramme: Sendable {
     var channelId: String
     var title: String
+    /// The episode's own name — XMLTV's `sub-title` — where the feed gives
+    /// one; the guide shows it under the show.
+    var subtitle: String?
     var desc: String?
     var start: Date
     var stop: Date
@@ -114,6 +117,7 @@ final class XMLTVParser: NSObject, XMLParserDelegate {
     private var pendingStart: Date?
     private var pendingStop: Date?
     private var pendingTitle: String?
+    private var pendingSubtitle: String?
     private var pendingDesc: String?
     /// Programmes the feed gave no `stop` — allowed by XMLTV, and common on
     /// feeds that mean "until the next one". Ended once the whole file is in.
@@ -170,6 +174,7 @@ final class XMLTVParser: NSObject, XMLParserDelegate {
             pendingStart = Self.parseDate(attributes["start"])
             pendingStop = Self.parseDate(attributes["stop"])
             pendingTitle = nil
+            pendingSubtitle = nil
             pendingDesc = nil
         default:
             break
@@ -188,6 +193,10 @@ final class XMLTVParser: NSObject, XMLParserDelegate {
             if let id = currentChannelId, channelNames[id] == nil, !text.isEmpty { channelNames[id] = text }
         case "title":
             if pendingTitle == nil { pendingTitle = text }
+        case "sub-title":
+            // First wins, like the title: a feed in several languages lists
+            // one per language, its own first.
+            if pendingSubtitle == nil, !text.isEmpty { pendingSubtitle = text }
         case "desc":
             pendingDesc = text.isEmpty ? nil : text
         case "channel":
@@ -196,16 +205,21 @@ final class XMLTVParser: NSObject, XMLParserDelegate {
             if let channel = pendingChannel, let start = pendingStart, let title = pendingTitle {
                 if let stop = pendingStop {
                     if stop > start {
-                        programmes.append(XMLTVProgramme(channelId: channel, title: title, desc: pendingDesc, start: start, stop: stop))
+                        programmes.append(XMLTVProgramme(
+                            channelId: channel, title: title, subtitle: pendingSubtitle, desc: pendingDesc, start: start, stop: stop
+                        ))
                     }
                 } else {
-                    openEnded.append(XMLTVProgramme(channelId: channel, title: title, desc: pendingDesc, start: start, stop: start))
+                    openEnded.append(XMLTVProgramme(
+                        channelId: channel, title: title, subtitle: pendingSubtitle, desc: pendingDesc, start: start, stop: start
+                    ))
                 }
             }
             pendingChannel = nil
             pendingStart = nil
             pendingStop = nil
             pendingTitle = nil
+            pendingSubtitle = nil
             pendingDesc = nil
         default:
             break
