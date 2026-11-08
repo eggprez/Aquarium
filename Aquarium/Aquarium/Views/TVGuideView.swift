@@ -1653,6 +1653,17 @@ private struct GuideRow: View {
                 onPlay()
             }
         }
+        #elseif os(tvOS)
+        GuideCell(
+            title: title,
+            episode: episode,
+            timeLabel: timeLabel,
+            isLive: isLive,
+            width: width,
+            height: rowHeight,
+            onPlay: onPlay,
+            isFocused: focus == .program(channel: channelId, index: index)
+        )
         #else
         GuideCell(
             title: title,
@@ -1707,6 +1718,11 @@ private struct GuideCell: View {
     var onSelect: () -> Void = {}
     var onInfo: () -> Void = {}
     @State private var isHovered = false
+    #elseif os(tvOS)
+    /// Whether the selector is on this cell, from the row's focus state:
+    /// the text is drawn over the button rather than inside it (see
+    /// `body`), so it has to be told when to lift with the cell.
+    var isFocused = false
     #endif
 
     var body: some View {
@@ -1727,6 +1743,29 @@ private struct GuideCell: View {
             // The whole title and its times on hover, for the cells the window
             // has cut short at either end.
             .help([title, timeLabel].compactMap { $0 }.joined(separator: "\n"))
+        #elseif os(tvOS)
+        // The button is the cell's tint alone; the words sit over it. With
+        // the text inside the button's label, an Apple TV (not the
+        // simulator, which draws it as written) paints an opaque dark
+        // platter behind the label's content, which on an on-now cell showed
+        // as a dark box hugging the title and times inside the lighter fill
+        // — "the reverse highlighting", in the photo from 2026-11-07. Text
+        // that is not a button's label gets no such treatment.
+        Button(action: onPlay) {
+            (isLive ? Theme.accentSoft : Color.clear)
+                .frame(width: width, height: height)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(GuideCellButtonStyle())
+        .overlay(alignment: .topLeading) {
+            label
+                .allowsHitTesting(false)
+                // The same lift the style gives the cell, so the words move
+                // with it.
+                .scaleEffect(isFocused ? 1.02 : 1)
+                .animation(.easeOut(duration: 0.15), value: isFocused)
+        }
+        .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 0.5) }
         #else
         Button(action: onPlay) {
             label
