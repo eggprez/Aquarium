@@ -1607,7 +1607,7 @@ private struct GuideRow: View {
                             index: index,
                             program: program,
                             title: program.title,
-                            episode: program.EpisodeTitle,
+                            episode: program.programmeEpisodeLine,
                             timeLabel: Format.programWindow(start: program.programStart, end: program.programEnd),
                             isLive: program.isAiringNow,
                             width: width
