@@ -370,28 +370,46 @@ private struct WatchStoragePage: View {
 
 private struct WatchTransfersPage: View {
     @State private var link = WatchLink.shared
+    @State private var confirmCancelAll = false
 
     var body: some View {
+        let moving = link.relayItems.filter { !$0.stage.isFinished }.count
         Form {
             Section {
                 if link.relayItems.isEmpty {
                     Text("Nothing is on its way to the watch.")
                         .foregroundStyle(Theme.textDim)
                 }
-                ForEach(relayRows) { item in
-                    RelayItemRow(item: item)
+                // Drawn against a clock that ticks: a send that stops moving
+                // changes nothing in the rows, so nothing else would redraw
+                // them, and the page could sit open for an hour saying all
+                // was well.
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    ForEach(relayRows) { item in
+                        RelayItemRow(item: item, now: context.date, watchAppInstalled: link.isWatchAppInstalled) {
+                            link.cancelRelay(item.id)
+                        }
+                    }
+                }
+                if moving > 1 {
+                    Button("Cancel All", role: .destructive) { confirmCancelAll = true }
                 }
                 if link.relayItems.contains(where: { $0.stage == .failed }) {
                     Button("Clear Failed") { link.clearFinishedRelayItems() }
                 }
             } footer: {
-                Text("What the watch asked this phone for: downloaded from the server here, a few at a time, then sent to the watch. Each leaves the list once it is on the watch. Downloads and sends carry on in the background.")
+                Text("What the watch asked this phone for: downloaded from the server here, a few at a time, then sent to the watch. Each leaves the list once it is on the watch. Downloads and sends carry on in the background. A send that has stopped moving is said so; Cancel stops it here and on the watch.")
             }
         }
         .formStyle(.grouped)
         .screenTitle("Transfers")
         .paletteBar()
         .palettePage()
+        .confirmationDialog("Cancel every transfer?", isPresented: $confirmCancelAll, titleVisibility: .visible) {
+            Button("Cancel \(moving)", role: .destructive) { link.cancelAllRelays() }
+        } message: {
+            Text("The watch stops waiting for them. Anything asked for by name on its own comes off the Download to Watch list.")
+        }
     }
 
     /// Moving first, furthest along at the top; then waiting, in the order
@@ -483,12 +501,28 @@ private struct WatchDiagnosticsPage: View {
 /// with its bar and a check when done.
 private struct RelayItemRow: View {
     let item: RelayItem
+    /// The clock the row is drawn against — see the page's `TimelineView`.
+    var now = Date()
+    /// Whether the phone still sees the watch app: a send to a watch
+    /// without it never finishes, and the row says so rather than "stuck".
+    var watchAppInstalled = true
+    var onCancel: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(item.title ?? "Looking it up…")
-                .lineLimit(1)
-                .foregroundStyle(item.title == nil ? Theme.textDim : Theme.text)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(item.title ?? "Looking it up…")
+                    .lineLimit(1)
+                    .foregroundStyle(item.title == nil ? Theme.textDim : Theme.text)
+                Spacer(minLength: 8)
+                // A button, not only a swipe: a send that has sat for days
+                // deserves a way out that can be seen.
+                if !item.stage.isFinished {
+                    Button("Cancel", role: .destructive, action: onCancel)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+            }
             step("Download to this phone", symbol: "arrow.down.circle",
                  fraction: item.downloadFraction, active: item.stage == .downloading)
             step("Send to the watch", symbol: "applewatch",
@@ -496,6 +530,18 @@ private struct RelayItemRow: View {
             switch item.stage {
             case .waiting:
                 Text("Waiting its turn").font(.caption).foregroundStyle(Theme.textDim)
+            case .sending where !watchAppInstalled:
+                Label("The watch app isn't installed, so this can't arrive", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(Theme.warn)
+            case .sending where item.isStuck(at: now):
+                // `.relative` keeps itself current, so the row needn't.
+                Label {
+                    Text("Nothing has reached the watch for ") + Text(item.movedAt ?? Date(), style: .relative)
+                        + Text(". It may be out of reach, locked, or out of room.")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(.caption).foregroundStyle(Theme.warn)
             case .failed:
                 Label(item.failure ?? "Failed", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(Theme.danger)
@@ -504,6 +550,11 @@ private struct RelayItemRow: View {
             }
         }
         .padding(.vertical, 2)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if !item.stage.isFinished {
+                Button("Cancel", role: .destructive, action: onCancel)
+            }
+        }
         .accessibilityElement(children: .combine)
     }
 

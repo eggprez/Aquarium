@@ -312,6 +312,11 @@ enum WatchMessage: Codable, Sendable {
     /// A want taken off the list on the phone: the watch lets go of what
     /// was there for it alone. The plan stops naming it in the same breath.
     case deleteWant(WatchDownloadRequest)
+    /// An item the phone was fetching or sending, cancelled by hand on the
+    /// phone's Transfers page. The watch stops waiting for it and treats it
+    /// as cancelled there too — declined for any want that names it — or
+    /// its next pass would ask the phone for it all over again.
+    case cancelled(itemId: String)
     // Watch → phone
     case progress([WatchProgressEvent])
     /// Fetch this item and hand it over as a file. The watch's own radio
