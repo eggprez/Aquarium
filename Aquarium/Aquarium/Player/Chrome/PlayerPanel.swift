@@ -62,18 +62,28 @@ struct PlayerPanel: View {
     /// One page, no tabs. The page says what it is at the top, except Info,
     /// whose first line is the title itself.
     private var stacked: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                if tab != .info {
-                    Text(tab.title)
-                        .font(.headline)
-                        .accessibilityAddTraits(.isHeader)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    if tab != .info {
+                        Text(tab.title)
+                            .font(.headline)
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                    content
                 }
-                content
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // The line-up opens on the channel being watched, as the
+            // television's opens with the selector on it: the channels either
+            // side are the ones wanted, and in a playlist of a few hundred
+            // the top of the list is nowhere near them.
+            .onAppear {
+                guard tab == .channels, let current = player.currentChannel?.Id else { return }
+                proxy.scrollTo(current, anchor: .center)
+            }
         }
     }
 
@@ -333,6 +343,10 @@ struct PanelRow<Leading: View>: View {
     /// The title in the middle of the card, for short labels — `+5`,
     /// `Reset`, `1.5×` — that look adrift at its leading edge.
     var centered = false
+    /// The title set in more than one style — an episode's show, label and
+    /// name, from `EpisodeLine.row` — given the font the row draws titles in
+    /// and whether it has the focus. `title` is still what the row is called.
+    var styledTitle: ((Font, TitleTone) -> Text)? = nil
     let action: () -> Void
     /// A channel's logo: above the title on a television, beside it
     /// elsewhere.
@@ -344,10 +358,11 @@ struct PanelRow<Leading: View>: View {
         Button(action: action) {
             if PlayerMetrics.television {
                 PanelCardLabel(title: title, detail: detail, isSelected: isSelected, disabledReason: disabledReason,
-                               width: width ?? rowWidth, height: height, centered: centered, leading: leading)
+                               width: width ?? rowWidth, height: height, centered: centered,
+                               styledTitle: styledTitle, leading: leading)
             } else {
                 PanelRowLabel(title: title, detail: detail, isSelected: isSelected, disabledReason: disabledReason,
-                              leading: leading)
+                              styledTitle: styledTitle, leading: leading)
             }
         }
         .buttonStyle(PlayerFocusStyle())
@@ -372,15 +387,15 @@ private struct PanelRowLabel<Leading: View>: View {
     let detail: String?
     let isSelected: Bool
     let disabledReason: String?
+    var styledTitle: ((Font, TitleTone) -> Text)? = nil
     @ViewBuilder var leading: () -> Leading
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             leading()
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.body)
-                    .foregroundStyle(isFocused ? .white : Theme.text)
+                (styledTitle?(.body, isFocused ? .focused : .page)
+                    ?? Text(title).font(.body).foregroundStyle(isFocused ? .white : Theme.text))
                     .multilineTextAlignment(.leading)
                 if let detail, !detail.isEmpty {
                     Text(detail)
@@ -422,6 +437,7 @@ private struct PanelCardLabel<Leading: View>: View {
     let width: CGFloat?
     let height: CGFloat?
     let centered: Bool
+    var styledTitle: ((Font, TitleTone) -> Text)? = nil
     @ViewBuilder var leading: () -> Leading
 
     /// Where the tick goes: in the corner when the card is too narrow to
@@ -439,8 +455,7 @@ private struct PanelCardLabel<Leading: View>: View {
                 // tick beside it — takes a third line instead: shrunk, the
                 // chosen track read smaller than the ones beside it and was
                 // cut off all the same.
-                Text(title)
-                    .font(.headline)
+                (styledTitle?(.headline, isFocused ? .focused : .page) ?? Text(title).font(.headline))
                     .lineLimit(width == nil ? 2 : 3)
                     .minimumScaleFactor(width == nil ? 0.75 : 1)
                     .multilineTextAlignment(centered ? .center : .leading)
@@ -819,13 +834,24 @@ private struct InfoTab: View {
     private var onDemand: some View {
         let item = player.infoItem
         let tv = PlayerMetrics.television
+        let heading: Font = tv ? .title3 : .headline
+        let line: Font = tv ? .callout : .subheadline
+        // An episode: its name regular, then its show and which one it is,
+        // each set as it is on a card, ahead of the facts.
         Text(item?.title ?? player.title)
-            .font(tv ? .title3.weight(.bold) : .headline)
+            .font(item?.isEpisode == true ? heading.titleRole(.episode) : tv ? heading.weight(.bold) : heading)
         if let facts = Self.facts(item), !facts.isEmpty {
-            Text(facts)
-                .font(tv ? .callout : .subheadline)
-                .foregroundStyle(Theme.textBody)
-                .lineLimit(tv ? 1 : nil)
+            let rest = Text(facts).font(line).foregroundStyle(Theme.textBody)
+            Group {
+                if let item, item.isEpisode, item.episodeLabel != nil {
+                    let names = EpisodeLine.text(for: item, episode: false, font: line)
+                    let gap = Text("  ·  ").font(line).foregroundStyle(Theme.textDim)
+                    Text("\(names)\(gap)\(rest)")
+                } else {
+                    rest
+                }
+            }
+            .lineLimit(tv ? 1 : nil)
         }
         if let overview = item?.Overview, !overview.isEmpty {
             // Whole, where the page scrolls.
@@ -844,9 +870,11 @@ private struct InfoTab: View {
                 .font(tv ? .title3.weight(.bold) : .headline)
             // The episode under the show, for a programme that is one of a
             // series: "Night Dispatch" alone says which show, not which night.
+            // Set as an episode's name is anywhere else, or as a label
+            // where the listing has only its number.
             if let episode = now.programmeEpisodeLine {
                 Text(episode)
-                    .font(tv ? .callout.weight(.semibold) : .subheadline.weight(.semibold))
+                    .titleRole(now.programmeEpisodeRole, font: tv ? .callout : .subheadline)
                     .lineLimit(tv ? 1 : 2)
             }
             if let start = now.programStart, let end = now.programEnd {
@@ -894,12 +922,13 @@ private struct InfoTab: View {
         }
     }
 
+    /// The year, the length, the rating, the score, the genres. Not an
+    /// episode's show or which one it is: those go in front, set by
+    /// `EpisodeLine` — see `onDemand`.
     static func facts(_ item: BaseItem?) -> String? {
         guard let item else { return nil }
         var parts: [String] = []
-        if item.isEpisode, let label = item.episodeLabel {
-            parts.append([item.SeriesName, label].compactMap { $0 }.joined(separator: " · "))
-        } else if let year = item.ProductionYear {
+        if !(item.isEpisode && item.episodeLabel != nil), let year = item.ProductionYear {
             parts.append(String(year))
         }
         if let ticks = item.RunTimeTicks, ticks > 0 {
@@ -938,6 +967,10 @@ private struct ChannelsTab: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .focused($focused, equals: channel.Id)
+                #if !os(tvOS)
+                // What `PlayerPanel.stacked` scrolls to as the page opens.
+                .id(channel.Id)
+                #endif
             }
         }
         .defaultFocus($focused, current)

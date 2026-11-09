@@ -102,6 +102,11 @@ struct PlayerTransport: View {
                     skipButton(forward: false)
                     skipButton(forward: true)
                 }
+            } else if player.canStepChannel {
+                HStack(spacing: 18) {
+                    channelButton(next: false)
+                    channelButton(next: true)
+                }
             }
         }
     }
@@ -151,7 +156,9 @@ struct PlayerTransport: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 14) {
                 if player.isLive { liveBadge }
-                if let kicker, !kicker.isEmpty {
+                if let episode = player.playingEpisode {
+                    EpisodeLine.text(for: episode, episode: false, font: .callout, tone: .picture)
+                } else if let kicker, !kicker.isEmpty {
                     Text(kicker)
                         .font(.callout.weight(.semibold))
                         .foregroundStyle(Theme.link)
@@ -162,8 +169,10 @@ struct PlayerTransport: View {
                         .foregroundStyle(Theme.textBody)
                 }
             }
+            // An episode's own name is the regular one of the three; a film's
+            // title, a programme's, keep the heading's weight.
             Text(mainTitle)
-                .font(.title2.weight(.bold))
+                .font(player.playingEpisode != nil ? Font.title2.titleRole(.episode) : .title2.weight(.bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
         }
@@ -262,10 +271,16 @@ struct PlayerTransport: View {
                 HStack(spacing: 8) {
                     if player.isLive { liveBadge }
                     Text(mainTitle)
-                        .font(compact ? .headline : .title3.weight(.semibold))
+                        .font(titleFont)
                         .lineLimit(1)
                 }
-                if let kicker, !kicker.isEmpty {
+                if let episode = player.playingEpisode {
+                    EpisodeLine.text(for: episode, episode: false, font: .subheadline, tone: .picture)
+                        .lineLimit(1)
+                        // A phone held upright has room for the show and
+                        // most of the label; a little smaller, all of it.
+                        .minimumScaleFactor(0.85)
+                } else if let kicker, !kicker.isEmpty {
                     Text(kicker)
                         .font(.subheadline)
                         .foregroundStyle(Theme.textDim)
@@ -372,7 +387,9 @@ struct PlayerTransport: View {
             .accessibilityLabel("Live")
     }
 
-    /// The line under the title: the show and the episode, or the channel.
+    /// The line under the title: the channel, or a film's year. An episode's
+    /// line — its show and which episode it is — is `EpisodeLine`'s, so the
+    /// two are set apart the way they are on a card.
     private var kicker: String? {
         if player.isLive {
             if let channel = player.currentChannel {
@@ -380,15 +397,20 @@ struct PlayerTransport: View {
             }
             return player.subtitle
         }
-        if let item = player.item, item.isEpisode {
-            return [item.SeriesName, item.episodeLabel].compactMap { $0 }.joined(separator: " · ")
-        }
         return player.item?.ProductionYear.map(String.init)
     }
 
     private var mainTitle: String {
         if player.isLive { return schedule.now?.title ?? player.title }
         return player.item?.title ?? player.title
+    }
+
+    /// The title over the picture on a phone, an iPad and a Mac. An episode's
+    /// name is the regular one of its three; anything else keeps the
+    /// heading's weight.
+    private var titleFont: Font {
+        let size: Font = compact ? .headline : .title3
+        return player.playingEpisode != nil ? size.titleRole(.episode) : size.weight(.semibold)
     }
 
     /// The "…" button: the More card — speed, the sleep timer, what happens
@@ -406,13 +428,33 @@ struct PlayerTransport: View {
         HStack(spacing: PlayerMetrics.clusterSpacing(compact: compact)) {
             if !player.isLive {
                 skipButton(forward: false)
+            } else if player.canStepChannel {
+                channelButton(next: false)
             }
             playPauseButton
             if !player.isLive {
                 skipButton(forward: true)
+            } else if player.canStepChannel {
+                channelButton(next: true)
             }
         }
         .shadow(color: .black.opacity(0.35), radius: 10, y: 2)
+    }
+
+    /// The channel before or after this one in the line-up, where a film has
+    /// its two skips: a channel has nothing to skip through, and the next
+    /// one is what a thumb reaches for instead. The television does this
+    /// with a click on the top or bottom of the remote — see
+    /// `PlayerRemoteDriver` — and wraps round at either end, as this does.
+    private func channelButton(next: Bool) -> some View {
+        PlayerGlyphButton(
+            symbol: next ? "forward.end.fill" : "backward.end.fill",
+            label: next ? "Next channel" : "Previous channel",
+            size: PlayerMetrics.skipGlyph(compact: compact) - 8, weight: .medium, padding: 16
+        ) {
+            onInteract()
+            player.switchChannel(by: next ? 1 : -1)
+        }
     }
 
     private func skipButton(forward: Bool) -> some View {
@@ -501,8 +543,8 @@ struct PlayerTransport: View {
 
     // MARK: - Pills
 
-    /// Info opens the panel; Audio, Subtitles, Quality and Up Next drop
-    /// their cards; Fill is a switch.
+    /// Info opens the panel, and on a channel so does Channels; Audio,
+    /// Subtitles, Quality and Up Next drop their cards; Fill is a switch.
     ///
     /// A phone held upright, the smallest of them especially, has no room
     /// for six pills with their words: the row used to scroll, with Fill
@@ -533,6 +575,14 @@ struct PlayerTransport: View {
             pill(symbol: PlayerTab.info.symbol, title: plain ? "Info" : nil,
                  label: player.isLive ? "Channel info" : "Episode info",
                  tab: .info, anchor: .info)
+            // The line-up, one tap from the picture: the television has it as
+            // the tab beside Info in its panel, and under "…" it was two. It
+            // keeps its word as long as Quality would have: a channel has no
+            // Quality pill, and a screen on its own does not say "channels".
+            if player.panelTabs.contains(.channels) {
+                pill(symbol: PlayerTab.channels.symbol, title: state ? "Channels" : nil,
+                     label: "Channels", tab: .channels, anchor: .channels)
+            }
             menuPill(.audio, symbol: "speaker.wave.2", title: plain ? "Audio" : nil, label: "Audio tracks")
             menuPill(.subtitles, symbol: "captions.bubble", title: plain ? "Subtitles" : nil, label: "Subtitles")
             if player.offersQualityChoice {

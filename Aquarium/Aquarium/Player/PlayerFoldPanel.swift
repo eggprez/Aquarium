@@ -221,10 +221,13 @@ struct PlayerFoldPanel: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(mainTitle)
-                    .font(.title3.weight(.semibold))
+                    .font(player.playingEpisode != nil ? Font.title3.titleRole(.episode) : .title3.weight(.semibold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
-                if let kicker, !kicker.isEmpty {
+                if let episode = player.playingEpisode {
+                    EpisodeLine.text(for: episode, episode: false, font: .subheadline, tone: .picture)
+                        .lineLimit(1)
+                } else if let kicker, !kicker.isEmpty {
                     Text(kicker)
                         .font(.subheadline)
                         .foregroundStyle(Theme.textDim)
@@ -259,16 +262,14 @@ struct PlayerFoldPanel: View {
         return player.item?.title ?? player.title
     }
 
-    /// The line under the title: the show and the episode, or the channel.
+    /// The line under the title: the channel, or a film's year. An episode's
+    /// is `EpisodeLine`'s — see `header`.
     private var kicker: String? {
         if player.isLive {
             if let channel = player.currentChannel {
                 return [channel.ChannelNumber, channel.title].compactMap { $0 }.joined(separator: " · ")
             }
             return player.subtitle
-        }
-        if let item = player.item, item.isEpisode {
-            return [item.SeriesName, item.episodeLabel].compactMap { $0 }.joined(separator: " · ")
         }
         return player.item?.ProductionYear.map(String.init)
     }
@@ -318,7 +319,7 @@ struct PlayerFoldPanel: View {
             PanelHeading(text: "Up Next")
             if !player.queue.isEmpty {
                 ForEach(player.queue, id: \.Id) { entry in
-                    PanelRow(title: PlayerModel.displayTitle(entry)) {
+                    PanelRow(title: PlayerModel.displayTitle(entry), styledTitle: EpisodeLine.row(entry)) {
                         Task { await player.playQueued(entry.Id) }
                     } leading: {
                         still(entry)
@@ -327,7 +328,8 @@ struct PlayerFoldPanel: View {
             } else {
                 ForEach(player.upNextList, id: \.Id) { entry in
                     PanelRow(title: PlayerModel.upNextRowTitle(entry),
-                             detail: entry.title == PlayerModel.upNextRowTitle(entry) ? nil : entry.SeriesName) {
+                             detail: entry.title == PlayerModel.upNextRowTitle(entry) ? nil : entry.SeriesName,
+                             styledTitle: EpisodeLine.row(entry, show: false)) {
                         Task { await player.playUpcoming(entry) }
                     } leading: {
                         still(entry)

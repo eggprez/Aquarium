@@ -15,6 +15,21 @@ extension PlayerModel {
 
     var channelLineup: [BaseItem] { LiveTVStore.shared.channels }
 
+    /// The episode on screen, when that is what is playing: the chrome sets
+    /// its show, its name and which one it is apart — see `TitleRole`.
+    var playingEpisode: BaseItem? {
+        guard !isLive, let item, item.isEpisode else { return nil }
+        return item
+    }
+
+    /// Whether there is a channel either side of this one to step to: the
+    /// television's up and down clicks, the buttons beside play elsewhere.
+    var canStepChannel: Bool {
+        guard let current = currentChannel else { return false }
+        let lineup = channelLineup
+        return lineup.count > 1 && lineup.contains { $0.Id == current.Id }
+    }
+
     func switchChannel(by offset: Int) {
         let lineup = channelLineup
         guard let current = currentChannel, !lineup.isEmpty,

@@ -347,7 +347,7 @@ private struct UpNextMenu: View {
     var body: some View {
         if !player.queue.isEmpty {
             ForEach(player.queue, id: \.Id) { entry in
-                PanelRow(title: PlayerModel.displayTitle(entry)) {
+                PanelRow(title: PlayerModel.displayTitle(entry), styledTitle: EpisodeLine.row(entry)) {
                     onInteract()
                     close()
                     Task { await player.playQueued(entry.Id) }
@@ -363,7 +363,8 @@ private struct UpNextMenu: View {
         } else {
             ForEach(player.upNextList, id: \.Id) { entry in
                 PanelRow(title: PlayerModel.upNextRowTitle(entry),
-                         detail: entry.title == PlayerModel.upNextRowTitle(entry) ? nil : entry.SeriesName) {
+                         detail: entry.title == PlayerModel.upNextRowTitle(entry) ? nil : entry.SeriesName,
+                         styledTitle: EpisodeLine.row(entry, show: false)) {
                     onInteract()
                     close()
                     Task { await player.playUpcoming(entry) }

@@ -11,6 +11,12 @@
 //      xcrun simctl spawn "iPhone Duo" notifyutil -p aquarium.debug.stop
 //      xcrun simctl spawn "iPhone Duo" notifyutil -p aquarium.debug.browse
 //      xcrun simctl spawn "iPhone Duo" notifyutil -p aquarium.debug.watchrelay
+//      xcrun simctl spawn "iPhone Duo" notifyutil -p aquarium.debug.channel
+//      xcrun simctl spawn "iPhone Duo" notifyutil -p aquarium.debug.channel.next
+//
+//  `channel` tunes the guide's first channel the way the guide does, as the
+//  Apple TV's hook of the same name does; `channel.next` and `channel.prev`
+//  are the buttons beside play on a channel.
 //
 //  The Apple TV has a fuller one of these — see Player/TV/RemoteDebugHook.swift.
 
@@ -21,7 +27,7 @@ import OSLog
 @MainActor
 enum DebugLinkHook {
     private static var registered = false
-    private static let names = ["openurl", "stop", "browse", "watchrelay"]
+    private static let names = ["openurl", "stop", "browse", "watchrelay", "channel", "channel.next", "channel.prev"]
 
     static func start() {
         guard !registered else { return }
@@ -57,6 +63,19 @@ enum DebugLinkHook {
             // a paired simulator never finishes a send, so there is no
             // honest way to get one there.
             WatchLink.shared.debugSeedRelayRows()
+        case "aquarium.debug.channel":
+            Task {
+                await LiveTVStore.shared.ensureLoaded()
+                guard let first = LiveTVStore.shared.channels.first else {
+                    PlayerModel.log.notice("no channels in the guide")
+                    return
+                }
+                PlayerModel.shared.playChannel(first)
+            }
+        case "aquarium.debug.channel.next":
+            PlayerModel.shared.switchChannel(by: 1)
+        case "aquarium.debug.channel.prev":
+            PlayerModel.shared.switchChannel(by: -1)
         default:
             break
         }

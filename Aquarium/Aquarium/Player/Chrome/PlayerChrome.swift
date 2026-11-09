@@ -68,7 +68,7 @@ final class PlayerChromeState {
     /// The speed to go back to when the hold ends.
     @ObservationIgnored var speedBeforeHold: Double = 1
 
-    enum PanelAnchor: Hashable { case info, more }
+    enum PanelAnchor: Hashable { case info, channels, more }
 
     enum ChromeMenu: Hashable {
         case audio, subtitles, quality, upNext, more
@@ -610,10 +610,14 @@ struct PlayerChrome: View {
 }
 
 extension PlayerChromeState.PanelAnchor {
-    /// The pill a page's popover hangs off: the Info pill for Info, the "…"
-    /// button for the pages opened from its menu.
+    /// The pill a page's popover hangs off: the Info pill for Info, the
+    /// Channels pill for the line-up, the "…" button for anything else.
     static func anchor(for tab: PlayerTab) -> Self {
-        tab == .info ? .info : .more
+        switch tab {
+        case .info: .info
+        case .channels: .channels
+        default: .more
+        }
     }
 }
 
