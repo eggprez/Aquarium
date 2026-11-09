@@ -740,9 +740,7 @@ struct ItemDetailView: View {
             // used to carry it as "Play S02E04", which is both a filename and
             // the longest label in the row.
             if let target = playable(for: item), target.Id != item.Id, target.isEpisode {
-                Text(upNextLine(target))
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.textBody)
+                upNextLine(target)
                     .lineLimit(2)
             }
 
@@ -921,9 +919,7 @@ struct ItemDetailView: View {
             #endif
         }
         if let target = playable(for: item), target.Id != item.Id, target.isEpisode {
-            Text(upNextLine(target))
-                .font(.subheadline)
-                .foregroundStyle(Theme.textBody)
+            upNextLine(target)
                 .lineLimit(2)
         }
 
@@ -1591,13 +1587,15 @@ struct ItemDetailView: View {
 
     /// "Up next · Season 2: Episode 4 · Fishes", or "Carry on with" where it has
     /// already been started — the line under the facts that says which episode
-    /// the Play button is pointing at.
-    private func upNextLine(_ target: BaseItem) -> String {
-        var parts: [String] = []
-        if let label = target.episodeLabel { parts.append(label) }
-        parts.append(target.title)
-        let lead = target.progressFraction != nil ? "Carry on with" : "Up next"
-        return "\(lead) · " + parts.joined(separator: " · ")
+    /// the Play button is pointing at. Which episode and what it is called are
+    /// set apart, as they are on a card: see `TitleRole`.
+    private func upNextLine(_ target: BaseItem) -> Text {
+        EpisodeLine.text(
+            for: target,
+            lead: target.progressFraction != nil ? "Carry on with" : "Up next",
+            show: false,
+            font: .subheadline
+        )
     }
 
     #if !os(tvOS)

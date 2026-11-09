@@ -184,12 +184,11 @@ struct PlayerUpNextCard: View {
                     .font(.caption.weight(.heavy))
                     .foregroundStyle(Theme.link)
                 Text(next?.title ?? title)
-                    .font(.headline)
+                    .font(next?.isEpisode == true ? Font.headline.titleRole(.episode) : .headline)
                     .lineLimit(2)
-                if let label = next?.episodeLabel {
-                    Text(label)
-                        .font(.caption)
-                        .foregroundStyle(Theme.textDim)
+                if let next, next.isEpisode, next.episodeLabel != nil {
+                    EpisodeLine.text(for: next, episode: false, font: .caption)
+                        .lineLimit(1)
                 }
                 Text("Click to play now · Menu to stop here")
                     .font(.caption)
@@ -215,10 +214,16 @@ struct PlayerUpNextCard: View {
                  : "Up next · in \(Int(player.secondsRemaining.rounded()))s")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.75))
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white)
-                .lineLimit(2)
+            Group {
+                if let next, next.isEpisode {
+                    EpisodeLine.text(for: next, font: .subheadline, tone: .picture)
+                } else {
+                    Text(title)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white)
+                }
+            }
+            .lineLimit(2)
             HStack(spacing: 10) {
                 Button(PlayerOverlayText.label(mac: "Play Now", elsewhere: "Play now")) { Task { await player.playNextNow() } }
                     .buttonStyle(.borderedProminent)

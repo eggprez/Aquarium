@@ -1118,6 +1118,21 @@ struct DownloadedRow: View {
         return number + record.name
     }
 
+    /// The same title for the eye: a row standing alone names an episode's
+    /// show, which one it is and what it is called, each set as it is on a
+    /// card — see `TitleRole`.
+    private var styledTitle: Text {
+        guard showsContext, record.isEpisode, let series = record.series, !series.isEmpty else {
+            return Text(displayTitle).foregroundStyle(Theme.text)
+        }
+        return EpisodeLine.text(
+            show: series,
+            label: BaseItem.episodeLabel(season: record.season, episode: record.episode),
+            episode: record.name,
+            font: .body
+        )
+    }
+
     /// An episode is a 16:9 still of that episode; a film is its portrait
     /// poster. Drawing an episode as a poster meant borrowing the show's, and
     /// then every row of a season was the same picture.
@@ -1218,9 +1233,8 @@ struct DownloadedRow: View {
                 thumbnail
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(displayTitle)
+                    styledTitle
                         .lineLimit(2)
-                        .foregroundStyle(Theme.text)
                     HStack(spacing: 8) {
                         Text(record.quality).font(.caption).foregroundStyle(Theme.textDim)
                         if record.played {

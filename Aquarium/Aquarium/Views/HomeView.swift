@@ -1489,8 +1489,7 @@ struct HeroHeader: View {
 
                 if item.isEpisode, let label = item.episodeLabel {
                     Text(label)
-                        .font(metaFont(strong: true))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .titleRole(.label, font: metaFont(strong: true), tone: .picture)
                         .lineLimit(1)
                 }
 

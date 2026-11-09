@@ -361,8 +361,14 @@ struct BaseItem: Codable, Hashable, Sendable, Identifiable {
     ///
     /// Season 0 is where Jellyfin files specials, which is what it calls them.
     var episodeLabel: String? {
-        guard let e = IndexNumber else { return nil }
-        guard let s = ParentIndexNumber else { return "Episode \(e)" }
+        Self.episodeLabel(season: ParentIndexNumber, episode: IndexNumber)
+    }
+
+    /// The same label from the two numbers alone, for whatever remembers an
+    /// episode without keeping the item — a download's record does.
+    static func episodeLabel(season: Int?, episode: Int?) -> String? {
+        guard let e = episode else { return nil }
+        guard let s = season else { return "Episode \(e)" }
         return s == 0 ? "Specials: Episode \(e)" : "Season \(s): Episode \(e)"
     }
 

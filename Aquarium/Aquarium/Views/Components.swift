@@ -390,12 +390,12 @@ struct PosterCard: View {
             if showSubtitle {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(cardTitle)
-                        .font(titleFont)
+                        .font(titleFont.titleRole(.show))
                         .lineLimit(titleLines)
-                        .foregroundStyle(Theme.text)
+                        .foregroundStyle(TitleRole.show.color(.page))
                     ForEach(Array(cardLines.enumerated()), id: \.offset) { _, line in
-                        Text(line)
-                            .font(subtitleFont)
+                        Text(line.text)
+                            .font(line.role.map { subtitleFont.titleRole($0) } ?? subtitleFont)
                             .lineLimit(1)
                             // "Season 1: Episode 1" is a few points wider than a
                             // phone's poster column; shrinking it slightly is
@@ -403,7 +403,7 @@ struct PosterCard: View {
                             // Mac, where shrunken type next to unshrunken type
                             // is the thing that reads as wrong.
                             .minimumScaleFactor(subtitleScale)
-                            .foregroundStyle(Theme.textDim)
+                            .foregroundStyle(line.role?.color(.page) ?? Theme.textDim)
                     }
                 }
                 .frame(maxWidth: width ?? .infinity, alignment: .leading)
@@ -434,11 +434,14 @@ struct PosterCard: View {
     /// come out at eleven and ten points, which under a 200-point poster is
     /// fine print. `.callout` and `.subheadline` there are the sizes the
     /// system's own media apps set a tile's name and line of facts in.
+    ///
+    /// The weight is not chosen here: a card's heading is a show's name or a
+    /// film's, and `TitleRole.show` sets those the same way everywhere.
     private var titleFont: Font {
         #if os(macOS)
-        .callout.weight(.medium)
+        .callout
         #else
-        .subheadline.weight(.medium)
+        .subheadline
         #endif
     }
 
@@ -576,20 +579,24 @@ struct PosterCard: View {
     /// The lines under the heading. An episode gets two — which one it is,
     /// spelled out, and then what it is called — because "Season 1: Episode 1 ·
     /// Pilot" on one line is what a card this narrow has no room for.
-    private var cardLines: [String] {
-        if let subtitle { return subtitle.isEmpty ? [] : [subtitle] }
+    ///
+    /// Each of the two says which it is, so the label and the name under it
+    /// are not set alike — see `TitleRole`. A line of facts has no role and
+    /// is drawn as it always was.
+    private var cardLines: [(text: String, role: TitleRole?)] {
+        if let subtitle { return subtitle.isEmpty ? [] : [(subtitle, nil)] }
         // The season's own name, now that the heading went to the show.
-        if seasonShowsSeries { return [item.title] }
+        if seasonShowsSeries { return [(item.title, .label)] }
         if item.isEpisode {
-            var lines: [String] = []
-            if let label = item.episodeLabel { lines.append(label) }
+            var lines: [(text: String, role: TitleRole?)] = []
+            if let label = item.episodeLabel { lines.append((label, .label)) }
             // Only when the heading went to the series; otherwise this is the
             // heading again.
-            if item.SeriesName != nil { lines.append(item.title) }
+            if item.SeriesName != nil { lines.append((item.title, .episode)) }
             return lines
         }
         let facts = Format.itemSubtitle(item)
-        return facts.isEmpty ? [] : [facts]
+        return facts.isEmpty ? [] : [(facts, nil)]
     }
 }
 
@@ -2919,6 +2926,9 @@ struct AncestorTrail: View {
     private struct Step: Identifiable {
         let id: String
         let name: String
+        /// The show, or the season: set apart the way they are everywhere
+        /// else, in the link's own colour.
+        let role: TitleRole
     }
 
     var body: some View {
@@ -2936,7 +2946,7 @@ struct AncestorTrail: View {
                         app.navigate(to: .item(step.id))
                     } label: {
                         Text(step.name)
-                            .font(.subheadline.weight(.medium))
+                            .font(Font.subheadline.titleRole(step.role))
                             .foregroundStyle(Theme.link)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -2956,10 +2966,10 @@ struct AncestorTrail: View {
         var out: [Step] = []
         if let id = seriesId, id != item.Id,
            let name = item.SeriesName, !name.isEmpty {
-            out.append(Step(id: id, name: name))
+            out.append(Step(id: id, name: name, role: .show))
         }
         if item.isEpisode, let id = seasonId, id != item.Id {
-            out.append(Step(id: id, name: seasonName))
+            out.append(Step(id: id, name: seasonName, role: .label))
         }
         return out
     }
