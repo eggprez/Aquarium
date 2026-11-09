@@ -219,6 +219,10 @@ final class FoldState {
     private init() {}
 
     func safeAreaResolved(top: CGFloat, size: CGSize) {
+        #if os(iOS)
+        // The one report that follows the window to the other display.
+        OrientationLock.shared.screenResolved()
+        #endif
         let upright = size.height > size.width
         let strip: CGFloat? = usesInnerDisplay && upright && top > Self.phoneStatusHeight + 10 ? top : nil
         let sideways = usesInnerDisplay && !upright
