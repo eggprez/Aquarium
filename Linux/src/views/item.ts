@@ -15,6 +15,9 @@ import {
   openMenu,
   toast,
   attachContextMenu,
+  openActionMenu,
+  queueActions,
+  askAddToNextUp,
   itemActions,
   downloadLabel,
   emptyState,
@@ -197,6 +200,16 @@ function playButtons(item: any): HTMLElement {
         "Play",
       ])
     );
+  }
+
+  // Up Next: queue it to play after what's on now.
+  const queue = queueActions(item);
+  if (queue.length) {
+    const uWrap = el("div", { class: "menu-wrap" });
+    const uBtn = el("button", { class: "btn", title: "Play next, or later, after what's playing" }, ["Up Next", icon("chevron-down")]);
+    uBtn.addEventListener("click", () => openActionMenu(uBtn, null, queue));
+    uWrap.append(uBtn);
+    actions.append(uWrap);
   }
 
   // Stream quality menu
@@ -570,6 +583,11 @@ function paintItem(page: HTMLElement, data: ItemData): void {
   // play/quality/download/watched bar.
   const actionBar = item.Type !== "Series" ? playButtons(item) : null;
   const actionNodes = actionBar ? [actionBar] : seriesHeroActions(playTarget);
+  // A show's page can put it on Next Up, on the server (see api.addToNextUp).
+  if (!actionBar) {
+    const bar = actionNodes[actionNodes.length - 1];
+    bar?.append(el("button", { class: "btn", title: "Put this show on Next Up, here and in Jellyfin's other apps", onClick: () => askAddToNextUp(item) }, [icon("episodes"), "Add to Next Up…"]));
+  }
 
   // The backdrop moves, so it gets its own clipping frame. Putting the clip on
   // the hero itself would cut off the Quality and Download dropdowns, which
@@ -664,6 +682,8 @@ function paintItem(page: HTMLElement, data: ItemData): void {
     seasons.forEach((season: any, idx: number) => {
       const btn = el("button", { class: "btn small" }, [season.Name ?? `Season ${season.IndexNumber}`]);
       btn.addEventListener("click", () => showSeason(season, btn));
+      // Right-click a season for Play Season Next / Later.
+      attachContextMenu(btn, season.Name ?? null, () => queueActions({ ...season, SeriesId: season.SeriesId ?? item.Id }));
       tabs.append(btn);
       if (idx === openIdx) showSeason(season, btn);
     });

@@ -2,7 +2,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as api from "./api";
-import { openDialog, toast } from "./ui";
+import { iptvUserAgent } from "./iptv";
+import { el, openDialog, toast } from "./ui";
 
 // ---------- Audio level ----------
 // mpv starts every session at 100% and forgets what came before, so the level
@@ -90,6 +91,8 @@ let nowPlaying: {
   /** The finished download of whatever is playing, streamed or not — what
    *  the quality menu's "Downloaded" row switches back to. */
   download: any | null;
+  /** How the server is sending it, for the stream info panel. */
+  source?: api.PlaybackSource;
 } | null = null;
 let lastPosition = 0;
 // Set synchronously when a finished playback is about to autoplay its next
@@ -117,6 +120,239 @@ export function isAutoplayCancelled(): boolean {
 export function resumeAutoplay(): void {
   autoplayCancelled = false;
   document.dispatchEvent(new CustomEvent("aquarium-upnext-changed"));
+}
+
+// ---------- Playback preferences ----------
+// Settings → Playback. Read where they apply rather than cached, so a change
+// takes hold on the next press without anything to invalidate.
+
+/** How far the skip buttons, ←/→ and a double-tap jump, in seconds. */
+export const SKIP_INTERVALS = [10, 15, 30];
+
+export function skipInterval(): number {
+  const v = Number(api.getConfig().player_skip_interval);
+  return SKIP_INTERVALS.includes(v) ? v : 10;
+}
+
+/** Seconds the fullscreen controls stay up after the last pointer move. */
+export const HIDE_AFTER_CHOICES = [2, 4, 6, 10];
+
+export function hideControlsAfter(): number {
+  const v = Number(api.getConfig().player_hide_after);
+  return HIDE_AFTER_CHOICES.includes(v) ? v : 2;
+}
+
+/** Whether the time at the right of the timeline counts down. */
+export function showsRemaining(): boolean {
+  return api.getConfig().player_show_remaining === true;
+}
+
+export function setShowsRemaining(on: boolean): void {
+  saveConfigSoon({ player_show_remaining: on });
+  api.getConfig().player_show_remaining = on;
+}
+
+/** Off: the Up Next card still appears, it just doesn't start on its own. */
+export function autoplayNextEnabled(): boolean {
+  return api.getConfig().autoplay_next !== false;
+}
+
+/** Off: everything opens at the beginning, even what was started before. */
+export function resumeEnabled(): boolean {
+  return api.getConfig().resume_playback !== false;
+}
+
+// ---------- Up Next: the user's queue ----------
+//
+// Titles queued by hand with Play Next / Play Later. They play ahead of
+// whatever the series would offer next, in order, and a queue started while
+// nothing is playing starts at once.
+
+let userQueue: any[] = [];
+
+/** True while something is on screen (the last player-status said so). */
+let playerRunning = false;
+
+export function getUserQueue(): any[] {
+  return userQueue;
+}
+
+function queueChanged(): void {
+  nextPeek = null;
+  document.dispatchEvent(new CustomEvent("aquarium-queue-changed"));
+}
+
+/** A season queues its episodes; films and episodes queue themselves. */
+async function queueable(items: any[]): Promise<any[]> {
+  const out: any[] = [];
+  for (const item of items) {
+    if (item.Type === "Season" && item.SeriesId) {
+      out.push(...(await api.getEpisodes(item.SeriesId, item.Id).catch(() => [])));
+    } else if (item.Type === "Movie" || item.Type === "Episode" || item.Type === "Video" || item.Type === "MusicVideo") {
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+export async function queueNext(items: any[]): Promise<number> {
+  const fresh = await queueable(items);
+  if (!fresh.length) return 0;
+  userQueue = [...fresh, ...userQueue.filter((q) => !fresh.some((f) => f.Id === q.Id))];
+  queueChanged();
+  startQueueIfIdle();
+  return fresh.length;
+}
+
+export async function queueLater(items: any[]): Promise<number> {
+  const fresh = await queueable(items);
+  if (!fresh.length) return 0;
+  userQueue = [...userQueue.filter((q) => !fresh.some((f) => f.Id === q.Id)), ...fresh];
+  queueChanged();
+  startQueueIfIdle();
+  return fresh.length;
+}
+
+export function removeFromQueue(id: string): void {
+  userQueue = userQueue.filter((q) => q.Id !== id);
+  queueChanged();
+}
+
+export function clearQueue(): void {
+  if (!userQueue.length) return;
+  userQueue = [];
+  queueChanged();
+}
+
+/** Play one queued title now; the ones ahead of it are passed over. */
+export async function playQueued(id: string): Promise<void> {
+  const i = userQueue.findIndex((q) => q.Id === id);
+  if (i < 0) return;
+  const next = userQueue[i];
+  userQueue = userQueue.slice(i + 1);
+  queueChanged();
+  const np = nowPlaying;
+  await playItem(
+    next,
+    { resume: true, maxBitrate: np && !np.isLocal ? np.opts.maxBitrate : undefined },
+    { inherited: !!np && !np.isLocal, continuation: !!np }
+  );
+}
+
+function startQueueIfIdle(): void {
+  if (playerRunning || autoplayPending || !userQueue.length) return;
+  const first = userQueue[0];
+  userQueue = userQueue.slice(1);
+  queueChanged();
+  void playItem(first, { resume: true }).catch(() => {});
+}
+
+// ---------- Opening the next stream early ----------
+//
+// About 90 seconds before the end, the next title's PlaybackInfo is asked
+// for and its stream opened on the server (`player_warm`), so the transcode
+// is already running when autoplay — or Play now — reaches it, and mpv opens
+// a stream that is ready instead of waiting on the server to start one.
+
+const PREFETCH_LEAD = 90;
+/** A prefetched PlaybackInfo older than this is asked for again. */
+const PREFETCH_TTL_MS = 10 * 60_000;
+
+let prefetched: {
+  itemId: string;
+  maxBitrate?: number;
+  startTicks: number;
+  src: api.PlaybackSource;
+  at: number;
+} | null = null;
+/** The file a prefetch was last tried for, so it is tried once per file. */
+let prefetchTriedFor: string | null = null;
+
+async function maybePrefetch(st: any): Promise<void> {
+  const np = nowPlaying;
+  if (!np || np.opts.live || !(st.duration > 0)) return;
+  const left = st.duration - (st.position ?? 0);
+  if (left > PREFETCH_LEAD || left <= 5) return;
+  const playingId = np.isLocal ? np.item.item_id : np.item.Id;
+  if (!playingId || prefetchTriedFor === playingId) return;
+  prefetchTriedFor = playingId;
+  if (autoplayCancelled) return;
+  const next = await peekNextEpisode().catch(() => null);
+  // Only a server item streams; a downloaded next episode plays from disk.
+  if (!next?.Id || nowPlaying !== np) return;
+  if (await findDownload(next.Id)) return;
+  const maxBitrate = np.isLocal ? undefined : np.opts.maxBitrate;
+  const startTicks = resumeEnabled() ? next.UserData?.PlaybackPositionTicks ?? 0 : 0;
+  try {
+    const src = await api.resolvePlayback(next.Id, {
+      maxBitrate,
+      forceTranscode: maxBitrate !== undefined,
+      startTicks,
+    });
+    if (nowPlaying !== np) return;
+    prefetched = { itemId: next.Id, maxBitrate, startTicks, src, at: Date.now() };
+    invoke("ui_log", { msg: `prefetch ${next.Id} method=${src.playMethod}` }).catch(() => {});
+    await invoke("player_warm", { url: src.url }).catch((e) =>
+      invoke("ui_log", { msg: `prefetch warm failed: ${e}` }).catch(() => {})
+    );
+  } catch (e) {
+    invoke("ui_log", { msg: `prefetch failed: ${e}` }).catch(() => {});
+  }
+}
+
+/** The prefetched source for this start, if it is still the right one. */
+function takePrefetched(itemId: string, maxBitrate: number | undefined, startTicks: number): api.PlaybackSource | null {
+  const p = prefetched;
+  prefetched = null;
+  if (!p || p.itemId !== itemId || p.maxBitrate !== maxBitrate || p.startTicks !== startTicks) return null;
+  if (Date.now() - p.at > PREFETCH_TTL_MS) return null;
+  return p.src;
+}
+
+// ---------- When playback fails ----------
+
+/** What to offer when a stream didn't play: the same again, a smaller one,
+ *  or giving up. Shown once the player has torn down, so the page is
+ *  visible and the card can be an ordinary dialog. */
+function showPlaybackError(message: string, np: NonNullable<typeof nowPlaying> | null, position: number): void {
+  const canRetry = !!np && !np.opts.live && !!np.item;
+  const smaller = np && !np.isLocal && !np.opts.live && np.item?.Id ? smallerStream(np.opts.maxBitrate) : null;
+  const body = [el("p", {}, [message])];
+  const actions: { label: string; primary?: boolean; run?: () => void }[] = [];
+  if (np && (canRetry || np.opts.live)) {
+    actions.push({
+      label: "Try Again",
+      primary: true,
+      run: () => {
+        if (np.opts.live && !np.serverItem) {
+          void playChannelUrl(np.item).catch(() => {});
+        } else if (np.isLocal) {
+          void playLocal(np.item, { serverItem: np.serverItem, startSeconds: position }).catch(() => {});
+        } else {
+          void playItem(np.item, { ...np.opts, startSeconds: np.opts.live ? undefined : position }, { stream: true }).catch(() => {});
+        }
+      },
+    });
+  }
+  if (smaller !== null && np) {
+    actions.push({
+      label: "Try a Smaller Stream",
+      primary: !actions.length,
+      run: () => {
+        void playItem(np.item, { ...np.opts, maxBitrate: smaller, startSeconds: position }, { stream: true }).catch(() => {});
+      },
+    });
+  }
+  actions.push({ label: "Close", primary: !actions.length });
+  openDialog({ title: "This didn't play", body, actions });
+}
+
+/** The next rung down from `current` (Direct Play counts as the top). */
+function smallerStream(current: number | undefined): number | null {
+  const rungs = QUALITY_CHOICES.map((q) => q.maxBitrate).filter((b): b is number => typeof b === "number");
+  if (current === undefined) return rungs[1] ?? rungs[0] ?? null;
+  const lower = rungs.find((b) => b < current);
+  return lower ?? null;
 }
 
 // ---------- Picture adjustments ----------
@@ -335,6 +571,7 @@ let nextPeek: { forId: string; item: any | null } | null = null;
  */
 export async function peekNextEpisode(): Promise<any | null> {
   const np = nowPlaying;
+  if (userQueue.length) return userQueue[0];
   if (!np || isShuffling()) return null;
   const id = np.isLocal ? np.item.item_id : np.item.Id;
   if (!id) return null;
@@ -367,7 +604,7 @@ export async function playNextNow(): Promise<boolean> {
   }
 }
 
-function itemTitle(item: any): string {
+export function itemTitle(item: any): string {
   if (item.Type === "Episode" && item.SeriesName) {
     const s = item.ParentIndexNumber, e = item.IndexNumber;
     const code = s != null && e != null ? ` Season ${s}, Episode ${e}` : "";
@@ -431,7 +668,7 @@ export async function playItem(
   const startTicks =
     opts.startSeconds != null
       ? Math.max(0, Math.floor(opts.startSeconds * 10_000_000))
-      : opts.resume
+      : opts.resume && resumeEnabled()
         ? item.UserData?.PlaybackPositionTicks ?? 0
         : 0;
   // A finished download beats any stream: no server transcode, no network to
@@ -478,12 +715,15 @@ export async function playItem(
       : opts.maxBitrate;
   if (nowPlaying === startedPlaying) nowPlaying = { ...nowPlaying, opts: { ...opts, maxBitrate } };
   try {
-    const src = await api.resolvePlayback(item.Id, {
-      maxBitrate,
-      forceTranscode: maxBitrate !== undefined,
-      live: opts.live,
-      startTicks,
-    });
+    const src =
+      (!opts.live && takePrefetched(item.Id, maxBitrate, startTicks)) ||
+      (await api.resolvePlayback(item.Id, {
+        maxBitrate,
+        forceTranscode: maxBitrate !== undefined,
+        live: opts.live,
+        startTicks,
+      }));
+    if (nowPlaying === startedPlaying) nowPlaying.source = src;
     invoke("ui_log", { msg: `playItem ${item.Id} method=${src.playMethod} startTicks=${startTicks} maxBitrate=${maxBitrate}` }).catch(() => {});
     await invoke("player_play", {
       req: {
@@ -511,7 +751,8 @@ export async function playItem(
     );
   } catch (e: any) {
     invoke("ui_log", { msg: `playItem FAILED: ${e?.message ?? e}` }).catch(() => {});
-    toast(`Playback failed: ${e.message ?? e}`, "error");
+    if (nowPlaying === startedPlaying) showPlaybackError(e?.message ?? String(e), startedPlaying, startTicks / 10_000_000);
+    else toast(`Playback failed: ${e.message ?? e}`, "error");
     throw e;
   }
 }
@@ -525,26 +766,32 @@ export async function playItem(
  * being reported to a server that has never heard of this channel. `live` still
  * has to be set, so the player bar shows Live rather than a scrubber.
  */
-export async function playChannelUrl(ch: any): Promise<void> {
+export async function playChannelUrl(
+  ch: any,
+  opts: { quiet?: boolean; continuation?: boolean } = {}
+): Promise<void> {
   shuffleState = null;
   nowPlaying = { item: ch, opts: { live: true }, isLocal: false, queue: null, serverItem: null, download: null };
   autoplayCancelled = false;
   nextPeek = null;
   tracksApplied = false;
-  toast(`Starting “${ch.Name}”…`);
+  if (!opts.quiet) toast(`Starting “${ch.Name}”…`);
   // A channel is a session on the far end more often than it is a file, and
   // a cold one can take a good while to come up. The backend waits for it —
   // and retries, since the server has been seen answering a request made
   // while it was still starting with a 500 — so mpv only ever opens a
   // running stream. The second toast is there because the first has faded
-  // by the time a slow one arrives, and silence reads as a failure.
-  const slow = window.setTimeout(
-    () => toast(`Still waiting for “${ch.Name}” to start…`),
-    5000
-  );
+  // by the time a slow one arrives, and silence reads as a failure. A quiet
+  // caller (the guide's tuning screen) says all of this itself.
+  const slow = opts.quiet
+    ? 0
+    : window.setTimeout(() => toast(`Still waiting for “${ch.Name}” to start…`), 5000);
   try {
     invoke("ui_log", { msg: `playChannelUrl ${ch.Id}` }).catch(() => {});
-    const url = await invoke<string>("resolve_stream", { url: ch.StreamUrl }).finally(
+    // Some stream servers vary what they serve by the client they see; the
+    // same string goes to the warm-up request and to mpv.
+    const userAgent = iptvUserAgent();
+    const url = await invoke<string>("resolve_stream", { url: ch.StreamUrl, userAgent }).finally(
       () => clearTimeout(slow)
     );
     // The user moved on to something else while the channel was starting.
@@ -555,6 +802,7 @@ export async function playChannelUrl(ch: any): Promise<void> {
         title: ch.Name ?? "Live TV",
         start_seconds: null,
         volume,
+        user_agent: userAgent,
         ctx: {
           item_id: ch.Id,
           is_local: false,
@@ -562,7 +810,9 @@ export async function playChannelUrl(ch: any): Promise<void> {
         },
       },
     });
-    document.dispatchEvent(new CustomEvent("aquarium-player-started", { detail: {} }));
+    document.dispatchEvent(
+      new CustomEvent("aquarium-player-started", { detail: { continuation: !!opts.continuation } })
+    );
   } catch (e: any) {
     clearTimeout(slow);
     invoke("ui_log", { msg: `playChannelUrl FAILED: ${e?.message ?? e}` }).catch(() => {});
@@ -758,6 +1008,18 @@ function nextFromServer(np: NonNullable<typeof nowPlaying>): any | null {
 
 /** Returns true when a next episode was found and playback started. */
 async function autoplayNext(np: NonNullable<typeof nowPlaying>): Promise<boolean> {
+  if (userQueue.length) {
+    const next = userQueue[0];
+    userQueue = userQueue.slice(1);
+    queueChanged();
+    toast(`Up next: ${itemTitle(next)}`);
+    await playItem(
+      next,
+      { resume: true, maxBitrate: np.isLocal ? undefined : np.opts.maxBitrate },
+      { inherited: !np.isLocal, continuation: true, quiet: true }
+    );
+    return true;
+  }
   const server = nextFromServer(np);
   if (!server) {
     const shuffling = isShuffling();
@@ -801,13 +1063,17 @@ function maybeAutoplay(st: any): void {
     if (st.requested_stop) shuffleState = null;
     return;
   }
-  if (np.opts.live) return;
-  if (!(st.duration > 0) || st.position / st.duration < 0.9) return;
+  if (np.opts.live && !userQueue.length) return;
+  if (!np.opts.live && (!(st.duration > 0) || st.position / st.duration < 0.9)) return;
   const playingId = np.isLocal ? np.item.item_id : np.item.Id;
   if (st.item_id && playingId && st.item_id !== playingId) return;
-  const server = nextFromServer(np);
-  const isEpisode = server ? server.Type === "Episode" && server.SeriesId : isLocalEpisode(np.item);
-  if (!isEpisode) return;
+  if (!userQueue.length) {
+    // Settings → Playback: the card still showed; it just doesn't start.
+    if (!autoplayNextEnabled() && !isShuffling()) return;
+    const server = nextFromServer(np);
+    const isEpisode = server ? server.Type === "Episode" && server.SeriesId : isLocalEpisode(np.item);
+    if (!isEpisode) return;
+  }
 
   autoplayPending = true;
   void (async () => {
@@ -909,8 +1175,35 @@ async function resolveSpace(
   });
 }
 
+/**
+ * Download one item. It goes through the same queue as a season, so a pause,
+ * the unmetered-only setting, one-transcode-at-a-time and the parallel limit
+ * all hold for it too; with nothing in the way it starts at once.
+ */
 export async function startDownload(item: any, q: api.DownloadQuality): Promise<void> {
+  ensureQueueBridge();
+  if (dlActive.has(item.Id) || dlQueue.some((e) => entryId(e) === item.Id)) {
+    toast(`“${item.Name}” is already in the download queue`);
+    return;
+  }
   const chosen = await resolveSpace([item], q, itemTitle(item));
+  if (!chosen) return;
+  dlQueue.push({ item, q: chosen, spaceChecked: true });
+  notifyQueueChanged();
+  await pumpQueue();
+  if (dlQueue.some((e) => entryId(e) === item.Id)) {
+    const why = downloadHoldReason();
+    toast(`Queued: ${item.Name}${why ? ` · ${why.toLowerCase()}` : ""}`, "ok");
+  }
+}
+
+/** Start one transfer now. Only the queue calls this. */
+async function beginDownload(
+  item: any,
+  q: api.DownloadQuality,
+  spaceChecked = false
+): Promise<void> {
+  const chosen = spaceChecked ? q : await resolveSpace([item], q, itemTitle(item));
   if (!chosen) return;
   // Last stop before the request is built, so every path in — a single item, a
   // season, the queue restored from a previous run — gets the original file
@@ -941,6 +1234,11 @@ export async function startDownload(item: any, q: api.DownloadQuality): Promise<
         episode: item.IndexNumber ?? null,
         year: item.ProductionYear ?? null,
         run_time_ticks: item.RunTimeTicks ?? null,
+        // Kept so the Downloads view has them offline; refreshed from the
+        // server at most every six hours after that.
+        overview: item.Overview ?? null,
+        image_tag: item.ImageTags?.Primary ?? null,
+        series_image_tag: item.SeriesPrimaryImageTag ?? null,
         quality: q.label,
         // Seed watch state from the server so an already-watched episode
         // shows its ✓ / resume point immediately; kept fresh afterwards by
@@ -981,14 +1279,42 @@ export interface BatchResult {
  * share the queue so a bulk retry obeys the same concurrency limit — firing
  * twelve stalled downloads at once is what got them stalled.
  */
+type RetryEntry = {
+  kind: "retry";
+  id: string;
+  title: string;
+  /** Not before this (ms since the epoch): a retry the app scheduled itself,
+   *  waiting out its back-off. */
+  retryAt?: number;
+  /** Why it is back in the queue, for its row ("Paused", "stalled … — trying
+   *  again"). */
+  reason?: string;
+  /** Someone pressed Retry: the backend starts its attempt count over. */
+  manual?: boolean;
+  /** Fetches a server transcode rather than the original file. */
+  transcode?: boolean;
+};
+
 type QueueEntry =
-  | { kind?: "new"; item: any; q: api.DownloadQuality }
-  | { kind: "retry"; id: string; title: string };
+  | { kind?: "new"; item: any; q: api.DownloadQuality; spaceChecked?: boolean }
+  | RetryEntry;
 
 /** Queue entries predating the retry kind have no discriminant; they're all
  *  new downloads, so absent `kind` reads as "new". */
-function isRetry(e: QueueEntry): e is { kind: "retry"; id: string; title: string } {
+function isRetry(e: QueueEntry): e is RetryEntry {
   return e.kind === "retry";
+}
+
+/** Whether an entry will make the server transcode. */
+function isTranscodeEntry(e: QueueEntry): boolean {
+  return isRetry(e) ? !!e.transcode : !api.effectiveDownloadQuality(e.item, e.q).original;
+}
+
+/** Whether a download's stored meta.json fetches a transcode. */
+export function isTranscodeDownload(dl: any): boolean {
+  const url: string = dl?.request?.url ?? "";
+  if (url) return !url.split("?")[0]!.endsWith("/Download");
+  return dl?.quality !== "Original quality";
 }
 
 function entryId(e: QueueEntry): string {
@@ -997,7 +1323,111 @@ function entryId(e: QueueEntry): string {
 
 const dlQueue: QueueEntry[] = [];
 const dlActive = new Set<string>();
+/** The running downloads that are server transcodes, for "one transcode at a
+ *  time". */
+const dlActiveTranscodes = new Set<string>();
 let dlBridgeReady = false;
+/** The connection is metered (GNetworkMonitor, via the backend). */
+let dlMetered = false;
+/** Wakes the pump when the soonest scheduled retry falls due. */
+let retryWake = 0;
+
+/** Paused from the Downloads page. Kept in config.json, so a pause holds
+ *  across a restart; the backend reads it too, and doesn't resume interrupted
+ *  transfers while it's set. */
+export function isDownloadsPaused(): boolean {
+  return api.getConfig()?.downloads_paused === true;
+}
+
+function unmeteredOnly(): boolean {
+  return api.getConfig()?.downloads_unmetered_only === true;
+}
+
+function transcodeSerial(): boolean {
+  return api.getConfig()?.downloads_transcode_serial === true;
+}
+
+const PAUSED_REASON = "Paused";
+const METERED_REASON = "Waiting for an unmetered connection";
+
+/** Why nothing new starts, or null when the queue is free to run. */
+export function downloadHoldReason(): string | null {
+  if (isDownloadsPaused()) return "Downloads are paused";
+  if (unmeteredOnly() && dlMetered) return METERED_REASON;
+  return null;
+}
+
+/**
+ * Take the running transfers down without losing them: each stops keeping its
+ * .part file and goes back to the front of the queue to carry on from it.
+ * Used by Pause and by the connection turning metered.
+ */
+function setAsideRunning(reason: string): void {
+  const running = [...dlActive];
+  if (!running.length) return;
+  const back: RetryEntry[] = [];
+  for (const id of running) {
+    void invoke("download_pause", { itemId: id }).catch(() => {});
+    if (dlQueue.some((e) => entryId(e) === id)) continue;
+    back.push({
+      kind: "retry",
+      id,
+      title: activeTitles.get(id) ?? id,
+      reason,
+      transcode: dlActiveTranscodes.has(id),
+    });
+  }
+  dlQueue.unshift(...back);
+  notifyQueueChanged();
+}
+
+/** Titles of what is running, so an entry set aside can still be named. */
+const activeTitles = new Map<string, string>();
+
+/** Pause or resume every download. */
+export async function setDownloadsPaused(paused: boolean): Promise<void> {
+  ensureQueueBridge();
+  if (paused === isDownloadsPaused()) return;
+  await api.saveConfig({ downloads_paused: paused }).catch(() => {});
+  invoke("ui_log", { msg: `downloads ${paused ? "paused" : "resumed"}` }).catch(() => {});
+  if (paused) {
+    setAsideRunning(PAUSED_REASON);
+  } else {
+    for (const e of dlQueue) {
+      if (isRetry(e) && e.reason === PAUSED_REASON) {
+        e.reason = undefined;
+        e.retryAt = undefined;
+      }
+    }
+    notifyQueueChanged();
+    void pumpQueue();
+  }
+}
+
+/** A download setting changed in Settings: re-apply the holds. */
+export function downloadPrefsChanged(): void {
+  ensureQueueBridge();
+  applyMeteredHold();
+  void invoke("downloads_sync_keep_awake").catch(() => {});
+  void pumpQueue();
+}
+
+function applyMeteredHold(): void {
+  if (unmeteredOnly() && dlMetered) {
+    setAsideRunning(METERED_REASON);
+    return;
+  }
+  let changed = false;
+  for (const e of dlQueue) {
+    if (isRetry(e) && e.reason === METERED_REASON) {
+      e.reason = undefined;
+      e.retryAt = undefined;
+      changed = true;
+    }
+  }
+  if (changed) notifyQueueChanged();
+  void pumpQueue();
+}
 
 // The queue is persisted so closing the app mid-season doesn't silently drop
 // the episodes that hadn't started yet (the backend only resumes the one
@@ -1048,6 +1478,12 @@ export interface PendingDownload {
   /** A re-run of a failed download rather than a first attempt. Its quality
    *  and episode numbering live in the stored meta, not here. */
   retry?: boolean;
+  /** Why it's waiting, when that's more than its turn. */
+  reason?: string;
+  /** A scheduled retry's due time (ms since the epoch). */
+  retryAt?: number;
+  /** Will make the server transcode. */
+  transcode: boolean;
 }
 
 /**
@@ -1067,6 +1503,9 @@ export function getQueuedDownloads(): PendingDownload[] {
           episode: null,
           quality: "retrying",
           retry: true,
+          reason: e.reason,
+          retryAt: e.retryAt,
+          transcode: !!e.transcode,
         }
       : {
           id: e.item.Id,
@@ -1075,6 +1514,7 @@ export function getQueuedDownloads(): PendingDownload[] {
           season: e.item.ParentIndexNumber ?? null,
           episode: e.item.IndexNumber ?? null,
           quality: e.q.label,
+          transcode: isTranscodeEntry(e),
         }
   );
 }
@@ -1101,14 +1541,22 @@ export function cancelQueuedDownload(id: string): void {
  * Anything already running or already queued is skipped, so a double-click
  * can't queue the same download twice.
  */
-function queueRetriesFirst(entries: { item_id: string; title?: string }[]): string[] {
+function queueRetriesFirst(
+  entries: { item_id: string; title?: string; transcode?: boolean }[]
+): string[] {
   const fresh: QueueEntry[] = [];
   const queued: string[] = [];
   for (const d of entries) {
     if (!d?.item_id) continue;
     if (dlActive.has(d.item_id) || dlQueue.some((e) => entryId(e) === d.item_id)) continue;
     if (fresh.some((e) => entryId(e) === d.item_id)) continue;
-    fresh.push({ kind: "retry", id: d.item_id, title: d.title ?? d.item_id });
+    fresh.push({
+      kind: "retry",
+      id: d.item_id,
+      title: d.title ?? d.item_id,
+      manual: true,
+      transcode: d.transcode,
+    });
     queued.push(d.item_id);
   }
   if (fresh.length) {
@@ -1131,9 +1579,18 @@ function queueRetriesFirst(entries: { item_id: string; title?: string }[]): stri
  * opened three connections, which is generally what had stalled them in the
  * first place.
  */
-export function retryDownload(itemId: string, title?: string): boolean {
+export function retryDownload(itemId: string, title?: string, transcode?: boolean): boolean {
   ensureQueueBridge();
-  return queueRetriesFirst([{ item_id: itemId, title }]).length > 0;
+  // A retry already waiting out its back-off: pressing Retry means now.
+  const waiting = dlQueue.find((e) => entryId(e) === itemId);
+  if (waiting && isRetry(waiting) && waiting.retryAt) {
+    waiting.retryAt = undefined;
+    waiting.manual = true;
+    notifyQueueChanged();
+    void pumpQueue();
+    return true;
+  }
+  return queueRetriesFirst([{ item_id: itemId, title, transcode }]).length > 0;
 }
 
 /**
@@ -1145,7 +1602,9 @@ export function retryDownload(itemId: string, title?: string): boolean {
  * everything else: retrying a dozen at once would open a dozen connections and
  * strand them exactly as before. Returns how many were queued.
  */
-export function retryFailedDownloads(failed: { item_id: string; title?: string }[]): number {
+export function retryFailedDownloads(
+  failed: { item_id: string; title?: string; transcode?: boolean }[]
+): number {
   ensureQueueBridge();
   return queueRetriesFirst(failed).length;
 }
@@ -1156,6 +1615,7 @@ export function clearDownloadQueue(): number {
   const n = dlQueue.length;
   dlQueue.length = 0;
   dlActive.clear();
+  dlActiveTranscodes.clear();
   notifyQueueChanged();
   return n;
 }
@@ -1170,40 +1630,120 @@ function ensureQueueBridge(): void {
   dlBridgeReady = true;
   listen("download-progress", (ev) => {
     const p = ev.payload as any;
-    if (!dlActive.has(p.item_id)) return;
-    if (p.state === "complete" || p.state === "error" || p.state === "canceled") {
-      dlActive.delete(p.item_id);
-      void pumpQueue();
+    const terminal = ["complete", "error", "canceled", "paused"].includes(p.state);
+    if (!terminal) return;
+    const wasOurs = dlActive.delete(p.item_id);
+    const transcode = dlActiveTranscodes.delete(p.item_id);
+    const title = activeTitles.get(p.item_id);
+    activeTitles.delete(p.item_id);
+    // The backend's word on a failure includes whether to go again, and
+    // when: a dropped link or a stall waits a few seconds and is put back,
+    // climbing to five minutes, five times; a short copy is fetched again at
+    // once. Anything it gives up on stays in Failed with a Retry button.
+    if (p.state === "error" && typeof p.retry_in === "number") {
+      scheduleAutomaticRetry(p.item_id, title ?? p.item_id, p.message, p.retry_in, transcode);
     }
+    if (wasOurs || p.state === "error") void pumpQueue();
   });
   // A queue restored while offline waits here until the server is back.
   document.addEventListener("aquarium-connectivity", (ev) => {
     if (!(ev as CustomEvent).detail?.offline) void pumpQueue();
   });
+  void invoke<boolean>("network_metered")
+    .then((m) => {
+      dlMetered = !!m;
+      applyMeteredHold();
+    })
+    .catch(() => {});
+  listen("network-metered", (ev) => {
+    dlMetered = !!ev.payload;
+    applyMeteredHold();
+  });
+}
+
+/** Put a failed download back at the front of the queue after a wait — the
+ *  app's own retry, as against the one behind the Retry button. */
+function scheduleAutomaticRetry(
+  id: string,
+  title: string,
+  reason: string,
+  delaySeconds: number,
+  transcode: boolean
+): void {
+  if (dlActive.has(id) || dlQueue.some((e) => entryId(e) === id)) return;
+  dlQueue.unshift({
+    kind: "retry",
+    id,
+    title,
+    reason,
+    retryAt: Date.now() + delaySeconds * 1000,
+    transcode,
+  });
+  invoke("ui_log", { msg: `download ${id}: retry in ${delaySeconds}s (${reason})` }).catch(() => {});
+  notifyQueueChanged();
+}
+
+/** Sleep until the soonest scheduled retry falls due, then pump. */
+function armRetryWake(): void {
+  clearTimeout(retryWake);
+  const now = Date.now();
+  const due = dlQueue
+    .map((e) => (isRetry(e) ? e.retryAt ?? 0 : 0))
+    .filter((t) => t > now);
+  if (!due.length) return;
+  retryWake = window.setTimeout(() => void pumpQueue(), Math.min(...due) - now + 50);
+}
+
+/**
+ * The next entry allowed to start now, or -1: the first one that is due (a
+ * retry waiting out its back-off isn't) and, with "one transcode at a time"
+ * on, isn't a second transcode. Originals still run side by side up to the
+ * parallel limit.
+ */
+function nextStartable(): number {
+  const now = Date.now();
+  const transcoding = transcodeSerial() && dlActiveTranscodes.size > 0;
+  return dlQueue.findIndex((e) => {
+    if (dlActive.has(entryId(e))) return false;
+    if (isRetry(e) && e.retryAt && e.retryAt > now) return false;
+    if (transcoding && isTranscodeEntry(e)) return false;
+    return true;
+  });
+}
+
+/** Whether a waiting entry is held back only by another transcode running. */
+export function isWaitingForTranscode(p: PendingDownload): boolean {
+  return transcodeSerial() && p.transcode && dlActiveTranscodes.size > 0;
 }
 
 async function pumpQueue(): Promise<void> {
   // Download URLs are built against the live session; offline they'd all just
   // error out one after another and drain the queue. The connectivity listener
   // in ensureQueueBridge re-pumps when the server comes back.
-  if (api.isOffline()) return;
+  armRetryWake();
+  if (api.isOffline() || downloadHoldReason()) return;
   while (dlActive.size < dlConcurrency) {
-    const next = dlQueue.shift();
-    if (!next) return;
+    const at = nextStartable();
+    if (at < 0) return;
+    const next = dlQueue.splice(at, 1)[0]!;
     const id = entryId(next);
     dlActive.add(id);
+    activeTitles.set(id, isRetry(next) ? next.title : itemTitle(next.item));
+    if (isTranscodeEntry(next)) dlActiveTranscodes.add(id);
     try {
       if (isRetry(next)) {
         // The backend rebuilds the request from meta.json and resumes from the
-        // .part file a stalled run left behind.
-        await invoke("download_retry", { itemId: next.id });
+        // .part file a stalled or paused run left behind.
+        await invoke("download_retry", { itemId: next.id, manual: !!next.manual });
       } else {
-        await startDownload(next.item, next.q);
+        await beginDownload(next.item, next.q, next.spaceChecked);
       }
     } catch (e) {
       // Couldn't start (e.g. already in progress) — skip and continue, but say
       // so: silently dropping an episode looks exactly like a stalled queue.
       dlActive.delete(id);
+      dlActiveTranscodes.delete(id);
+      activeTitles.delete(id);
       toast(`Couldn't start ${isRetry(next) ? next.title : itemTitle(next.item)}: ${e}`, "error");
     }
     // Notify only once the backend has written meta.json. Any earlier and the
@@ -1293,7 +1833,10 @@ export async function restoreDownloadQueue(): Promise<void> {
   } catch {
     // Corrupted entry — drop it.
   }
-  if (!Array.isArray(saved) || !saved.length) return;
+  // Carried on with even when nothing was saved: the bridge is what puts a
+  // failed transfer back in line, and what the backend resumed at launch has
+  // to be adopted for that.
+  if (!Array.isArray(saved)) saved = [];
   ensureQueueBridge();
 
   const existing = await invoke<any[]>("downloads_list").catch(() => []);
@@ -1316,7 +1859,15 @@ export async function restoreDownloadQueue(): Promise<void> {
     void pumpQueue();
     return;
   }
-  for (const d of active) dlActive.add(d.item_id);
+  for (const d of active) {
+    dlActive.add(d.item_id);
+    activeTitles.set(d.item_id, d.title ?? d.name ?? d.item_id);
+    if (isTranscodeDownload(d)) dlActiveTranscodes.add(d.item_id);
+  }
+  // The backend resumed these before the holds were known here (a metered
+  // connection is only checked from this side).
+  const held = downloadHoldReason();
+  if (held) setAsideRunning(held === METERED_REASON ? METERED_REASON : PAUSED_REASON);
   // A terminal event could slip past before our listener was registered,
   // which would stall the queue for good — recheck once shortly after.
   window.setTimeout(async () => {
@@ -1611,6 +2162,22 @@ async function handlePlayerMessage(args: any[]): Promise<void> {
       // WM-level fullscreen) — exit fullscreen but never enter it.
       document.dispatchEvent(new CustomEvent("aquarium-fullscreen-exit"));
       break;
+    case "aquarium-key":
+    case "aquarium-gesture":
+    case "aquarium-context":
+      // Pointer, touch and keys over the picture: the player bar (main.ts)
+      // owns what they do.
+      document.dispatchEvent(new CustomEvent("aquarium-player-input", { detail: { name, arg, rest: args.slice(2) } }));
+      break;
+    case "aquarium-queue-play":
+      await playQueued(arg);
+      break;
+    case "aquarium-chapter":
+      await playerCtl.seek(parseFloat(arg), true);
+      break;
+    case "aquarium-ctl":
+      document.dispatchEvent(new CustomEvent("aquarium-player-input", { detail: { name: "aquarium-ctl", arg } }));
+      break;
     case "aquarium-play-local": {
       // Diagnostic hook (see AQUARIUM_TEST_PLAY in lib.rs): starts a
       // downloaded item through the real frontend path — unlike TEST_PLAY it
@@ -1627,14 +2194,27 @@ async function handlePlayerMessage(args: any[]): Promise<void> {
 export async function registerPlayerBridge(): Promise<void> {
   await listen("player-status", (ev) => {
     const st = ev.payload as any;
+    playerRunning = !!st.active;
     if (st.active && typeof st.position === "number") lastPosition = st.position;
+    if (st.active) void maybePrefetch(st);
     if (!st.active) {
-      // mpv couldn't open what it was given. Without this the player simply
-      // vanishes, which for a live channel looks like nothing happened at
-      // all. ("redirect" is mpv having fallen back to reading the address as
-      // a playlist after the real demuxer refused it.)
+      prefetchTriedFor = null;
+      // mpv couldn't open what it was given, or the stream died under it.
+      // Without this the player simply vanishes, which for a live channel
+      // looks like nothing happened at all. ("redirect" is mpv having fallen
+      // back to reading the address as a playlist after the real demuxer
+      // refused it.)
       if (st.ended && !st.requested_stop && (st.error || st.reason === "redirect")) {
-        toast(`Playback failed: ${st.error ?? "the stream couldn't be opened"}`, "error");
+        const np = nowPlaying;
+        const nearEnd = st.duration > 0 && st.position / st.duration >= 0.98;
+        if (!nearEnd) {
+          showPlaybackError(st.error ?? "The stream couldn't be opened.", np, lastPosition);
+          lastPosition = 0;
+          lastTracks = [];
+          // A failure is not an ending: nothing next starts on its own.
+          document.dispatchEvent(new CustomEvent("aquarium-autoplay-none"));
+          return;
+        }
       }
       // Runs before main.ts's status listener (registered first), so the
       // pending flag is visible when the player bar decides to tear down.
@@ -1693,7 +2273,29 @@ export const playerCtl = {
   /** Shift subtitles in time; negative shows them earlier. */
   setSubDelay: (seconds: number) =>
     mpvCommand(["set_property", "sub-delay", Math.round(seconds * 100) / 100]),
+  /** Shift the sound in time; positive plays it later. Saved, so the next
+   *  file starts with it too (a headset's lag is the headset's, not the
+   *  file's). */
+  setAudioDelay: (seconds: number) => {
+    const v = Math.max(-10, Math.min(10, Math.round(seconds * 1000) / 1000));
+    saveConfigSoon({ audio_delay: v });
+    api.getConfig().audio_delay = v;
+    return mpvCommand(["set_property", "audio-delay", v]);
+  },
 };
+
+/** One press of the audio-delay buttons and keys. */
+export const AUDIO_DELAY_STEP = 0.05;
+
+/** The stream as the server is sending it, for the stream info panel. */
+export function getStreamSource(): api.PlaybackSource | null {
+  return nowPlaying?.source ?? null;
+}
+
+export function getNowPlayingFull(): { item: any; isLocal: boolean; serverItem: any | null; live: boolean; maxBitrate?: number } | null {
+  const np = nowPlaying;
+  return np ? { item: np.item, isLocal: np.isLocal, serverItem: np.serverItem, live: !!np.opts.live, maxBitrate: np.opts.maxBitrate } : null;
+}
 
 export async function syncOfflineProgress(showToast = false): Promise<void> {
   const s = api.getSession();

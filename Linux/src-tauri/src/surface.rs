@@ -1837,6 +1837,8 @@ fn connect_input(area: &gtk::Widget, video: Rc<RefCell<Video>>) {
         }
     });
 
+    connect_touch_gestures(area, video.clone());
+
     area.connect_key_press_event({
         let video = video.clone();
         move |_area, ev| {
@@ -1850,4 +1852,91 @@ fn connect_input(area: &gtk::Widget, video: Rc<RefCell<Video>>) {
             glib::Propagation::Stop
         }
     });
+}
+
+/// Touchscreen gestures over the picture: double-tap the left or right third
+/// to skip back or forward, pinch to switch between Fit and Fill, and hold to
+/// play at 2× for as long as the finger stays down. A single tap shows the
+/// controls. Each one goes to the page as a `script-message aquarium-gesture
+/// …`, the same road input.conf's bindings take, so the skip interval and the
+/// speed handling live in one place there.
+///
+/// These are on the video widget, not the webview: wry's own touch handler
+/// sits on the webview (see the note in `Surface::new`), and the picture is
+/// where a finger lands while something plays. Asking for touch events means
+/// GTK stops turning touches into emulated clicks here, which is also what
+/// keeps a double-tap from reaching mpv as MBTN_LEFT_DBL (fullscreen).
+fn connect_touch_gestures(area: &gtk::Widget, video: Rc<RefCell<Video>>) {
+    area.add_events(gdk::EventMask::TOUCH_MASK);
+    // A hold is under way; the tap the same touch ends in isn't a tap.
+    let holding = Rc::new(Cell::new(false));
+
+    let taps = gtk::GestureMultiPress::new(area);
+    taps.set_touch_only(true);
+    taps.connect_released({
+        let video = video.clone();
+        let holding = holding.clone();
+        move |g, n_press, x, _y| {
+            if holding.get() {
+                return;
+            }
+            let width = g.widget().map(|w| w.allocated_width()).unwrap_or(0) as f64;
+            if n_press >= 2 && width > 0.0 {
+                let side = if x < width / 3.0 {
+                    "left"
+                } else if x > width * 2.0 / 3.0 {
+                    "right"
+                } else {
+                    "middle"
+                };
+                send_input(&video, &format!("script-message aquarium-gesture doubletap {side}"));
+            } else if n_press == 1 {
+                send_input(&video, "script-message aquarium-gesture tap");
+            }
+        }
+    });
+
+    let hold = gtk::GestureLongPress::new(area);
+    hold.set_touch_only(true);
+    hold.connect_pressed({
+        let video = video.clone();
+        let holding = holding.clone();
+        move |_g, _x, _y| {
+            holding.set(true);
+            send_input(&video, "script-message aquarium-gesture hold-start");
+        }
+    });
+    hold.connect_end({
+        let video = video.clone();
+        let holding = holding.clone();
+        move |_g, _seq| {
+            if holding.replace(false) {
+                send_input(&video, "script-message aquarium-gesture hold-end");
+            }
+        }
+    });
+
+    let pinch = gtk::GestureZoom::new(area);
+    let last_scale = Rc::new(Cell::new(1.0f64));
+    pinch.connect_scale_changed({
+        let last_scale = last_scale.clone();
+        move |_g, scale| last_scale.set(scale)
+    });
+    pinch.connect_end({
+        let video = video.clone();
+        move |_g, _seq| {
+            let scale = last_scale.replace(1.0);
+            if scale > 1.15 {
+                send_input(&video, "script-message aquarium-gesture pinch-out");
+            } else if scale < 0.87 {
+                send_input(&video, "script-message aquarium-gesture pinch-in");
+            }
+        }
+    });
+
+    // GTK3 gestures aren't owned by their widget; the widget lives as long as
+    // the window does, so these are kept alive for the life of the process.
+    std::mem::forget(taps);
+    std::mem::forget(hold);
+    std::mem::forget(pinch);
 }

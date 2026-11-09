@@ -47,6 +47,34 @@ query parameter, all of which Jellyfin 12 disables by default), and the
 
 ## Features
 
+- **Signing in** — servers you've signed in to before and any Jellyfin server
+  that answers on the local network (the UDP 7359 broadcast, asked on every
+  interface) are listed under the address field. Once connected, the server's
+  users are offered under "Who's signing in?" (typing narrows them), and where
+  the server has Quick Connect a code sits beside the password form, signing
+  in by itself once approved on another device.
+- **Several accounts** — keep accounts on several servers, each with its own
+  keyring token; switch without a password, add one, or sign one out of this
+  device from Settings → Accounts. Settings → Quick Connect approves a code
+  shown by another device.
+- **Up Next queue** — Play Next / Play Later on films, episodes and seasons.
+  Queued titles play ahead of the series' next episode and lead the in-player
+  Up next strip (Clear Up Next empties it). About 90 s before the end the next
+  title's stream is opened on the server, so autoplay starts straight away.
+- **Player** — skip interval (10/15/30 s), hide-controls delay, time remaining
+  (click the time to flip it), autoplay and resume, all in Settings → Playback;
+  audio delay (saved), a stream info panel (`i`, Ctrl+I), a chapter list, and a
+  "This didn't play" card with Try Again / Try a Smaller Stream. Over the
+  picture: wheel for volume, a sideways wheel to scrub, right-click for the
+  player menu, `c` for subtitles, `s` to skip intro or credits; on a
+  touchscreen, double-tap to skip, pinch for Fit/Fill, hold for 2×.
+- **Next Up** — Remove from Next Up and Add to Next Up (from the last watched
+  episode, or from the first with the show marked unwatched) write to the
+  server, so Jellyfin's other apps agree. Settings → Next Up: how long shows
+  stay, episodes in progress, rewatching.
+- **Home** — rows follow the account's Jellyfin home-screen order (Jellyfin's
+  default when it was never set), with library chips and an On Now row of
+  what's airing on Live TV.
 - **Direct streaming** — original quality, remux-free `static=true` streams.
 - **Transcoded streaming** — pick a bitrate (35/18/10/5/2.5 Mbps); the server is
   asked via `PlaybackInfo` with an HLS h264/aac device profile and mpv plays the
@@ -66,6 +94,36 @@ query parameter, all of which Jellyfin 12 disables by default), and the
   re-encoding it is a loss twice over. Before anything is queued the estimated
   size is checked against the free space on that volume; a season that won't fit
   says so, with the numbers, and offers the quality rungs that would.
+  - Every download, single or season, goes through one queue: **Pause all** /
+    **Resume all** stops transfers where they are (the `.part` file is kept and
+    resumed with an HTTP Range request), and a pause holds across a restart.
+  - A dropped connection, a stall or a server error puts the download back in
+    the queue by itself after 5 s, 15 s, 45 s, 2 min and 5 min, then leaves it in
+    Failed; an attempt that fetched 4 MB or more resets the count. Retry and
+    Retry all still work at any time. A 4xx answer isn't retried unasked.
+  - **Integrity check:** a direct file must match its Content-Length, and a
+    transcode (chunked, no length, no duration in the header) must reach the
+    item's runtime, read from the timestamp of its last Matroska cluster. A
+    short copy is thrown away and fetched once more ("The first copy arrived
+    incomplete — fetching it again").
+  - Settings → Downloads: **Only download on unmetered connections** (GNOME's
+    metered flag via GNetworkMonitor; running transfers are set aside and the
+    queue says what it's waiting for), **Transcode one at a time** (originals
+    still run in parallel up to the Parallel limit), and **Keep the laptop
+    awake while downloading** (a gnome-session suspend inhibitor, or logind's
+    sleep lock elsewhere; the screen still blanks).
+  - Text subtitles are saved next to the video (`sub.<index>.<lang>.srt|ass`,
+    indexed in `subtitles.json`) and handed to mpv with the file. A transcode
+    gets every text track; an original gets the server's external files (its
+    embedded tracks are already inside it). Picture subtitles are skipped.
+  - Names, overviews and artwork of downloaded items are refreshed from the
+    server at most every six hours when the Downloads page opens; watched state
+    is reconciled on every visit.
+  - **Manage** menu: Retry All Failed, Clear Queue, Delete Watched Downloads,
+    Delete All Downloads, each confirmed. Series and seasons offer Play Next
+    (the next unwatched episode), Shuffle this season and **Show in Files**
+    (FileManager1 `ShowItems`, or the folder via `xdg-open`). The Delete key
+    removes the selected card or episode row, after asking.
 - **Detail pages** — cast (each name searches for itself), "More like this" from
   the server's own recommendations, and a line describing what the source file
   actually is (`1080p · HEVC · EAC3 · 5.1 · 8.4 GiB`) beside the quality menu.
@@ -74,8 +132,26 @@ query parameter, all of which Jellyfin 12 disables by default), and the
   reports, watched flags via the played-items endpoint) whenever the server is
   reachable — automatically at app start, after local playback, or manually from
   the Downloads view.
-- **Live TV** — channel list with current-program info; channels play through
-  `PlaybackInfo` + `AutoOpenLiveStream` (direct or server-transcoded HLS).
+- **Live TV** — a TV guide (six hours at a time, with More hours to extend it
+  to a day, Earlier / Now / Later, a day-and-time jump, Today / Tomorrow /
+  Yesterday labels and a channel filter), or a channel list when there's no
+  guide data. Jellyfin channels play through `PlaybackInfo` +
+  `AutoOpenLiveStream`; a custom M3U playlist with an optional XMLTV guide
+  (Settings → Live TV) plays straight from the provider. The line-up loads in
+  the background at launch, so the guide opens without a wait.
+  - **Keyboard** — the guide is one Tab stop with a selection separate from
+    what's playing: arrows walk programmes, Enter watches the channel, Space
+    shows the programme, letters jump to a channel, Esc clears.
+    Ctrl+← / Ctrl+→ / Ctrl+T move Earlier / Later / Now.
+  - **In the player** — the Channels button in the player bar lists the
+    line-up (logo, number, what's on and how far through) and changes channel
+    without leaving the player; Page Up / Page Down step through channels. The
+    title shows what's on now and what's coming up.
+  - **Custom playlist settings** — a User-Agent (default
+    `VLC/3.0.20 LibVLC/3.0.20`) for the playlist, guide and streams, mpv
+    included; a guide refresh interval (default 3 hours, or Never) with
+    Refresh now and a "Last read" summary; and Check artwork, which loads
+    every channel logo and says how many came back.
 - **Power** — while the video covers the page, the app freezes the page's
   animations and stops GTK repainting the web view underneath, and WebKit is
   told to render to shared memory (see `webkit_defaults` in
@@ -90,6 +166,52 @@ query parameter, all of which Jellyfin 12 disables by default), and the
   follows the desktop's colour scheme (read from the XDG desktop portal, so it
   tracks GNOME/KDE's dark-style toggle rather than the GTK theme name) and
   updates live when it changes.
+- **Music** — a sidebar section whenever the server has a music library,
+  modelled on the iPhone/iPad app's Music tab. **Listen Now**: Recently Played,
+  stations built from the artists and genres you play most, Your Top Songs,
+  New in Your Library, favourite albums and artists, a random draw, and
+  **Surprise Me**. **Library**: playlists, artists, albums, songs and genres,
+  each with a filter field and a sort; album, artist (top songs, albums,
+  Appears On, about, similar artists), genre and playlist pages; a music
+  search; and Downloaded, which plays with no server. Click selects a song,
+  double-click plays it, Ctrl/Shift-click selects more for Play Next or
+  **New Playlist…**.
+- **Playing music** — a mini player along the bottom of every page, opening
+  into Now Playing: cover, scrubber, shuffle, repeat (all / one), volume, a
+  sleep timer (minutes, or the end of the song), Sound Check (ReplayGain),
+  an Up Next you can drag to reorder, and timed lyrics that light the line
+  being sung (click a line to go there). Every song, album, artist and
+  playlist menu has Play Next, Play Later, Start Station, Add to Playlist and,
+  for a song, **Song Info** (tags, plays, format, bitrate; a missing artist,
+  genre or year is called out). Songs join gaplessly: music plays in an
+  audio-only mpv core of its own (`src-tauri/src/audio.rs`, with
+  `gapless-audio` and `prefetch-playlist`), holding the current song and the
+  next. Plays are reported to Jellyfin as video's are. Starting a video stops
+  the music and the other way round. The desktop's media controls (MPRIS)
+  show title, artist, album and cover art, and Next/Previous and the track
+  list follow the queue.
+- **Stations** — Jellyfin's Instant Mix of the seed, of its artist and of
+  similar artists, scored the way the Apple app scores them: twenty points
+  across seven dials (same artist, genre, era, favourites, most played,
+  discovery, surprise), with Balanced, Familiar and Discovery presets
+  (Listen Now → Station Mix…). Dealt so one artist or album doesn't come back
+  to back, and topped up as the queue runs low.
+- **Playlists** — create, rename and delete on the server; add songs, albums,
+  artists or genres from any menu; Edit drags to reorder and removes, each
+  change saved as it's made. **Smart playlists** are rules (genres, artists,
+  years, added in the last N days, played/never played, a play-count floor,
+  favourites, an order and a limit) kept in `config.json`, answered from the
+  library every time they're opened, and saveable to the server as a real
+  playlist.
+- **Audiobooks** — a sidebar entry when the server has a books library, kept
+  apart from music: Continue Listening with time left, Recently Added,
+  Authors, All Books (by title, author, date added or last played), its own
+  search, and a book page with chapters, resume point and speed. The player
+  skips 15 s back and 30 s forward, and the mini player names the chapter.
+- **Music downloads** — songs, whole albums and audiobooks, always the
+  original file, through the same throttled queue as video. A downloaded song
+  plays from disk wherever it's started from; an audiobook's position played
+  offline syncs back like a film's.
 - Home (Continue Watching / Next Up / Latest), library browsing with sorting and
   paging, series → season → episode navigation, search, watched toggles, and
   playback progress reported to the server every 10 s like any first-class client.
@@ -129,7 +251,8 @@ runtime relative to the executable; `$AQUARIUM_MPV_CONFIG` overrides it.
 
 ## Storage
 
-- Config: `~/.config/aquarium/config.json` (server, token, device id, prefs)
+- Config: `~/.config/aquarium/config.json` (server, saved accounts, device id,
+  prefs; tokens only when there is no desktop keyring)
 - Downloads + offline progress queue: `~/.local/share/aquarium/`
 
 ## Releases & updating
