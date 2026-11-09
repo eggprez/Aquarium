@@ -56,6 +56,11 @@
      rather than something the content can be laid out around: #content pads
      itself past it, and the heroes pull themselves back up underneath it. */
   --topbar-h: 67px;
+  /* The home hero's height, bar included. A fixed 516 was a 2.8:1 band in a
+     1440-wide window and a 5:1 strip on a 2560-wide monitor, cut from a 16:9
+     backdrop. It follows the width now — about 2.5:1 — but never takes more
+     than two-thirds of the window's height, so a shelf stays in view. */
+  --hero-h: clamp(516px, 40vw, 66vh);
 
   /* Type scale. Ten steps, and nothing in the app picks a size outside them —
      the alternative (a hand-chosen 12.5px here, 14.5px there) is why sibling
@@ -479,7 +484,7 @@ button {
   /* Bleeds past #content's padding on every side, including up behind the
      floating top bar. */
   margin: calc(-1 * (var(--topbar-h) + 26px)) -28px 30px;
-  min-height: 516px;
+  min-height: var(--hero-h);
   display: flex;
   align-items: flex-end;
   padding: calc(var(--topbar-h) + 40px) 28px 26px;
@@ -488,7 +493,12 @@ button {
 .hero-bg {
   position: absolute; inset: 0;
   background-size: cover;
-  background-position: center 22%;
+  /* Jellyfin's backdrops are 16:9 and this band is far wider, so most of the
+     crop has to come off one end. The top 93px are already under the floating
+     bar and its scrim, and the bottom dissolves into the page, so the crop is
+     taken almost entirely from the bottom: at 22% a wide window lost the
+     heads to the bar. */
+  background-position: center 6%;
   opacity: 0;
   transition: opacity 0.5s ease;
   /* Feathered bottom edge. The scrim below already darkens toward the page
@@ -600,7 +610,7 @@ button {
 .hero-stage {
   position: relative;
   margin: calc(-1 * (var(--topbar-h) + 26px)) -28px 30px;
-  height: 516px;
+  height: var(--hero-h);
 }
 .hero-stage .home-hero {
   position: absolute;

@@ -682,6 +682,12 @@ struct RemoteImage: View {
     var fallbackURL: URL?
     var blurHash: String?
     var contentMode: ContentMode = .fill
+    /// Which part of a `.fill` picture survives the crop. Centred for cards,
+    /// where the slot is close to the picture's own shape. A hero is a band
+    /// far wider than the 16:9 backdrop Jellyfin hands out, so centring took
+    /// equal amounts off the top and bottom — and the bottom is faded into
+    /// the page anyway, so what went was the top, where the faces are.
+    var focus: UnitPoint = .center
     /// What to paint under artwork that hasn't arrived, for the callers whose
     /// slot isn't a card — the hero, which stays dark in both themes.
     var placeholderFill: LinearGradient = Theme.placeholderFill
@@ -781,10 +787,34 @@ struct RemoteImage: View {
     @ViewBuilder
     private var artworkLayer: some View {
         if let image {
-            Image(platformImage: image)
+            if contentMode == .fill, focus != .center,
+               image.size.width > 0, image.size.height > 0 {
+                anchoredFill(Image(platformImage: image), natural: image.size)
+                    .transition(.opacity)
+            } else {
+                Image(platformImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    /// A filled picture placed by `focus` rather than by its centre: scaled
+    /// to cover the bounds, then slid so that the overspill is taken
+    /// `focus.y` from the top (and `focus.x` from the leading side).
+    private func anchoredFill(_ picture: Image, natural: CGSize) -> some View {
+        GeometryReader { geo in
+            let box = geo.size
+            let scale = max(box.width / natural.width, box.height / natural.height)
+            let drawn = CGSize(width: natural.width * scale, height: natural.height * scale)
+            picture
                 .resizable()
-                .aspectRatio(contentMode: contentMode)
-                .transition(.opacity)
+                .frame(width: drawn.width, height: drawn.height)
+                .offset(
+                    x: (box.width - drawn.width) * focus.x,
+                    y: (box.height - drawn.height) * focus.y
+                )
         }
     }
 
