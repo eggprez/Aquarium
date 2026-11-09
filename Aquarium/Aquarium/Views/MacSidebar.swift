@@ -77,7 +77,7 @@ struct MacSidebarRows: View {
             Button("Open in New Window") { openWindow(id: RouteWindow.id, value: route) }
         }
         switch section {
-        case .library, .libraries, .favorites, .home:
+        case .library, .libraries, .favorites, .collections, .home:
             Button(section == .home ? "Refresh" : "Refresh Library") {
                 app.selection = section
                 MacCommandRequests.shared.refresh += 1
@@ -99,7 +99,7 @@ struct MacSidebarRows: View {
     private func windowRoute(for section: AppSection) -> Route? {
         switch section {
         case .library(let id, let name, let type): .library(id: id, name: name, collectionType: type)
-        case .favorites, .libraries: .section(section)
+        case .favorites, .libraries, .collections: .section(section)
         default: nil
         }
     }

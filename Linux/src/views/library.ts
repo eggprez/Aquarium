@@ -97,9 +97,14 @@ export async function renderLibrary(root: HTMLElement, libId: string): Promise<v
     void api.getItem(libId).then((fresh) => setCached(libMetaKey, fresh)).catch(() => {});
   }
 
+  // The Collections view lists the collections; one collection lists its
+  // films and shows, not the seasons and episodes a recursive query would
+  // also find inside the shows.
   const includeTypes =
     lib?.CollectionType === "movies" ? "Movie" :
-    lib?.CollectionType === "tvshows" ? "Series" : "";
+    lib?.CollectionType === "tvshows" ? "Series" :
+    lib?.CollectionType === "boxsets" ? "BoxSet" :
+    lib?.Type === "BoxSet" ? "Movie,Series,Video,MusicVideo" : "";
 
   const prefs = loadPrefs(libId);
   let [sortBy, sortOrder] = prefs.sort.split("|");

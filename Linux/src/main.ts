@@ -94,6 +94,7 @@ const ICONS: Record<string, string> = {
   music: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5.5l10-2V16"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>',
   musicLibrary: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="4" height="16" rx="1"/><rect x="9" y="4" width="4" height="16" rx="1"/><path d="m16 5 3.5 1L16.5 20 13 19"/></svg>',
   books: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h9.5a3 3 0 0 1 3 3v12H8a3 3 0 0 1-3-3z"/><path d="M5 16.5a3 3 0 0 1 3-3h9.5"/></svg>',
+  collections: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="2"/><path d="M6 5.5h12M8.5 2h7"/></svg>',
   favorites: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 4.5 2.35 4.9 5.15.7-3.8 3.75.95 5.15L12 16.6l-4.65 2.4.95-5.15L4.5 10.1l5.15-.7z"/></svg>',
 };
 
@@ -567,6 +568,10 @@ function paintNav(views: any[] | null): void {
 
   nav.append(el("div", { class: "nav-sep" }, ["Aquarium"]));
   add("#/favorites", "Favorites", ICONS.favorites);
+  // Jellyfin's box sets, where the server has any: its Collections view is
+  // a library of them, and each opens as a grid of what is in it.
+  const collections = views.find((v) => v.CollectionType === "boxsets");
+  if (collections) add(`#/lib/${collections.Id}`, "Collections", ICONS.collections);
   // Only servers that actually have a Live TV library get the entry: without a
   // tuner configured, the page can never say anything but "no channels". A
   // custom M3U source doesn't go through the server at all, so it earns the

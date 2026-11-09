@@ -1146,6 +1146,10 @@ export function itemCard(
       : null,
   ]);
 
+  // A collection opens as a grid of what is in it, the way a library does:
+  // its own detail page would be little more than that list.
+  const openHash = item.Type === "BoxSet" ? `#/lib/${item.Id}` : `#/item/${target}`;
+
   // A card behaves like a button, so it has to say so and be reachable by Tab.
   // It can't *be* a <button>: it contains one (the play overlay), which nesting
   // rules forbid.
@@ -1160,7 +1164,7 @@ export function itemCard(
       // focus or the pointer, before Enter or a click ever asks for it.
       "data-item-id": target,
       onClick: () => {
-        location.hash = `#/item/${target}`;
+        location.hash = openHash;
       },
       onKeydown: (ev: KeyboardEvent) => {
         // Space scrolls the page by default; a card that looks like a button
@@ -1168,7 +1172,7 @@ export function itemCard(
         if (ev.key !== "Enter" && ev.key !== " ") return;
         if (ev.target !== ev.currentTarget) return; // the overlay button's own key
         ev.preventDefault();
-        location.hash = `#/item/${target}`;
+        location.hash = openHash;
       },
     },
     [
