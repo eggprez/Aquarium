@@ -95,6 +95,14 @@ enum M3UParser {
 struct XMLTVProgramme: Sendable {
     var channelId: String
     var title: String
+    /// The episode's own name — XMLTV's `sub-title` — where the feed gives
+    /// one; the guide shows it under the show.
+    var subtitle: String?
+    /// Season and episode from `episode-num`, where the feed numbers its
+    /// episodes but has no name for them — the common case on the 24-hour
+    /// single-show channels, whose entries all carry the show's own title.
+    var season: Int?
+    var episode: Int?
     var desc: String?
     var start: Date
     var stop: Date
@@ -114,6 +122,11 @@ final class XMLTVParser: NSObject, XMLParserDelegate {
     private var pendingStart: Date?
     private var pendingStop: Date?
     private var pendingTitle: String?
+    private var pendingSubtitle: String?
+    private var pendingSeason: Int?
+    private var pendingEpisode: Int?
+    /// The `system` of the `episode-num` being read, if any.
+    private var pendingNumberSystem: String?
     private var pendingDesc: String?
     /// Programmes the feed gave no `stop` — allowed by XMLTV, and common on
     /// feeds that mean "until the next one". Ended once the whole file is in.
@@ -170,7 +183,12 @@ final class XMLTVParser: NSObject, XMLParserDelegate {
             pendingStart = Self.parseDate(attributes["start"])
             pendingStop = Self.parseDate(attributes["stop"])
             pendingTitle = nil
+            pendingSubtitle = nil
+            pendingSeason = nil
+            pendingEpisode = nil
             pendingDesc = nil
+        case "episode-num":
+            pendingNumberSystem = attributes["system"]?.lowercased()
         default:
             break
         }
@@ -188,6 +206,18 @@ final class XMLTVParser: NSObject, XMLParserDelegate {
             if let id = currentChannelId, channelNames[id] == nil, !text.isEmpty { channelNames[id] = text }
         case "title":
             if pendingTitle == nil { pendingTitle = text }
+        case "sub-title":
+            // First wins, like the title: a feed in several languages lists
+            // one per language, its own first.
+            if pendingSubtitle == nil, !text.isEmpty { pendingSubtitle = text }
+        case "episode-num":
+            // Whichever system the feed writes first that can be read:
+            // `xmltv_ns` ("4.11." — both zero-based) or `onscreen` ("S05E12").
+            if pendingEpisode == nil, let numbers = Self.parseEpisodeNumber(text, system: pendingNumberSystem) {
+                pendingSeason = numbers.season
+                pendingEpisode = numbers.episode
+            }
+            pendingNumberSystem = nil
         case "desc":
             pendingDesc = text.isEmpty ? nil : text
         case "channel":
@@ -196,20 +226,52 @@ final class XMLTVParser: NSObject, XMLParserDelegate {
             if let channel = pendingChannel, let start = pendingStart, let title = pendingTitle {
                 if let stop = pendingStop {
                     if stop > start {
-                        programmes.append(XMLTVProgramme(channelId: channel, title: title, desc: pendingDesc, start: start, stop: stop))
+                        programmes.append(XMLTVProgramme(
+                            channelId: channel, title: title, subtitle: pendingSubtitle, season: pendingSeason,
+                            episode: pendingEpisode, desc: pendingDesc, start: start, stop: stop
+                        ))
                     }
                 } else {
-                    openEnded.append(XMLTVProgramme(channelId: channel, title: title, desc: pendingDesc, start: start, stop: start))
+                    openEnded.append(XMLTVProgramme(
+                        channelId: channel, title: title, subtitle: pendingSubtitle, season: pendingSeason,
+                        episode: pendingEpisode, desc: pendingDesc, start: start, stop: start
+                    ))
                 }
             }
             pendingChannel = nil
             pendingStart = nil
             pendingStop = nil
             pendingTitle = nil
+            pendingSubtitle = nil
+            pendingSeason = nil
+            pendingEpisode = nil
             pendingDesc = nil
         default:
             break
         }
+    }
+
+    /// `xmltv_ns` is "season.episode.part", each zero-based and any of them
+    /// blank; `onscreen` is what a broadcaster prints — "S05E12", "S5 E12",
+    /// "5x12" — and anything else is left alone. Nil where there is no
+    /// episode number to read: a season alone names nothing.
+    static func parseEpisodeNumber(_ text: String, system: String?) -> (season: Int?, episode: Int)? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if system == "xmltv_ns" || (system == nil && t.contains(".")) {
+            let parts = t.split(separator: ".", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count >= 2, let e = Int(parts[1].split(separator: "/").first ?? "") else { return nil }
+            let s = Int(parts[0].split(separator: "/").first ?? "")
+            return (s.map { $0 + 1 }, e + 1)
+        }
+        let patterns = [#"[Ss](\d+)\s*[Ee](\d+)"#, #"(\d+)x(\d+)"#, #"[Ee](?:p(?:isode)?)?\.?\s*(\d+)"#]
+        for (index, pattern) in patterns.enumerated() {
+            guard let match = t.range(of: pattern, options: .regularExpression) else { continue }
+            let found = t[match]
+            let numbers = found.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+            if index < 2, numbers.count == 2 { return (numbers[0], numbers[1]) }
+            if index == 2, let e = numbers.first { return (nil, e) }
+        }
+        return nil
     }
 
     /// `20240115193000 +0000`, the usual shape — but XMLTV allows the time to

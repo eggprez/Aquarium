@@ -19,6 +19,9 @@ enum OfflineProgress {
     struct Result: Sendable {
         var synced: Int
         var failed: Int
+        /// Records whose item the server no longer has under any id. Their
+        /// watch state stays on the device and is no longer waiting to go.
+        var gone = 0
     }
 
     @MainActor
@@ -45,8 +48,8 @@ enum OfflineProgress {
         // minutes offline and finished on the TV meanwhile went back to ten
         // minutes. Asked once for the lot; unanswered, everything goes as
         // before.
-        let server = (try? await client.itemsByIds(pending.map(\.itemId) + owed.map(\.itemId))) ?? []
-        let lastPlayed = Dictionary(server.map { ($0.Id, $0) }, uniquingKeysWith: { a, _ in a })
+        let lookup = try? await client.itemsByIds(pending.map(\.itemId) + owed.map(\.itemId))
+        let lastPlayed = Dictionary((lookup ?? []).map { ($0.Id, $0) }, uniquingKeysWith: { a, _ in a })
         func serverIsNewer(_ id: String, than changed: Date?) -> BaseItem? {
             guard let item = lastPlayed[id], let changed,
                   let played = Format.parseDate(item.userData.LastPlayedDate),
@@ -56,6 +59,7 @@ enum OfflineProgress {
 
         var synced = 0
         var failed = 0
+        var gone = 0
         for record in pending {
             if let newer = serverIsNewer(record.itemId, than: record.progressChangedAt) {
                 manager.takeServerState(
@@ -65,17 +69,30 @@ enum OfflineProgress {
                 synced += 1
                 continue
             }
-            do {
-                try await send(
-                    itemId: record.itemId, played: record.played, unplayedPending: record.unplayedPending,
-                    positionTicks: record.positionTicks, with: client
-                )
-                // Against what was sent: newer progress noted during the
-                // await leaves the record unsynced.
-                manager.markSynced(record.itemId, revision: record.progressRevision)
-                synced += 1
-            } catch {
-                failed += 1
+            // An id the lookup answered without is one the server no longer
+            // has; asked anyway when the lookup itself failed.
+            if lookup == nil || lastPlayed[record.itemId] != nil {
+                do {
+                    try await send(
+                        itemId: record.itemId, played: record.played, unplayedPending: record.unplayedPending,
+                        positionTicks: record.positionTicks, with: client
+                    )
+                    // Against what was sent: newer progress noted during the
+                    // await leaves the record unsynced.
+                    manager.markSynced(record.itemId, revision: record.progressRevision)
+                    synced += 1
+                    continue
+                } catch APIError.server(let status, _) where status == 404 {
+                    // Gone under this id: settled below.
+                } catch {
+                    failed += 1
+                    continue
+                }
+            }
+            switch await settleGone(record, with: client, manager: manager) {
+            case .moved: synced += 1
+            case .gone: gone += 1
+            case .failed: failed += 1
             }
         }
         let current = Set(pending.map(\.itemId))
@@ -98,7 +115,70 @@ enum OfflineProgress {
             manager.settleOwed(entry.itemId)
             synced += 1
         }
-        return Result(synced: synced, failed: failed)
+        return Result(synced: synced, failed: failed, gone: gone)
+    }
+
+    private enum GoneOutcome { case moved, gone, failed }
+
+    /// A record whose item the server has dropped under the id the download
+    /// was made with. A file renamed or replaced by an upgrade comes back
+    /// under a new id; deleted outright, it comes back under none. Either
+    /// way the record used to stay unsynced for good — the watched flag went
+    /// to the old id, the server said 404, and every sync after counted it
+    /// as a failure: "Syncing 1 item", for ever.
+    ///
+    /// Found under a new id, the state goes there and the download is moved
+    /// over at the next launch (see `DownloadManager.rekey`). Found nowhere,
+    /// there is nothing to tell, the way an owed entry's 404 is read below;
+    /// the device's own copy keeps what it knows.
+    @MainActor
+    private static func settleGone(
+        _ record: DownloadRecord, with client: JellyfinClient, manager: DownloadManager
+    ) async -> GoneOutcome {
+        do {
+            guard let replacement = try await replacement(for: record, with: client) else {
+                manager.markSynced(record.itemId, revision: record.progressRevision)
+                return .gone
+            }
+            try await send(
+                itemId: replacement.Id, played: record.played, unplayedPending: record.unplayedPending,
+                positionTicks: record.positionTicks, with: client
+            )
+            manager.noteFoundUnderNewId(record.itemId, newId: replacement.Id, confirmedGone: true)
+            manager.markSynced(record.itemId, revision: record.progressRevision)
+            return .moved
+        } catch {
+            return .failed
+        }
+    }
+
+    /// The server's item for a download whose id it no longer has, by what
+    /// the download is — the same strict match as `completeRecord(matching:)`,
+    /// asked the other way round and of the server itself, since the device's
+    /// copy of the library may still hold the old id.
+    @MainActor
+    private static func replacement(for record: DownloadRecord, with client: JellyfinClient) async throws -> BaseItem? {
+        if record.isEpisode {
+            guard let seriesId = record.seriesId, let season = record.season, let episode = record.episode else {
+                return nil
+            }
+            let episodes: [BaseItem]
+            do {
+                episodes = try await client.episodes(seriesId: seriesId, seasonId: nil, fromServer: true)
+            } catch APIError.server(let status, _) where status == 404 {
+                // The whole series is gone, not just the file.
+                return nil
+            }
+            return episodes.first {
+                $0.Id != record.itemId && $0.ParentIndexNumber == season && $0.IndexNumber == episode
+            }
+        }
+        guard record.type == "Movie", record.runTimeTicks > 0 else { return nil }
+        let films = try await client.search(record.name, limit: 10, types: "Movie").items
+        return films.first {
+            $0.Id != record.itemId && $0.title == record.name
+                && abs(($0.RunTimeTicks ?? 0) - record.runTimeTicks) < 5 * 10_000_000
+        }
     }
 
     /// One item's state, said to the server. Throws unless all of it landed.

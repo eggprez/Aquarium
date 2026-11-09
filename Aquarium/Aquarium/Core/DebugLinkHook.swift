@@ -10,6 +10,7 @@
 //      xcrun simctl spawn "iPhone Duo" notifyutil -p aquarium.debug.openurl
 //      xcrun simctl spawn "iPhone Duo" notifyutil -p aquarium.debug.stop
 //      xcrun simctl spawn "iPhone Duo" notifyutil -p aquarium.debug.browse
+//      xcrun simctl spawn "iPhone Duo" notifyutil -p aquarium.debug.watchrelay
 //
 //  The Apple TV has a fuller one of these — see Player/TV/RemoteDebugHook.swift.
 
@@ -20,7 +21,7 @@ import OSLog
 @MainActor
 enum DebugLinkHook {
     private static var registered = false
-    private static let names = ["openurl", "stop", "browse"]
+    private static let names = ["openurl", "stop", "browse", "watchrelay"]
 
     static func start() {
         guard !registered else { return }
@@ -51,6 +52,11 @@ enum DebugLinkHook {
             PlayerModel.shared.stop(reason: "debug hook")
         case "aquarium.debug.browse":
             AppModel.shared.tentBrowsing = true
+        case "aquarium.debug.watchrelay":
+            // Three rows as a bad night leaves them, for the Transfers page:
+            // a paired simulator never finishes a send, so there is no
+            // honest way to get one there.
+            WatchLink.shared.debugSeedRelayRows()
         default:
             break
         }

@@ -476,6 +476,26 @@ struct DownloadsView: View {
     }
     #endif
 
+    /// What the Sync button's toast says. Items the server no longer has are
+    /// named as such: "couldn't reach the server" was the only other thing
+    /// it knew how to say, and was said of a download whose film had been
+    /// replaced on the server, sync after sync.
+    static func syncMessage(_ result: OfflineProgress.Result) -> String {
+        func items(_ n: Int) -> String { "\(n) item\(n == 1 ? "" : "s")" }
+        var parts: [String] = []
+        if result.synced > 0 { parts.append("Synced \(items(result.synced)) to Jellyfin") }
+        if result.gone > 0 {
+            parts.append(
+                result.gone == 1
+                    ? "1 item is no longer on the server; its watch state stays on this device"
+                    : "\(result.gone) items are no longer on the server; their watch state stays on this device"
+            )
+        }
+        if parts.isEmpty { return "Couldn't reach the server to sync" }
+        if result.failed > 0 { parts.append("\(items(result.failed)) couldn't be sent") }
+        return parts.joined(separator: " · ")
+    }
+
     // MARK: - Chrome
 
     @ViewBuilder
@@ -498,12 +518,7 @@ struct DownloadsView: View {
                             isSyncing = true
                             let result = await OfflineProgress.sync()
                             isSyncing = false
-                            app.toast(
-                                result.synced > 0
-                                    ? "Synced \(result.synced) item\(result.synced == 1 ? "" : "s") to Jellyfin"
-                                    : "Couldn't reach the server to sync",
-                                tone: result.failed > 0 ? .error : .ok
-                            )
+                            app.toast(Self.syncMessage(result), tone: result.failed > 0 ? .error : .ok)
                         }
                     } label: {
                         if isSyncing {

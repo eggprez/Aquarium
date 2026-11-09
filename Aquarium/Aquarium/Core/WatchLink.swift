@@ -80,9 +80,11 @@ final class WatchLink: NSObject {
     /// page would be empty.
     var transfersSummary: String? {
         let moving = relayItems.filter { !$0.stage.isFinished }.count
+        let stuck = relayItems.filter(\.isStuck).count
         let failed = relayItems.filter { $0.stage == .failed }.count
         var parts: [String] = []
         if moving > 0 { parts.append("\(moving.formatted()) on the way") }
+        if stuck > 0 { parts.append("\(stuck.formatted()) not moving") }
         if failed > 0 { parts.append("\(failed.formatted()) failed") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
@@ -1072,6 +1074,66 @@ final class WatchLink: NSObject {
         }
     }
 
+    /// Cancelled by hand on the Transfers page. The download or the send
+    /// stops and the row goes; the watch is told, so it stops waiting and
+    /// declines the item for any want that names it, the way its own
+    /// Cancel does — otherwise its next pass would ask for it all over
+    /// again. A song or a book wanted on its own *is* the want: off the
+    /// list here too, in the same breath.
+    ///
+    /// Before this there was no way to stop a send by hand at all: a
+    /// transfer WatchConnectivity never finished sat on the page for days,
+    /// and the only thing that cleared it was the watch's own Cancel, on a
+    /// row the watch might not even show.
+    func cancelRelay(_ itemId: String) {
+        Self.log.notice("cancelled by hand: \(itemId, privacy: .public)")
+        cancelFetch(itemId)
+        for key in ["song:\(itemId)", "book:\(itemId)"] where wants.contains(where: { $0.id == key }) {
+            forgetWant(key: key)
+        }
+        send(.cancelled(itemId: itemId))
+    }
+
+    /// Every row still on its way, cancelled. Returns how many.
+    @discardableResult
+    func cancelAllRelays() -> Int {
+        let ids = relayItems.filter { !$0.stage.isFinished }.map(\.id)
+        for id in ids { cancelRelay(id) }
+        return ids.count
+    }
+
+    #if DEBUG
+    /// QA only — see `DebugLinkHook`: two sends that stopped hours ago and
+    /// one row waiting its turn, so the Transfers page can be looked at on
+    /// a simulator. Rows with nothing behind them: Cancel takes them off
+    /// the way it would a real one.
+    ///
+    /// The ids come from the `debug_relay_ids` default (comma-separated),
+    /// and should be items the watch is waiting on: the watch's next
+    /// context drops every row it isn't, the way it would a stale ask.
+    func debugSeedRelayRows() {
+        let now = Date()
+        let ids = (UserDefaults.standard.string(forKey: "debug_relay_ids") ?? "")
+            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard ids.count >= 3 else {
+            Self.log.error("debug: debug_relay_ids needs three item ids the watch is waiting on")
+            return
+        }
+        let seeded = [
+            RelayItem(id: ids[0], stage: .sending, downloadFraction: 1, transferFraction: 0.42,
+                      askedAt: now.addingTimeInterval(-4 * 3600), movedAt: now.addingTimeInterval(-3 * 3600)),
+            RelayItem(id: ids[1], stage: .sending, downloadFraction: 1, transferFraction: 0,
+                      askedAt: now.addingTimeInterval(-26 * 3600), movedAt: now.addingTimeInterval(-26 * 3600)),
+            RelayItem(id: ids[2], stage: .waiting, askedAt: now),
+        ]
+        relayItems.removeAll { row in seeded.contains { $0.id == row.id } }
+        relayItems += seeded
+        persistRelay()
+        for id in ids.prefix(3) { nameRelayItem(id) }
+        Self.log.notice("debug: seeded \(seeded.count) relay rows")
+    }
+    #endif
+
     /// Settings' "Clear": the failed rows go. Delivered ones go by
     /// themselves, the moment the watch has the file.
     func clearFinishedRelayItems() {
@@ -1203,7 +1265,10 @@ final class WatchLink: NSObject {
             defer { transferProgressTask = nil }
             while !transferring.isEmpty, !Task.isCancelled {
                 for (itemId, sent) in Self.sentFractions(WCSession.default.outstandingFileTransfers) {
-                    updateRelay(itemId) { $0.transferFraction = sent }
+                    updateRelay(itemId) { r in
+                        if abs((r.transferFraction ?? -1) - sent) > 0.0005 || r.movedAt == nil { r.movedAt = Date() }
+                        r.transferFraction = sent
+                    }
                     reportProgress(itemId, Self.fetchShare + (1 - Self.fetchShare) * sent)
                 }
                 try? await Task.sleep(for: .seconds(3))
@@ -1294,6 +1359,7 @@ final class WatchLink: NSObject {
         updateRelay(itemId) { r in
             r.stage = .sending
             r.transferFraction = 0
+            r.movedAt = Date()
         }
         if !transferring.contains(itemId) { transferring.append(itemId) }
         guard bytes > WatchFileTransfer.pieceBytes else {
@@ -1603,7 +1669,9 @@ extension WatchLink: WCSessionDelegate {
             for (id, sent) in Self.sentFractions(transfers) {
                 Self.log.notice("send of \(id, privacy: .public) to the watch still under way, \(Int(sent * 100))%")
                 if !transferring.contains(id) { transferring.append(id) }
-                updateRelay(id) { $0.stage = .sending; $0.transferFraction = sent }
+                // The clock starts again: nothing was watching while the app
+                // was gone, and a send that moved then would read as stuck.
+                updateRelay(id) { $0.stage = .sending; $0.transferFraction = sent; $0.movedAt = Date() }
             }
             if !transferring.isEmpty { watchTransfers() }
             // A row left sending with nothing in WatchConnectivity: the app
@@ -1913,6 +1981,24 @@ struct RelayItem: Codable, Hashable, Identifiable, Sendable {
     var updatedAt = Date()
     /// When the watch asked; nil for a row older than the field.
     var askedAt: Date?
+    /// When the send to the watch last got anywhere: the moment it was
+    /// handed over, and each time WatchConnectivity reported more of it
+    /// across. A send that sits for long is said so on its row, since
+    /// WatchConnectivity itself never says why one has stopped — a watch
+    /// out of reach, locked, or out of room all look the same from here.
+    var movedAt: Date?
+
+    /// A send that hasn't got anywhere for this long is called stuck.
+    static let stuckAfter: TimeInterval = 10 * 60
+
+    /// Whether this is a send to the watch that has stopped moving, as of
+    /// `now` — a page that stays open passes the clock it is drawn with.
+    func isStuck(at now: Date = Date()) -> Bool {
+        guard stage == .sending, let movedAt else { return false }
+        return now.timeIntervalSince(movedAt) > Self.stuckAfter
+    }
+
+    var isStuck: Bool { isStuck() }
 }
 
 #endif

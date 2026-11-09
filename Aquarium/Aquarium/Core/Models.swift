@@ -366,6 +366,17 @@ struct BaseItem: Codable, Hashable, Sendable, Identifiable {
         return s == 0 ? "Specials: Episode \(e)" : "Season \(s): Episode \(e)"
     }
 
+    /// The line under a programme's title in a guide: the episode's own
+    /// name where the listing has one, else its number — "S5 E12", or
+    /// "Episode 12" with no season — and nothing for a film or a one-off.
+    /// Short, since a guide cell is a few words wide.
+    var programmeEpisodeLine: String? {
+        if let name = EpisodeTitle?.trimmingCharacters(in: .whitespaces), !name.isEmpty { return name }
+        guard let e = IndexNumber else { return nil }
+        guard let s = ParentIndexNumber, s > 0 else { return "Episode \(e)" }
+        return "S\(s) E\(e)"
+    }
+
     /// How far through the item the user is, 0...1, or nil when it hasn't been
     /// started. The bar under a card is drawn from this.
     var progressFraction: Double? {
