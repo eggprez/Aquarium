@@ -12,8 +12,13 @@
 //  AppKit has had the controller over an `AVPlayerLayer` since 10.15; this
 //  is the behaviour `AVPlayerView`'s delegate used to carry.
 //
-//  Only an `AVPlayerLayer` can be put in the window: a stream on the mpv
-//  engine is handed to AVPlayer first (`PlayerModel.handOverForPictureInPicture`),
+//  Only an `AVPlayerLayer` or an `AVSampleBufferDisplayLayer` can be put in
+//  the window. On an iPhone or iPad mpv draws into the second
+//  (`MPVSampleBufferLayer`), so its picture floats as it is, with this
+//  object answering the window's own play, pause and skip buttons through
+//  `AVPictureInPictureSampleBufferPlaybackDelegate`. Anywhere mpv draws
+//  through Metal — the Mac, or an iPhone with a picture adjustment on — the
+//  stream is handed to AVPlayer first (`PlayerModel.handOverForPictureInPicture`),
 //  with `startWhenPossible` starting the picture as soon as the new layer
 //  plays, and goes back to mpv when the picture returns.
 
@@ -44,6 +49,13 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
     @ObservationIgnored private var hiddenWindow = false
     #endif
 
+    #if os(iOS)
+    /// The window was closed with the app behind another, rather than
+    /// brought back: the sound mustn't play on with nothing to show for it.
+    /// AVPlayer pauses itself here; mpv is told.
+    @ObservationIgnored private var restoring = false
+    #endif
+
     /// Point the controller at the layer the picture is drawn on. Called
     /// once per layer; a new layer replaces the controller.
     func attach(to layer: AVPlayerLayer) {
@@ -51,6 +63,38 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
         if let controller, controller.playerLayer === layer { return }
         observers.removeAll()
         guard let made = AVPictureInPictureController(playerLayer: layer) else { return }
+        install(made)
+    }
+
+    #if os(iOS)
+    /// The same, for mpv's sample layer: the window's buttons come back
+    /// through the playback delegate below, and the state it reads is
+    /// invalidated whenever the player's changes.
+    func attach(to layer: AVSampleBufferDisplayLayer) {
+        guard AVPictureInPictureController.isPictureInPictureSupported() else { return }
+        if let controller, controller.contentSource?.sampleBufferDisplayLayer === layer { return }
+        observers.removeAll()
+        let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: layer, playbackDelegate: self)
+        install(AVPictureInPictureController(contentSource: source))
+        watchPlaybackState()
+    }
+
+    private func watchPlaybackState() {
+        guard let controller, controller.contentSource?.sampleBufferDisplayLayer != nil else { return }
+        withObservationTracking {
+            let player = PlayerModel.shared
+            _ = (player.isPaused, player.duration, player.isLive)
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.controller === controller else { return }
+                controller.invalidatePlaybackState()
+                self.watchPlaybackState()
+            }
+        }
+    }
+    #endif
+
+    private func install(_ made: AVPictureInPictureController) {
         made.delegate = self
         #if os(iOS)
         made.canStartPictureInPictureAutomaticallyFromInline = true
@@ -112,6 +156,14 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
 
     // MARK: Delegate
 
+    nonisolated func pictureInPictureControllerWillStartPictureInPicture(_ controller: AVPictureInPictureController) {
+        #if os(iOS)
+        // Before the app goes to the background, when PiP starts on its own
+        // from a swipe home: mpv keeps the video track for the window.
+        Task { @MainActor in PlayerModel.shared.pictureInPictureHoldsPicture = true }
+        #endif
+    }
+
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
         Task { @MainActor in
             self.isActive = true
@@ -122,8 +174,15 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
     }
 
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
+        let sampleBuffer = controller.contentSource?.sampleBufferDisplayLayer != nil
         Task { @MainActor in
             self.isActive = false
+            #if os(iOS)
+            if sampleBuffer, !self.restoring, UIApplication.shared.applicationState != .active {
+                PlayerModel.shared.pause()
+            }
+            self.restoring = false
+            #endif
             #if os(macOS)
             self.restoreWindow()
             #endif
@@ -137,6 +196,9 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
         failedToStartPictureInPictureWithError error: any Error
     ) {
         PlayerModel.log.error("Picture in Picture failed to start: \(error.localizedDescription, privacy: .public)")
+        #if os(iOS)
+        Task { @MainActor in PlayerModel.shared.pictureInPictureHoldsPicture = false }
+        #endif
     }
 
     /// The button in the floating window that means "back to the app". On an
@@ -152,10 +214,24 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
             self.restoreWindow()
             completionHandler(true)
         }
+        #elseif os(iOS)
+        Task { @MainActor in self.restoring = true }
+        completionHandler(true)
         #else
         completionHandler(true)
         #endif
     }
+
+    // MARK: The mpv picture's buttons
+
+    #if os(iOS)
+    /// AVKit asks these on the main thread; read through `onMain` in case
+    /// it ever doesn't, since the answers are the main actor's.
+    private nonisolated func onMain<T: Sendable>(_ body: @MainActor () -> T) -> T {
+        if Thread.isMainThread { return MainActor.assumeIsolated(body) }
+        return DispatchQueue.main.sync { MainActor.assumeIsolated(body) }
+    }
+    #endif
 
     // MARK: The Mac window
 
@@ -179,5 +255,41 @@ final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
     }
     #endif
 }
+
+#if os(iOS)
+extension PictureInPicture: AVPictureInPictureSampleBufferPlaybackDelegate {
+    nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController, setPlaying playing: Bool) {
+        onMain { playing ? PlayerModel.shared.resume() : PlayerModel.shared.pause() }
+    }
+
+    /// In the sample layer's clock, which runs at the playhead: the whole
+    /// title, or no end for a channel.
+    nonisolated func pictureInPictureControllerTimeRangeForPlayback(_ controller: AVPictureInPictureController) -> CMTimeRange {
+        onMain {
+            let player = PlayerModel.shared
+            if player.isLive || player.duration <= 0 {
+                return CMTimeRange(start: .negativeInfinity, duration: .positiveInfinity)
+            }
+            return CMTimeRange(start: .zero, duration: CMTime(seconds: player.duration, preferredTimescale: 90_000))
+        }
+    }
+
+    nonisolated func pictureInPictureControllerIsPlaybackPaused(_ controller: AVPictureInPictureController) -> Bool {
+        onMain { PlayerModel.shared.isPaused }
+    }
+
+    nonisolated func pictureInPictureController(
+        _ controller: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions
+    ) {}
+
+    nonisolated func pictureInPictureController(
+        _ controller: AVPictureInPictureController, skipByInterval skipInterval: CMTime,
+        completion completionHandler: @escaping () -> Void
+    ) {
+        onMain { PlayerModel.shared.seek(by: skipInterval.seconds) }
+        completionHandler()
+    }
+}
+#endif
 
 #endif

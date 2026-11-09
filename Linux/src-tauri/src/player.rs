@@ -168,20 +168,48 @@ pub fn power_changed(app: &AppHandle) {
     });
 }
 
+/// Network protocols a stream may use. Matches `LIVE_STREAM_URL` in `iptv.ts`.
+const STREAM_SCHEMES: [&str; 8] = ["http", "https", "rtsp", "rtsps", "rtmp", "rtmps", "udp", "rtp"];
+
+/// Refuse an address that isn't a network stream or a downloaded file.
+///
+/// `loadfile` is the most trusted way into mpv, so it opens `av://lavfi`,
+/// `edl://` and any local path without complaint, and on Linux nothing sandboxes
+/// what those reach. The address comes from a third-party playlist or a download
+/// record, so it is checked here, where the webview can't skip it.
+pub fn check_play_target(target: &str) -> Result<(), String> {
+    if play_target_allowed(target, &crate::config::downloads_dir()) {
+        Ok(())
+    } else {
+        Err("This isn't an address Aquarium can play.".into())
+    }
+}
+
+fn play_target_allowed(target: &str, downloads: &std::path::Path) -> bool {
+    if target != target.trim() || target.chars().any(char::is_control) {
+        return false;
+    }
+    if target.starts_with('/') {
+        // Resolved first, so neither `..` nor a symlink can lead out of the folder.
+        let (Ok(file), Ok(root)) = (std::fs::canonicalize(target), std::fs::canonicalize(downloads))
+        else {
+            return false;
+        };
+        return file.is_file() && file.starts_with(root);
+    }
+    reqwest::Url::parse(target).is_ok_and(|u| STREAM_SCHEMES.contains(&u.scheme()))
+}
+
 /// The `Authorization` header mpv should send for this stream, if any. Skipped
 /// for local files and when there's no stored token.
 ///
 /// The token is only ever sent to the Jellyfin server it belongs to. A custom
 /// Live TV playlist streams from whatever hosts the user's provider names, and
 /// handing our credential to one of those would leak it to a third party — so
-/// the stream URL has to sit under the server URL this context carries.
+/// the stream URL has to be on the server this install is signed in to.
 fn http_auth_header(req: &PlayRequest) -> Option<String> {
-    if !req.url.starts_with("http://") && !req.url.starts_with("https://") {
-        return None;
-    }
     let ctx = req.ctx.as_ref()?;
-    let server = ctx.server_url.as_deref()?.trim_end_matches('/');
-    if server.is_empty() || !req.url.starts_with(server) {
+    if !crate::server::is_session_origin(&req.url) {
         return None;
     }
     let token = crate::secret::token()?;
@@ -391,8 +419,9 @@ impl Player {
             volume: start_volume,
             start,
             // Authenticate with a header rather than an `api_key=` query
-            // parameter, so the token never lands in Jellyfin's access log or
-            // in our own mpv log for every stream we open.
+            // parameter, so the token never lands in Jellyfin's access log for
+            // every stream we open. mpv's own log does record it, which is why
+            // that log is off by default; see `mpv_log_path`.
             auth_header: http_auth_header(&req),
             user_agent: req.user_agent.clone(),
             prefs: crate::prefs::Prefs::load().args(),
@@ -1000,7 +1029,9 @@ fn report_body(ctx: &PlayContext, st: &Status, event: Option<&str>) -> Value {
 
 fn server_creds(ctx: &PlayContext) -> Option<(String, String, String)> {
     Some((
-        ctx.server_url.clone()?,
+        ctx.server_url
+            .clone()
+            .filter(|s| crate::server::is_session_origin(s))?,
         crate::secret::token()?,
         ctx.device_id.clone().unwrap_or_else(|| "aquarium".into()),
     ))
@@ -1045,8 +1076,12 @@ async fn report_stopped(ctx: &Option<PlayContext>, st: &Status) {
         let ticks = (st.position.max(0.0) * TICKS_PER_SECOND) as u64;
         progress::store_local(&ctx.item_id, ticks, played);
         // Opportunistic sync — succeeds silently when the server is reachable.
+        let server = ctx
+            .server_url
+            .as_ref()
+            .filter(|s| crate::server::is_session_origin(s));
         if let (Some(server), Some(token), Some(user_id)) =
-            (&ctx.server_url, crate::secret::token(), &ctx.user_id)
+            (server, crate::secret::token(), &ctx.user_id)
         {
             let device_id = ctx.device_id.clone().unwrap_or_else(|| "aquarium".into());
             let _ = progress::sync(server, &token, &device_id, user_id).await;
@@ -1067,4 +1102,64 @@ async fn report_stopped(ctx: &Option<PlayContext>, st: &Status) {
         &body,
     )
     .await;
+}
+
+#[cfg(test)]
+mod play_target_tests {
+    use super::*;
+
+    #[test]
+    fn network_streams_are_allowed() {
+        let root = std::env::temp_dir();
+        for url in [
+            "https://jf.example.com/Videos/1/stream",
+            "HTTP://provider.example/live.m3u8",
+            "rtsp://cam.example/1",
+            "rtmp://provider.example/live",
+            "udp://@239.0.0.1:1234",
+        ] {
+            assert!(play_target_allowed(url, &root), "{url}");
+        }
+    }
+
+    #[test]
+    fn other_mpv_targets_are_refused() {
+        let root = std::env::temp_dir();
+        for url in [
+            "av://lavfi:testsrc",
+            "AV://lavfi:testsrc",
+            "edl://a.mkv,0,1",
+            "file:///etc/passwd",
+            "lavf://file:/etc/passwd",
+            "memory://x",
+            "fd://0",
+            "relative.mkv",
+            " http://example.com/x",
+            "http://example.com/x\n",
+            "",
+        ] {
+            assert!(!play_target_allowed(url, &root), "{url:?}");
+        }
+    }
+
+    #[test]
+    fn local_files_must_be_inside_downloads() {
+        let base = std::env::temp_dir().join(format!("aquarium-test-{}", uuid::Uuid::new_v4()));
+        let root = base.join("downloads");
+        std::fs::create_dir_all(root.join("item")).unwrap();
+        let inside = root.join("item/film.mkv");
+        let outside = base.join("secret.mkv");
+        std::fs::write(&inside, b"x").unwrap();
+        std::fs::write(&outside, b"x").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("item/link.mkv")).unwrap();
+
+        let allowed = |p: &std::path::Path| play_target_allowed(&p.to_string_lossy(), &root);
+        assert!(allowed(&inside));
+        assert!(!allowed(&outside));
+        assert!(!allowed(&root.join("item/link.mkv")));
+        assert!(!allowed(&root.join("item/../../secret.mkv")));
+        assert!(!allowed(&root.join("item")));
+        assert!(!allowed(&root.join("item/missing.mkv")));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 }

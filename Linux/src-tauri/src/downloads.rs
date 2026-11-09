@@ -81,14 +81,67 @@ pub(crate) fn item_dir(item_id: &str) -> Result<PathBuf, String> {
     Ok(config::downloads_dir().join(item_id))
 }
 
+/// Files in an item's folder that the app owns. A title called "meta" in a
+/// "json" container would otherwise replace the record with the server's bytes.
+const RESERVED_FILE_NAMES: [&str; 4] =
+    ["meta.json", "poster.jpg", "series_poster.jpg", "season_poster.jpg"];
+
+/// Fields of a record that `list` works out from the folder each time. Whatever
+/// is stored under these names is ignored: `path` goes straight to mpv.
+const COMPUTED_PATHS: [&str; 4] =
+    ["path", "poster_path", "series_poster_path", "season_poster_path"];
+
 /// The same guard for the file name a download is saved under, which is
 /// joined onto the item's folder. The frontend already replaces anything
-/// unusual in it; this only has to stop it leaving the folder.
+/// unusual in it; this stops it leaving the folder or replacing the app's files.
 fn check_file_name(name: &str) -> Result<(), String> {
-    if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\0') {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\0')
+        || RESERVED_FILE_NAMES.contains(&name)
+    {
         return Err(format!("not a valid file name: {name:?}"));
     }
     Ok(())
+}
+
+/// Read an item's record. Anything but a JSON object counts as no record:
+/// assigning a field on any other JSON value panics.
+fn read_meta(path: &std::path::Path) -> Option<Value> {
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<Value>(&text)
+        .ok()
+        .filter(Value::is_object)
+}
+
+/// Replace a record's paths with what is actually in its folder.
+fn refresh_paths(meta: &mut Value, dir: &std::path::Path) {
+    let Some(fields) = meta.as_object_mut() else {
+        return;
+    };
+    for key in COMPUTED_PATHS {
+        fields.remove(key);
+    }
+    let file = meta.get("file").and_then(|v| v.as_str()).unwrap_or("");
+    if check_file_name(file).is_ok() {
+        let fpath = dir.join(file);
+        if fpath.is_file() {
+            meta["path"] = json!(fpath.to_string_lossy());
+            meta["size_bytes"] = json!(fpath.metadata().map(|m| m.len()).unwrap_or(0));
+        }
+    }
+    for (name, key) in [
+        ("poster.jpg", "poster_path"),
+        ("series_poster.jpg", "series_poster_path"),
+        ("season_poster.jpg", "season_poster_path"),
+    ] {
+        let poster = dir.join(name);
+        if poster.exists() {
+            meta[key] = json!(poster.to_string_lossy());
+        }
+    }
 }
 
 /// Bytes an unprivileged process can still write to the filesystem holding the
@@ -189,7 +242,7 @@ impl DlManager {
         check_file_name(&req.file_name)?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
-        let mut meta = req.meta.clone();
+        let mut meta = if req.meta.is_object() { req.meta.clone() } else { json!({}) };
         if let Some(o) = meta.as_object_mut() {
             o.remove("error"); // stale from a failed run being retried
         }
@@ -231,10 +284,7 @@ impl DlManager {
             let fetched = AtomicU64::new(0);
             let result = run_download(&app2, &req, &dir, flag.clone(), &fetched).await;
 
-            let mut meta = std::fs::read_to_string(dir.join("meta.json"))
-                .ok()
-                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-                .unwrap_or_else(|| json!({}));
+            let mut meta = read_meta(&dir.join("meta.json")).unwrap_or_else(|| json!({}));
 
             crate::debug_log_line(&format!(
                 "download {} -> {}",
@@ -495,6 +545,13 @@ async fn run_download(
     stop: Arc<AtomicU8>,
     fetched: &AtomicU64,
 ) -> Result<(), String> {
+    // A stored download can outlive the sign-in it was started under, and the
+    // header below is today's token. Sending it to the address in an old record
+    // would hand this server's credential to the previous one.
+    if !crate::server::is_session_origin(&req.url) {
+        return Err("This download is from a different server. Delete it, or sign in to that server to finish it.".into());
+    }
+
     // Posters first (best effort, small): the item's own image, plus the
     // portrait series/season posters for episodes (used on show/season cards).
     fetch_image(&req.image_url, dir.join("poster.jpg")).await;
@@ -732,36 +789,16 @@ pub fn list(mgr: &DlManager) -> Vec<Value> {
         if !p.is_dir() {
             continue;
         }
-        let Ok(s) = std::fs::read_to_string(p.join("meta.json")) else {
+        let Some(mut meta) = read_meta(&p.join("meta.json")) else {
             continue;
         };
-        let Ok(mut meta) = serde_json::from_str::<Value>(&s) else {
-            continue;
-        };
-        let file = meta.get("file").and_then(|v| v.as_str()).unwrap_or("");
-        let fpath = p.join(file);
-        if fpath.exists() {
-            meta["path"] = json!(fpath.to_string_lossy());
-            meta["size_bytes"] = json!(fpath.metadata().map(|m| m.len()).unwrap_or(0));
-        }
+        refresh_paths(&mut meta, &p);
         let subs = crate::download_extras::local_subtitles(&p);
         if !subs.is_empty() {
             meta["subtitles"] = json!(subs);
         }
         if meta.get("status").and_then(|v| v.as_str()) == Some("complete") {
             meta["subtitles_settled"] = json!(crate::download_extras::subtitles_settled(&p));
-        }
-        let poster = p.join("poster.jpg");
-        if poster.exists() {
-            meta["poster_path"] = json!(poster.to_string_lossy());
-        }
-        let series_poster = p.join("series_poster.jpg");
-        if series_poster.exists() {
-            meta["series_poster_path"] = json!(series_poster.to_string_lossy());
-        }
-        let season_poster = p.join("season_poster.jpg");
-        if season_poster.exists() {
-            meta["season_poster_path"] = json!(season_poster.to_string_lossy());
         }
         let item_id = meta
             .get("item_id")
@@ -786,10 +823,7 @@ pub fn set_watch_state(item_id: &str, position_ticks: u64, played: bool) {
         return;
     };
     let meta_path = dir.join("meta.json");
-    let Ok(s) = std::fs::read_to_string(&meta_path) else {
-        return;
-    };
-    let Ok(mut meta) = serde_json::from_str::<Value>(&s) else {
+    let Some(mut meta) = read_meta(&meta_path) else {
         return;
     };
     meta["position_ticks"] = json!(position_ticks);
@@ -810,6 +844,65 @@ pub fn delete(item_id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_item_dir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("aquarium-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn file_names_cannot_replace_the_apps_own_files() {
+        assert!(check_file_name("Some Film (2024).mkv").is_ok());
+        for name in ["meta.json", "poster.jpg", "series_poster.jpg", "season_poster.jpg"] {
+            assert!(check_file_name(name).is_err(), "{name}");
+        }
+        for name in ["", ".", "..", "../x.mkv", "/etc/x"] {
+            assert!(check_file_name(name).is_err(), "{name}");
+        }
+    }
+
+    #[test]
+    fn stored_paths_are_ignored() {
+        let dir = temp_item_dir();
+        let mut meta = json!({
+            "file": "missing.mkv",
+            "path": "av://lavfi:testsrc",
+            "poster_path": "/etc/passwd",
+        });
+        refresh_paths(&mut meta, &dir);
+        assert!(meta.get("path").is_none());
+        assert!(meta.get("poster_path").is_none());
+
+        std::fs::write(dir.join("film.mkv"), b"x").unwrap();
+        let mut meta = json!({ "file": "film.mkv", "path": "/elsewhere" });
+        refresh_paths(&mut meta, &dir);
+        assert_eq!(meta["path"], json!(dir.join("film.mkv").to_string_lossy()));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_record_with_no_usable_file_has_no_path() {
+        let dir = temp_item_dir();
+        // An empty name would join to the folder itself.
+        for file in [json!(""), json!("meta.json"), json!("../../etc/passwd"), json!(7)] {
+            let mut meta = json!({ "file": file });
+            refresh_paths(&mut meta, &dir);
+            assert!(meta.get("path").is_none());
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_record_that_is_not_an_object_is_no_record() {
+        let dir = temp_item_dir();
+        let path = dir.join("meta.json");
+        std::fs::write(&path, "[1, 2, 3]").unwrap();
+        assert!(read_meta(&path).is_none());
+        std::fs::write(&path, r#"{"status":"complete"}"#).unwrap();
+        assert!(read_meta(&path).is_some());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     /// A Matroska head with a TimestampScale, and a tail whose clusters
     /// stop at `last_ms`.

@@ -237,6 +237,18 @@ final class PlayerModel {
     /// engine is the one playing. One for the life of the app; the handle
     /// drawing into it is made per stream.
     let mpvLayer = MPVMetalLayer()
+    #if os(iOS)
+    /// The surface mpv draws into for Picture in Picture's sake, and which
+    /// of the two it is drawing into — what `VideoSurface` hosts. See
+    /// `applyMPVOutput`.
+    let mpvSampleLayer = MPVSampleBufferLayer()
+    var mpvOutput: MPVOutput = .metal
+    #endif
+    #endif
+    #if os(iOS)
+    /// Picture in Picture is starting or up: the picture is the floating
+    /// window's, so going to the background mustn't let go of the video track.
+    var pictureInPictureHoldsPicture = false
     #endif
 
     // MARK: - Internals
@@ -365,7 +377,10 @@ final class PlayerModel {
     struct DownloadShuffleState {
         var seriesId: String?
         var seriesName: String?
-        var seen: Set<String>
+        /// What plays after this one, already shuffled: dealt once, so the
+        /// Up Next card and list can say what is really coming instead of
+        /// the next episode in order. Refilled, reshuffled, when it runs out.
+        var order: [String]
         /// The downloads this shuffle draws from: a season's, when it was
         /// started from a season. Nil is every download of the series.
         var pool: Set<String>? = nil
@@ -436,6 +451,10 @@ final class PlayerModel {
     var displayRequested = false
     var lastAwakeAssert: CFTimeInterval = 0
     #endif
+    #if os(macOS)
+    /// The activity holding the display awake while mpv plays.
+    var displayAwake: (any NSObjectProtocol)?
+    #endif
 
     /// Whether the audio session has been given this app's category. Set
     /// after the first frame, or by the first playback — see
@@ -488,13 +507,21 @@ final class PlayerModel {
         case .mpv:
             #if canImport(Libmpv)
             if let mpvEngine { return mpvEngine }
-            guard let made = MPVEngine(layer: mpvLayer, tuning: mpvTuning) else {
+            #if os(iOS)
+            let sampleLayer: Any? = mpvSampleLayer
+            #else
+            let sampleLayer: Any? = nil
+            #endif
+            guard let made = MPVEngine(layer: mpvLayer, sampleLayer: sampleLayer, tuning: mpvTuning) else {
                 Self.log.error("mpv could not be created")
                 return nil
             }
             appleEngine.stop()
             mpvEngine = made
             engine = made
+            #if os(iOS)
+            made.onRequirementsChanged = { [weak self] in self?.applyMPVOutput() }
+            #endif
             wireEngineEvents(for: made)
             configure(made)
             Self.log.info("mpv engine made (\(self.mpvTuning.demuxerMaxBytes, privacy: .public) cache)")
@@ -527,6 +554,7 @@ final class PlayerModel {
         guard let mpvEngine else { return }
         #if os(iOS)
         mpvEngine.hintContentFrameRate(nil)
+        mpvOutput = .metal
         #endif
         mpvEngine.shutdown()
         engineEventsTasks[ObjectIdentifier(mpvEngine)] = nil
@@ -560,9 +588,7 @@ final class PlayerModel {
         guard source === engine, isActive, !awaitingLoad else { return }
         switch event {
         case .position(let seconds):
-            #if os(tvOS)
             keepScreenAwake()
-            #endif
             position = seconds
             // The first frame is the usual way the cover comes off; a stream
             // whose engine says nothing of one comes out from under it on
@@ -749,8 +775,11 @@ final class PlayerModel {
         speed = Self.speeds[next]
     }
 
-    func stop(reason: String = "stop") {
-        Task { await finish(userRequested: true, reason: reason) }
+    /// `tellServer` false is for a stream whose account has already gone: its
+    /// closing reports would be sent with the new account's token.
+    @discardableResult
+    func stop(reason: String = "stop", tellServer: Bool = true) -> Task<Void, Never> {
+        Task { await finish(userRequested: true, reason: reason, tellServer: tellServer) }
     }
 
     /// `generation`, for a caller outside that has to act on the stream it saw
@@ -765,21 +794,21 @@ final class PlayerModel {
     /// Take the player down, then settle with the server. The player comes
     /// down first, synchronously, before anything is awaited, so a start
     /// racing it has a clean board.
-    func finish(userRequested: Bool, reason: String = "ended") async {
+    func finish(userRequested: Bool, reason: String = "ended", tellServer: Bool = true) async {
         guard isActive else { return }
         Self.log.info(
             "finish: \(reason, privacy: .public) live=\(self.isLive) external=\(self.isExternal) position=\(self.position, format: .fixed(precision: 1)) error=\(self.errorMessage ?? "none", privacy: .public)")
         generation &+= 1
 
         let finalPosition = position
-        let closingReport = isExternal || isLocal ? nil : report(paused: true, position: finalPosition)
+        let closingReport = isExternal || isLocal || !tellServer ? nil : report(paused: true, position: finalPosition)
         let closingLocalId = localRecordId
         #if !os(tvOS)
         let closingLocalSession = localSession
         localSession = nil
         #endif
         dropPrefetched()
-        let closingSource = source
+        let closingSource = tellServer ? source : nil
 
         engine?.stop()
         pictureIsStale = true

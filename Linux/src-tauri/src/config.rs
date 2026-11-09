@@ -70,6 +70,12 @@ fn harden(path: &Path, mode: u32) {
     }
 }
 
+/// The data folder holds logs, download records and downloaded media, none of
+/// which other accounts on the machine have any business reading.
+pub fn harden_data_dir() {
+    harden(&data_dir(), DIR_MODE);
+}
+
 pub fn load() -> Value {
     harden(&config_dir(), DIR_MODE);
     harden(&config_path(), FILE_MODE);

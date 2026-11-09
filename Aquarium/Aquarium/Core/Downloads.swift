@@ -2480,7 +2480,12 @@ final class DownloadManager: NSObject {
         Self.keepFromPurge(url)
         // After the transfer rather than beside it, so the subtitle requests
         // don't compete with the encode. See `DownloadSubtitles`.
-        if !rec.isAudio { Task { await DownloadSubtitles.fetch(itemId: itemId, into: Self.folder(for: itemId)) } }
+        if !rec.isAudio {
+            Task {
+                await DownloadSubtitles.fetch(itemId: itemId, into: Self.folder(for: itemId))
+                await DownloadSegments.fetch(itemId: itemId, into: Self.folder(for: itemId))
+            }
+        }
     }
 
     /// Marks a downloaded stream as one to keep. AVFoundation's packages sit
@@ -2768,7 +2773,12 @@ final class DownloadManager: NSObject {
             rec.errorMessage = nil
             rec.verifyFailures = 0
             save(rec)
-            if !isAudio { Task { await DownloadSubtitles.fetch(itemId: itemId, into: Self.folder(for: itemId)) } }
+            if !isAudio {
+                Task {
+                    await DownloadSubtitles.fetch(itemId: itemId, into: Self.folder(for: itemId))
+                    await DownloadSegments.fetch(itemId: itemId, into: Self.folder(for: itemId))
+                }
+            }
             return
         }
 
@@ -2795,7 +2805,10 @@ final class DownloadManager: NSObject {
             rec.verifyFailures = 0
             rec.needsMPV = true
             save(rec)
-            Task { await DownloadSubtitles.fetch(itemId: itemId, into: Self.folder(for: itemId)) }
+            Task {
+                await DownloadSubtitles.fetch(itemId: itemId, into: Self.folder(for: itemId))
+                await DownloadSegments.fetch(itemId: itemId, into: Self.folder(for: itemId))
+            }
             return
         }
         try? FileManager.default.removeItem(at: url)

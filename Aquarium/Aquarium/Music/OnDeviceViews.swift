@@ -239,6 +239,10 @@ struct OnDeviceLibraryView: View {
     @Environment(JellyfinClient.self) private var client
     @State private var downloads = DownloadManager.shared
     @State private var recent: [BaseItem] = []
+    /// The Downloaded page's own search, over the downloads alone — see
+    /// `MusicSearch`. As the offline Library the Music tab's field serves.
+    @State private var term = ""
+    @FocusState private var isFieldFocused: Bool
 
     private let doors: [LibraryDoors.Door] = [
         .init(title: "Playlists", symbol: "music.note.list", route: .playlists),
@@ -253,7 +257,26 @@ struct OnDeviceLibraryView: View {
         // Titled only as a page of its own. As the offline Library it sits
         // inside the Music tab, whose title is the Discover / Library switch.
         if isDownloadedPage {
-            content.navigationTitle("Downloaded").paletteBar()
+            // A stack for the same reason as the Music tab's: the field is
+            // hung on it, and must outlive the switch it causes.
+            ZStack {
+                if isFieldFocused || !term.trimmingCharacters(in: .whitespaces).isEmpty {
+                    MusicSearchView(term: term, scope: .downloads)
+                } else {
+                    content
+                }
+            }
+            .navigationTitle("Downloaded")
+            // Inline: with the field fitted under the bar the large title
+            // took the bar for scrolled and folded itself away, leaving a
+            // blank band where the name of the page had been.
+            .navigationBarTitleDisplayMode(.inline)
+            .paletteBar()
+            // In view under the title — see `MusicSearchField`.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                MusicSearchField(term: $term, prompt: "Downloaded music", isFocused: $isFieldFocused)
+            }
+            .scrollDismissesKeyboard(.immediately)
         } else {
             content
         }
@@ -568,8 +591,20 @@ struct OnDeviceCollectionView: View {
                     .padding(.bottom, 8)
 
                     if albums.count > 1 {
-                        AlbumShelf(title: "Albums", items: albums) { app.pushOnDevice(.album($0.Id)) }
+                        if case .artist = kind {
+                            // Every album on the device, wrapping, the way
+                            // the online artist page lays its albums out.
+                            VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
+                                ShelfHeading(title: "Albums")
+                                AlbumGrid(items: albums, subtitleFor: { $0.ProductionYear.map(String.init) ?? "" }) {
+                                    app.pushOnDevice(.album($0.Id))
+                                }
+                            }
                             .padding(.vertical, 12)
+                        } else {
+                            AlbumShelf(title: "Albums", items: albums) { app.pushOnDevice(.album($0.Id)) }
+                                .padding(.vertical, 12)
+                        }
                         ShelfHeading(title: "Songs").padding(.bottom, 6)
                     }
                     ForEach(songs) { song in

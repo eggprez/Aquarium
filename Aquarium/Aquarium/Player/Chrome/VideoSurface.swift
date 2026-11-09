@@ -1,7 +1,8 @@
 //  Where the picture is drawn, on every platform: a plain view hosting
 //  a `CALayer` the engine renders into. For AVPlayer that is an
 //  `AVPlayerLayer`; for mpv the model's `MPVMetalLayer`, which goes in the
-//  same slot and is given the screen's scale so it draws at Retina size. The
+//  same slot and is given the screen's scale so it draws at Retina size —
+//  or, on an iPhone or iPad, its `MPVSampleBufferLayer` (`mpvOutput`). The
 //  view takes no touches or clicks of its own — the gesture layer above it
 //  does — and the layer takes the view's bounds on every layout.
 //
@@ -161,10 +162,20 @@ private enum VideoSurfaceWiring {
     static func attach(_ player: PlayerModel, to view: VideoLayerHostView, pictureInPicture: PictureInPicture?) {
         #if canImport(Libmpv)
         if player.engine?.kind == .mpv {
+            #if os(iOS)
+            // Drawn into the sample layer, mpv's picture can float as it is.
+            if player.mpvOutput == .sampleBuffer {
+                let layer = player.mpvSampleLayer
+                guard view.videoLayer !== layer else { return }
+                view.host(layer)
+                pictureInPicture?.attach(to: layer)
+                return
+            }
+            #endif
             let layer = player.mpvLayer
             guard view.videoLayer !== layer else { return }
-            // Picture in Picture is AVPlayer's; the button on mpv hands the
-            // stream over rather than lifting this layer out.
+            // Picture in Picture can't lift a Metal layer out; the button
+            // hands the stream to AVPlayer instead.
             pictureInPicture?.detach()
             view.host(layer)
             return

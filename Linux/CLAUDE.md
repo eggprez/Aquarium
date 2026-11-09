@@ -17,6 +17,7 @@ Linux Jellyfin client, in the `Linux/` folder of the Aquarium repo (the Apple ap
 - `AQUARIUM_TEST_EVAL=<js>` runs JS in the main webview 4 s after start. The app restores its last route, so the script should set `location.hash` itself. It can call `window.__TAURI_INTERNALS__.invoke("jf_request", {path, method, body})` with the real keyring token. To report results, use `new Image().src="http://127.0.0.1:8765/?m=…"` to reach a small Python receiver (CSP allows http images).
 - `AQUARIUM_TEST_INPUT=1` sends a synthetic click and touch, `AQUARIUM_TEST_REPLAY` restarts playback mid-stream, and `AQUARIUM_SURFACE_TEST=1` logs geometry, frame gaps and swap times.
 - `AQUARIUM_MPV_CONFIG=<dir>`: point it at a copy of `src-tauri/mpv-config` with `mute=yes` added so test runs stay silent.
+- `AQUARIUM_MPV_LOG=1` writes mpv's own log to `~/.local/share/aquarium/mpv-logs/`. It's off otherwise, and logs are deleted at launch without it and at sign-out, because they contain the access token. Don't share one without revoking that session.
 - The debug log is `~/.local/share/aquarium/debug.log`. Test instances share the user's config and log.
 
 Working without hands on this machine:

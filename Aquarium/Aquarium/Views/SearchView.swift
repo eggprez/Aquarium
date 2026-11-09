@@ -16,6 +16,11 @@ struct SearchView: View {
     /// What the music libraries had to say about the same term. Drawn above
     /// the video grid; empty on a server with no music.
     @State private var music = JellyfinClient.MusicSearchResults()
+    #if os(iOS)
+    /// The music came from the downloads — the server was out of reach, or
+    /// went while the search was out — so it opens the on-device pages.
+    @State private var musicFromDevice = false
+    #endif
     @State private var isSearching = false
     @State private var error: String?
     @State private var searchTask: Task<Void, Never>?
@@ -121,7 +126,7 @@ struct SearchView: View {
                     EmptyState(
                         symbol: "magnifyingglass",
                         title: "No matches",
-                        message: "Nothing in your libraries matches “\(term)”."
+                        message: noMatchesMessage
                     )
                 } else {
                     #if os(iOS)
@@ -273,6 +278,25 @@ struct SearchView: View {
     }
 
     #if os(iOS)
+    /// What the field offers to find. With the server gone only the
+    /// downloaded music can answer, and the field says so.
+    private var fieldPrompt: String {
+        if client.showsOffline { return "Downloaded music" }
+        return app.hasAudio ? "Movies, shows, music, books" : "Movies, shows, episodes"
+    }
+    #endif
+
+    /// Nothing found, said for where the search looked.
+    private var noMatchesMessage: String {
+        #if os(iOS)
+        if musicFromDevice || client.showsOffline {
+            return MusicSearch.noMatchesMessage(for: term, fromDevice: true, scope: .library)
+        }
+        #endif
+        return "Nothing in your libraries matches “\(term)”."
+    }
+
+    #if os(iOS)
     /// Back, and the field. Back with or without a term is the way out;
     /// the field's own clear button empties it.
     private var searchBar: some View {
@@ -282,7 +306,7 @@ struct SearchView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(Theme.textDim)
-                    TextField(app.hasAudio ? "Movies, shows, music, books" : "Movies, shows, episodes", text: $term)
+                    TextField(fieldPrompt, text: $term)
                         .focused($isFieldFocused)
                         .submitLabel(.search)
                         .autocorrectionDisabled()
@@ -470,34 +494,23 @@ struct SearchView: View {
 
     #if os(iOS)
     /// Artists, albums and a few songs, ahead of the films and shows. Each
-    /// opens into the Music tab, which is where the rest of it lives.
+    /// opens into the Music tab, which is where the rest of it lives. The
+    /// same view the Music tab's own search draws — see `MusicSearch`.
     @ViewBuilder
     private var musicResults: some View {
         if !music.isEmpty {
             VStack(alignment: .leading, spacing: Metrics.shelfSpacing) {
-                ArtistShelf(title: "Artists", items: Array(music.artists.prefix(12))) { artist in
+                MusicSearchResultsView(
+                    results: music,
+                    fromDevice: musicFromDevice,
+                    abridged: true,
+                    footnote: musicFromDevice
+                        ? (client.showsOffline
+                            ? "Downloaded music only: the server is out of reach."
+                            : "From this device: the server stopped answering.")
+                        : nil
+                ) {
                     prefs.rememberSearch(term)
-                    app.show(.music)
-                    app.push(.music(.artist(artist.Id)))
-                }
-                AlbumShelf(title: "Albums", items: Array(music.albums.prefix(12))) { album in
-                    prefs.rememberSearch(term)
-                    app.show(.music)
-                    app.push(.music(.album(album.Id)))
-                }
-                if !music.songs.isEmpty {
-                    VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
-                        ShelfHeading(title: "Songs") {
-                            prefs.rememberSearch(term)
-                            app.show(.music)
-                        }
-                        ForEach(music.songs.prefix(5)) { song in
-                            SongRow(song: song) {
-                                prefs.rememberSearch(term)
-                                MusicPlayer.shared.play(music.songs, startingAt: music.songs.position(of: song) ?? 0, title: "Search")
-                            }
-                        }
-                    }
                 }
                 AlbumShelf(title: "Audiobooks", items: Array(music.audiobooks.prefix(12)), subtitleFor: { $0.AlbumArtist }) { book in
                     prefs.rememberSearch(term)
@@ -538,6 +551,9 @@ struct SearchView: View {
             results = []
             total = 0
             music = .init()
+            #if os(iOS)
+            musicFromDevice = false
+            #endif
             error = nil
             isSearching = false
             searchedTerm = nil
@@ -557,6 +573,14 @@ struct SearchView: View {
         error = nil
         // A search overtaken by the next one leaves the flag to that one.
         defer { if !Task.isCancelled { isSearching = false } }
+        #if os(iOS)
+        // No server to ask: the downloaded music answers, and nothing else
+        // can. The same answer the Music tab's search gives offline.
+        if client.showsOffline {
+            answerFromDevice(query)
+            return
+        }
+        #endif
         do {
             // Music is asked for only where there is somewhere to show it —
             // the phone's Music tab. Asked for elsewhere it came back and was
@@ -575,6 +599,9 @@ struct SearchView: View {
             results = Self.ranked(response.items, for: query)
             total = response.total
             music = found ?? .init()
+            #if os(iOS)
+            musicFromDevice = false
+            #endif
             searchedTerm = query
             #if os(macOS)
             if openExactMatchWhenReady {
@@ -586,11 +613,32 @@ struct SearchView: View {
             // Overtaken by the next keystroke; that search will answer.
         } catch {
             guard !Task.isCancelled else { return }
+            #if os(iOS)
+            // The server went away mid-search: what is downloaded still
+            // counts, and beats an error page when it has anything to say.
+            if !MusicSearch.onDevice(query, limit: 12).results.isEmpty {
+                answerFromDevice(query)
+                return
+            }
+            #endif
             self.error = error.localizedDescription
             results = []
             searchedTerm = query
         }
     }
+
+    #if os(iOS)
+    /// The downloads' answer, in place of the server's: music only, since
+    /// nothing else is searchable without a server.
+    private func answerFromDevice(_ query: String) {
+        music = MusicSearch.onDevice(query, limit: 12).results
+        musicFromDevice = true
+        results = []
+        total = 0
+        error = nil
+        searchedTerm = query
+    }
+    #endif
 
     private func loadMore() async {
         let query = term.trimmingCharacters(in: .whitespaces)

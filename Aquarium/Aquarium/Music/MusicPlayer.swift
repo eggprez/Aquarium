@@ -546,9 +546,13 @@ final class MusicPlayer {
         speed = Self.speeds[min(max(i + direction, 0), Self.speeds.count - 1)]
     }
 
-    /// Take everything down. What is owed to the server is paid on the way.
-    func stop() {
-        guard isActive || !queue.isEmpty else { return }
+    /// Take everything down. What is owed to the server is paid on the way,
+    /// unless `tellServer` is false: the account it's owed under has gone, and
+    /// the closing reports would carry the new account's token. The task is
+    /// those reports, for a caller that must wait until they have gone out.
+    @discardableResult
+    func stop(tellServer: Bool = true) -> Task<Void, Never>? {
+        guard isActive || !queue.isEmpty else { return nil }
         Self.log.info("stop at \(self.position, format: .fixed(precision: 1))")
         generation &+= 1
         learn(.other)
@@ -580,7 +584,8 @@ final class MusicPlayer {
         errorMessage = nil
         reachedEndOfQueue = false
         clearNowPlaying()
-        Task {
+        guard tellServer else { return nil }
+        return Task {
             if let closing { await client.reportPlaybackStopped(closing) }
             if let closingSource, closingSource.isTranscode {
                 await client.stopTranscode(playSessionId: closingSource.playSessionId)

@@ -55,6 +55,12 @@ extension PlayerModel {
         request.hints = hints
         request.prepared = prepared
         awaitingLoad = false
+        // The session goes active before the sound starts. AVPlayer does
+        // this itself; mpv's audio unit started into a session nothing had
+        // activated, so the system never took the stage from whatever else
+        // was playing — music carried on under the film, and the lock
+        // screen's transport didn't show it. Only `resume` had activated it.
+        if !paused { reactivateAudioSession() }
         engine?.load(request)
         // Every stream begins the way it was asked for. The engine only
         // reports a change of its pause flag, and mpv's doesn't change when
@@ -406,7 +412,7 @@ extension PlayerModel {
         releaseOutgoingServerStream()
         endLocalSession()
         localSession = OfflineProgress.Session(itemId: record.itemId)
-        if !keepShuffle { shuffleSeries = nil }
+        if keepShuffle { dealFromShuffle(record.itemId) } else { shuffleSeries = nil }
         errorMessage = nil
         noVideoTrack = false
         noVideoDetail = nil
@@ -435,7 +441,10 @@ extension PlayerModel {
         artworkURL = (record.seriesArtURL ?? record.artURL).flatMap(URL.init(string:))
         currentBitrate = nil
         setChapters([])
-        segments = []
+        // The intro and credits markers kept with the download, so the skip
+        // buttons work offline. See `DownloadSegments`.
+        let folder = DownloadManager.folder(for: record.itemId)
+        segments = record.isAudio ? [] : DownloadSegments.local(in: folder)
         trickplay = nil
         fullItem = nil
         isActive = true
@@ -446,7 +455,16 @@ extension PlayerModel {
         // Downloads made before subtitles came with them get theirs the first
         // time they are played with a server in reach.
         if !record.isAudio, !JellyfinClient.shared.isOffline {
-            Task { await DownloadSubtitles.fetch(itemId: record.itemId, into: DownloadManager.folder(for: record.itemId)) }
+            Task { await DownloadSubtitles.fetch(itemId: record.itemId, into: folder) }
+            // Likewise the markers, and asked again each time: a plugin may
+            // have analysed the episode since it was downloaded.
+            let mine = generation
+            Task {
+                let fetched = await DownloadSegments.fetch(itemId: record.itemId, into: folder)
+                guard generation == mine, localRecordId == record.itemId, fetched != segments else { return }
+                segments = fetched
+                refreshCues()
+            }
         }
     }
 
@@ -645,7 +663,10 @@ extension PlayerModel {
     private func awaitSurface() async {
         #if canImport(Libmpv)
         let deadline = ContinuousClock.now + .milliseconds(1500)
-        while (mpvLayer.superlayer == nil || mpvLayer.bounds.width < 2 || mpvLayer.bounds.height < 2),
+        // The layer mpv will draw into, which on an iPhone or iPad is the
+        // sample layer unless something needs gpu-next.
+        var surface: CALayer { mpvEngine?.drawingLayer ?? mpvLayer }
+        while (surface.superlayer == nil || surface.bounds.width < 2 || surface.bounds.height < 2),
               ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(16))
         }
@@ -849,9 +870,13 @@ extension PlayerModel {
             playLocal(record, startAt: position)
             #endif
         case .stream(let bitrate):
+            // Not away from a download. Switching reopened the title from
+            // the server — which, offline, failed, and coming back to the
+            // download started it over. The card says why instead.
+            guard !isLocal else { return }
             prefs.adaptiveQuality = false
             prefs.defaultBitrate = bitrate
-            if isLocal || currentBitrate != bitrate {
+            if currentBitrate != bitrate {
                 await switchQuality(to: bitrate)
             }
         }

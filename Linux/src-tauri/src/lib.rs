@@ -371,6 +371,10 @@ async fn player_play(
     player: State<'_, player::Player>,
     req: player::PlayRequest,
 ) -> Result<(), String> {
+    // Here rather than in `Player::play`, so the AQUARIUM_TEST_PLAY hooks can
+    // still open a file from anywhere, and so a refused address doesn't stop
+    // what is already playing.
+    player::check_play_target(&req.url)?;
     // Music and video never play over each other; see audio.rs.
     app.state::<audio::AudioPlayer>().stop(&app).await;
     player.play(app, req).await
@@ -912,6 +916,11 @@ pub fn run() {
 
             // Media keys, the lock screen, and the shell's audio menu.
             mpris::start(app.handle().clone());
+
+            config::harden_data_dir();
+            if std::env::var_os("AQUARIUM_MPV_LOG").is_none() {
+                mpv::remove_logs();
+            }
 
             // Pick up downloads that were mid-transfer when the app last
             // closed (meta.json still says "downloading" but nothing runs).

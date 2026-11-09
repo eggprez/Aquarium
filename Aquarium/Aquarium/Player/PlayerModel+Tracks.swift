@@ -60,6 +60,9 @@ extension PlayerModel {
     func applyFraming(switchingIfNeeded: Bool = false) {
         let framing = preferredFraming
         engine?.framing = framing
+        #if os(iOS) && canImport(Libmpv)
+        applyMPVOutput()
+        #endif
         guard switchingIfNeeded, isActive, engine?.capabilities.contains(.zoom) == false else { return }
         switch framing {
         case .zoom, .aspect:

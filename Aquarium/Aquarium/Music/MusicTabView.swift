@@ -22,10 +22,14 @@ struct MusicTabView: View {
 
     @State private var page: Page = .listenNow
     @State private var term = ""
-    @State private var isSearchPresented = false
+    @FocusState private var isFieldFocused: Bool
 
     var body: some View {
-        Group {
+        // A stack, not a Group: the field below is hung on this node, and a
+        // Group's modifiers ride on whichever branch is showing. Focusing the
+        // field swaps the branch, which rebuilt the field and lost the focus
+        // it had just taken.
+        ZStack {
             if isSearching {
                 MusicSearchView(term: term)
             } else if client.showsOffline {
@@ -44,6 +48,14 @@ struct MusicTabView: View {
         .background(Theme.background)
         // There while songs are downloading, and the way to the queue.
         .safeAreaInset(edge: .top, spacing: 0) { DownloadQueueBanner() }
+        // The search, in view under the switch — see `MusicSearchField`.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            MusicSearchField(
+                term: $term, prompt: client.showsOffline ? "Downloaded music" : "Artists, albums, songs",
+                isFocused: $isFieldFocused
+            )
+        }
+        .scrollDismissesKeyboard(.immediately)
         .navigationTitle("Music")
         // The switch *is* the title: a large "Music" over "Discover" over
         // a search field was three headings before any content.
@@ -58,10 +70,6 @@ struct MusicTabView: View {
                 .frame(maxWidth: 260)
             }
         }
-        .searchable(
-            text: $term, isPresented: $isSearchPresented, placement: .navigationBarDrawer(displayMode: .automatic),
-            prompt: client.showsOffline ? "Downloaded music" : "Artists, albums, songs"
-        )
         // The Add to Playlist menu reads this list; loaded here so it is
         // there by the time anyone holds a song down.
         .task { await PlaylistStore.shared.ensureLoaded() }
@@ -71,7 +79,7 @@ struct MusicTabView: View {
     }
 
     private var isSearching: Bool {
-        isSearchPresented || !term.trimmingCharacters(in: .whitespaces).isEmpty
+        isFieldFocused || !term.trimmingCharacters(in: .whitespaces).isEmpty
     }
 }
 
@@ -151,104 +159,9 @@ struct MusicDestination: View {
 }
 
 // MARK: - Search
-
-/// Everything matching a term, grouped by what it is. Debounced like the
-/// video search: one request per pause in typing, not per keystroke.
-struct MusicSearchView: View {
-    let term: String
-
-    @Environment(AppModel.self) private var app
-    @Environment(JellyfinClient.self) private var client
-    @Environment(MusicPlayer.self) private var music
-
-    @State private var results = JellyfinClient.MusicSearchResults()
-    @State private var isSearching = false
-    @State private var error: String?
-    @State private var task: Task<Void, Never>?
-
-    var body: some View {
-        ScrollView {
-            let query = term.trimmingCharacters(in: .whitespaces)
-            if query.isEmpty {
-                EmptyState(
-                    symbol: "magnifyingglass",
-                    title: "Search your music",
-                    message: "Artists, albums, songs and playlists, by name."
-                )
-            } else if isSearching, results.isEmpty {
-                SkeletonList(count: 8)
-            } else if let error {
-                ErrorState(error: error) { schedule(query, immediate: true) }
-            } else if results.isEmpty {
-                EmptyState(
-                    symbol: "magnifyingglass", title: "No matches",
-                    message: client.showsOffline
-                        ? "Nothing downloaded matches “\(query)”. The rest of the library is searched once you're back online."
-                        : "Nothing in your music matches “\(query)”."
-                )
-            } else {
-                LazyVStack(alignment: .leading, spacing: Metrics.shelfSpacing) {
-                    ArtistShelf(title: "Artists", items: results.artists) { app.push(.music(.artist($0.Id))) }
-                    AlbumShelf(title: "Albums", items: results.albums) { app.push(.music(.album($0.Id))) }
-                    if !results.songs.isEmpty {
-                        VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
-                            ShelfHeading(title: "Songs")
-                            ForEach(results.songs) { song in
-                                SongRow(
-                                    song: song,
-                                    isCurrent: music.current?.Id == song.Id,
-                                    isPlaying: music.isPlaying
-                                ) {
-                                    music.play(results.songs, startingAt: results.songs.position(of: song) ?? 0, title: "Search")
-                                }
-                            }
-                        }
-                    }
-                    AlbumShelf(title: "Playlists", items: results.playlists) { app.push(.music(.playlist($0.Id))) }
-                }
-                .padding(.vertical, 12)
-                .padding(.bottom, 24)
-            }
-        }
-        .onChange(of: term, initial: true) { _, new in schedule(new.trimmingCharacters(in: .whitespaces)) }
-        .reloadWhenItemsChange { schedule(term.trimmingCharacters(in: .whitespaces), immediate: true) }
-    }
-
-    private func schedule(_ query: String, immediate: Bool = false) {
-        task?.cancel()
-        guard !query.isEmpty else {
-            results = .init()
-            error = nil
-            return
-        }
-        // Offline the answer is already in memory: no pause, no request.
-        if client.showsOffline {
-            error = nil
-            results = OfflineMusic.search(query)
-            return
-        }
-        task = Task {
-            if !immediate {
-                try? await Task.sleep(for: .milliseconds(320))
-                guard !Task.isCancelled else { return }
-            }
-            isSearching = true
-            error = nil
-            defer { isSearching = false }
-            do {
-                var found = try await client.searchMusic(query)
-                found.audiobooks = []
-                guard !Task.isCancelled else { return }
-                results = found
-            } catch {
-                guard !Task.isCancelled else { return }
-                // The server went away mid-search: what is here still counts.
-                let local = OfflineMusic.search(query)
-                if local.isEmpty { self.error = error.localizedDescription } else { results = local }
-            }
-        }
-    }
-}
+//
+// `MusicSearchView` and the engine behind it are in MusicSearch.swift,
+// shared with the Search page and the Downloads page.
 
 // MARK: - Mini player and Now Playing hooks for the shell
 
@@ -315,7 +228,8 @@ private struct BottomChromeTopKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    fileprivate var bottomChromeTop: CGFloat? {
+    /// Read by `LetterIndexBar` too, which sizes itself down to the bars.
+    var bottomChromeTop: CGFloat? {
         get { self[BottomChromeTopKey.self] }
         set { self[BottomChromeTopKey.self] = newValue }
     }
@@ -327,9 +241,23 @@ private struct MeasuresBottomChrome: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.bottomChromeTop, top)
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.frame(in: .global).maxY - proxy.safeAreaInsets.bottom
-            } action: { top = $0 }
+            .onGeometryChange(for: CGFloat.self) { Self.barsBegin($0) } action: { top = $0 }
+    }
+
+    /// Where the bars begin, in global points. With the offline strip up
+    /// the stack's frame already stops at the strip, while its safe area
+    /// still says how far the screen's edge is below that — so the foot
+    /// less the inset put the bars 160 points higher than they were, every
+    /// page kept a dead stretch above the strip, and the A–Z index was
+    /// squashed into the top of its list. The bars begin at the lower of
+    /// the frame's foot and the screen's edge less the inset, whichever
+    /// way the stack was laid out.
+    private static func barsBegin(_ proxy: GeometryProxy) -> CGFloat {
+        let frame = proxy.frame(in: .global)
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        let edge = scene?.screen.bounds.height ?? (frame.maxY + proxy.safeAreaInsets.bottom)
+        return min(frame.maxY, edge - proxy.safeAreaInsets.bottom)
     }
 }
 

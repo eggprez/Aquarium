@@ -171,6 +171,10 @@ extension PlayerModel {
                 #if os(tvOS)
                 self.pause()
                 #endif
+                #if os(iOS)
+                // The floating window is showing the frames: keep drawing.
+                if self.pictureInPictureHoldsPicture { return }
+                #endif
                 if self.engine?.kind == .mpv {
                     Self.log.info("background: mpv picture decode off")
                     self.engine?.pictureDecode = false
@@ -214,8 +218,34 @@ extension PlayerModel {
         lastAwakeAssert = now
         holdScreenAwake(reassert: true)
     }
+    #elseif os(iOS)
+    /// Keeps the screen from locking while mpv plays. AVPlayer holds it on
+    /// by itself (`preventsDisplaySleepDuringVideoPlayback`); mpv's Metal
+    /// layer is nothing the system counts as video, so the phone dimmed and
+    /// locked through a film. Through `ScreenAwake` so the Downloads page's
+    /// own hold and this one don't let go of each other.
+    func holdScreenAwake(reassert: Bool = false) {
+        ScreenAwake.hold("player", isActive && !isPaused && engine?.kind == .mpv)
+    }
+
+    /// On every position tick, so a switch of engine mid-stream is caught.
+    func keepScreenAwake() { holdScreenAwake() }
+    #elseif os(macOS)
+    /// The Mac twin: an activity that keeps the display awake while mpv
+    /// plays, for the same reason as on the phone.
+    func holdScreenAwake(reassert: Bool = false) {
+        let wanted = isActive && !isPaused && engine?.kind == .mpv
+        if wanted, displayAwake == nil {
+            displayAwake = ProcessInfo.processInfo.beginActivity(
+                options: [.idleDisplaySleepDisabled, .userInitiated], reason: "Playing video")
+        } else if !wanted, let activity = displayAwake {
+            ProcessInfo.processInfo.endActivity(activity)
+            displayAwake = nil
+        }
+    }
+
+    func keepScreenAwake() { holdScreenAwake() }
     #else
-    /// No screensaver to hold off where AVPlayer owns the picture.
     func holdScreenAwake(reassert: Bool = false) {}
     #endif
 

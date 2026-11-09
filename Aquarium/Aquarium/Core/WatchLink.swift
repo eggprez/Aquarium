@@ -1437,10 +1437,10 @@ final class WatchLink: NSObject {
         for event in events where !known.contains(event.id) {
             // A book's newer position makes an older one still waiting moot.
             if !event.played {
-                for older in pendingEvents where older.itemId == event.itemId && !older.played && older.at <= event.at {
+                for older in pendingEvents where older.accountKey == event.accountKey && older.itemId == event.itemId && !older.played && older.at <= event.at {
                     settle(older)
                 }
-                if pendingEvents.contains(where: { $0.itemId == event.itemId && !$0.played && $0.at > event.at }) {
+                if pendingEvents.contains(where: { $0.accountKey == event.accountKey && $0.itemId == event.itemId && !$0.played && $0.at > event.at }) {
                     settle(event)
                     continue
                 }
@@ -1495,7 +1495,13 @@ final class WatchLink: NSObject {
             }
             let client = JellyfinClient.shared
             guard client.isSignedIn, !client.isOffline else { return }
-            while let event = pendingEvents.first {
+            // Another account's events wait for that account to be signed in
+            // again. Once it has been removed from this phone they never can go.
+            let saved = Set(client.accounts.map(\.accountKey))
+            for event in pendingEvents where !event.belongs(to: client.session?.accountKey) {
+                if let key = event.accountKey, !saved.contains(key) { settle(event) }
+            }
+            while let event = pendingEvents.first(where: { $0.belongs(to: client.session?.accountKey) }) {
                 do {
                     if try await deliver(event, with: client) { lastForwardedAt = Date() }
                     settle(event)

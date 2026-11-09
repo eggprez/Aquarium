@@ -22,7 +22,8 @@ echo "==> Compiling (frontend + Rust, release)"
 if [ -f "$PROJ/.build-deps/env.sh" ]; then
   source "$PROJ/.build-deps/env.sh"
 fi
-npx tauri build
+# Arguments go to `tauri build`; CI passes `-- --locked`.
+npx tauri build "$@"
 
 DEB="$(ls -t "$PROJ/src-tauri/target/release/bundle/deb"/*.deb 2>/dev/null | head -1)"
 [ -n "$DEB" ] || { echo "FATAL: no .deb was produced"; exit 1; }

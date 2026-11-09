@@ -215,6 +215,35 @@ fn configured_server() -> Result<String, String> {
     normalize(raw)
 }
 
+/// Scheme, host and port, for http(s) URLs only. Refuses backslashes and control
+/// characters: this parser and FFmpeg's read those differently, so
+/// `https://jf.example.com\@evil.net` is a different host to each of them.
+fn origin(url: &str) -> Option<(String, String, u16)> {
+    if url.contains('\\') || url.chars().any(char::is_control) {
+        return None;
+    }
+    let u = reqwest::Url::parse(url).ok()?;
+    if !matches!(u.scheme(), "http" | "https") {
+        return None;
+    }
+    Some((
+        u.scheme().to_string(),
+        u.host_str()?.to_string(),
+        u.port_or_known_default()?,
+    ))
+}
+
+fn same_origin(a: &str, b: &str) -> bool {
+    matches!((origin(a), origin(b)), (Some(x), Some(y)) if x == y)
+}
+
+/// Whether a URL is on the server this install is signed in to. Checked before
+/// the token goes anywhere whose address came from a stored download record or
+/// from the webview, either of which can name somewhere else.
+pub fn is_session_origin(url: &str) -> bool {
+    configured_server().is_ok_and(|server| same_origin(url, &server))
+}
+
 // ---------- Authenticated requests ----------
 
 /// One Jellyfin API call, made from Rust with the token added here.
@@ -833,6 +862,7 @@ pub async fn logout() -> Result<Value, String> {
         let _ = config::remove_account(&key);
     }
     config::merge(json!({ "user_id": null, "user_name": null, "account_key": null }))?;
+    crate::mpv::remove_logs();
 
     Ok(json!({ "revoked": revoked, "pending": parked }))
 }
@@ -866,6 +896,24 @@ mod tests {
 
     fn kind_of(e: &str) -> &str {
         e.split('|').next().unwrap_or("")
+    }
+
+    #[test]
+    fn same_origin_accepts_only_the_exact_server() {
+        let server = "https://jf.example.com";
+        assert!(same_origin("https://jf.example.com/Items/1/Download", server));
+        assert!(same_origin("https://JF.example.com:443/x", server));
+        assert!(same_origin("https://example.com/x", "https://example.com/jellyfin"));
+        // The prefix tricks a `starts_with` check lets through.
+        assert!(!same_origin("https://jf.example.com.evil.net/x", server));
+        assert!(!same_origin("https://jf.example.com@evil.net/x", server));
+        assert!(!same_origin("https://jf.example.com:8920/x", server));
+        // Same host, weaker scheme: the token would cross the network in clear.
+        assert!(!same_origin("http://jf.example.com/x", server));
+        // Read differently by this parser and by FFmpeg.
+        assert!(!same_origin("https://jf.example.com\\@evil.net/x", server));
+        assert!(!same_origin("https://jf.example.com/x\n", server));
+        assert!(!same_origin("/home/me/film.mkv", server));
     }
 
     #[test]

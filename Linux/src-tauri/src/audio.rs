@@ -203,6 +203,12 @@ impl AudioPlayer {
     /// running core when there is one, so moving through an album or skipping
     /// around the queue doesn't reopen the audio device each time.
     pub async fn play(&self, app: AppHandle, req: PlayRequest) -> Result<(), String> {
+        // The same rule as video (see `player::check_play_target`): network
+        // streams and downloaded files only, never av://, edl:// or local paths.
+        crate::player::check_play_target(&req.track.url)?;
+        if let Some(next) = &req.next {
+            crate::player::check_play_target(&next.url)?;
+        }
         let _transition = self.transition.lock().await;
         // Music and video never play over each other.
         if let Some(p) = app.try_state::<crate::player::Player>() {
@@ -292,6 +298,9 @@ impl AudioPlayer {
     /// Replace whatever is queued behind the current track. `None` lets the
     /// queue end after it (the sleep timer's "end of track", the last song).
     pub async fn set_next(&self, next: Option<AudioTrack>) -> Result<(), String> {
+        if let Some(n) = &next {
+            crate::player::check_play_target(&n.url)?;
+        }
         let guard = self.core.lock().await;
         let Some(core) = guard.as_ref() else { return Ok(()) };
         // Everything but the playing entry goes; that includes an entry mpv
@@ -392,11 +401,16 @@ impl AudioPlayer {
         ] {
             prefs.push(opt.to_string());
         }
+        // The token only goes to the signed-in server's own origin, as for video.
         let auth_header = match (&req.server_url, crate::secret::token()) {
-            (Some(server), Some(token)) if !server.is_empty() => Some(jellyfin::auth_header(
+            (Some(server), Some(token))
+                if !server.is_empty() && crate::server::is_session_origin(&req.track.url) =>
+            {
+                Some(jellyfin::auth_header(
                 &token,
                 req.device_id.as_deref().unwrap_or("aquarium"),
-            )),
+            ))
+            }
             _ => None,
         };
         let opts = mpv::Options {

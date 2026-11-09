@@ -17,6 +17,7 @@
 
 #if !os(tvOS)
 
+import OSLog
 import SwiftUI
 #if os(iOS)
 import AVFoundation
@@ -27,6 +28,8 @@ import UIKit
 struct PlayerGestureLayer: View {
     @Environment(PlayerModel.self) private var player
     @Environment(Preferences.self) private var prefs
+    @Environment(\.devicePose) private var pose
+    @Environment(\.scenePhase) private var scenePhase
 
     let chrome: PlayerChromeState
     let compact: Bool
@@ -66,6 +69,20 @@ struct PlayerGestureLayer: View {
         }
         .ignoresSafeArea()
         .accessibilityHidden(true)
+        // A hold ends when the finger lifts — or when the touch is taken away
+        // before it can: the phone folding under the finger, the app leaving
+        // the front, this layer going. SwiftUI says nothing when a touch is
+        // cancelled, so 2× and its badge used to outlast all of those until
+        // the next hold.
+        .onChange(of: pose) { _, _ in endHold("pose changed") }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { endHold("scene inactive") } }
+        .onChange(of: holdAllowed) { _, allowed in if !allowed { endHold("hold not allowed") } }
+        .onDisappear { endHold("layer gone") }
+        // A speed set from the More card under a stuck hold: the hold is
+        // over, and the badge goes with it rather than waiting for the next.
+        .onChange(of: player.speed) { _, speed in
+            if chrome.holdingDoubleSpeed, speed != 2 { chrome.holdingDoubleSpeed = false }
+        }
     }
 
     // MARK: Hold for 2×
@@ -83,15 +100,18 @@ struct PlayerGestureLayer: View {
                     chrome.holdingDoubleSpeed = true
                     player.speed = 2
                     if player.isPaused { player.resume() }
+                    PlayerModel.log.debug("hold 2× begins at \(player.position, format: .fixed(precision: 1))")
                 }
             }
-            .onEnded { _ in endHold() }
+            .onEnded { _ in endHold("lifted") }
     }
 
-    private func endHold() {
+    /// `why` is for the log: the lift, or what took the touch away.
+    private func endHold(_ why: String) {
         guard chrome.holdingDoubleSpeed else { return }
         chrome.holdingDoubleSpeed = false
         player.speed = chrome.speedBeforeHold
+        PlayerModel.log.debug("hold 2× ends (\(why, privacy: .public)) at \(player.position, format: .fixed(precision: 1))")
     }
 
     // MARK: Pinch

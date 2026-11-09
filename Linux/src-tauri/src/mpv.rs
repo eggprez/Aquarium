@@ -55,9 +55,21 @@ pub fn resolve_mpv_config_dir() -> Option<PathBuf> {
     None
 }
 
-/// Per-session mpv debug log under the app data dir; keeps the last few so
-/// "video didn't show" reports can be diagnosed after the fact.
+/// Delete every mpv log. Run at sign-out, and at launch unless logging was
+/// asked for, because logs from before `AQUARIUM_MPV_LOG` hold access tokens.
+pub fn remove_logs() {
+    let _ = std::fs::remove_dir_all(crate::config::data_dir().join("mpv-logs"));
+}
+
+/// Per-session mpv debug log under the app data dir, only when
+/// `AQUARIUM_MPV_LOG` is set; keeps the last few.
+///
+/// Off by default because mpv's `log-file` records at debug level or above, and
+/// that level includes every command's arguments: the `Authorization` header
+/// set in `Session::start`, and any `ApiKey` in a transcode URL. A log taken
+/// with this on holds a live token, so it must not be shared as it is.
 pub fn mpv_log_path() -> Option<PathBuf> {
+    std::env::var_os("AQUARIUM_MPV_LOG")?;
     let dir = crate::config::data_dir().join("mpv-logs");
     std::fs::create_dir_all(&dir).ok()?;
     // Prune: keep the 5 newest logs.
@@ -236,6 +248,15 @@ impl Session {
             set("ytdl", "no");
             if let Some(ua) = opts.user_agent.as_deref().filter(|s| !s.trim().is_empty()) {
                 set("user-agent", ua.trim());
+            }
+            // mpv before 2026 doesn't check HTTPS certificates unless told to,
+            // and it sends the Authorization header on whatever answers. Naming
+            // Debian's bundle means this doesn't depend on how the distro's
+            // FFmpeg finds its default roots.
+            set("tls-verify", "yes");
+            const CA_BUNDLE: &str = "/etc/ssl/certs/ca-certificates.crt";
+            if std::path::Path::new(CA_BUNDLE).exists() {
+                set("tls-ca-file", CA_BUNDLE);
             }
             set("cache", "yes");
             // Read the stream in bursts rather than a trickle. With a plain

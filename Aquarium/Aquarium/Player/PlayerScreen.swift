@@ -38,6 +38,9 @@ struct PlayerScreen: View {
     @State private var pictureInPicture = PictureInPicture()
     #if os(iOS)
     @Environment(\.devicePose) private var pose
+    /// The frame the chrome was laid out in while the status bar was up —
+    /// see `framed`.
+    @State private var heldFrame: HeldFrame?
     #endif
 
     /// How far down a foldable's front screen the status bar still takes
@@ -98,7 +101,24 @@ struct PlayerScreen: View {
         #if os(iOS)
         if FoldState.shared.isFoldable {
             GeometryReader { geo in
-                let insets = geo.safeAreaInsets
+                let live = geo.safeAreaInsets
+                let screen = CGSize(width: geo.size.width + live.leading + live.trailing,
+                                    height: geo.size.height + live.top + live.bottom)
+                // A Duo's clock column and strip are safe area, and they
+                // change as the status bar goes. The bar is gone in a blink
+                // while the chrome takes a quarter second to fade, so the
+                // title row's buttons slid across the gap before they went.
+                // While the bar is hidden the chrome keeps the frame it had
+                // with the bar up — unless the screen has changed, or been
+                // turned: the two landscapes are the same size with the
+                // camera and the clock column on opposite sides, and a
+                // frame held across that turn kept the first side's
+                // clearance, which shoved the title row's buttons in from
+                // an edge nothing was on.
+                let orientation = Self.interfaceOrientation
+                let held = statusBarHidden
+                    ? heldFrame.flatMap { $0.screen == screen && $0.orientation == orientation ? $0 : nil } : nil
+                let insets = held?.insets ?? live
                 // The front screen reports no top inset — its clock is in
                 // the column down the trailing edge — yet the top 24 points
                 // still belong to the status bar's touch strip: measured on
@@ -119,10 +139,13 @@ struct PlayerScreen: View {
                 // does the same with its clock column: only the pill at its
                 // head is in the way, so the timeline runs to the edge under
                 // it while the title row and the pills keep the column.
-                let clearance = pose == .front
-                    ? PlayerSideClearance(geo, titleRowFoot: top + PlayerSideClearance.titleRowDepth,
+                // The camera's clearance is read live: the lens is where it
+                // is whether or not the bar shows. Only the insets are held.
+                let clearance: PlayerSideClearance? = pose == .front
+                    ? PlayerSideClearance(geo, column: insets, titleRowFoot: top + PlayerSideClearance.titleRowDepth,
                                           pillRowHead: insets.top + geo.size.height - PlayerSideClearance.pillRowDepth)
                     : FoldState.shared.innerSideways ? PlayerSideClearance(keeping: insets) : nil
+                let frame = HeldFrame(screen: screen, orientation: orientation, insets: insets)
                 FoldSplit(split: foldsBelow, crease: .black) {
                     stage
                         .safeAreaPadding(EdgeInsets(top: top, leading: clearance == nil ? insets.leading : 0,
@@ -144,6 +167,9 @@ struct PlayerScreen: View {
                 }
                 .background(Color.black)
                 .ignoresSafeArea()
+                .onChange(of: frame, initial: true) { _, frame in
+                    if !statusBarHidden { heldFrame = frame }
+                }
             }
         } else {
             stage
@@ -152,6 +178,23 @@ struct PlayerScreen: View {
         stage
         #endif
     }
+
+    #if os(iOS)
+    private var statusBarHidden: Bool { !chrome.controlsVisible && !player.isPaused }
+
+    private struct HeldFrame: Equatable {
+        var screen: CGSize
+        var orientation: UIInterfaceOrientation
+        var insets: EdgeInsets
+    }
+
+    /// Which way the screen is turned, from the scene that is up.
+    private static var interfaceOrientation: UIInterfaceOrientation {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        return scene?.effectiveGeometry.interfaceOrientation ?? .unknown
+    }
+    #endif
 
     var body: some View {
         framed
@@ -162,7 +205,7 @@ struct PlayerScreen: View {
         #if os(iOS)
         // The status bar comes and goes with the controls, as in Apple's
         // player; the home indicator dims on its own over a full-screen video.
-        .statusBarHidden(!chrome.controlsVisible && !player.isPaused)
+        .statusBarHidden(statusBarHidden)
         .persistentSystemOverlays(.hidden)
         // The shell is portrait on a phone; a film is the reason the phone gets
         // turned, so the player follows the phone either way up. See
@@ -191,7 +234,9 @@ struct PlayerScreen: View {
 /// level with it, from the edge they sit on: upright the title row's
 /// buttons stop at the camera and the band runs edge to edge; sideways the
 /// camera is at the head of one side or the foot of the other, and the back
-/// button or the pills stop at it while the timeline runs past.
+/// button or the pills stop at it while the timeline runs past. Only the
+/// lens counts, and only a lens in the column; when the system reports
+/// none the camera is taken to be where it always is in that column.
 ///
 /// Measured in the full screen's coordinates, the space `PlayerScreen.framed`
 /// reads. Each value is the region's reach in from its edge, margins and
@@ -219,42 +264,82 @@ struct PlayerSideClearance: Equatable {
     }
 
     #if os(iOS)
-    init(_ geo: GeometryProxy, titleRowFoot: CGFloat, pillRowHead: CGFloat) {
+    /// The lens with its margins, as the system reports it: 37 points.
+    /// Anything much bigger is the Dynamic Island's room around it, not
+    /// the camera.
+    static let lensReach: CGFloat = 60
+    /// Where the lens sits when the system says nothing: measured on the
+    /// simulator, 17.67 points in from the column's inner edge and 29.33
+    /// from the end of the screen it is nearest, 37 square.
+    private static let lensInset: CGFloat = 17.67
+    private static let lensEndGap: CGFloat = 29.33
+    private static let lensSize: CGFloat = 37
+    /// A side of safe area at least this wide is the clock column.
+    private static let columnMinimum: CGFloat = 40
+
+    /// `column` is the safe area the chrome is laid out to — held while the
+    /// status bar is hidden, since the column goes with the bar.
+    init(_ geo: GeometryProxy, column: EdgeInsets, titleRowFoot: CGFloat, pillRowHead: CGFloat) {
         // The reader is the safe area's rectangle and the regions come back
         // in its space, out past its edges; shifted here to the screen's.
-        let insets = geo.safeAreaInsets
-        var regions: [CGRect] = []
-        if #available(iOS 27.1, *) {
-            regions = geo.reservedRegions(kind: .occlusion).filter(\.isActive)
-                .map { $0.frame.offsetBy(dx: insets.leading, dy: insets.top) }
+        let live = geo.safeAreaInsets
+        let width = geo.size.width + live.leading + live.trailing
+        let height = geo.size.height + live.top + live.bottom
+        let screen = CGRect(x: 0, y: 0, width: width, height: height)
+        let onTrailing = column.trailing >= Self.columnMinimum
+        let onLeading = !onTrailing && column.leading >= Self.columnMinimum
+        // Only the lens itself, and only inside the column. The system
+        // reports the camera twice — the lens, and the 84-point block at
+        // the head of the column the Dynamic Island grows into — and on
+        // the device the block can stand at the head of the column with
+        // the lens at its foot, holding nothing: clearing it shoved the
+        // title row's buttons in from an edge nothing was on. And the
+        // regions can come back a turn late, the lens still where it was
+        // before the phone turned, on a side with no column at all.
+        var lenses: [CGRect] = []
+        #if DEBUG
+        // `-AquariumNoLens YES` plays the device that reports no regions.
+        let reported = !UserDefaults.standard.bool(forKey: "AquariumNoLens")
+        #else
+        let reported = true
+        #endif
+        if reported, #available(iOS 27.1, *) {
+            lenses = geo.reservedRegions(kind: .occlusion).filter(\.isActive)
+                .map { $0.frame.offsetBy(dx: live.leading, dy: live.top) }
+                .filter { region in
+                    guard screen.intersects(region), max(region.width, region.height) <= Self.lensReach else { return false }
+                    if onTrailing { return region.minX >= width - column.trailing - 1 }
+                    if onLeading { return region.maxX <= column.leading + 1 }
+                    return true
+                }
         }
-        // No regions to go by: the title row and the pills keep the safe
-        // area's sides, as they did before, so neither can land on the
-        // camera; the timeline still runs edge to edge.
-        guard !regions.isEmpty else {
-            titleLeading = insets.leading
-            titleTrailing = insets.trailing
-            pillsLeading = insets.leading
-            pillsTrailing = insets.trailing
+        // Nothing to go by. With a column the camera is still where it
+        // always is — at the column's head, or at its foot when the
+        // column is trailing and the screen is wide — so the rows stop
+        // there rather than a whole column short. Without one the rows
+        // keep the safe area's sides, as they did before, so neither can
+        // land on the camera; the timeline still runs edge to edge.
+        if lenses.isEmpty, onTrailing || onLeading {
+            let x = onTrailing ? width - column.trailing + Self.lensInset : column.leading - Self.lensInset - Self.lensSize
+            let atFoot = onTrailing && width > height
+            let y = atFoot ? height - Self.lensEndGap - Self.lensSize : Self.lensEndGap
+            lenses = [CGRect(x: x, y: y, width: Self.lensSize, height: Self.lensSize)]
+        }
+        guard !lenses.isEmpty else {
+            titleLeading = column.leading
+            titleTrailing = column.trailing
+            pillsLeading = column.leading
+            pillsTrailing = column.trailing
             return
         }
-        // The camera comes back twice: its lens, 37 points with margins,
-        // inside an 84-point square at the head of the column that the
-        // Dynamic Island grows into. Only the lens is in the way of a row
-        // across the top, so a region holding another is left out and the
-        // buttons stop at the camera itself.
-        let innermost = regions.filter { outer in
-            !regions.contains { $0 != outer && outer.contains($0) }
-        }
-        let width = geo.size.width + insets.leading + insets.trailing
-        for region in innermost {
-            let onLeading = region.midX < width / 2
-            let reach = onLeading ? region.maxX : width - region.minX
-            if region.minY < titleRowFoot {
-                if onLeading { titleLeading = max(titleLeading, reach) } else { titleTrailing = max(titleTrailing, reach) }
+        for lens in lenses {
+            let leading = lens.midX < width / 2
+            let reach = leading ? lens.maxX : width - lens.minX
+            if lens.minY < titleRowFoot {
+                if leading { titleLeading = max(titleLeading, reach) } else { titleTrailing = max(titleTrailing, reach) }
             }
-            if region.maxY > pillRowHead {
-                if onLeading { pillsLeading = max(pillsLeading, reach) } else { pillsTrailing = max(pillsTrailing, reach) }
+            if lens.maxY > pillRowHead {
+                if leading { pillsLeading = max(pillsLeading, reach) } else { pillsTrailing = max(pillsTrailing, reach) }
             }
         }
     }

@@ -42,9 +42,18 @@ extension PlayerModel {
     /// Jellyfin item being streamed, not a download or a playlist channel.
     var offersQuality: Bool { item != nil && !isLocal && !isExternal && !isLive }
 
-    /// Why the quality rungs are not offered, when they aren't.
+    /// The download's row in the quality card: its quality when the record
+    /// knows it.
+    var downloadedTitle: String {
+        #if !os(tvOS)
+        if let download = downloadedCopy, !download.quality.isEmpty { return "Downloaded · \(download.quality)" }
+        #endif
+        return "Downloaded"
+    }
+
+    /// Why the quality rungs are not offered, when they aren't. A download
+    /// has no reason to give: its card holds the one row and nothing else.
     var qualityUnavailableReason: String? {
-        if isLocal { return "This is a download: it plays the file as it was saved." }
         if isExternal { return "This channel comes straight from its playlist; the server isn't encoding it." }
         if isLive { return "A live channel plays as the tuner sends it." }
         return nil
@@ -108,6 +117,8 @@ extension PlayerModel {
     /// The same list for a download: the episodes of its series on this
     /// device that come after it, at most `upNextLimit`.
     var upNextLocal: [DownloadRecord] {
+        // Shuffling, what the shuffle will play, not what follows in order.
+        if isShuffling { return shuffledUpcoming(limit: Self.upNextLimit) }
         // Online, the server's list is the one: it holds the downloaded
         // episodes too, which were otherwise listed twice.
         guard upcoming.isEmpty else { return [] }

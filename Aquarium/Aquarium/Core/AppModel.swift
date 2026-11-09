@@ -1657,8 +1657,13 @@ final class AppModel {
         // the usual sync it would be filed under the next person's.
         if !client.isOffline, OfflineProgress.pendingCount > 0 { await OfflineProgress.sync() }
         #endif
-        PlayerModel.shared.stop(reason: "switching account")
+        let closing = [PlayerModel.shared.stop(reason: "switching account"), MusicPlayer.shared.stop()]
         stopSessionActivity()
+        // Each stop only starts a task, and a request reads the session when it
+        // runs: not waiting sent this account's closing reports under the next
+        // one. A server that has gone away mustn't hold up the switch, and what
+        // has been sent by then already carries this account's token.
+        await waitFor(closing.compactMap { $0 }, atMost: .seconds(4))
         guard client.switchAccount(to: account) else {
             // The token went in the moment since it was checked. The account
             // in use is untouched; its libraries are asked for again, since
@@ -1677,7 +1682,10 @@ final class AppModel {
     /// the add-account sheet. The client has the new session by now; this is
     /// the teardown of what the old one left in the app.
     func accountChanged() {
-        PlayerModel.shared.stop(reason: "signed in to another account")
+        // The old account's token has already been replaced, so nothing here
+        // can tell its server. A stream it leaves running times out over there.
+        PlayerModel.shared.stop(reason: "signed in to another account", tellServer: false)
+        MusicPlayer.shared.stop(tellServer: false)
         stopSessionActivity()
         clearSessionState()
         LibraryIndex.shared.wipe()
@@ -1720,6 +1728,20 @@ final class AppModel {
         #if os(iOS)
         QuickActions.clear()
         #endif
+    }
+
+    /// Until every task has finished or `limit` has passed, whichever is first.
+    private func waitFor(_ tasks: [Task<Void, Never>], atMost limit: Duration) async {
+        let (signal, finish) = AsyncStream<Void>.makeStream()
+        Task {
+            for task in tasks { await task.value }
+            finish.finish()
+        }
+        Task {
+            try? await Task.sleep(for: limit)
+            finish.finish()
+        }
+        for await _ in signal {}
     }
 
     /// The half of a sign-out that has to happen while the session is still
