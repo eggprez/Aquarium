@@ -1370,6 +1370,7 @@ struct HeroHeader: View {
                 url: Artwork.url(item, type: "Backdrop", width: backdropWidth)
                     ?? Artwork.url(item, type: "Primary", width: backdropWidth),
                 blurHash: Artwork.hash(item, type: "Backdrop") ?? Artwork.hash(item),
+                focus: Self.backdropFocus,
                 placeholderFill: Theme.heroPlaceholderFill
             )
             .frame(height: artHeight)
@@ -1384,6 +1385,16 @@ struct HeroHeader: View {
         }
         .frame(height: artHeight)
     }
+
+    /// Where the backdrop is cropped from. Jellyfin's backdrops are 16:9, and
+    /// this band is 2.4:1 on an iPad, a Mac or an open foldable, 2.7:1 on a
+    /// television and 3.5:1 on a phone on its side — so between an eighth and
+    /// a half of the picture's height has to go. Centred, a quarter of the top
+    /// went on a phone on its side, which is where a backdrop puts its faces;
+    /// the bottom is the part the page blend dissolves anyway. Taking 15% of
+    /// the overspill from the top and the rest from the bottom keeps the upper
+    /// third, and still leaves a little sky above a head.
+    static let backdropFocus = UnitPoint(x: 0.5, y: 0.15)
 
     /// What to ask the server for. A television is a 1920-point canvas, so a
     /// 1600-wide backdrop was being stretched across it before anything cropped
