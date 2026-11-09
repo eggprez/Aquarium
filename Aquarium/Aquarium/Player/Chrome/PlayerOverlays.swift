@@ -165,9 +165,25 @@ struct PlayerUpNextCard: View {
     /// download.
     var next: BaseItem?
     var compact = false
+    /// The count as last drawn, for the card to go on saying once there is
+    /// nothing left to count.
+    @State private var lastCount = 0
 
     var body: some View {
-        if PlayerMetrics.television { television } else { handheld }
+        Group {
+            if PlayerMetrics.television { television } else { handheld }
+        }
+        .onChange(of: count, initial: true) { _, count in lastCount = count }
+    }
+
+    /// Whole seconds until the next episode starts. The card is still drawn
+    /// while it fades out after its stream has closed, and a closed stream
+    /// has no duration: `secondsRemaining` is infinite then, which `Int`
+    /// traps on. The fading card keeps the number it had.
+    private var count: Int {
+        let seconds = player.secondsRemaining
+        guard seconds.isFinite else { return lastCount }
+        return Int(seconds.rounded(PlayerMetrics.television ? .up : .toNearestOrAwayFromZero))
     }
 
     /// The next episode, counting down to itself: its still beside the
@@ -180,7 +196,7 @@ struct PlayerUpNextCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             VStack(alignment: .leading, spacing: 8) {
-                Text(player.isStartingNext ? "STARTING…" : "UP NEXT IN \(Int(player.secondsRemaining.rounded(.up)))")
+                Text(player.isStartingNext ? "STARTING…" : "UP NEXT IN \(count)")
                     .font(.caption.weight(.heavy))
                     .foregroundStyle(Theme.link)
                 Text(next?.title ?? title)
@@ -212,7 +228,7 @@ struct PlayerUpNextCard: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(player.isStartingNext
                  ? "Starting…"
-                 : "Up next · in \(Int(player.secondsRemaining.rounded()))s")
+                 : "Up next · in \(count)s")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.75))
             Text(title)
