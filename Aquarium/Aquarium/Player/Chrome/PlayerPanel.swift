@@ -870,9 +870,11 @@ private struct InfoTab: View {
                 .font(tv ? .title3.weight(.bold) : .headline)
             // The episode under the show, for a programme that is one of a
             // series: "Night Dispatch" alone says which show, not which night.
+            // Set as an episode's name is anywhere else, or as a label
+            // where the listing has only its number.
             if let episode = now.programmeEpisodeLine {
                 Text(episode)
-                    .font(tv ? .callout.weight(.semibold) : .subheadline.weight(.semibold))
+                    .titleRole(now.programmeEpisodeRole, font: tv ? .callout : .subheadline)
                     .lineLimit(tv ? 1 : 2)
             }
             if let start = now.programStart, let end = now.programEnd {

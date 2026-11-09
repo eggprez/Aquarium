@@ -1608,6 +1608,7 @@ private struct GuideRow: View {
                             program: program,
                             title: program.title,
                             episode: program.programmeEpisodeLine,
+                            episodeRole: program.programmeEpisodeRole,
                             timeLabel: Format.programWindow(start: program.programStart, end: program.programEnd),
                             isLive: program.isAiringNow,
                             width: width
@@ -1625,7 +1626,7 @@ private struct GuideRow: View {
     }
 
     @ViewBuilder
-    private func cell(index: Int, program: BaseItem?, title: String, episode: String? = nil, timeLabel: String?, isLive: Bool, width: CGFloat) -> some View {
+    private func cell(index: Int, program: BaseItem?, title: String, episode: String? = nil, episodeRole: TitleRole = .episode, timeLabel: String?, isLive: Bool, width: CGFloat) -> some View {
         #if os(macOS)
         let key = GuideSelection(row: rowIndex, column: index)
         GuideCell(
@@ -1657,6 +1658,7 @@ private struct GuideRow: View {
         GuideCell(
             title: title,
             episode: episode,
+            episodeRole: episodeRole,
             timeLabel: timeLabel,
             isLive: isLive,
             width: width,
@@ -1668,6 +1670,7 @@ private struct GuideRow: View {
         GuideCell(
             title: title,
             episode: episode,
+            episodeRole: episodeRole,
             timeLabel: timeLabel,
             isLive: isLive,
             width: width,
@@ -1707,6 +1710,9 @@ private struct GuideCell: View {
     /// television's row has a line for it; a phone's and a Mac's do not,
     /// and there it is in the programme's popover or not at all.
     var episode: String? = nil
+    /// Whether that line is the episode's name or its number standing in
+    /// for one: the two are set differently (see EpisodeTypography).
+    var episodeRole: TitleRole = .episode
     let timeLabel: String?
     let isLive: Bool
     let width: CGFloat
@@ -1780,7 +1786,7 @@ private struct GuideCell: View {
     private var label: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.caption.weight(.medium))
+                .font(Font.caption.titleRole(.show))
                 #if os(macOS)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -1796,8 +1802,7 @@ private struct GuideCell: View {
             #if os(tvOS)
             if showsEpisode, let episode {
                 Text(episode)
-                    .font(.caption)
-                    .foregroundStyle(Theme.textBody)
+                    .titleRole(episodeRole, font: .caption)
                     .lineLimit(1)
             }
             #endif

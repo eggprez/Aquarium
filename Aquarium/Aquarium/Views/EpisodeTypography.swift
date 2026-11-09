@@ -8,8 +8,9 @@
 //    set like one.
 //
 //  A card on Home, the hero, a title page's "Up next" line, the player's
-//  title and its Info page, the Up Next card and list, a download's row: all
-//  of them come here rather than choosing a weight of their own. The sizes
+//  title and its Info page, the Up Next card and list, a download's row, a
+//  programme in the guide and on a channel's Info page: all of them come
+//  here rather than choosing a weight of their own. The sizes
 //  stay each screen's business — a television's heading is not a phone's
 //  caption — which is why every helper takes the font it is to be set in.
 //
@@ -70,6 +71,16 @@ extension Text {
     /// Set as `role`, in `font`'s size.
     func titleRole(_ role: TitleRole, font: Font, tone: TitleTone = .page) -> Text {
         self.font(font.titleRole(role)).foregroundStyle(role.color(tone))
+    }
+}
+
+extension BaseItem {
+    /// How a programme's `programmeEpisodeLine` is set: as the episode's
+    /// name where the listing gave one, and as a label where its number —
+    /// "S5 E12" — is standing in for a name it has not got.
+    var programmeEpisodeRole: TitleRole {
+        guard let name = EpisodeTitle?.trimmingCharacters(in: .whitespaces), !name.isEmpty else { return .label }
+        return .episode
     }
 }
 
