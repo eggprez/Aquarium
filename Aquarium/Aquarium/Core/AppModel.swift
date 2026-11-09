@@ -91,6 +91,10 @@ enum AppSection: Hashable, Identifiable, Sendable, Codable {
     case libraries
     case library(id: String, name: String, collectionType: String?)
     case favorites
+    /// The server's Collections view: Jellyfin's box sets, each a grid of the
+    /// films and shows put in it. Only where the server has the view, which
+    /// it makes once anything has been put in a collection.
+    case collections
     case liveTV
     case downloads
     case search
@@ -108,6 +112,7 @@ enum AppSection: Hashable, Identifiable, Sendable, Codable {
         case .libraries: "libraries"
         case .library(let id, _, _): "lib-\(id)"
         case .favorites: "favorites"
+        case .collections: "collections"
         case .liveTV: "livetv"
         case .downloads: "downloads"
         case .search: "search"
@@ -124,6 +129,7 @@ enum AppSection: Hashable, Identifiable, Sendable, Codable {
         case .libraries: "Library"
         case .library(_, let name, _): name
         case .favorites: "Favorites"
+        case .collections: "Collections"
         case .liveTV: "Live TV"
         case .downloads: "Downloads"
         case .search: "Search"
@@ -164,6 +170,7 @@ enum AppSection: Hashable, Identifiable, Sendable, Codable {
             default: "folder"
             }
         case .favorites: "star"
+        case .collections: "square.stack"
         case .liveTV:
             #if os(macOS)
             "play.tv"
@@ -218,6 +225,26 @@ final class AppModel {
     /// video ones: they are browsed by the Music tab, not by Library.
     private(set) var musicLibraries: [BaseItem] = []
     private(set) var audiobookLibraries: [BaseItem] = []
+    /// The server's Collections view (`boxsets`), if it has one. Kept apart
+    /// from `libraries`: it is not a library of titles but a list of lists,
+    /// and has a section of its own — see `AppSection.collections`.
+    private(set) var collectionsView: BaseItem?
+
+    /// Whether there is a Collections section. Until the server has been
+    /// asked, what it said last time, so the section doesn't come and go
+    /// with every launch.
+    var hasCollections: Bool {
+        collectionsView != nil || (librariesUnknown && UserDefaults.standard.string(forKey: Self.collectionsViewKey) != nil)
+    }
+
+    /// The id of the Collections view the server last had.
+    private static let collectionsViewKey = "collections_view_id"
+
+    /// The Collections view's id: the one the server gave, or the one it gave
+    /// last time while it hasn't been asked yet.
+    var collectionsViewId: String? {
+        collectionsView?.Id ?? UserDefaults.standard.string(forKey: Self.collectionsViewKey)
+    }
 
     /// Whether there is anything for a Music tab to show. iPhone and iPad
     /// only for now — the Mac and the television get theirs in a later pass.
@@ -743,6 +770,10 @@ final class AppModel {
         #endif
         out.append(.libraries)
         out.append(.favorites)
+        // After Favorites and never in the default bar: on a phone it starts
+        // in More, and anyone who wants it in the bar can move it there in
+        // Settings → Tab Bar.
+        if hasCollections { out.append(.collections) }
         if hasLiveTV { out.append(.liveTV) }
         out.append(.downloads)
         return out
@@ -1350,6 +1381,9 @@ final class AppModel {
         let books = views.filter { $0.CollectionType == "books" || $0.CollectionType == "audiobooks" }
         if musicLibraries != music { musicLibraries = music }
         if audiobookLibraries != books { audiobookLibraries = books }
+        let collections = views.first { $0.CollectionType == "boxsets" }
+        if collectionsView != collections { collectionsView = collections }
+        UserDefaults.standard.set(collections?.Id, forKey: Self.collectionsViewKey)
         LibraryIndex.shared.keepLibraries(video: video, music: music, books: books, liveTV: liveTV)
         UserDefaults.standard.set(!musicLibraries.isEmpty, forKey: "had_music_library")
         UserDefaults.standard.set(!audiobookLibraries.isEmpty, forKey: "had_books_library")

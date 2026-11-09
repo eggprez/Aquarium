@@ -35,6 +35,17 @@ struct LibrariesView: View {
         return [GridItem(.adaptive(minimum: Metrics.stillWidth), spacing: Metrics.gridSpacing, alignment: .top)]
     }
 
+    /// The libraries, and on a television the Collections view after them:
+    /// everywhere else Collections is a section of its own (More, or a
+    /// sidebar row), but a television's strip is kept to five entries and
+    /// has no More — see `AppModel.sections`.
+    private var tiles: [BaseItem] {
+        #if os(tvOS)
+        if let collections = app.collectionsView { return app.libraries + [collections] }
+        #endif
+        return app.libraries
+    }
+
     var body: some View {
         ScrollView {
             if app.isLoadingLibraries, app.libraries.isEmpty {
@@ -53,7 +64,7 @@ struct LibrariesView: View {
                 )
             } else {
                 LazyVGrid(columns: columns, spacing: Metrics.gridRowSpacing) {
-                    ForEach(app.libraries) { library in
+                    ForEach(tiles) { library in
                         Button {
                             app.push(.library(
                                 id: library.Id,
@@ -270,6 +281,7 @@ struct LibraryTile: View {
         case "tvshows": "TV shows"
         case "homevideos": "Home videos"
         case "musicvideos": "Music videos"
+        case "boxsets": "Collections"
         default: "Library"
         }
     }

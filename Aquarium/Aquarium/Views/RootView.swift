@@ -838,6 +838,16 @@ struct SectionView: View {
             LibraryView(parentId: id, title: name, collectionType: type)
         case .favorites:
             FavoritesView()
+        case .collections:
+            if let id = app.collectionsViewId {
+                LibraryView(parentId: id, title: "Collections", collectionType: "boxsets")
+            } else {
+                EmptyState(
+                    symbol: "square.stack",
+                    title: "No collections",
+                    message: "Collections made in Jellyfin show up here."
+                )
+            }
         case .liveTV:
             LiveTVView()
         case .search:

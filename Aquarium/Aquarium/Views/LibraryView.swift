@@ -204,7 +204,28 @@ struct LibraryView: View {
         switch resolvedCollectionType {
         case "movies": "Movie"
         case "tvshows": "Series"
+        // The Collections view lists the collections themselves; anything
+        // else under it is what is inside them, a level down.
+        case "boxsets": "BoxSet"
+        // One collection: its films and shows, not the seasons and episodes
+        // a recursive query would also find inside the shows.
+        case Self.boxSetType: "Movie,Series,Video,MusicVideo"
         default: nil
+        }
+    }
+
+    /// The collection type a single box set's page is opened with — not a
+    /// Jellyfin one, only this page's, so it lists what is in the set.
+    static let boxSetType = "boxset"
+
+    /// A title's page, or for a collection the grid of what is in it: a box
+    /// set's own page in Jellyfin is little more than that list, and the
+    /// grid has the sorting and filters already.
+    private func open(_ item: BaseItem) {
+        if item.kind == "BoxSet" {
+            app.push(.library(id: item.Id, name: item.title, collectionType: Self.boxSetType))
+        } else {
+            app.push(.item(item.Id))
         }
     }
 
@@ -336,7 +357,7 @@ struct LibraryView: View {
                     sort: $sort,
                     reversed: $reversed,
                     selection: $selection,
-                    onOpen: { app.push(.item($0.Id)) },
+                    onOpen: { open($0) },
                     onReachEnd: { Task { await loadMore() } }
                 )
             }
@@ -389,7 +410,7 @@ struct LibraryView: View {
                     MediaGrid(
                         items: items,
                         pendingCount: isPaging ? pendingTileCount : 0,
-                        onSelect: { app.push(.item($0.Id)) },
+                        onSelect: { open($0) },
                         onReachEnd: { Task { await loadMore() } },
                         selection: gridSelection,
                         revision: listRevision
