@@ -1170,7 +1170,8 @@ struct TVGuideView: View {
                 guard let channelId = item.ChannelId else { continue }
                 map[channelId, default: []].append((item.programStart ?? .distantPast, item))
             }
-            return map.mapValues { $0.sorted { $0.start < $1.start }.map(\.item) }
+            // In order, then made to lie end to end: see `GuideSchedule`.
+            return map.mapValues { GuideSchedule.resolved($0.sorted { $0.start < $1.start }.map(\.item)) }
         }.value
     }
 
@@ -1606,6 +1607,7 @@ private struct GuideRow: View {
                             index: index,
                             program: program,
                             title: program.title,
+                            episode: program.programmeEpisodeLine,
                             timeLabel: Format.programWindow(start: program.programStart, end: program.programEnd),
                             isLive: program.isAiringNow,
                             width: width
@@ -1623,7 +1625,7 @@ private struct GuideRow: View {
     }
 
     @ViewBuilder
-    private func cell(index: Int, program: BaseItem?, title: String, timeLabel: String?, isLive: Bool, width: CGFloat) -> some View {
+    private func cell(index: Int, program: BaseItem?, title: String, episode: String? = nil, timeLabel: String?, isLive: Bool, width: CGFloat) -> some View {
         #if os(macOS)
         let key = GuideSelection(row: rowIndex, column: index)
         GuideCell(
@@ -1651,9 +1653,21 @@ private struct GuideRow: View {
                 onPlay()
             }
         }
+        #elseif os(tvOS)
+        GuideCell(
+            title: title,
+            episode: episode,
+            timeLabel: timeLabel,
+            isLive: isLive,
+            width: width,
+            height: rowHeight,
+            onPlay: onPlay,
+            isFocused: focus == .program(channel: channelId, index: index)
+        )
         #else
         GuideCell(
             title: title,
+            episode: episode,
             timeLabel: timeLabel,
             isLive: isLive,
             width: width,
@@ -1689,6 +1703,10 @@ extension GuideRow: Equatable {
 
 private struct GuideCell: View {
     let title: String
+    /// The episode's own name, for a programme that is one of a series. A
+    /// television's row has a line for it; a phone's and a Mac's do not,
+    /// and there it is in the programme's popover or not at all.
+    var episode: String? = nil
     let timeLabel: String?
     let isLive: Bool
     let width: CGFloat
@@ -1700,6 +1718,11 @@ private struct GuideCell: View {
     var onSelect: () -> Void = {}
     var onInfo: () -> Void = {}
     @State private var isHovered = false
+    #elseif os(tvOS)
+    /// Whether the selector is on this cell, from the row's focus state:
+    /// the text is drawn over the button rather than inside it (see
+    /// `body`), so it has to be told when to lift with the cell.
+    var isFocused = false
     #endif
 
     var body: some View {
@@ -1720,6 +1743,29 @@ private struct GuideCell: View {
             // The whole title and its times on hover, for the cells the window
             // has cut short at either end.
             .help([title, timeLabel].compactMap { $0 }.joined(separator: "\n"))
+        #elseif os(tvOS)
+        // The button is the cell's tint alone; the words sit over it. With
+        // the text inside the button's label, an Apple TV (not the
+        // simulator, which draws it as written) paints an opaque dark
+        // platter behind the label's content, which on an on-now cell showed
+        // as a dark box hugging the title and times inside the lighter fill
+        // — "the reverse highlighting", in the photo from 2026-11-07. Text
+        // that is not a button's label gets no such treatment.
+        Button(action: onPlay) {
+            (isLive ? Theme.accentSoft : Color.clear)
+                .frame(width: width, height: height)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(GuideCellButtonStyle())
+        .overlay(alignment: .topLeading) {
+            label
+                .allowsHitTesting(false)
+                // The same lift the style gives the cell, so the words move
+                // with it.
+                .scaleEffect(isFocused ? 1.02 : 1)
+                .animation(.easeOut(duration: 0.15), value: isFocused)
+        }
+        .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 0.5) }
         #else
         Button(action: onPlay) {
             label
@@ -1738,10 +1784,23 @@ private struct GuideCell: View {
                 #if os(macOS)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                #elseif os(tvOS)
+                .foregroundStyle(Theme.text)
+                // One line when the episode takes the next; two for a film
+                // or a one-off, which has only its own name to show.
+                .lineLimit(width < 100 || showsEpisode ? 1 : 2)
                 #else
                 .foregroundStyle(Theme.text)
                 .lineLimit(width < 100 ? 1 : 2)
                 #endif
+            #if os(tvOS)
+            if showsEpisode, let episode {
+                Text(episode)
+                    .font(.caption)
+                    .foregroundStyle(Theme.textBody)
+                    .lineLimit(1)
+            }
+            #endif
             if let timeLabel, width > 64 {
                 Text(timeLabel)
                     .font(.caption2)
@@ -1757,6 +1816,16 @@ private struct GuideCell: View {
         .padding(.vertical, 6)
         .frame(width: width, height: height, alignment: .topLeading)
     }
+
+    #if os(tvOS)
+    /// Whether the cell has an episode name and the width to say it: the
+    /// same cut-off the times use, since a cell too narrow for "8:00 PM –
+    /// 9:00 PM" is too narrow for a title.
+    private var showsEpisode: Bool {
+        guard let episode, !episode.isEmpty else { return false }
+        return width > 64
+    }
+    #endif
 
     #if os(macOS)
     /// Selected, then hovered, then on now, then nothing — the strongest

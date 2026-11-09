@@ -535,6 +535,10 @@ struct MacDownloadsView: View {
                 title: "Couldn't Sync",
                 message: "The watched progress of \(result.failed) item\(result.failed == 1 ? "" : "s") couldn't be sent to Jellyfin. Check the connection and try again."
             )
+        } else if result.gone > 0 {
+            // Not a failure, but worth a word: the count went to nothing
+            // without anything reaching the server.
+            app.toast(DownloadsView.syncMessage(result), tone: .ok)
         }
     }
 

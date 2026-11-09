@@ -127,6 +127,9 @@ export function wireSpatialNav(isBusy: () => boolean): void {
     // Only take over when a tile is already focused. From anywhere else the
     // arrows keep their usual meaning.
     if (!active || !active.matches(TILES)) return;
+    // A grid with a keyboard model of its own (the TV guide's selection,
+    // which walks programmes in time rather than boxes on screen).
+    if (active.closest("[data-own-arrows]")) return;
     if (move(active, dir)) ev.preventDefault();
   });
 }

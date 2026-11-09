@@ -1125,8 +1125,13 @@ img.art.has-ph {
 .guide.busy { opacity: 0.55; pointer-events: none; transition: opacity 0.15s; }
 .guide-note { color: var(--text-dim); font-size: var(--fs-sm); margin-bottom: 14px; max-width: 62ch; }
 
-.guide-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.guide-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .guide-range { font-size: var(--fs-sm); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.guide-toolbar-gap { flex: 1; }
+.guide-jump { padding: 5px 8px; font-size: var(--fs-sm); color-scheme: light dark; }
+.guide-filter { padding: 6px 10px; font-size: var(--fs-sm); width: 180px; }
+.guide-more { display: inline-flex; align-items: center; gap: 4px; }
+.guide-empty { padding: 24px 16px; color: var(--text-dim); font-size: var(--fs-sm); }
 
 .guide-scroll {
   overflow: auto;
@@ -1136,7 +1141,12 @@ img.art.has-ph {
   border-radius: var(--radius);
   background: var(--bg-raised);
   overscroll-behavior: contain;
+  /* Keeps a selected programme out from under the sticky column and header
+     when the keyboard scrolls it into view. */
+  scroll-padding: 34px 0 0 var(--guide-ch-w);
 }
+.guide-scroll:focus { outline: none; }
+.guide-scroll:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 #content.has-player .guide-scroll { max-height: calc(100vh - var(--topbar-h) - var(--player-h) - 190px); }
 /* Sized by its content so the sticky channel column has a row wider than the
    viewport to stick inside of. */
@@ -1204,6 +1214,12 @@ img.art.has-ph {
 /* What's on right now, which is the only row anyone scans for on arrival. */
 .guide-prog.on-now { background: var(--accent-soft); border-color: transparent; }
 .guide-prog.on-now:hover { border-color: var(--accent); }
+/* The keyboard's place in the grid, separate from what's playing. Drawn only
+   while the grid has focus, so a mouse user never sees a stray outline. */
+.guide-scroll:focus-within .guide-prog.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.guide-scroll:focus-within .guide-lane.selected { box-shadow: inset 0 0 0 2px var(--accent); }
+.guide-scroll:focus-within .guide-ch.selected { background: var(--bg-hover); }
+.guide-tick.day { color: var(--text); font-weight: 600; }
 .guide-prog-title { font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .guide-prog-sub { font-size: var(--fs-micro); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .guide-gap {
@@ -1258,6 +1274,13 @@ img.art.has-ph {
 }
 .dl-bar > div { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.3s; }
 .dl-actions { display: flex; gap: 6px; }
+/* The selected row (a click focuses it), which the Delete key removes. */
+.dl-row[data-dl-ids]:focus { outline: none; border-color: var(--accent); }
+.dl-body .dl-overview {
+  font-size: var(--fs-xs); color: var(--text-dim); margin-top: 4px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.dl-hold { color: var(--text-dim); }
 .sync-pill {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: var(--fs-xs); color: var(--text-dim);
@@ -2167,3 +2190,129 @@ h1.page-title { font-size: var(--fs-2xl); margin-bottom: 20px; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- Live TV tuning screen ----------
+   Fills the space the video is about to take, from the click until mpv has
+   the stream (views/livetv.ts `tune`). Dark in both themes, like the player. */
+.tuning {
+  position: absolute; inset: 0; z-index: 40;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  background: #000; color: #ececf4;
+  padding: 24px; text-align: center;
+}
+.tuning .channel-logo.tuning-logo {
+  width: 160px; height: 96px; border-radius: 14px;
+  background: #1e1e2a; color: #9a9ab0; font-size: var(--fs-lg, 1.4rem);
+}
+.tuning-name { margin: 0; font-size: 1.5rem; font-weight: 700; }
+.tuning-status { margin: 0; color: #9a9ab0; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; max-width: 48ch; }
+.tuning .btn { --text: #ececf4; --border: #3a3a4e; color: #ececf4; background: transparent; margin-top: 6px; }
+
+/* ---------- Sign-in: servers, accounts, people, Quick Connect ---------- */
+.login-card { max-height: calc(100vh - 48px); overflow-y: auto; }
+.login-card.wide { width: 780px; }
+.login-form { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.login-hint.center { text-align: center; }
+.login-hint.warn { color: var(--warn, #d08a2c); }
+.login-section { display: flex; flex-direction: column; gap: 6px; }
+.login-section[hidden] { display: none; }
+.login-section-title { font-size: var(--fs-sm); font-weight: 600; color: var(--text-dim); }
+.login-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.login-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border: 0; background: transparent; color: var(--text);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.login-row + .login-row { border-top: 1px solid var(--border); }
+.login-row:hover, .login-row:focus-visible { background: var(--accent-soft); }
+.login-row-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.login-row-detail { color: var(--text-dim); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: auto; }
+.login-chip .login-row-detail { margin-left: 0; }
+.login-avatar {
+  position: relative; flex: none; display: inline-grid; place-items: center;
+  border-radius: 50%; overflow: hidden; background: var(--accent-soft); color: var(--accent);
+  font-size: 12px; font-weight: 700;
+}
+.login-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.login-people { display: flex; flex-direction: column; gap: 6px; }
+.login-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.login-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 12px 4px 4px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font: inherit; font-size: var(--fs-sm); cursor: pointer;
+}
+.login-chip:hover, .login-chip.on { border-color: var(--accent); background: var(--accent-soft); }
+.login-buttons { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.login-buttons.start { justify-content: flex-start; }
+.login-banner { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.login-banner-name { display: flex; align-items: center; gap: 10px; }
+.login-columns { display: grid; grid-template-columns: 1fr; gap: 28px; }
+.login-card.wide .login-columns { grid-template-columns: 1fr 1fr; }
+.login-qc { display: flex; flex-direction: column; gap: 10px; padding-left: 28px; border-left: 1px solid var(--border); }
+.login-qc-code { font-size: 38px; font-weight: 800; letter-spacing: 2px; font-variant-numeric: tabular-nums; user-select: text; }
+.login-qc-code.expired, .login-qc-code.pending { color: var(--text-dim); }
+.login-qc-code.pending { font-size: var(--fs-md); font-weight: 500; letter-spacing: 0; min-height: 46px; display: flex; align-items: center; }
+@media (max-width: 860px) {
+  .login-card.wide { width: min(780px, calc(100vw - 32px)); }
+  .login-card.wide .login-columns { grid-template-columns: 1fr; }
+  .login-qc { padding-left: 0; border-left: 0; border-top: 1px solid var(--border); padding-top: 16px; }
+}
+.settings-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.qc-code { width: 9em; font-variant-numeric: tabular-nums; letter-spacing: 1px; }
+.qc-outcome { margin-top: 6px; }
+.qc-outcome.ok { color: var(--ok, #3fb37f); }
+.qc-outcome.warn { color: var(--warn, #d08a2c); }
+.qc-outcome.bad { color: var(--danger); }
+
+/* ---------- Player bar: stream info, chapters, time remaining ---------- */
+/* Label over value, cells running along the bar; the panel scrolls sideways
+   when the window is too narrow for all of them. */
+.pb-panel.pb-info { gap: 18px; }
+.pb-info-cell { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; max-width: 260px; }
+.pb-info-label {
+  font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim);
+}
+.pb-info-value {
+  font-size: var(--fs-sm); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pb-chapter { display: inline-flex; gap: 6px; align-items: baseline; }
+.pb-chapter-time { font-variant-numeric: tabular-nums; opacity: 0.7; font-size: var(--fs-xs); }
+.pb-dur { cursor: pointer; border-radius: 4px; }
+.pb-dur:hover { color: var(--text); }
+.pb-queue-tile.queued .pb-queue-status { color: var(--accent); }
+
+/* ---------- Home: library chips, On Now ---------- */
+.home-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 28px; }
+.home-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 14px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg-raised); color: var(--text);
+  font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+}
+.home-chip:hover, .home-chip:focus-visible { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.onnow-poster { display: grid; place-items: center; background: var(--bg-raised); }
+.onnow-live { display: inline-flex; align-items: center; }
+.onnow-live .live-dot { margin-right: 5px; }
+
+/* ---------- Player: Live TV channels ---------- */
+#player-bar:not(.live) #pb-channels { display: none; }
+.pb-ch-tile { width: 240px; }
+.pb-ch-logo {
+  width: 72px; height: 44px; flex-shrink: 0;
+  border-radius: 6px; overflow: hidden;
+  background: var(--bg-hover);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--fs-xs); font-weight: 700; color: var(--text-dim);
+}
+.pb-ch-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.pb-ch-name {
+  font-size: var(--fs-sm); font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pb-ch-num { color: var(--text-dim); font-weight: 500; margin-right: 6px; font-variant-numeric: tabular-nums; }
+.pb-ch-tile .pb-queue-status { display: block; overflow: hidden; text-overflow: ellipsis; }
+/* How far through the programme on now. Static: redrawn when the panel is. */
+.pb-ch-progress { display: block; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.pb-ch-progress > span { display: block; height: 100%; background: var(--accent); }

@@ -13,6 +13,12 @@ import {
   getDownloadConcurrency,
   setDownloadConcurrency,
   MAX_DOWNLOAD_CONCURRENCY,
+  isDownloadsPaused,
+  setDownloadsPaused,
+  downloadHoldReason,
+  isWaitingForTranscode,
+  isTranscodeDownload,
+  itemTitle,
   type PendingDownload,
 } from "../playback";
 import {
@@ -25,6 +31,8 @@ import {
   emptyState,
   icon,
   skeletonGrid,
+  openDialog,
+  openActionMenu,
   type MenuAction,
 } from "../ui";
 
@@ -36,6 +44,7 @@ let openSeason: number | null = null;
 let currentRoot: HTMLElement | null = null;
 let queueListenerInstalled = false;
 let playbackListenerInstalled = false;
+let deleteKeyInstalled = false;
 /** Guards the self-heal re-render below against stacking up on progress ticks. */
 let healingQueueTab = false;
 /** Bumped by every `renderDownloads`, so only the latest one paints. */
@@ -121,6 +130,8 @@ function libCard(opts: {
   actions?: () => MenuAction[];
   /** Title shown at the top of that menu. */
   menuTitle?: string;
+  /** What the Delete key removes while this card is selected. */
+  deletes?: { ids: string[]; what: string };
 }): HTMLElement {
   const pct = opts.progressPct ?? 0;
   const poster = el("div", { class: "card-poster" }, [
@@ -166,10 +177,13 @@ function libCard(opts: {
   if (opts.actions) {
     attachContextMenu(card, opts.menuTitle ?? opts.title, opts.actions);
   }
+  if (opts.deletes) markDeletable(card, opts.deletes.ids, opts.deletes.what);
   return card;
 }
 
 async function deleteDownload(itemId: string, root: HTMLElement): Promise<void> {
+  // A retry still waiting in the queue would otherwise bring it back.
+  cancelQueuedDownload(itemId);
   await invoke("download_delete", { itemId });
   toast("Download deleted");
   renderDownloads(root, { keepTab: true });
@@ -177,10 +191,151 @@ async function deleteDownload(itemId: string, root: HTMLElement): Promise<void> 
 
 async function deleteMany(eps: any[], root: HTMLElement): Promise<void> {
   for (const ep of eps) {
+    cancelQueuedDownload(ep.item_id);
     await invoke("download_delete", { itemId: ep.item_id }).catch(() => {});
   }
   toast(`Deleted ${eps.length} download${eps.length === 1 ? "" : "s"}`);
   renderDownloads(root, { keepTab: true });
+}
+
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+function bytesOf(list: any[]): number {
+  return list.reduce((sum, d) => sum + (d.size_bytes ?? 0), 0);
+}
+
+/** Ask before deleting, the way the Apple app's Manage menu does: what goes,
+ *  how much space it frees, and a button that says exactly what it does. */
+function confirmDeletion(opts: {
+  title: string;
+  message: string;
+  confirm: string;
+  run: () => void;
+}): void {
+  const p = document.createElement("p");
+  p.textContent = opts.message;
+  openDialog({
+    title: opts.title,
+    body: [p],
+    actions: [
+      { label: "Cancel", primary: true },
+      { label: opts.confirm, danger: true, run: opts.run },
+    ],
+  });
+}
+
+/** Films and episodes that have been watched to the end. */
+function watchedDownloads(items: any[]): any[] {
+  return items.filter((d) => d.status === "complete" && d.played);
+}
+
+function confirmDeleteWatched(items: any[], root: HTMLElement, where = "everything you've watched"): void {
+  const watched = watchedDownloads(items);
+  if (!watched.length) {
+    toast("Nothing watched to delete");
+    return;
+  }
+  confirmDeletion({
+    title: `Delete ${where}?`,
+    message: `${plural(watched.length, "item")} · ${api.bytesToText(bytesOf(watched))}`,
+    confirm: `Delete ${plural(watched.length, "Download")}`,
+    run: () => void deleteMany(watched, root),
+  });
+}
+
+/** Every download, and the queue with it. */
+async function deleteEverything(root: HTMLElement): Promise<void> {
+  const dropped = clearDownloadQueue();
+  const items = await invoke<any[]>("downloads_list").catch(() => [] as any[]);
+  for (const d of items.filter((d) => d.status === "downloading")) {
+    await invoke("download_cancel", { itemId: d.item_id }).catch(() => {});
+  }
+  for (const d of items) {
+    await invoke("download_delete", { itemId: d.item_id }).catch(() => {});
+  }
+  toast(
+    `Deleted ${plural(items.length, "download")}` + (dropped ? ` · ${dropped} queued dropped` : ""),
+    "ok"
+  );
+  renderDownloads(root, { keepTab: true });
+}
+
+/** Show downloads in Files, selected. */
+function revealInFiles(ids: string[]): void {
+  void invoke("downloads_reveal", { itemIds: ids }).catch((e) =>
+    toast(`Couldn't show that in Files: ${e}`, "error")
+  );
+}
+
+/** Mark a card or row as something the Delete key removes while it has
+ *  focus (a click on it focuses it). */
+function markDeletable(node: HTMLElement, ids: string[], what: string): void {
+  node.dataset.dlIds = ids.join(",");
+  node.dataset.dlWhat = what;
+  if (!node.hasAttribute("tabindex")) node.tabIndex = 0;
+}
+
+/** Delete removes the selected card or row, after asking. Installed once. */
+function installDeleteKey(): void {
+  if (deleteKeyInstalled) return;
+  deleteKeyInstalled = true;
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Delete" || ev.defaultPrevented) return;
+    const root = currentRoot;
+    if (!root || !document.contains(root) || !root.querySelector(".dl-tabs")) return;
+    const target = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>("[data-dl-ids]");
+    if (!target || !root.contains(target) || document.querySelector(".dialog-scrim")) return;
+    ev.preventDefault();
+    const ids = (target.dataset.dlIds ?? "").split(",").filter(Boolean);
+    if (!ids.length) return;
+    const what = target.dataset.dlWhat ?? "this download";
+    confirmDeletion({
+      title: `Delete ${what}?`,
+      message: ids.length === 1 ? "The file is removed from this computer." : `${plural(ids.length, "download")} are removed from this computer.`,
+      confirm: ids.length === 1 ? "Delete" : `Delete ${ids.length}`,
+      run: () => void deleteMany(ids.map((item_id) => ({ item_id })), root),
+    });
+  });
+}
+
+/** Episodes in watching order. */
+function inOrder(eps: any[]): any[] {
+  return [...eps].sort(
+    (a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0)
+  );
+}
+
+/** The episode "Play Next" means: the first one not watched to the end (an
+ *  episode part-way through counts, and resumes), or null when all are. */
+function nextUnwatched(eps: any[]): any | null {
+  return inOrder(eps.filter((e) => e.status === "complete" && e.path)).find((e) => !e.played) ?? null;
+}
+
+/** Play Next when something's unwatched, otherwise Play from the start of the
+ *  first episode. Null when nothing in the group is playable. */
+function playNextAction(eps: any[]): MenuAction | null {
+  const next = nextUnwatched(eps);
+  if (next) {
+    const code = next.episode != null ? ` (E${next.episode})` : "";
+    return { label: `Play Next${code}`, icon: "play", run: () => playLocal(next) };
+  }
+  const first = inOrder(eps.filter((e) => e.status === "complete" && e.path))[0];
+  return first
+    ? { label: "Play from the Start", icon: "play", run: () => playLocal({ ...first, position_ticks: 0 }) }
+    : null;
+}
+
+function playNextButton(eps: any[]): HTMLElement | null {
+  const a = playNextAction(eps);
+  if (!a) return null;
+  const next = nextUnwatched(eps);
+  return el("button", {
+    class: "btn small primary",
+    title: next ? "Play the Next Unwatched Episode" : "Play from the Start",
+    onClick: () => void a.run?.(),
+  }, [icon("play"), next ? "Play Next" : "Play"]);
 }
 
 /** Danger button that arms on first click ("Delete N episodes?") and only
@@ -282,6 +437,9 @@ function localActions(dl: any, root: HTMLElement): MenuAction[] {
       },
     });
   }
+  if (dl.path) {
+    out.push({ label: "Show in Files", icon: "folder", run: () => revealInFiles([dl.item_id]) });
+  }
   out.push({
     label: "Delete download",
     icon: "trash",
@@ -294,21 +452,19 @@ function localActions(dl: any, root: HTMLElement): MenuAction[] {
 /** Right-click actions for a group card (a series or a season). */
 function groupActions(eps: any[], label: string, root: HTMLElement): MenuAction[] {
   const playable = eps.filter((e) => e.status === "complete" && e.path);
-  const sorted = [...playable].sort(
-    (a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0)
-  );
-  const firstUnwatched = sorted.find((e) => !e.played) ?? sorted[0];
   const allPlayed = eps.every((e) => e.played);
+  const watched = watchedDownloads(eps);
   return [
-    firstUnwatched
+    playNextAction(eps),
+    playable.length
       ? {
-          label: `Play ${firstUnwatched.episode != null ? `E${firstUnwatched.episode}` : "first"}`,
-          icon: "play",
-          run: () => playLocal(firstUnwatched),
+          label: label === "season" ? "Shuffle this season" : "Shuffle",
+          icon: "shuffle",
+          run: () => startLocalShuffle(playable),
         }
       : null,
     playable.length
-      ? { label: "Shuffle", icon: "shuffle", run: () => startLocalShuffle(playable) }
+      ? { label: "Show in Files", icon: "folder", run: () => revealInFiles(playable.map((e) => e.item_id)) }
       : null,
     {
       label: allPlayed ? `Mark ${label} unwatched` : `Mark ${label} watched`,
@@ -328,6 +484,14 @@ function groupActions(eps: any[], label: string, root: HTMLElement): MenuAction[
         renderDownloads(root, { keepTab: true });
       },
     },
+    watched.length && watched.length < eps.length
+      ? {
+          label: `Delete watched episodes (${watched.length})`,
+          icon: "trash",
+          danger: true,
+          run: () => confirmDeleteWatched(eps, root, `the watched episodes of this ${label}`),
+        }
+      : null,
     { label: `Delete ${label}`, danger: true, run: () => deleteMany(eps, root) },
   ].filter(Boolean) as MenuAction[];
 }
@@ -408,6 +572,10 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
           },
           onShuffle: () => startLocalShuffle(eps),
           actions: () => groupActions(eps, "series", root),
+          deletes: {
+            ids: eps.map((e) => e.item_id),
+            what: eps.length === 1 ? `the episode of “${series}”` : `all ${eps.length} episodes of “${series}”`,
+          },
         })
       );
     }
@@ -447,11 +615,17 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
         }, [icon("arrow-left"), "All shows"]),
         el("span", {}, [openSeries]),
         el("span", { class: "row-actions" }, [
+          playNextButton(eps),
           el("button", {
-            class: "btn small primary",
+            class: "btn small",
             title: "Play every downloaded episode in random order",
             onClick: () => startLocalShuffle(eps),
           }, [icon("shuffle"), `Shuffle ${eps.length} episode${eps.length === 1 ? "" : "s"}`]),
+          el("button", {
+            class: "btn small",
+            title: "Show these downloads in Files",
+            onClick: () => revealInFiles(eps.map((e) => e.item_id)),
+          }, [icon("folder"), "Show in Files"]),
           deleteAllButton("Delete series", eps.length, () => deleteMany(eps, root)),
         ]),
       ])
@@ -479,6 +653,7 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
           },
           actions: () => groupActions(list, "season", root),
           menuTitle: `${openSeries} · ${seasonTitle(season)}`,
+          deletes: { ids: list.map((e) => e.item_id), what: `${seasonTitle(season)} of “${openSeries}”` },
         })
       );
     }
@@ -496,6 +671,17 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
       }, [icon("arrow-left"), "Seasons"]),
       el("span", {}, [`${openSeries} · ${seasonTitle(openSeason)}`]),
       el("span", { class: "row-actions" }, [
+        playNextButton(list),
+        el("button", {
+          class: "btn small",
+          title: "Play this season's episodes in random order",
+          onClick: () => startLocalShuffle(list),
+        }, [icon("shuffle"), "Shuffle this season"]),
+        el("button", {
+          class: "btn small",
+          title: "Show this season in Files",
+          onClick: () => revealInFiles(list.map((e) => e.item_id)),
+        }, [icon("folder"), "Show in Files"]),
         deleteAllButton("Delete season", list.length, () => deleteMany(list, root)),
       ]),
     ])
@@ -514,11 +700,15 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
     const row = dlRow(
       ep.poster_path,
       `${code}${ep.name ?? ep.title ?? ep.item_id}`,
-      [el("div", { class: "dl-sub" }, [completedSub(ep)])],
+      [
+        el("div", { class: "dl-sub" }, [completedSub(ep)]),
+        ep.overview ? el("div", { class: "dl-overview" }, [ep.overview]) : null,
+      ],
       actions,
       watchedOverlay(ep)
     );
     attachContextMenu(row, ep.name ?? ep.title ?? null, () => localActions(ep, root));
+    markDeletable(row, [ep.item_id], `“${ep.name ?? ep.title ?? "this episode"}”`);
     pane.append(row);
   }
 }
@@ -556,6 +746,7 @@ function renderMoviesTab(pane: HTMLElement, movies: any[], root: HTMLElement): v
         },
         onDelete: () => deleteDownload(dl.item_id, root),
         actions: () => localActions(dl, root),
+        deletes: { ids: [dl.item_id], what: `“${dl.title ?? dl.name ?? "this film"}”` },
       })
     );
   }
@@ -579,6 +770,23 @@ function renderQueueTab(
       })
     );
     return;
+  }
+
+  const held = downloadHoldReason();
+  if (held && (active.length || waiting.length)) {
+    pane.append(
+      el("div", { class: "lib-crumb dl-hold" }, [
+        el("span", {}, [held === "Downloads are paused" ? "Downloads are paused" : `${held} — downloads wait until there is one`]),
+        isDownloadsPaused()
+          ? el("span", { class: "row-actions" }, [
+              el("button", { class: "btn small primary", onClick: () => void setDownloadsPaused(false) }, [
+                icon("play"),
+                "Resume all",
+              ]),
+            ])
+          : null,
+      ])
+    );
   }
 
   const queued = active.length + waiting.length;
@@ -634,7 +842,14 @@ function renderQueueTab(
       else if (p.series) parts.push(p.series);
       // A retry replays the stored request, so its quality isn't known here —
       // saying "Waiting · retrying" reads as a stutter. Name what it is.
-      parts.push(p.retry ? "Waiting · retry of a failed download" : `Waiting · ${p.quality}`);
+      if (p.reason) {
+        const secs = p.retryAt ? Math.ceil((p.retryAt - Date.now()) / 1000) : 0;
+        parts.push(secs > 0 ? `${p.reason} in ${secs < 90 ? `${secs}s` : `${Math.round(secs / 60)} min`}` : p.reason);
+      } else if (isWaitingForTranscode(p)) {
+        parts.push("Waiting for the transcode ahead of it");
+      } else {
+        parts.push(p.retry ? "Waiting · retry of a failed download" : `Waiting · ${p.quality}`);
+      }
       const actions = el("div", { class: "dl-actions" }, [
         el("span", { class: "queue-pos" }, [`#${i + 1}`]),
         el("button", { class: "btn small danger", onClick: () => cancelQueuedDownload(p.id) }, ["Remove"]),
@@ -662,7 +877,11 @@ function renderQueueTab(
             class: "btn small",
             onClick: async () => {
               const n = retryFailedDownloads(
-                errored.map((d) => ({ item_id: d.item_id, title: d.title ?? d.name }))
+                errored.map((d) => ({
+                  item_id: d.item_id,
+                  title: d.title ?? d.name,
+                  transcode: isTranscodeDownload(d),
+                }))
               );
               toast(
                 n ? `Retrying ${n} download${n === 1 ? "" : "s"}` : "Those are already retrying",
@@ -681,7 +900,7 @@ function renderQueueTab(
       // to a fresh download. It goes to the front of the queue, so with the
       // limit free it still starts immediately.
       const retry = (): void => {
-        const queued = retryDownload(dl.item_id, dl.title ?? dl.name);
+        const queued = retryDownload(dl.item_id, dl.title ?? dl.name, isTranscodeDownload(dl));
         toast(
           queued ? "Queued for retry" : "That one is already retrying",
           queued ? "ok" : "error"
@@ -689,17 +908,19 @@ function renderQueueTab(
         renderDownloads(root, { keepTab: true });
       };
       const actions = el("div", { class: "dl-actions" }, [
-        el("button", { class: "btn small", onClick: retry }, ["Retry"]),
+        el("button", { class: "btn small", onClick: retry }, [dl.status === "paused" ? "Resume" : "Retry"]),
         el("button", { class: "btn small danger", onClick: () => deleteDownload(dl.item_id, root) }, ["Delete"]),
       ]);
       const row = dlRow(
         dl.poster_path,
         dl.title ?? dl.name ?? dl.item_id,
-        [el("div", { class: "dl-sub" }, [`failed: ${dl.error ?? "unknown error"}`])],
+        [el("div", { class: "dl-sub" }, [
+          dl.status === "paused" ? "Paused" : `failed: ${dl.error ?? "unknown error"}`,
+        ])],
         actions
       );
       attachContextMenu(row, dl.title ?? dl.name ?? null, () => [
-        { label: "Retry download", run: retry },
+        { label: dl.status === "paused" ? "Resume download" : "Retry download", run: retry },
         { label: "Delete", danger: true, run: () => deleteDownload(dl.item_id, root) },
       ]);
       pane.append(row);
@@ -738,6 +959,170 @@ async function refreshWatchState(completed: any[]): Promise<boolean> {
     }).catch(() => {});
   }
   return changed;
+}
+
+// ---------- Details refresh ----------
+
+const DETAILS_AT_KEY = "aquarium-dl-details-at";
+const DETAILS_EVERY_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Bring each download's name, overview and artwork up to date with the
+ * server — a renamed episode, a better poster picked in the dashboard, an
+ * overview the metadata agent filled in after the file was saved — at most
+ * once every six hours. Also fetches subtitles for downloads saved before
+ * they were kept. Returns true when anything changed.
+ */
+async function refreshDetails(completed: any[]): Promise<boolean> {
+  if (api.isOffline() || !api.getSession() || !completed.length) return false;
+  let last = 0;
+  try {
+    last = Number(localStorage.getItem(DETAILS_AT_KEY) ?? 0);
+  } catch {
+    // Unreadable: refresh.
+  }
+  if (Date.now() - last < DETAILS_EVERY_MS) return false;
+  try {
+    // Before the fetch, so a server that fails it isn't asked on every render.
+    localStorage.setItem(DETAILS_AT_KEY, String(Date.now()));
+  } catch {
+    // Quota exceeded — the next render tries again.
+  }
+
+  const fresh = await api.getItemsByIds(
+    completed.map((d) => d.item_id),
+    "Overview,ProductionYear"
+  );
+  const byId = new Map(fresh.map((it: any) => [it.Id, it]));
+  let changed = false;
+  for (const d of completed) {
+    const it = byId.get(d.item_id);
+    if (!it) continue; // gone from the server: keep what's on disk
+    const patch: Record<string, any> = {
+      name: it.Name ?? d.name,
+      title: itemTitle(it),
+      overview: it.Overview ?? null,
+      series: it.SeriesName ?? d.series ?? null,
+      season: it.ParentIndexNumber ?? d.season ?? null,
+      episode: it.IndexNumber ?? d.episode ?? null,
+      year: it.ProductionYear ?? d.year ?? null,
+      run_time_ticks: it.RunTimeTicks ?? d.run_time_ticks ?? null,
+      image_tag: it.ImageTags?.Primary ?? null,
+      series_image_tag: it.SeriesPrimaryImageTag ?? null,
+    };
+    const differs = Object.keys(patch).some((k) => (d[k] ?? null) !== patch[k]);
+    // Artwork only when the server's tag moved (or there's none on disk). A
+    // download from before tags were kept has none recorded: note it now.
+    const posterUrl =
+      !d.poster_path || (d.image_tag && d.image_tag !== patch.image_tag)
+        ? api.imageUrl(it, "Primary", 500)
+        : null;
+    const seriesUrl =
+      it.Type === "Episode" &&
+      (!d.series_poster_path || (d.series_image_tag && d.series_image_tag !== patch.series_image_tag))
+        ? api.seriesPosterUrl(it, 500)
+        : null;
+    if (!differs && !posterUrl && !seriesUrl) continue;
+    await invoke("download_update_details", {
+      itemId: d.item_id,
+      patch,
+      posterUrl,
+      seriesPosterUrl: seriesUrl,
+    }).catch(() => {});
+    changed = true;
+  }
+  // Subtitles for anything saved before they were kept, or whose fetch had
+  // gaps. One at a time: this is housekeeping, not something to wait on.
+  for (const d of completed) {
+    if (d.subtitles_settled === false) {
+      await invoke("download_fetch_subtitles", { itemId: d.item_id }).catch(() => {});
+    }
+  }
+  invoke("ui_log", { msg: `downloads: details refreshed (${completed.length} items, changed=${changed})` }).catch(() => {});
+  return changed;
+}
+
+// ---------- Header controls ----------
+
+/** Pause or resume every download. Shown while there's a queue to hold, and
+ *  while paused (so the way out is always on the page). */
+function pauseButton(hasQueue: boolean): HTMLElement | null {
+  const paused = isDownloadsPaused();
+  if (!paused && !hasQueue) return null;
+  return el("button", {
+    class: `btn small${paused ? " primary" : ""}`,
+    title: paused
+      ? "Carry on with every download"
+      : "Stop every download where it is; each picks up from there when resumed",
+    onClick: async () => {
+      await setDownloadsPaused(!paused);
+      toast(paused ? "Downloads resumed" : "Downloads paused", "ok");
+      if (currentRoot) renderDownloads(currentRoot, { keepTab: true });
+    },
+  }, [icon(paused ? "play" : "pause"), paused ? "Resume all" : "Pause all"]);
+}
+
+/** The Manage menu: the bulk actions, each asking first where it deletes. */
+function manageButton(
+  items: any[],
+  waitingCount: number,
+  errored: any[],
+  root: HTMLElement
+): HTMLElement {
+  const btn = el("button", { class: "btn small", title: "Manage Downloads", "aria-haspopup": "menu" }, [
+    "Manage",
+    icon("chevron-down"),
+  ]);
+  btn.addEventListener("click", () => {
+    const watched = watchedDownloads(items);
+    const running = items.filter((d) => d.status === "downloading").length;
+    const queued = waitingCount + running;
+    openActionMenu(btn, null, [
+      errored.length
+        ? {
+            label: `Retry All Failed (${errored.length})`,
+            run: () => {
+              const n = retryFailedDownloads(
+                errored.map((d) => ({ item_id: d.item_id, title: d.title ?? d.name, transcode: isTranscodeDownload(d) }))
+              );
+              toast(n ? `Retrying ${plural(n, "download")}` : "Those are already retrying", n ? "ok" : "error");
+            },
+          }
+        : null,
+      queued
+        ? {
+            label: "Clear Queue…",
+            run: () =>
+              confirmDeletion({
+                title: "Clear the queue?",
+                message: `${plural(queued, "waiting download")} will be removed. Nothing already on this computer is affected.`,
+                confirm: "Clear Queue",
+                run: () => void clearQueue(root),
+              }),
+          }
+        : null,
+      watched.length
+        ? { label: `Delete Watched Downloads… (${watched.length})`, icon: "trash", run: () => confirmDeleteWatched(items, root) }
+        : null,
+      items.length
+        ? {
+            label: "Delete All Downloads…",
+            icon: "trash",
+            danger: true,
+            run: () =>
+              confirmDeletion({
+                title: "Delete every download?",
+                message:
+                  `${plural(items.length, "item")} · ${api.bytesToText(bytesOf(items))} will be removed from this computer, ` +
+                  "and anything still queued is cancelled.",
+                confirm: "Delete Everything",
+                run: () => void deleteEverything(root),
+              }),
+          }
+        : null,
+    ]);
+  });
+  return el("span", { class: "menu-wrap" }, [btn]);
 }
 
 // ---------- Entry point ----------
@@ -784,13 +1169,16 @@ export async function renderDownloads(
   // under "Failed", the second with a Retry button that does nothing because
   // it's already queued.
   const waitingIds = new Set(waiting.map((p) => p.id));
-  const errored = items.filter((d) => d.status === "error" && !waitingIds.has(d.item_id));
+  const errored = items.filter(
+    (d) => (d.status === "error" || d.status === "paused") && !waitingIds.has(d.item_id)
+  );
 
   clear(root);
   root.append(
     el("div", { class: "section-head" }, [
       el("h1", { class: "page-title" }, ["Downloads"]),
       el("div", { class: "head-tools" }, [
+        pauseButton(active.length + waiting.length > 0),
         concurrencySelector(),
         el("span", { class: "sync-pill" }, [
           pending > 0 ? `${pending} watch state(s) waiting to sync` : "Watch state in sync",
@@ -802,6 +1190,7 @@ export async function renderDownloads(
             renderDownloads(root, { keepTab: true });
           },
         }, ["Sync now"]),
+        manageButton(items, waiting.length, errored, root),
       ]),
     ])
   );
@@ -849,6 +1238,13 @@ export async function renderDownloads(
       if (changed && document.contains(pane)) paint();
     })
     .catch(() => {});
+  // Names, overviews and artwork, at most every six hours.
+  void refreshDetails(completed)
+    .then((changed) => {
+      if (changed && document.contains(pane)) renderDownloads(root, { keepTab: true });
+    })
+    .catch(() => {});
+  installDeleteKey();
 
   // Refresh the view when the in-memory batch queue changes (installed once).
   if (!queueListenerInstalled) {

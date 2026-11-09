@@ -1437,8 +1437,16 @@ final class DownloadManager: NSObject {
     /// `completeRecord(matching:)`. Moved over to the new id once the server
     /// has said the old one is gone — never on a guess — and only at the next
     /// launch, when nothing can be playing it.
-    func noteFoundUnderNewId(_ oldId: String, newId: String) {
+    ///
+    /// `confirmedGone` is for a caller the server has already told — the
+    /// sync, whose request for the old id came back 404 — which needs no
+    /// second asking.
+    func noteFoundUnderNewId(_ oldId: String, newId: String, confirmedGone: Bool = false) {
         guard oldId != newId, pendingRekeys[oldId] == nil else { return }
+        if confirmedGone {
+            pendingRekeys[oldId] = newId
+            return
+        }
         Task {
             do {
                 _ = try await JellyfinClient.shared.item(oldId)

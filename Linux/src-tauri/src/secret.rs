@@ -338,11 +338,13 @@ pub fn hydrate(mut cfg: Value) -> Value {
             obj.remove("token");
         }
         cfg["has_token"] = json!(true);
+        redact_accounts(&mut cfg);
         return cfg;
     }
 
     cfg["has_token"] = json!(keyring_get().is_some());
     cfg["token_storage"] = json!(backend_name());
+    redact_accounts(&mut cfg);
     cfg
 }
 
@@ -358,8 +360,23 @@ pub fn dehydrate(mut cfg: Value) -> Value {
         obj.remove("token");
         obj.remove("token_storage");
         obj.remove("has_token");
+        // Owned by the backend: sign-in, switching and signing out write them.
+        obj.remove("accounts");
+        obj.remove("known_servers");
     }
     cfg
+}
+
+/// Saved accounts as the webview may see them: everything but a file-mode
+/// token.
+fn redact_accounts(cfg: &mut Value) {
+    if let Some(list) = cfg.get_mut("accounts").and_then(|v| v.as_array_mut()) {
+        for a in list {
+            if let Some(obj) = a.as_object_mut() {
+                obj.remove("token");
+            }
+        }
+    }
 }
 
 /// The stored token, for Rust-side requests. Reads the keyring first and falls
@@ -450,4 +467,60 @@ pub fn backend_name() -> &'static str {
     }
     cached_token(&mut st);
     st.backend.unwrap_or("file")
+}
+
+// ---------- Other accounts on this device ----------
+//
+// The account in use keeps its token under `ACCOUNT`, exactly where it always
+// has, so everything above (the cache, the legacy adoption, the plaintext
+// migration) carries on unchanged. Every saved account also has a slot of its
+// own, `jellyfin-access-token:<account key>`, which is what makes switching
+// back to it a click rather than a password. Switching copies the slot into
+// `ACCOUNT`; signing an account out of this device wipes its slot.
+
+fn slot(key: &str) -> String {
+    format!("{ACCOUNT}:{key}")
+}
+
+/// File the token for one saved account. With no usable keyring the token
+/// goes into that account's entry in config.json instead, the same degraded
+/// mode `store` falls back to.
+pub fn store_account(key: &str, tok: &str) -> Result<(), String> {
+    let _st = state();
+    match write(&slot(key), tok) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            crate::debug_log_line(&format!(
+                "secret: keyring write for a saved account failed ({}) — falling back to config.json",
+                e
+            ));
+            crate::config::set_account_field(key, "token", json!(tok))
+        }
+    }
+}
+
+/// A saved account's token, from its keyring slot or, failing that, from its
+/// config entry.
+pub fn account_token(key: &str) -> Option<String> {
+    let from_keyring = {
+        let _st = state();
+        read(&slot(key)).ok().flatten()
+    };
+    from_keyring.or_else(|| {
+        crate::config::accounts()
+            .into_iter()
+            .find(|a| a.get("key").and_then(|v| v.as_str()) == Some(key))
+            .and_then(|a| a.get("token").and_then(|v| v.as_str()).map(str::to_owned))
+            .filter(|s| !s.is_empty())
+    })
+}
+
+pub fn clear_account(key: &str) {
+    {
+        let _st = state();
+        if let Err(e) = wipe(&slot(key)) {
+            crate::debug_log_line(&format!("secret: keyring clear for a saved account failed: {}", e));
+        }
+    }
+    let _ = crate::config::set_account_field(key, "token", Value::Null);
 }

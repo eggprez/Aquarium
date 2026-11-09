@@ -275,7 +275,9 @@ enum Metrics {
     /// Height of one channel's row in the guide.
     static var guideRowHeight: CGFloat {
         #if os(tvOS)
-        return 96
+        // Three lines from across a room: the show, its episode and the
+        // times. 96 held two, and a series' episode had nowhere to go.
+        return 128
         #elseif os(macOS)
         // A pointer needs no thumb-height row; forty is a two-line table
         // cell, which is what a guide cell holds.

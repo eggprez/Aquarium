@@ -190,6 +190,9 @@ enum IPTVSource {
             usedIds.insert(id)
             item.Id = id
             item.Name = source.title
+            item.EpisodeTitle = source.subtitle
+            item.ParentIndexNumber = source.season
+            item.IndexNumber = source.episode
             item.Overview = source.desc
             item.ChannelId = channelId
             item.ExternalStart = source.start

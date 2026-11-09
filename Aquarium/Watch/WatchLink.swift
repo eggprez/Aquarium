@@ -254,6 +254,10 @@ final class WatchLink: NSObject {
             downloads.phoneFailed(itemId: itemId, reason: reason)
         case .deleteWant(let request):
             downloads.deleteWant(request)
+        case .cancelled(let itemId):
+            // Cancelled by hand on the phone: the same as Cancel here.
+            WatchLog.note("downloads", "\(itemId) cancelled on the phone")
+            downloads.cancel(itemId)
         case .phonePlayback(let state):
             take(playback: state)
         case .progress, .fetch, .fetchMany, .cancelFetch, .playlistRemoved, .wantRemoved, .requestContext, .logs, .requestPlayback, .remote:
