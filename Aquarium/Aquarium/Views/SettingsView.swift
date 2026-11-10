@@ -813,13 +813,33 @@ private typealias Copy = SettingsCopy
 struct SettingsView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.horizontalSizeClass) private var sizeClass
+    /// The width the page has been given, beside the sidebar. Zero until the
+    /// first layout pass.
+    @State private var width: CGFloat = 0
+
+    /// The narrowest page that is worth two columns: the list, and a page
+    /// beside it with room for a row's label and its control. An 11-inch
+    /// iPad held upright, with the sidebar out, has about 620 points here,
+    /// which split three ways left the page a strip too thin to use; it gets
+    /// the phone's list instead, each row opening its page full width.
+    static let splitMinimumWidth: CGFloat = SettingsSplitPage.narrowList + 440
+
+    private var splits: Bool {
+        guard app.usesSidebar, sizeClass == .regular else { return false }
+        return width == 0 || width >= Self.splitMinimumWidth
+    }
 
     var body: some View {
-        if app.usesSidebar && sizeClass == .regular {
-            SettingsSplitPage()
-        } else {
-            SettingsListPage()
+        Group {
+            if splits {
+                SettingsSplitPage(listWidth: width >= SettingsSplitPage.wideList + 560 || width == 0
+                                  ? SettingsSplitPage.wideList : SettingsSplitPage.narrowList)
+            } else {
+                SettingsListPage()
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
     }
 }
 
@@ -844,6 +864,14 @@ private struct SettingsListPage: View {
 /// machinery. Pages a page opens — Station mix, the app icon, the sidebar's
 /// order — push onto the stack this view is in, as they would on a phone.
 private struct SettingsSplitPage: View {
+    /// The list's column: the system's 320 where the page beside it still
+    /// has room, and 280 where it would not — an iPad held upright, beside
+    /// the sidebar — at the cost of the grey value at the end of a row.
+    static let wideList: CGFloat = 320
+    static let narrowList: CGFloat = 280
+
+    var listWidth: CGFloat = Self.wideList
+
     @State private var page: SettingsPage = .video
 
     var body: some View {
@@ -852,7 +880,7 @@ private struct SettingsSplitPage: View {
                 SettingsMapRows(selectable: true)
             }
             .listStyle(.insetGrouped)
-            .frame(width: 320)
+            .frame(width: listWidth)
 
             Divider()
 
@@ -2463,7 +2491,7 @@ enum SettingsCopy {
         text: "Your server, your sign-in and everything on this screen follow you to your other Apple TVs, iPhones, iPads and Macs through iCloud. Signing out anywhere signs out everywhere. Volume, the audio delay and this device's identity to the server stay where they are — those describe the room, not the account."
     )
     static let libraryCopy: SettingNote = {
-        var text = "Saves the details of every film, show, season and episode on this device, with their posters, logos and episode stills. After the first sync, opening the app only fetches what changed: library pages open straight away, and can still be browsed when the server can't be reached. Backdrops are saved as you come across them. Turning this off deletes the copy."
+        var text = "Saves the details of every film, show, season and episode on this device, with their posters, logos, episode stills and the backdrops the banner at the top of Home shows. After the first sync, opening the app only fetches what changed: library pages open straight away, and can still be browsed — banner included — when the server can't be reached. Turning this off deletes the copy."
         #if os(tvOS)
         text += " Apple TV may clear the copy when it runs short of storage; it is rebuilt at the next sync."
         #endif
