@@ -137,9 +137,12 @@ enum LetterIndex {
     static let minimumCount = 20
 
     /// The name the server sorts an item by, lowercased as the server
-    /// compares it.
+    /// compares it. A song's title, not its `SortName`: the server prefixes
+    /// that with the disc and track numbers, and songs are listed by title
+    /// (see `JellyfinClient.sortBy`).
     static func key(_ item: BaseItem) -> String {
-        (item.SortName ?? item.Name ?? "").lowercased()
+        if item.kind == "Audio" { return (item.Name ?? "").lowercased() }
+        return (item.SortName ?? item.Name ?? "").lowercased()
     }
 
     /// Whether a name sorts at or after `letter`. "#" is before everything.

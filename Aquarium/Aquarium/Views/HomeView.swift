@@ -2059,21 +2059,50 @@ struct HeroCarousel: View {
 
     private var height: CGFloat { HeroHeader.height(forWidth: width) }
 
+    /// Each page's width: the bar's own, and the sides it is laid out over
+    /// — the column under an iPad's sidebar, a foldable's tab column — so
+    /// the picture reaches the screen's edges on every page alike while the
+    /// title and the buttons keep inside them (`HeroHeader.sideInsets`).
+    private var pageWidth: CGFloat {
+        max(1, width + sideInsets.leading + sideInsets.trailing)
+    }
+
+    /// The page the scroll view rests on, as the index the ticker, the dots
+    /// and the thumbnails speak in.
+    private var pagePosition: Binding<Int?> {
+        Binding(get: { index }, set: { if let new = $0 { index = new } })
+    }
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            TabView(selection: $index) {
-                ForEach(Array(items.enumerated()), id: \.element.Id) { position, item in
-                    HeroHeader(
-                        item: item,
-                        topBleed: topBleed,
-                        heroHeight: height,
-                        availableWidth: width,
-                        sideInsets: sideInsets
-                    )
-                    .tag(position)
+            // A paging scroll view rather than a page-style `TabView`. The
+            // page view hands the safe area it is sitting over — an iPad's
+            // sidebar, which the detail column runs under — to whichever
+            // page is at its leading edge when it first lays out, and to no
+            // other; nothing inside the page could undo it. The first title
+            // of every draw sat half a sidebar to the right of the rest,
+            // picture, scrims and text together. Here every page is laid
+            // out the same way: the bar's whole width, starting at its edge.
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.Id) { position, item in
+                        HeroHeader(
+                            item: item,
+                            topBleed: topBleed,
+                            heroHeight: height,
+                            availableWidth: width,
+                            sideInsets: sideInsets
+                        )
+                        .frame(width: pageWidth)
+                        .id(position)
+                    }
                 }
+                .scrollTargetLayout()
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: pagePosition)
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .frame(height: height + topBleed)
 
             if items.count > 1 {
