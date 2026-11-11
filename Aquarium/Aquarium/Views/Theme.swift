@@ -192,10 +192,19 @@ extension View {
     /// mode is a different, greyer black than the page it sits on. Screens whose
     /// artwork runs under the bar — Home, and a detail page's hero — don't want
     /// this: they want no bar background at all.
+    ///
+    /// Always shown, not left to the system to bring in once a page has
+    /// scrolled. The system only tracks one scroll view per page: a page made
+    /// of two columns, as an iPad's Settings is, or one whose list sits inside
+    /// something else, never told the bar it had scrolled, so its rows slid up
+    /// under a title with nothing behind it. The page colour at rest is the
+    /// colour the page already is, so a solid bar looks the same until
+    /// something goes under it.
     @ViewBuilder
     func paletteBar() -> some View {
         #if os(iOS)
         toolbarBackground(Theme.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         #else
         self
         #endif
