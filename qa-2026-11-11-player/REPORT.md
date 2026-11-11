@@ -6,7 +6,7 @@
 
 ## Where it stands now (second pass, same day)
 
-All seven bugs from the first pass are fixed or resolved and re-tested on the simulators, along with five of the smaller issues. The areas that were untested were then tried; that turned up three new problems, which are fixed and re-tested too (third pass, below). The changes are uncommitted in the working tree (17 files). The app builds for iPhone/iPad, Apple TV and Mac, and the 98 unit tests pass.
+All seven bugs from the first pass are fixed or resolved and re-tested on the simulators, along with five of the smaller issues. The areas that were untested were then tried; that turned up three new problems, which are fixed and re-tested too (third pass, below). The fixes are committed on `claude/instant-mix` (not pushed). The app builds for iPhone/iPad, Apple TV and Mac, and the 98 unit tests pass.
 
 **One correction to the first pass:** B7 was misdiagnosed. It is not caused by pre-loading the next episode. It happens on any server re-encode of a file whose subtitle track runs longer than its picture (QA Show E06: picture 5:59.98, subtitles 6:01). The server lists a last segment it never produces and AVPlayer fails the whole stream when it reads ahead to it. A clean episode (E04) at the same 5 Mbps rung rolled on to the next one without trouble.
 
@@ -45,9 +45,25 @@ The first attempt at N2 (stopping mpv cropping frames for Fill) did not change t
 
 Not done from the Auto quality plan: the moving-average estimate, the early drop before a stall, the faster climb, and telling a slow server from a slow network. Auto still climbs one rung per five steady minutes.
 
+### Fourth pass: more of the untested areas
+
+| Area | Result |
+|---|---|
+| **Lock screen (iPhone)** | Playback continues with the phone locked. The Now Playing card shows the title, series, artwork and a moving scrubber; pause and resume from it work. Its skip buttons are not drawn in the simulator, so skip and scrub from the lock screen are unconfirmed. `shots/lock-screen-iphone.png` |
+| **Sleep-timer Live Activity (iPhone)** | Appears on the lock screen with the time left. "+15 min" extends the timer (30 to 44 min), pause/play acts on the player, "Turn off" cancels the timer and removes the activity. |
+| **Server unreachable mid-play (iPad)** | The proxy was frozen for 96 s. The buffer played for a minute, then the player showed "Loading", stepped down a rung and waited; the picture was back 6 s after the server returned, with no error card. Killing the proxy outright was not tried (blocked by the permission system). |
+| **Resized iPad window** | Dragged to about 374 x 514 pt. Playback continues, the chrome drops to glyph-only pills, and the Quality, More and Up Next cards and the Info sheet open and fit. `shots/small-window-ipad.png` |
+
+Two more problems found and fixed in this pass:
+
+| # | Problem | Fix | Re-test |
+|---|---|---|---|
+| W1 | **In a resized iPad window the system's window controls covered the Back button.** | The title row starts 52 pt further in when the window is smaller than the screen. | iPad: Back sits beside the controls; unchanged at full size. `shots/fixed-small-window-back-ipad.png` |
+| W2 | **A quality change sometimes ended in "This didn't play" (error -19602).** Seen on 3 changes on the 15.6 Mbps episode, each going from the 10 Mbps rung back up to the original. The server starts one encode for the playlist and replaces it with another at the position asked for; the player was still reading the first when it was deleted. | A stream that fails within 10 s of a same-title reopen is quietly reopened, within the existing budget of two recoveries. | Not observed firing: the race did not recur in 36 further quality changes, which showed no error. |
+
 ### Still not tested
 
-Split View and Stage Manager resizing on iPad (no simulator-tool access for the iPad), PiP on iPhone, AirPlay, SharePlay in a call, Handoff, lock-screen controls, Live Activity, Siri and Shortcuts, the Watch remote, a hand-made queue of several videos, server loss, and real hardware.
+PiP on iPhone, AirPlay, SharePlay in a call, Handoff, Siri and Shortcuts, the Watch remote, skip and scrub from the lock screen, Control Centre, a hand-made queue of several videos, a hard server drop, and real hardware.
 
 ---
 

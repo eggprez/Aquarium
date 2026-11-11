@@ -364,6 +364,7 @@ extension PlayerModel {
             #endif
 
             let resumeAt = canHandOver ? max(startSeconds, position) : startSeconds
+            sameTitleReopenedAt = sameSitting ? Date() : nil
             engineLoad(
                 url: src.url, startAt: opts.live ? 0 : resumeAt,
                 headers: client.authHeaders(for: src.url), paused: staysPaused,

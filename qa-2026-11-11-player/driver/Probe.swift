@@ -60,6 +60,10 @@ final class Probe: XCTestCase {
         let rest = a.count > 1 ? a[1] : ""
         let w = rest.split(separator: " ").map(String.init)
         switch c {
+        case "use":
+            app = rest == "sb" ? XCUIApplication(bundleIdentifier: "com.apple.springboard") : XCUIApplication(bundleIdentifier: "scottai.FellyJin")
+        case "lock":
+            XCUIDevice.shared.perform(NSSelectorFromString("pressLockButton"))
         case "labels": labels(rest.isEmpty ? nil : rest)
         case "show":
             if find("Timeline") == nil && find("Channel info") == nil { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap(); Thread.sleep(forTimeInterval: 0.7) }

@@ -164,6 +164,9 @@ final class PlayerModel {
     var outgoingQuiesced = false
     /// Whether the reopen now on its way was asked to come back paused.
     var reopensPaused = false
+    /// When the title already playing was last reopened — for a quality, a
+    /// track, a recovery — or nil for a fresh start. See `handleStreamFailure`.
+    var sameTitleReopenedAt: Date?
     /// The title whose stream failed near its end and was reopened reading
     /// only a little way ahead. See `recoverFromMissingTail`.
     var tailRetryItemId: String?

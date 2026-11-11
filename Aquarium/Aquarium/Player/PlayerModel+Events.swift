@@ -192,6 +192,19 @@ extension PlayerModel {
         if recoverFromMissingTail(failure) { return }
         // A session that went bad rather than unplayable media — ask again.
         if failure.isSessionLoss, recoverFromStreamFailure() { return }
+        // A title that was playing a moment ago, reopened at its position,
+        // failing within seconds of the reopen: not a file that won't play.
+        // The server starts one encode for the playlist and replaces it with
+        // another at the position asked for, and now and then the player is
+        // still reading the first when it is deleted (seen as -19602, on
+        // about one quality change in four on a 15 Mbps file). Asked again,
+        // it plays. Within the same budget as any other recovery.
+        if failure.duringPlayback, !isLocal, !isExternal, isTranscoding,
+           let reopened = sameTitleReopenedAt, Date().timeIntervalSince(reopened) < 10,
+           recoverFromStreamFailure() {
+            Self.log.notice("failed \(Date().timeIntervalSince(reopened), format: .fixed(precision: 1)) s after a reopen; asking again")
+            return
+        }
         // Not a session fault — the stream itself. If the server sent the
         // original file, it has another way to send it.
         if escalateToTranscode() { return }
