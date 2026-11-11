@@ -271,7 +271,12 @@ struct RootView: View {
         #elseif os(iOS)
         .fullScreenCover(isPresented: playerBinding) {
             if player.isActive {
+                // The cover is above the app's own toasts, so what the player
+                // had to say — "Start a FaceTime call first", "Asking the
+                // server to re-encode" — was said underneath it. Lifted clear
+                // of the row of pills.
                 PlayerScreen()
+                    .overlay(alignment: .bottom) { ToastOverlay().padding(.bottom, 96) }
             } else {
                 // The player asks the cover for dark, and the presentation
                 // keeps that answer after the player has gone: the tent came

@@ -186,6 +186,10 @@ struct PlayerUpNextCard: View {
         return Int(seconds.rounded(PlayerMetrics.television ? .up : .toNearestOrAwayFromZero))
     }
 
+    /// With autoplay off the card is an offer, not a countdown: nothing
+    /// starts when the episode ends, so it doesn't say when.
+    private var startsByItself: Bool { player.prefs.autoplayNext }
+
     /// The next episode, counting down to itself: its still beside the
     /// words, and what the remote does about it.
     private var television: some View {
@@ -196,7 +200,7 @@ struct PlayerUpNextCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             VStack(alignment: .leading, spacing: 8) {
-                Text(player.isStartingNext ? "STARTING…" : "UP NEXT IN \(count)")
+                Text(player.isStartingNext ? "STARTING…" : (startsByItself ? "UP NEXT IN \(count)" : "UP NEXT"))
                     .font(.caption.weight(.heavy))
                     .foregroundStyle(Theme.link)
                 Text(next?.title ?? title)
@@ -206,7 +210,7 @@ struct PlayerUpNextCard: View {
                     EpisodeLine.text(for: next, episode: false, font: .caption)
                         .lineLimit(1)
                 }
-                Text("Click to play now · Menu to stop here")
+                Text(startsByItself ? "Click to play now · Menu to stop here" : "Click to play now · Menu to dismiss")
                     .font(.caption)
                     .foregroundStyle(Theme.textBody)
                     .padding(.top, 4)
@@ -227,7 +231,7 @@ struct PlayerUpNextCard: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(player.isStartingNext
                  ? "Starting…"
-                 : "Up next · in \(count)s")
+                 : (startsByItself ? "Up next · in \(count)s" : "Up next"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.75))
             Group {

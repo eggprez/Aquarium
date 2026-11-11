@@ -158,6 +158,15 @@ final class PlayerModel {
 
     var isActive = false { didSet { holdScreenAwake() } }
     var isPaused = false { didSet { holdScreenAwake() } }
+    /// The outgoing stream has been stopped for a reopen and nothing is
+    /// loaded yet: `isPaused` is true because of that, not because anyone
+    /// paused. See `play(item:options:meta:)`.
+    var outgoingQuiesced = false
+    /// Whether the reopen now on its way was asked to come back paused.
+    var reopensPaused = false
+    /// The title whose stream failed near its end and was reopened reading
+    /// only a little way ahead. See `recoverFromMissingTail`.
+    var tailRetryItemId: String?
     /// Waiting on the network, or opening: the spinner.
     var isBuffering = false
     /// Between asking for a stream and its first frame.
@@ -270,7 +279,13 @@ final class PlayerModel {
     #if os(iOS)
     /// Picture in Picture is starting or up: the picture is the floating
     /// window's, so going to the background mustn't let go of the video track.
-    var pictureInPictureHoldsPicture = false
+    var pictureInPictureHoldsPicture = false {
+        didSet {
+            // The floating window shows the sample layer as it is framed, so
+            // Fill goes off for as long as the window is up: see `applyFraming`.
+            if oldValue != pictureInPictureHoldsPicture, engine?.kind == .mpv { applyFraming() }
+        }
+    }
     #endif
 
     // MARK: - Internals
@@ -348,6 +363,10 @@ final class PlayerModel {
     @ObservationIgnored var stallCounted = false
     /// Times a stall that goes on. See `noteBuffering`.
     @ObservationIgnored var stallWatch: Task<Void, Never>?
+    /// The watch for what the engine doesn't report. See `watchProgress`.
+    @ObservationIgnored var progressWatch: Task<Void, Never>?
+    /// The stream now being opened is one Auto stepped down to.
+    @ObservationIgnored var openingAfterAutoDrop = false
     /// The speed check is timing the connection before this stream opens;
     /// the quality pill turns a wheel meanwhile.
     var isCheckingSpeed = false

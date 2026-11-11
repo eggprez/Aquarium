@@ -58,7 +58,14 @@ extension PlayerModel {
     /// aspect override is mpv's: on AVPlayer, which has Fit and Fill alone,
     /// `switchingIfNeeded` reopens the title on mpv.
     func applyFraming(switchingIfNeeded: Bool = false) {
-        let framing = preferredFraming
+        var framing = preferredFraming
+        #if os(iOS)
+        // mpv's Picture in Picture window is the sample layer itself. Filled,
+        // the system gave it the screen's shape rather than the film's: a
+        // portrait window with a slice of the picture at the top. The window
+        // always shows the whole frame, as AVPlayer's does.
+        if pictureInPictureHoldsPicture, engine?.kind == .mpv, framing == .fill { framing = .fit }
+        #endif
         engine?.framing = framing
         #if os(iOS) && canImport(Libmpv)
         applyMPVOutput()
@@ -504,6 +511,14 @@ extension PlayerModel {
             selectSubtitleTrack(nil)
         } else if let match = subtitleOptions.first(where: { $0.serverIndex == subtitle }), let av = match.avIndex {
             selectSubtitleTrack(av)
+        } else if let stream = serverStreams?.subtitleStreams.first(where: { $0.Index == subtitle }),
+                  stream.isSidecar, addExternalSubtitle(stream) {
+            // Not in the stream and not painted into it either: the server
+            // hands it over as a file of its own, which is how a track inside
+            // the original reaches mpv once the picture is being transcoded.
+            // Without this the reopen came back with no subtitle at all under
+            // a menu that had it ticked.
+            rememberTrackChoice(subtitleLanguage: stream.Language ?? "und")
         } else {
             rememberTrackChoiceFromSelection()
         }

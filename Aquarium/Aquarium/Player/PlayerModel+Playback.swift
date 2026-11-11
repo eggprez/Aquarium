@@ -54,7 +54,11 @@ extension PlayerModel {
         request.loop = loop
         request.hints = hints
         request.prepared = prepared
+        if let retried = tailRetryItemId, retried == item?.Id, !isLocal, !isExternal {
+            request.readAhead = Self.missingTailReadAhead
+        }
         awaitingLoad = false
+        outgoingQuiesced = false
         // The session goes active before the sound starts. AVPlayer does
         // this itself; mpv's audio unit started into a session nothing had
         // activated, so the system never took the stage from whatever else
@@ -157,6 +161,18 @@ extension PlayerModel {
             return
         }
 
+        // The same title asked for again — another quality, another track —
+        // is still the viewer's sitting: paused stays paused, and "Stop after
+        // this episode" stays on. Both used to be lost to the reopen. Not
+        // after an error, where asking again means play it. While an earlier
+        // reopen is still on its way the pause flag is the quiesce's, not the
+        // viewer's, and the answer is the one that reopen was given.
+        let sameSitting = isActive && self.item?.Id == item.Id && !isLocal && !isExternal
+        let staysPaused = sameSitting && errorMessage == nil && !opts.live
+            && (outgoingQuiesced ? reopensPaused : isPaused)
+        let keepsStopAfter = sameSitting && autoplayCancelled
+        reopensPaused = staysPaused
+
         MusicPlayer.shared.yield()
         shuffleSeries = nil
         errorMessage = nil
@@ -183,6 +199,7 @@ extension PlayerModel {
         if self.item?.SeriesId != item.SeriesId { episodeQueue = nil }
 
         if self.item?.Id != item.Id {
+            tailRetryItemId = nil
             setSelectedAudioTrack(nil)
             setSelectedSubtitleTrack(nil)
             pendingTrackChoice = nil
@@ -207,7 +224,7 @@ extension PlayerModel {
         endLocalSession()
         self.localRecordId = nil
         self.isLive = opts.live
-        self.autoplayCancelled = false
+        self.autoplayCancelled = keepsStopAfter
         self.tracksApplied = false
         self.wantedTracks = (opts.audioStreamIndex, opts.subtitleStreamIndex)
         self.upcoming = []
@@ -315,6 +332,7 @@ extension PlayerModel {
                     adaptive.begin(
                         inherited: meta.inherited, ceiling: requestedBitrate, powerCap: powerCapBitrate,
                         untouched: Quality.untouchedRung(for: src.mediaSource))
+                    watchProgress()
                     return
                 }
             }
@@ -339,12 +357,17 @@ extension PlayerModel {
             let sent = URLComponents(url: src.url, resolvingAgainstBaseURL: false)?.queryItems?
                 .first { $0.name.caseInsensitiveCompare("AudioStreamIndex") == .orderedSame }?.value ?? "none"
             Self.log.info("tracks asked: audio \(opts.audioStreamIndex.map(String.init) ?? "nil", privacy: .public) subtitle \(opts.subtitleStreamIndex.map(String.init) ?? "nil", privacy: .public); address says audio \(sent, privacy: .public); prefetched \(prepared != nil)")
+            if let asked = opts.subtitleStreamIndex, asked >= 0,
+               let wanted = src.mediaSource.subtitleStreams.first(where: { $0.Index == asked }) {
+                Self.log.info("subtitle \(asked) comes as \(wanted.DeliveryMethod ?? "nothing said", privacy: .public), address \(wanted.DeliveryUrl == nil ? "none" : "given", privacy: .public)")
+            }
             #endif
 
             let resumeAt = canHandOver ? max(startSeconds, position) : startSeconds
             engineLoad(
                 url: src.url, startAt: opts.live ? 0 : resumeAt,
-                headers: client.authHeaders(for: src.url), live: opts.live, hints: hints, prepared: prepared)
+                headers: client.authHeaders(for: src.url), paused: staysPaused,
+                live: opts.live, hints: hints, prepared: prepared)
 
             if let previous, previous.isTranscode, previous.playSessionId != src.playSessionId {
                 await client.stopTranscode(playSessionId: previous.playSessionId)
@@ -355,10 +378,11 @@ extension PlayerModel {
             }
             await loadExtras(for: item)
             guard generation == mine else { return }
-            await client.reportPlaybackStart(report(paused: false))
+            await client.reportPlaybackStart(report(paused: staysPaused))
             adaptive.begin(
                 inherited: meta.inherited, ceiling: requestedBitrate, powerCap: powerCapBitrate,
                 untouched: Quality.untouchedRung(for: src.mediaSource))
+            watchProgress()
         } catch {
             guard generation == mine else { return }
             resolvingGeneration = nil
@@ -410,6 +434,9 @@ extension PlayerModel {
             return
         }
         audioNeedingStream = nil
+        // The title already up, now from its download, keeps "Stop after
+        // this episode"; anything else starts clean.
+        let sameSitting = isActive && (localRecordId == record.itemId || item?.Id == record.itemId)
         if localRecordId != record.itemId {
             engineOverride = nil
             returnsToMPV = false
@@ -441,7 +468,7 @@ extension PlayerModel {
         isLive = false
         isTranscoding = false
         localRecordId = record.itemId
-        autoplayCancelled = false
+        if !sameSitting { autoplayCancelled = false }
         tracksApplied = false
         wantedTracks = (nil, nil)
         setSelectedAudioTrack(nil)
@@ -746,6 +773,7 @@ extension PlayerModel {
     func quiesceOutgoingStream() {
         engine?.quiesce()
         isPaused = true
+        outgoingQuiesced = true
         isOpening = false
     }
 
@@ -816,6 +844,7 @@ extension PlayerModel {
             AppModel.shared.toast(decision.message, tone: .error)
             return
         }
+        openingAfterAutoDrop = decision.isDrop
         let notice = BitrateNotice(
             isUp: !decision.isDrop,
             headline: decision.bitrate == nil ? "Original quality" : Quality.label(for: decision.bitrate),
@@ -876,7 +905,7 @@ extension PlayerModel {
             guard isActive, !isLocal else { return }
             #if !os(tvOS)
             if let record = downloadedCopy {
-                playLocal(record, startAt: position)
+                playLocal(record, startAt: position, paused: isPaused)
                 return
             }
             #endif
@@ -884,7 +913,7 @@ extension PlayerModel {
         case .downloaded:
             #if !os(tvOS)
             guard !isLocal, let record = downloadedCopy else { return }
-            playLocal(record, startAt: position)
+            playLocal(record, startAt: position, paused: isPaused)
             #endif
         case .stream(let bitrate):
             // Not away from a download. Switching reopened the title from
@@ -900,6 +929,42 @@ extension PlayerModel {
     }
 
     // MARK: - Recovery
+
+    /// How near the end a failure has to be to be taken for a missing tail.
+    static let missingTailWindow: Double = 120
+    /// How near the end one is simply taken as the end.
+    static let missingTailSlack: Double = 20
+    static let missingTailReadAhead: Double = 8
+
+    /// The server lists a transcode's segments from the file's length before
+    /// it has made any, and the file's length is its longest track: a
+    /// subtitle track that runs a second past the picture adds a last segment
+    /// the encode never produces. AVPlayer reads far ahead, finds it missing
+    /// and fails the whole stream — forty seconds from the end after a seek,
+    /// and again on every "Try again". So a server encode that fails inside
+    /// its last two minutes is reopened once reading only a few seconds
+    /// ahead, which plays to within a segment or two of the gap; and a
+    /// failure that close to the end is the end, with whatever follows it.
+    func recoverFromMissingTail(_ failure: EngineFailure) -> Bool {
+        guard failure.duringPlayback, let item, isActive, errorMessage == nil,
+              !isLive, !isLocal, !isExternal, isTranscoding, duration > 0 else { return false }
+        let remaining = duration - position
+        guard remaining <= Self.missingTailWindow else { return false }
+        if remaining <= Self.missingTailSlack {
+            Self.log.notice("stream failed \(Int(remaining)) s from the end; taking it as the end")
+            handleReachedEnd()
+            return true
+        }
+        guard tailRetryItemId != item.Id else { return false }
+        tailRetryItemId = item.Id
+        Self.log.notice("stream failed \(Int(remaining)) s from the end; reopening with a short read-ahead")
+        isOpening = false
+        isBuffering = true
+        var opts = options
+        opts.startSeconds = max(0, position)
+        Task { await play(item: item, options: opts, meta: StartMeta(inherited: true, quiet: true, recovering: true)) }
+        return true
+    }
 
     func recoverFromStreamFailure() -> Bool {
         guard let item, isActive, !isLive, !isLocal else { return false }

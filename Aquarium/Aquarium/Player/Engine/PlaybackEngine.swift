@@ -197,6 +197,10 @@ struct EngineLoadRequest {
     /// A stream `prepare` already has reading its playlist, used in place of
     /// a fresh one when it is for this URL.
     var prepared: (any PreparedStream)?
+    /// A ceiling, in seconds, on how far ahead of the playhead the engine
+    /// reads; nil leaves it to the engine. Set when the far end of a stream
+    /// is known to be unreadable, so playback gets as near to it as it can.
+    var readAhead: Double?
 }
 
 /// Why a stream stopped.

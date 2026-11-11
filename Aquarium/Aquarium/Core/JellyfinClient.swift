@@ -1900,7 +1900,9 @@ final class JellyfinClient {
     func mediaSegments(itemId: String) async throws -> [MediaSegment] {
         guard let r = try? await get(
             MediaSegmentsResponse.self,
-            "/MediaSegments/\(Self.pathId(itemId))?includeSegmentTypes=Intro,Outro"
+            // One parameter per type: the server reads a comma-joined list as
+            // its first entry alone, and the credits never came back.
+            "/MediaSegments/\(Self.pathId(itemId))?includeSegmentTypes=Intro&includeSegmentTypes=Outro"
         ) else { return [] }
         return (r.Items ?? []).map {
             MediaSegment(

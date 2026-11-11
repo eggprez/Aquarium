@@ -139,12 +139,18 @@ struct PlayerStreamRows {
             let ms = player.appliedAudioDelayMilliseconds
             rows.append(("Audio delay", "\(ms > 0 ? "+" : "")\(ms) ms"))
         }
-        if let id = player.selectedAudioTrack, let track = player.audioTracks.first(where: { $0.id == id }) {
-            rows.append(("Audio track", track.label))
+        // By the names the Audio and Subtitles cards use, which are the
+        // server's: the engine's own name for a track with no language is
+        // "Unknown", and it has no track at all for a subtitle the app or
+        // the server draws.
+        let audioChoices = player.audioOptions
+        if let id = player.selectedAudioOption, let option = audioChoices.first(where: { $0.id == id }) {
+            rows.append(("Audio track", option.label))
         }
-        if let id = player.selectedSubtitleTrack, let track = player.subtitleTracks.first(where: { $0.id == id }) {
-            rows.append(("Subtitles", track.label))
-        } else if !player.subtitleTracks.isEmpty {
+        let subtitleChoices = player.subtitleOptions
+        if let id = player.selectedSubtitleOption, let option = subtitleChoices.first(where: { $0.id == id }) {
+            rows.append(("Subtitles", option.label))
+        } else if !subtitleChoices.isEmpty {
             rows.append(("Subtitles", "Off"))
         }
         if let chapter = player.chapterName(at: player.position) {

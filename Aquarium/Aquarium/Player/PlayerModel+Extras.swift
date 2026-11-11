@@ -35,7 +35,9 @@ extension PlayerModel {
     func resumeAutoplay() { autoplayCancelled = false }
 
     func upNextIsDue() -> Bool {
-        guard !autoplayCancelled, prefs.autoplayNext, duration > 0 else { return false }
+        // Whether or not the next one starts by itself: with autoplay off
+        // the card is the offer, and "Not now" still puts it away.
+        guard !autoplayCancelled, duration > 0 else { return false }
         let hasNext = upNext != nil || upNextLocalId != nil || !queue.isEmpty
         return hasNext && secondsRemaining <= 25 && secondsRemaining > 0
     }
@@ -429,7 +431,7 @@ extension PlayerModel {
             maxBitrate: opts.maxBitrate, forceTranscode: forced,
             audioStreamIndex: opts.audioStreamIndex, subtitleStreamIndex: opts.subtitleStreamIndex,
             startTicks: startTicks, engine: kind)
-        Self.log.info("prefetched next \(next.Id, privacy: .public) transcode=\(src.isTranscode) engine=\(kind.title, privacy: .public)")
+        Self.log.info("prefetched next \(next.Id, privacy: .public) transcode=\(src.isTranscode) engine=\(kind.title, privacy: .public) preloaded=\(prepared != nil)")
     }
 
     func takePrefetched(

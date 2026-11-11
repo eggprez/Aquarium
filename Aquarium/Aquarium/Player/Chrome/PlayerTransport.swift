@@ -632,7 +632,9 @@ struct PlayerTransport: View {
     private var qualitySpoken: String {
         if player.isLocal { return "Downloaded copy" }
         return switch player.qualitySelection {
-        case .auto: "Auto, playing \(Quality.label(for: player.currentBitrate))"
+        case .auto: player.currentBitrate == nil && player.isTranscoding
+            ? "Auto, playing the original, converted by the server"
+            : "Auto, playing \(Quality.label(for: player.currentBitrate))"
         case .downloaded: "Downloaded copy"
         case .stream(let bitrate): Quality.label(for: bitrate)
         }
