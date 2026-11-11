@@ -167,7 +167,7 @@ extension PlayerModel {
 
         let startSeconds = startSeconds(for: item, options: opts)
 
-        let canHandOver = streamIsPlaying && !meta.forTracks
+        let canHandOver = streamIsPlaying && !meta.forTracks && !meta.atOnce
             && startSeconds > 1 && duration > 0
             && startSeconds + Self.handoverLead < duration - 30
 
@@ -398,6 +398,7 @@ extension PlayerModel {
         if localRecordId != record.itemId {
             engineOverride = nil
             returnsToMPV = false
+            sidecarOverlay = nil
         }
         let kind = chooseEngine(forLocal: record)
         guard makeEngine(kind) != nil else { return }
@@ -748,8 +749,9 @@ extension PlayerModel {
 
     /// Reopen what is playing at `bitrate`. From a download it is the
     /// server's copy of the same title, looked up by the record's id, from
-    /// where the download had got to.
-    func switchQuality(to bitrate: Int?, meta: StartMeta = .init()) async {
+    /// where the download had got to. With no `meta` it is a choice made by
+    /// hand, which cuts over at once; Auto passes its own and is handed over.
+    func switchQuality(to bitrate: Int?, meta: StartMeta = StartMeta(atOnce: true)) async {
         if isLocal {
             #if !os(tvOS)
             guard let id = localRecordId else { return }
