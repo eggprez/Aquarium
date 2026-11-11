@@ -596,7 +596,7 @@ struct ItemMenu: View {
                         set: { if let quality = $0 { download(quality) } }
                     )) {
                         ForEach(DownloadQualities.all) { quality in
-                            Text(quality.label).tag(Optional(quality))
+                            DownloadChoiceLabel(quality.label, size: sizeText(quality)).tag(Optional(quality))
                         }
                     }
                     .pickerStyle(.inline)
@@ -607,7 +607,9 @@ struct ItemMenu: View {
                     // every row onto two lines — six rows became twelve, taller
                     // than a small phone has room for under the row being held.
                     ForEach(DownloadQualities.all) { quality in
-                        Button(quality.menuLabel) { download(quality) }
+                        Button { download(quality) } label: {
+                            DownloadChoiceLabel(quality.menuLabel, size: sizeText(quality))
+                        }
                     }
                     #endif
                 } label: {
@@ -615,6 +617,13 @@ struct ItemMenu: View {
                 }
             }
         }
+    }
+
+    /// About what this would add at `quality`, from the item as the grid has
+    /// it, the library copy, or a page that has shown it. A grid's item has
+    /// no file, so without either of those an encode's size is all there is.
+    private func sizeText(_ quality: DownloadQuality) -> String? {
+        DownloadSizes.text(DownloadSizes.shared.bytes([item], quality: quality))
     }
 
     /// The same disk-space gate the detail page applies, reporting rather than

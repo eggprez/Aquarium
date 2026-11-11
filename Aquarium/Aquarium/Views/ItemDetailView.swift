@@ -1613,10 +1613,13 @@ struct ItemDetailView: View {
     private func downloadMenu(_ item: BaseItem, existing: DownloadRecord?) -> some View {
         Menu {
             if item.isSeries {
+                let whole = seasons.flatMap { DownloadSizes.shared.items(of: $0.Id) ?? [] }
                 Menu {
                     ForEach(DownloadQualities.all) { quality in
-                        Button(quality.label) {
+                        Button {
                             Task { await requestSeriesDownload(item, quality: quality) }
+                        } label: {
+                            DownloadChoiceLabel(quality.label, size: sizeText(whole, quality))
                         }
                     }
                 } label: {
@@ -1626,10 +1629,13 @@ struct ItemDetailView: View {
                 // going one level down to the season page to get it is a
                 // detour — every season this series has is offered here.
                 ForEach(seasons) { season in
+                    let episodes = DownloadSizes.shared.items(of: season.Id) ?? []
                     Menu {
                         ForEach(DownloadQualities.all) { quality in
-                            Button(quality.label) {
+                            Button {
                                 Task { await requestSeasonDownload(series: item, season: season, quality: quality) }
+                            } label: {
+                                DownloadChoiceLabel(quality.label, size: sizeText(episodes, quality))
                             }
                         }
                     } label: {
@@ -1638,8 +1644,10 @@ struct ItemDetailView: View {
                 }
             } else if item.isSeason {
                 ForEach(DownloadQualities.all) { quality in
-                    Button("This Season · \(quality.label)") {
+                    Button {
                         Task { await requestDownload(episodes, quality: quality) }
+                    } label: {
+                        DownloadChoiceLabel("This Season · \(quality.label)", size: sizeText(episodes, quality))
                     }
                 }
             } else {
@@ -1659,8 +1667,10 @@ struct ItemDetailView: View {
                     }
                 } else {
                     ForEach(DownloadQualities.all) { quality in
-                        Button(quality.label) {
+                        Button {
                             Task { await requestDownload([item], quality: quality) }
+                        } label: {
+                            DownloadChoiceLabel(quality.label, size: sizeText([item], quality))
                         }
                     }
                 }
@@ -1685,6 +1695,22 @@ struct ItemDetailView: View {
             Label(downloadLabel(existing), systemImage: downloadSymbol(existing))
             #endif
         }
+        // A whole series, or one of its seasons, is a size worth knowing
+        // before choosing it: each season's episodes, from the library copy
+        // where there is one, else the server, with their files.
+        .task(id: item.isSeries ? seasons.map(\.Id) : []) {
+            guard item.isSeries, !client.showsOffline else { return }
+            for season in seasons {
+                await DownloadSizes.shared.warm(season.Id) {
+                    (try? await client.episodes(seriesId: item.Id, seasonId: season.Id)) ?? []
+                }
+            }
+        }
+    }
+
+    /// What a download menu says under a choice: about what it adds.
+    private func sizeText(_ items: [BaseItem], _ quality: DownloadQuality) -> String? {
+        DownloadSizes.text(DownloadSizes.shared.bytes(items, quality: quality))
     }
 
     private func downloadLabel(_ record: DownloadRecord?) -> String {

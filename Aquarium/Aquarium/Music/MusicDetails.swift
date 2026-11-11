@@ -149,6 +149,9 @@ struct AlbumDetailView: View {
             let fetched = try await a
             album = fetched
             tracks = try await t
+            // For the download menu's figure: the tracks with their files.
+            let listed = tracks
+            Task { await DownloadSizes.shared.warm(albumId) { await MusicFiles.withSources(listed).full } }
             if let artistId = (fetched.AlbumArtists?.first ?? fetched.ArtistItems?.first)?.Id {
                 var q = JellyfinClient.MusicQuery(types: "MusicAlbum", sort: .year, limit: 20)
                 q.albumArtistIds = [artistId]
@@ -561,6 +564,13 @@ struct PlaylistDetailView: View {
         }
         do {
             songs = try await s
+            // For the download menu's figure, again on every load: a playlist
+            // changes.
+            let listed = songs
+            Task {
+                let full = await MusicFiles.withSources(listed).full
+                if !full.isEmpty { DownloadSizes.shared.note(full, as: playlistId) }
+            }
         } catch is CancellationError {
         } catch {
             songsError = error.localizedDescription

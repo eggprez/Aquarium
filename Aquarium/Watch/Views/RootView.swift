@@ -513,6 +513,21 @@ struct DownloadControl: View {
         return "song"
     }
 
+    /// About what the button would fetch: every watch download is 128 kbps
+    /// AAC, so it comes from running time — of the songs not here yet where
+    /// the page knows them, else of the album, playlist or book as a whole.
+    private var sizeText: String? {
+        let bytes: Int64
+        if let members, !members.isEmpty {
+            bytes = members.filter { downloads.record(for: $0.Id)?.status != .complete }
+                .reduce(0) { $0 + JellyfinClient.estimatedBytes(for: $1) }
+        } else {
+            bytes = JellyfinClient.estimatedBytes(for: item)
+        }
+        guard bytes > 0 else { return nil }
+        return "About " + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
     private var memberIds: [String] {
         if let members { return members.map(\.Id) }
         if item.isAudiobook || item.isSong { return [item.Id] }
@@ -578,7 +593,18 @@ struct DownloadControl: View {
                     if working {
                         HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
                     } else {
-                        Label(p.done > 0 ? "Download the Rest" : "Download to Watch", systemImage: "arrow.down.circle")
+                        Label {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(p.done > 0 ? "Download the Rest" : "Download to Watch")
+                                if let size = sizeText {
+                                    Text(size)
+                                        .font(.caption2)
+                                        .foregroundStyle(WatchTheme.dim)
+                                }
+                            }
+                        } icon: {
+                            Image(systemName: "arrow.down.circle")
+                        }
                     }
                 }
                 .tint(WatchTheme.accent)
