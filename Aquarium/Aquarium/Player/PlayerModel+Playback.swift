@@ -131,7 +131,8 @@ extension PlayerModel {
         }
 
         if !opts.live, let source = item.MediaSources?.first, !source.streams.isEmpty,
-           self.item?.Id != item.Id || (opts.audioStreamIndex == nil && opts.subtitleStreamIndex == nil) {
+           (self.item?.Id != item.Id && !meta.leavingDownloadForTrack)
+            || (opts.audioStreamIndex == nil && opts.subtitleStreamIndex == nil) {
             let wanted = preferredStreams(in: source, seriesId: item.SeriesId)
             opts.audioStreamIndex = wanted.audio
             opts.subtitleStreamIndex = wanted.subtitle
@@ -189,6 +190,13 @@ extension PlayerModel {
         }
 
         let outgoingReport = source != nil && !isLocal && !isExternal ? report(paused: true) : nil
+        // The version the chosen tracks are counted in, which the server
+        // has to be told or it ignores them: the item's own where it lists
+        // one, else the one already playing when this is the same title.
+        // Not for a channel, whose source is opened by the asking.
+        let trackSourceId: String? = opts.live ? nil
+            : item.MediaSources?.first?.Id
+                ?? (self.item?.Id == item.Id && !isLocal && !isExternal ? source?.mediaSourceId : nil)
 
         self.item = item
         self.options = opts
@@ -265,6 +273,7 @@ extension PlayerModel {
                     forceTranscode: opts.forceTranscode || opts.forceFullEncode || opts.maxBitrate != nil,
                     live: opts.live, startTicks: requestedTicks, fullEncode: opts.forceFullEncode,
                     audioStreamIndex: opts.audioStreamIndex, subtitleStreamIndex: opts.subtitleStreamIndex,
+                    mediaSourceId: trackSourceId,
                     engine: kind
                 )
             }
@@ -326,6 +335,11 @@ extension PlayerModel {
             self.source = src
             self.isTranscoding = src.isTranscode
             Self.log.info("opening \(item.Id, privacy: .public) on \(kind.title, privacy: .public): \(src.isTranscode ? "transcode" : "original", privacy: .public), container \(src.mediaSource.Container ?? "none", privacy: .public)")
+            #if DEBUG
+            let sent = URLComponents(url: src.url, resolvingAgainstBaseURL: false)?.queryItems?
+                .first { $0.name.caseInsensitiveCompare("AudioStreamIndex") == .orderedSame }?.value ?? "none"
+            Self.log.info("tracks asked: audio \(opts.audioStreamIndex.map(String.init) ?? "nil", privacy: .public) subtitle \(opts.subtitleStreamIndex.map(String.init) ?? "nil", privacy: .public); address says audio \(sent, privacy: .public); prefetched \(prepared != nil)")
+            #endif
 
             let resumeAt = canHandOver ? max(startSeconds, position) : startSeconds
             engineLoad(
@@ -372,7 +386,7 @@ extension PlayerModel {
 
     #if !os(tvOS)
     private func downloadToPlay(for item: BaseItem, options: StreamOptions, meta: StartMeta) -> DownloadRecord? {
-        guard !options.live, !meta.recovering, !meta.reopening else { return nil }
+        guard !options.live, !meta.recovering, !meta.reopening, !meta.leavingDownloadForTrack else { return nil }
         if isActive, !isLocal, self.item?.Id == item.Id { return nil }
         let askedForAStream = options.maxBitrate != nil || options.bitrateIsChosen
             || options.forceTranscode || options.forceFullEncode
@@ -395,6 +409,7 @@ extension PlayerModel {
                 tone: .error)
             return
         }
+        audioNeedingStream = nil
         if localRecordId != record.itemId {
             engineOverride = nil
             returnsToMPV = false

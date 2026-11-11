@@ -328,6 +328,9 @@ extension PlayerModel {
     }
 
     var audioOptions: [TrackOption] {
+        #if !os(tvOS)
+        if isLocal { return localAudioOptions }
+        #endif
         guard let streams = serverStreams?.audioStreams, !streams.isEmpty else {
             return audioTracks.map {
                 TrackOption(serverIndex: nil, avIndex: $0.id, label: $0.label, language: $0.language, isForced: false)
@@ -355,6 +358,12 @@ extension PlayerModel {
                 avIndex: engineTrack(for: stream, kind: .subtitle),
                 label: stream.menuLabel, language: stream.Language, isForced: stream.isForced)
         }
+    }
+
+    /// What an Audio menu says under a track that isn't in what is playing.
+    func audioDetail(for option: TrackOption) -> String? {
+        guard option.needsNewStream else { return nil }
+        return isLocal ? "Not in the download: streams from the server" : "Reopens the stream with this track"
     }
 
     var selectedAudioOption: TrackOption.ID? {
@@ -400,6 +409,15 @@ extension PlayerModel {
             return
         }
         guard let index = option.serverIndex else { return }
+        #if !os(tvOS)
+        // A download has no server to ask and doesn't carry this track. It
+        // is the server's stream or nothing, and that is asked first: it
+        // needs a connection the download didn't.
+        if isLocal {
+            audioNeedingStream = option
+            return
+        }
+        #endif
         Task { await reopen(audio: index, subtitle: subtitleRequest) }
     }
 
@@ -544,6 +562,61 @@ extension PlayerModel {
         let entries = DownloadSubtitles.local(in: folder)
         Self.sidecarCache = (key, entries)
         return entries
+    }
+
+    // MARK: A download's other soundtracks
+
+    /// The disk read behind `localAudioList`, kept until the list changes.
+    @MainActor private static var audioListCache: (key: String, index: DownloadAudioList.Index?)?
+
+    /// What soundtracks the title playing from a download has on the server
+    /// (see `DownloadAudioList`).
+    private var localAudioList: DownloadAudioList.Index? {
+        guard let folder = localFolder else { return nil }
+        let path = folder.appendingPathComponent(DownloadAudioList.indexName).path
+        let stamp = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date)?
+            .timeIntervalSince1970 ?? 0
+        let key = "\(path)|\(stamp)"
+        if let cached = Self.audioListCache, cached.key == key { return cached.index }
+        let index = DownloadAudioList.index(in: folder)
+        Self.audioListCache = (key, index)
+        return index
+    }
+
+    /// The download's own soundtracks, then the ones it left on the server,
+    /// which can be had only by streaming. A stream download's one track is
+    /// nameless inside the package, so it takes the name the server gave it.
+    private var localAudioOptions: [TrackOption] {
+        var out = audioTracks.map {
+            TrackOption(serverIndex: nil, avIndex: $0.id, label: $0.label, language: $0.language, isForced: false)
+        }
+        guard let list = localAudioList else { return out }
+        if out.count == 1, let main = list.main {
+            out[0].label = main.title
+            out[0].language = main.language ?? out[0].language
+        }
+        for track in list.others {
+            out.append(TrackOption(
+                serverIndex: track.index, avIndex: nil, label: track.title, language: track.language, isForced: false))
+        }
+        return out
+    }
+
+    /// The answer was yes: leave the download for the server's stream of the
+    /// same title, with that soundtrack, from the same moment.
+    func streamForAudio(_ option: TrackOption) async {
+        audioNeedingStream = nil
+        guard isLocal, let id = localRecordId, let index = option.serverIndex else { return }
+        let resume = position
+        guard let streamed = try? await JellyfinClient.shared.item(id) else {
+            AppModel.shared.toast("The server can't be reached, so the download plays on", tone: .error)
+            return
+        }
+        guard isLocal, localRecordId == id else { return }
+        var opts = StreamOptions()
+        opts.audioStreamIndex = index
+        opts.startSeconds = resume
+        await play(item: streamed, options: opts, meta: StartMeta(forTracks: true, leavingDownloadForTrack: true))
     }
 
     /// The subtitle file the app is drawing over the download that is

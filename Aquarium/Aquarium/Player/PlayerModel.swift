@@ -65,6 +65,11 @@ struct StartMeta: Sendable {
     /// which for a quality change is seamless and for a subtitle is twelve
     /// seconds of the old stream with none, under a menu saying it is on.
     var forTracks: Bool = false
+    /// A download left for the server's stream of the same title, for a
+    /// soundtrack the download doesn't carry: the stream is wanted though a
+    /// copy is on the device, and the track asked for stands though the
+    /// title is, to the player, a new one.
+    var leavingDownloadForTrack: Bool = false
     /// A quality somebody picked from the menu, as against one Auto moved
     /// to. Loaded straight away for the same reason: handed over, the old
     /// stream played on for twelve seconds and more while the new one was
@@ -329,6 +334,9 @@ final class PlayerModel {
     /// A download's subtitle file being drawn by the app itself, over an
     /// engine that can't take a file in. See `SubtitleFileOverlay`.
     var sidecarOverlay: SidecarOverlay?
+    /// A soundtrack picked on a download that doesn't carry it, waiting on
+    /// the answer to "stream it instead?". See `PlayerModel.selectAudio`.
+    var audioNeedingStream: TrackOption?
     #endif
 
     var client: JellyfinClient { .shared }

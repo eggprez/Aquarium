@@ -236,7 +236,7 @@ private struct AudioMenu: View {
         } else {
             ForEach(options) { option in
                 PanelRow(title: option.label,
-                         detail: option.needsNewStream ? "Reopens the stream with this track" : nil,
+                         detail: player.audioDetail(for: option),
                          isSelected: option.id == selected) {
                     onInteract()
                     player.selectAudio(option)
