@@ -1,0 +1,11 @@
+#!/bin/zsh
+# srv [device-substring] : now-playing state per session from the QA server
+cd "$HOME/Library/Application Support/AquariumQA" && ./api.sh GET /Sessions | python3 -c "
+import json,sys
+f=sys.argv[1] if len(sys.argv)>1 else ''
+for s in json.load(sys.stdin):
+    if f.lower() not in s.get('DeviceName','').lower(): continue
+    n=s.get('NowPlayingItem'); p=s.get('PlayState',{}); t=s.get('TranscodingInfo') or {}
+    if not n: print(s.get('UserName'),s.get('DeviceName'),'idle'); continue
+    print(s.get('UserName'),'|',s.get('DeviceName'),'|',n.get('Name'),'| pos',round(p.get('PositionTicks',0)/1e7,1),'| paused',p.get('IsPaused'),'| method',p.get('PlayMethod'),'| aud',p.get('AudioStreamIndex'),'sub',p.get('SubtitleStreamIndex'),'| tc',t.get('VideoCodec'),t.get('AudioCodec'),t.get('Bitrate'),t.get('Height'),'direct' if t.get('IsVideoDirect') else '', t.get('TranscodeReasons'))
+" "$1"

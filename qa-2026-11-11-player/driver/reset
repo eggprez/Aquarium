@@ -1,0 +1,3 @@
+#!/bin/zsh
+# reset <userId> id... : clear watch state
+u=$1; shift; cd "$HOME/Library/Application Support/AquariumQA"; for id in "$@"; do ./api.sh POST "/UserItems/$id/UserData?userId=$u" '{"PlaybackPositionTicks":0,"Played":false}' >/dev/null; done

@@ -1,0 +1,8 @@
+#!/bin/zsh
+# cue <p|t> <name> [period=10] [lo=5] [hi=7]: wait until position%period in [lo,hi], then screenshot
+S=${0:A:h}; d=$1; n=$2; per=${3:-10}; lo=${4:-5}; hi=${5:-7}
+for i in {1..14}; do
+  r=$($S/q $d x pos | grep POS | sed "s/ of .*//"); m=$(echo $r | grep -oE '[0-9]+ minute' | grep -oE '[0-9]+'); s=$(echo $r | grep -oE '[0-9]+ second' | grep -oE '[0-9]+'); t=$(( ${m:-0}*60 + ${s:-0} ))
+  if (( t % per >= lo && t % per <= hi )); then $S/q $d shot $n ${6:-640} >/dev/null; echo "shot $n at $t"; exit 0; fi
+  sleep 0.7
+done; echo "no cue window ($r)"; $S/q $d shot $n 640 >/dev/null
