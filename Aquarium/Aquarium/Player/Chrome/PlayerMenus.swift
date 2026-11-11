@@ -10,8 +10,9 @@
 //
 //  A control reports where it is through `chromeMenuAnchor`, and
 //  `ChromeMenuLayer`, laid over the whole transport, puts the open card
-//  above a pill or under the "…" button — clamped to the picture, and no
-//  taller than the room there is, scrolling inside when it needs more.
+//  above a pill or under the "…" button — clamped to the picture, kept
+//  between the title row and the pills, and no taller than the room there
+//  is, scrolling inside when it needs more.
 
 import SwiftUI
 
@@ -51,32 +52,44 @@ struct ChromeMenuLayer: View {
 
     private static let gap: CGFloat = 8
     private static let margin: CGFloat = 8
+    /// The cards that open above a pill, whose row "…"'s card stops short of.
+    private static let pillMenus: [PlayerChromeState.ChromeMenu] = [.audio, .subtitles, .quality, .upNext]
 
     var body: some View {
         GeometryReader { geo in
             if let menu = chrome.menu, let anchor = anchors[menu] {
                 let rect = geo[anchor]
                 let width = min(compact ? 300 : 340, geo.size.width - Self.margin * 2)
+                // The card keeps to the band between the title row and the
+                // pills. Given the whole picture, a tall card — Quality, Up
+                // Next, "…" — ran over the title and the "…" button, or over
+                // the pills, on a phone held sideways.
+                let barBottom = anchors[.more].map { geo[$0].maxY + Self.gap } ?? Self.margin
+                let pillsTop = Self.pillMenus.compactMap { anchors[$0].map { geo[$0].minY - Self.gap } }.min()
                 if menu == .more {
                     let x = max(Self.margin, min(rect.maxX - width, geo.size.width - width - Self.margin))
-                    let room = geo.size.height - rect.maxY - Self.gap - Self.margin
+                    let top = rect.maxY + Self.gap
+                    let floor = pillsTop.flatMap { $0 > top ? $0 : nil } ?? geo.size.height - Self.margin
+                    let room = floor - top
                     VStack(spacing: 0) {
                         card(menu, maxHeight: room)
                         Spacer(minLength: 0)
                     }
                     .frame(width: width, height: max(0, room), alignment: .top)
-                    .offset(x: x, y: rect.maxY + Self.gap)
+                    .offset(x: x, y: top)
                     .transition(transition(anchor: .topTrailing))
                     .id(menu)
                 } else {
                     let x = max(Self.margin, min(rect.minX, geo.size.width - width - Self.margin))
-                    let room = rect.minY - Self.gap - Self.margin
+                    let bottom = rect.minY - Self.gap
+                    let top = barBottom < bottom ? barBottom : Self.margin
+                    let room = bottom - top
                     VStack(spacing: 0) {
                         Spacer(minLength: 0)
                         card(menu, maxHeight: room)
                     }
                     .frame(width: width, height: max(0, room), alignment: .bottom)
-                    .offset(x: x, y: Self.margin)
+                    .offset(x: x, y: top)
                     .transition(transition(anchor: .bottomLeading))
                     .id(menu)
                 }
