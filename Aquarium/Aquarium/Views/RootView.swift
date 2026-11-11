@@ -760,6 +760,12 @@ struct RouteDestination: View {
             #else
             EmptyView()
             #endif
+        case .settings(let route):
+            #if os(iOS)
+            SettingsRouteView(route: route)
+            #else
+            EmptyView()
+            #endif
         }
     }
 }

@@ -256,9 +256,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         let recentSongs = (try? await recent) ?? []
         let stations = ListenNowView.stations(recent: recentSongs, top: [], favoriteArtists: [], random: [])
             .map { ($0.title, $0.subtitle, $0.seed) }
-        var sections = await discoverSections(books: started, recentAlbums: recentSongs.albumsInOrder(), stations: stations) {
-            (try? await client.music(.init(types: "MusicAlbum", sort: .random, limit: 1)).items)?.first
-        }
+        var sections = await discoverSections(books: started, recentAlbums: recentSongs.albumsInOrder(), stations: stations)
         // Asked of a server that didn't answer: the downloads are still here.
         if sections.isEmpty, client.isOffline { sections = await offlineListenNow() }
         listenNow.updateSections(sections)
@@ -274,23 +272,19 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             recent: recent, top: OfflineMusic.mostPlayed(limit: 24),
             favorites: OfflineMusic.favorites(), all: all
         ).map { ($0.title, $0.subtitle, $0.seed) }
-        return await discoverSections(books: OfflineMusic.booksInProgress, recentAlbums: recent.localAlbums(), stations: stations) {
-            all.shuffled().localAlbums().first
-        }
+        return await discoverSections(books: OfflineMusic.booksInProgress, recentAlbums: recent.localAlbums(), stations: stations)
     }
 
     /// Discover, top to bottom: the book you're partway through, the covers
-    /// of what was played lately, then stations — Surprise Me, and a row of
+    /// of what was played lately, then stations — Shuffle All, and a row of
     /// the stations' covers — then playlists. Nothing else: it's a screen
-    /// read at a glance. Surprise Me is the phone's: one of these stations
-    /// at random, or a random album where there are none, started as a live
-    /// station that re-deals as songs are skipped.
+    /// read at a glance. Shuffle All is the phone's: the whole library in a
+    /// random order.
     @MainActor
     private func discoverSections(
         books: [BaseItem],
         recentAlbums: [BaseItem],
-        stations: [(title: String, subtitle: String, seed: BaseItem)],
-        randomAlbum: @escaping @MainActor () async -> BaseItem?
+        stations: [(title: String, subtitle: String, seed: BaseItem)]
     ) async -> [CPListSection] {
         var sections: [CPListSection] = []
         if !books.isEmpty {
@@ -312,15 +306,15 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         }
         if let recentRow { sections.append(CPListSection(items: [recentRow], header: "Recently Played", sectionIndexTitle: nil)) }
 
-        let surprise = CPListItem(text: "Surprise Me", detailText: "A mix that learns as you skip", image: symbolTile("shuffle"))
-        surprise.handler = { [weak self] _, done in
+        let shuffleAll = CPListItem(text: MusicMixes.shuffleAllTitle, detailText: "Your whole library, shuffled", image: symbolTile("shuffle"))
+        shuffleAll.handler = { [weak self] _, done in
             Task { @MainActor in
-                let started = await MusicMixes.startSurprise(cover: await randomAlbum()).started
-                if started { self?.showNowPlaying() } else { self?.alert("Couldn't build a mix", "There's nothing in the library to mix from yet.") }
+                let started = await MusicMixes.shuffleAll().started
+                if started { self?.showNowPlaying() } else { self?.alert("Nothing to shuffle", "There's nothing in the library to play yet.") }
                 done()
             }
         }
-        var stationItems: [CPListTemplateItem] = [surprise]
+        var stationItems: [CPListTemplateItem] = [shuffleAll]
         let stationRow = imageRow(nil, covers: await stationCovers) { [weak self] index in
             Task { @MainActor in
                 await MusicMixes.startStation(from: seeds[index].seed, title: seeds[index].title)
@@ -722,26 +716,20 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                 let albums = offline
                     ? OfflineMusic.songs(byArtist: artist).localAlbums()
                     : (try? await JellyfinClient.shared.music(q).items) ?? []
-                // Surprise Me here is the artist's station — their songs and
-                // the artists near them, re-dealt as songs are skipped —
-                // what the phone's "Start Station" on an artist does. Only
-                // when no station can be built (nothing of theirs on this
-                // device, say) does it fall back to a shuffle of their songs.
-                let shuffle = CPListItem(text: "Surprise Me", detailText: "A mix around \(artist.title)", image: self?.symbolTile("shuffle"))
+                // Shuffle here is every song of the artist's in a random
+                // order. A mix like them is Instant Mix, in the player.
+                let shuffle = CPListItem(text: "Shuffle", detailText: "Every song by \(artist.title)", image: self?.symbolTile("shuffle"))
                 shuffle.handler = { _, finished in
                     Task { @MainActor in
-                        let started = await MusicMixes.startStation(from: artist, title: "\(artist.title) Station", localOnly: offline).started
-                        if !started {
-                            let songs = offline
-                                ? OfflineMusic.songs(byArtist: artist)
-                                : (try? await JellyfinClient.shared.allSongs(artistId: artist.Id)) ?? []
-                            if !songs.isEmpty { MusicPlayer.shared.play(songs, shuffle: true, title: artist.title) }
-                        }
+                        let songs = offline
+                            ? OfflineMusic.songs(byArtist: artist)
+                            : (try? await JellyfinClient.shared.allSongs(artistId: artist.Id)) ?? []
+                        if !songs.isEmpty { MusicPlayer.shared.play(songs, shuffle: true, title: artist.title) }
                         self?.showNowPlaying()
                         finished()
                     }
                 }
-                // Surprise Me heads the list rather than sitting in a
+                // Shuffle heads the list rather than sitting in a
                 // header-less section of its own, which the car spaced off
                 // from the albums like a missing heading.
                 let list = CPListTemplate(title: artist.title, sections: [
@@ -1045,10 +1033,30 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                 Task { @MainActor in self?.chooseSleepTimer() }
             })
         }
+        // Instant Mix: the fifth and last a car shows. A mix of this song
+        // after it, from the source chosen in Settings.
+        if current.isSong, let wand = UIImage(systemName: "wand.and.stars") {
+            buttons.append(CPNowPlayingImageButton(image: wand) { [weak self] _ in
+                Task { @MainActor in await self?.instantMix() }
+            })
+        }
         template.updateNowPlayingButtons(buttons)
         template.isUpNextButtonEnabled = player.hasUpNext
         template.upNextTitle = "Up Next"
         template.isAlbumArtistButtonEnabled = current.isSong && current.AlbumId != nil
+    }
+
+    /// The player's Instant Mix, from the car. Offline the mix is Aquarium's,
+    /// from downloads, and the car says so once — there is no toast here.
+    @MainActor
+    private func instantMix() async {
+        guard let song = MusicPlayer.shared.current, song.isSong else { return }
+        let result = await MusicMixes.instantMix(from: song)
+        if !result.started {
+            alert("Couldn't build a mix", result.isLocal ? "Nothing on this device goes with this song." : "The server didn't send a mix for this song.")
+        } else if MusicPlayer.shared.mixIsOfflineFallback {
+            alert("Offline", "Mixed from your downloads. Back online, press Instant Mix again for a fresh mix.")
+        }
     }
 
     @MainActor

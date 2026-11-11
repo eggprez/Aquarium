@@ -867,9 +867,11 @@ extension Array where Element == BaseItem {
 
 // MARK: - One door for every mix
 
-/// Where every station is started: Listen Now, Surprise Me, Start Station,
-/// CarPlay, the end of a queue. Built by `StationBuilder`, from the server
-/// when there is one and from downloads when there isn't.
+/// Where every mix is started: Listen Now, Shuffle All, Start Station,
+/// Instant Mix in the player, CarPlay. A mix of one thing comes from the
+/// source chosen in Settings (`MixSource`): the server's Instant Mix, or a
+/// station built by `StationBuilder`. Without a server it is always the
+/// station, from downloads.
 @MainActor
 enum MusicMixes {
     struct Started {
@@ -878,18 +880,81 @@ enum MusicMixes {
         var isLocal: Bool
     }
 
-    /// Surprise Me: a shuffle of what the listener plays that becomes a mix
-    /// of its own as songs are finished and skipped — see `SpecialStation`.
-    /// `cover` is what the station's tile wears, if anything.
+    static let shuffleAllTitle = "Shuffle All"
+    /// How many songs Shuffle All asks the server for at a time.
+    private static let shuffleDepth = 500
+
+    /// Shuffle All: the whole library in a random order — no station, no
+    /// learning, just a shuffle. From downloads when `localOnly` or offline,
+    /// or when the server sends nothing.
     @discardableResult
-    static func startSurprise(cover: BaseItem? = nil, localOnly: Bool = false) async -> Started {
-        let special = SpecialStation.surprise
-        return await startStation(from: special.seed(cover: cover), title: special.title, localOnly: localOnly)
+    static func shuffleAll(localOnly: Bool = false) async -> Started {
+        let client = JellyfinClient.shared
+        if !localOnly, !client.isOffline {
+            let q = JellyfinClient.MusicQuery(types: "Audio", sort: .random, limit: shuffleDepth)
+            let songs = (try? await client.music(q).items)?.filter(\.isSong) ?? []
+            if !songs.isEmpty {
+                MusicPlayer.shared.play(songs, shuffle: true, title: shuffleAllTitle)
+                return Started(started: true, isLocal: false)
+            }
+        }
+        #if !os(tvOS)
+        let songs = OfflineMusic.songs
+        guard !songs.isEmpty else { return Started(started: false, isLocal: true) }
+        MusicPlayer.shared.play(songs.shuffled(), shuffle: true, title: shuffleAllTitle)
+        return Started(started: true, isLocal: true)
+        #else
+        return Started(started: false, isLocal: false)
+        #endif
     }
 
-    /// `localOnly` builds from downloads even with the server in reach.
+    /// The server's Instant Mix of `seed`, when that is the source chosen,
+    /// the server is in reach and the seed is something the server has —
+    /// otherwise nil, and the caller builds Aquarium's. A server running the
+    /// AudioMuse-AI plugin answers this with AudioMuse's mix on its own.
+    /// A song seed is first and appears once.
+    static func jellyfinMix(of seed: BaseItem, limit: Int = 100) async -> [BaseItem]? {
+        let client = JellyfinClient.shared
+        guard Preferences.shared.mixSource == .jellyfin, !client.isOffline,
+              SpecialStation(seed: seed) == nil,
+              !seed.Id.isEmpty, !seed.Id.hasPrefix("local-"), !seed.Id.hasPrefix(StationBuilder.genrePrefix)
+        else { return nil }
+        guard let mix = try? await client.instantMix(from: seed.Id, limit: limit) else { return nil }
+        var songs = mix.filter { $0.isSong && $0.Id != seed.Id }
+        if seed.isSong { songs.insert(seed, at: 0) }
+        return songs.count > (seed.isSong ? 1 : 0) ? songs : nil
+    }
+
+    /// Instant Mix, from the player: what is playing keeps playing, and a mix
+    /// of it replaces everything that was coming. Offline it is Aquarium's
+    /// mix of the downloads, and says so — and stays that, back online, until
+    /// Instant Mix is pressed again.
+    @discardableResult
+    static func instantMix(from song: BaseItem) async -> Started {
+        let player = MusicPlayer.shared
+        let title = "\(song.title) Mix"
+        if let mix = await jellyfinMix(of: song) {
+            player.replaceUpcoming(with: Array(mix.dropFirst()), title: title, station: nil, offlineFallback: false)
+            return Started(started: true, isLocal: false)
+        }
+        guard let station = await StationBuilder.build(from: song, title: title) else {
+            return Started(started: false, isLocal: JellyfinClient.shared.isOffline)
+        }
+        let first = station.pool[song.Id] ?? song
+        let songs = station.upcoming(count: MusicPlayer.stationDepth, after: [first])
+        guard !songs.isEmpty else { return Started(started: false, isLocal: station.isLocal) }
+        player.replaceUpcoming(with: songs, title: title, station: station, offlineFallback: station.isLocal)
+        return Started(started: true, isLocal: station.isLocal)
+    }
+
+    /// A mix of `seed` from the start, replacing the queue. `localOnly` builds
+    /// Aquarium's from downloads even with the server in reach.
     @discardableResult
     static func startStation(from seed: BaseItem, title: String, localOnly: Bool = false) async -> Started {
+        if !localOnly, let mix = await jellyfinMix(of: seed) {
+            MusicPlayer.shared.play(mix, title: title)
+            return Started(started: true, isLocal: false)
+        }
         guard let station = await StationBuilder.build(from: seed, title: title, localOnly: localOnly) else {
             return Started(started: false, isLocal: localOnly || JellyfinClient.shared.isOffline)
         }
@@ -897,7 +962,8 @@ enum MusicMixes {
         if seed.isSong { first = [station.pool[seed.Id] ?? seed] }
         let songs = first + station.upcoming(count: MusicPlayer.stationDepth, after: first)
         guard !songs.isEmpty else { return Started(started: false, isLocal: station.isLocal) }
-        MusicPlayer.shared.playStation(station, songs: songs)
+        // Only a fallback when downloads weren't what was asked for.
+        MusicPlayer.shared.playStation(station, songs: songs, offlineFallback: station.isLocal && !localOnly)
         return Started(started: true, isLocal: station.isLocal)
     }
 }

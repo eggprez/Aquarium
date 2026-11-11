@@ -213,6 +213,24 @@ enum LiveTVSource: String, CaseIterable, Sendable {
     }
 }
 
+/// Where a mix from one song, album or artist comes from: Instant Mix in the
+/// player, Start Station, and autoplay at the end of a queue.
+enum MixSource: String, CaseIterable, Sendable {
+    /// Aquarium's own stations: a pool from several places, ranked here and
+    /// re-dealt as songs are skipped (see `StationBuilder`).
+    case aquarium
+    /// The server's Instant Mix, played as the server ordered it. A server
+    /// with the AudioMuse-AI plugin answers it with AudioMuse's similarity.
+    case jellyfin
+
+    var label: String {
+        switch self {
+        case .aquarium: "Aquarium"
+        case .jellyfin: "Jellyfin Instant Mix"
+        }
+    }
+}
+
 enum ThemePref: String, CaseIterable, Sendable {
     case auto, light, dark
 
@@ -922,6 +940,11 @@ final class Preferences {
     var musicAutoplay: Bool {
         didSet { write(musicAutoplay, forKey: "music_autoplay") }
     }
+    /// Whose mix Instant Mix, Start Station and autoplay play. Without a
+    /// server it is always Aquarium's, from downloads.
+    var mixSource: MixSource {
+        didSet { write(mixSource.rawValue, forKey: "music_mix_source") }
+    }
     /// Show artist names in Latin letters where a fair transliteration exists.
     var musicRomanizeNames: Bool {
         didSet { write(musicRomanizeNames, forKey: "music_romanize") }
@@ -1127,6 +1150,7 @@ final class Preferences {
         syncsAcrossDevices = d.object(forKey: "cloud_sync") == nil ? true : d.bool(forKey: "cloud_sync")
         losslessOnCellular = d.bool(forKey: "music_lossless_cellular")
         musicAutoplay = d.object(forKey: "music_autoplay") == nil ? true : d.bool(forKey: "music_autoplay")
+        mixSource = MixSource(rawValue: d.string(forKey: "music_mix_source") ?? "") ?? .aquarium
         normalizeVolume = d.bool(forKey: "music_normalize")
         // Stations once had a switch for learning across weeks. They learn
         // only while they play now, and the switch went with that.
@@ -1260,6 +1284,7 @@ final class Preferences {
         publish(subtitleBackground.rawValue, forKey: "sub_bg")
         publish(losslessOnCellular, forKey: "music_lossless_cellular")
         publish(musicAutoplay, forKey: "music_autoplay")
+        publish(mixSource.rawValue, forKey: "music_mix_source")
         publish(normalizeVolume, forKey: "music_normalize")
         publish(musicRomanizeNames, forKey: "music_romanize")
         publish(mixPoints.stored, forKey: "music_mix_points")
@@ -1401,6 +1426,8 @@ final class Preferences {
             losslessOnCellular = v
         }
         if let v = CloudSync.object(forKey: "music_autoplay") as? Bool, v != musicAutoplay { musicAutoplay = v }
+        if let v = CloudSync.object(forKey: "music_mix_source") as? String,
+           let s = MixSource(rawValue: v), s != mixSource { mixSource = s }
         if let v = CloudSync.object(forKey: "music_normalize") as? Bool, v != normalizeVolume { normalizeVolume = v }
         if let v = CloudSync.object(forKey: "music_romanize") as? Bool, v != musicRomanizeNames { musicRomanizeNames = v }
         if let v = MixPoints(stored: CloudSync.object(forKey: "music_mix_points")), v != mixPoints { mixPoints = v }

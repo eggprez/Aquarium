@@ -103,6 +103,13 @@ final class MusicPlayer {
     /// How many songs a station keeps queued ahead.
     static let stationDepth = 25
 
+    /// What is queued is a mix built from this device's downloads because
+    /// the server couldn't be reached when it was asked for. The player says
+    /// so. It stays until something else is played: coming back online
+    /// doesn't swap the mix for the server's — Instant Mix is pressed again
+    /// for that.
+    private(set) var mixIsOfflineFallback = false
+
     var repeatMode: RepeatMode {
         didSet {
             Preferences.shared.musicRepeat = repeatMode.rawValue
@@ -289,17 +296,48 @@ final class MusicPlayer {
         currentIndex = start
         queueTitle = title
         station = nil
+        mixIsOfflineFallback = false
         autoplayTried = false
         reachedEndOfQueue = false
         startCurrent(startAt: position)
     }
 
     /// Play a station's first songs and keep dealing from it.
-    func playStation(_ station: LiveStation, songs: [BaseItem]) {
+    func playStation(_ station: LiveStation, songs: [BaseItem], offlineFallback: Bool = false) {
         play(songs, title: station.title)
         guard !queue.isEmpty else { return }
         for i in queue.indices { queue[i].fromStation = true }
         self.station = station
+        mixIsOfflineFallback = offlineFallback
+    }
+
+    /// Instant Mix from the player: what is playing carries on, and `items`
+    /// take the place of everything that was coming after it. With a
+    /// `station`, the station keeps dealing them as songs are skipped; without
+    /// one (the server's Instant Mix) they play in the order given.
+    func replaceUpcoming(
+        with items: [BaseItem], title: String, station: LiveStation?, offlineFallback: Bool
+    ) {
+        let entries = items.filter { $0.isAudio || $0.isSong }.map { Entry($0, fromStation: station != nil) }
+        guard !entries.isEmpty else { return }
+        guard isActive, let c = currentIndex, queue.indices.contains(c) else {
+            if let station {
+                playStation(station, songs: items, offlineFallback: offlineFallback)
+            } else {
+                play(items, title: title)
+            }
+            return
+        }
+        queue = Array(queue[...c]) + entries
+        unshuffled = nil
+        isShuffled = false
+        queueTitle = title
+        self.station = station
+        mixIsOfflineFallback = offlineFallback
+        autoplayTried = false
+        reachedEndOfQueue = false
+        prepareNext()
+        updateNowPlaying()
     }
 
     /// Everything after the current track, in order, then these.
@@ -581,6 +619,7 @@ final class MusicPlayer {
         chapters = []
         queueTitle = nil
         station = nil
+        mixIsOfflineFallback = false
         errorMessage = nil
         reachedEndOfQueue = false
         clearNowPlaying()
@@ -862,20 +901,6 @@ final class MusicPlayer {
               )
         else { return }
         station.session.note(prepared.item, reaction)
-        if station.profile.isSurprise {
-            // The mood this session is in, a step at a time, for the next
-            // one at this time of day — see `MoodMemory`.
-            MoodMemory.record(station.session)
-        }
-        // A Surprise Mix grows towards what is heard to the end — once the
-        // session has backed that direction more than once: more like it
-        // joins the pool, once per song, and the next deal can reach it.
-        if station.profile.isSurprise, reaction == .finished, station.session.supports(prepared.item) {
-            Task {
-                let grew = await StationBuilder.widen(station, from: prepared.item)
-                if grew, self.station === station { self.scheduleRestation() }
-            }
-        }
         scheduleRestation()
     }
 
@@ -1069,21 +1094,25 @@ final class MusicPlayer {
         updateNowPlaying()
     }
 
-    /// Carry on past the end with a station grown from the last song, so
-    /// what autoplay brings learns from skips like any other station.
+    /// Carry on past the end with a mix of the last song, from the source
+    /// chosen in Settings: the server's Instant Mix as it comes, or a station
+    /// grown from it, which learns from skips like any other.
     private func autoplayMore(after last: BaseItem) async {
         let mine = generation
-        let built = await StationBuilder.build(from: last, title: "Autoplay")
-        guard generation == mine, currentPrepared == nil else { return }
         let history = queue.map(\.item)
-        let more = built?.upcoming(count: Self.stationDepth, after: history) ?? []
-        guard let built, !more.isEmpty, let i = currentIndex else {
+        let fromServer = await MusicMixes.jellyfinMix(of: last)?.filter { song in !history.contains { $0.Id == song.Id } }
+        let built = fromServer?.isEmpty == false ? nil : await StationBuilder.build(from: last, title: "Autoplay")
+        guard generation == mine, currentPrepared == nil else { return }
+        let more = fromServer?.isEmpty == false
+            ? fromServer ?? []
+            : built?.upcoming(count: Self.stationDepth, after: history) ?? []
+        guard !more.isEmpty, let i = currentIndex else {
             position = 0
             reachedEndOfQueue = true
             updateNowPlaying()
             return
         }
-        queue.append(contentsOf: more.map { Entry($0, fromStation: true) })
+        queue.append(contentsOf: more.map { Entry($0, fromStation: built != nil) })
         station = built
         if queueTitle != nil { queueTitle = "Autoplay" }
         currentIndex = i + 1

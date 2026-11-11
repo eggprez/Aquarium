@@ -608,18 +608,24 @@ struct SettingsView: View {
         }
     }
 
-    /// Stations learn only while they play, so there is nothing kept here
-    /// to count or forget — but for the moods Surprise Me remembers by time
-    /// of day, which are only a place to start (see `MoodMemory`).
+    /// Whose mix the player's Instant Mix plays, and how stations name
+    /// artists. Stations learn only while they play, so there is nothing
+    /// kept here to count or forget.
     private var stationsSection: some View {
         @Bindable var prefs = prefs
         return Section {
+            Picker(selection: $prefs.mixSource) {
+                ForEach(MixSource.allCases, id: \.self) { Text($0.label).tag($0) }
+            } label: {
+                MacSettingLabel(Copy.mixSource)
+            }
+            .note(Copy.mixSource)
             Toggle(isOn: $prefs.musicRomanizeNames) { MacSettingLabel(Copy.musicRomanize) }
                 .note(Copy.musicRomanize)
         } header: {
             Text("Stations")
         } footer: {
-            MacSettingFooter(Copy.musicRomanize)
+            MacSettingFooter(Copy.mixSource, Copy.musicRomanize)
         }
     }
 
@@ -990,6 +996,21 @@ struct SettingsPageView: View {
     }
 }
 
+/// The page a `Route.settings` opens — see `SettingsRoute`.
+struct SettingsRouteView: View {
+    let route: SettingsRoute
+
+    var body: some View {
+        switch route {
+        case .appIcon: AppIconSettingsView()
+        case .tabBar: TabBarSettingsView()
+        case .syncMeasure: SyncMeasureView()
+        case .stationMix: StationMixSettingsPage()
+        case .customPlaylist: CustomPlaylistSettingsPage()
+        }
+    }
+}
+
 extension View {
     /// What a settings page wears when it is pushed onto the stack rather than
     /// shown beside the list: its title in the bar, the bar in the app's
@@ -1213,17 +1234,11 @@ private struct AppearanceSettingsPage: View {
 
             Section {
                 if UIApplication.shared.supportsAlternateIcons {
-                    NavigationLink {
-                        AppIconSettingsView()
-                            .clearsBottomChrome()
-                    } label: {
+                    NavigationLink(value: Route.settings(.appIcon)) {
                         LabeledContent("App Icon", value: iconTitle)
                     }
                 }
-                NavigationLink {
-                    TabBarSettingsView()
-                        .clearsBottomChrome()
-                } label: {
+                NavigationLink(value: Route.settings(.tabBar)) {
                     LabeledContent(app.usesSidebar ? "Sidebar" : "Tab Bar",
                                    value: prefs.tabBarOrder.isEmpty ? "Default" : "Custom")
                 }
@@ -1334,10 +1349,7 @@ private struct AudioSettingsPage: View {
             // measured and set; the row below is how.
             #if os(iOS)
             Section {
-                NavigationLink {
-                    SyncMeasureView()
-                        .clearsBottomChrome()
-                } label: {
+                NavigationLink(value: Route.settings(.syncMeasure)) {
                     Text(Copy.measureSync.name ?? "")
                 }
             } header: {
@@ -1398,11 +1410,18 @@ private struct MusicSettingsPage: View {
             }
 
             Section {
+                Picker(Copy.mixSource.name ?? "", selection: $prefs.mixSource) {
+                    ForEach(MixSource.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+            } header: {
+                Text("Mixes")
+            } footer: {
+                SettingsFooter(Copy.mixSource)
+            }
+
+            Section {
                 Toggle(Copy.musicRomanize.name ?? "", isOn: $prefs.musicRomanizeNames)
-                NavigationLink {
-                    StationMixSettingsPage()
-                        .clearsBottomChrome()
-                } label: {
+                NavigationLink(value: Route.settings(.stationMix)) {
                     LabeledContent(Copy.stationMix.name ?? "", value: prefs.mixPoints.presetName)
                 }
             } header: {
@@ -1434,10 +1453,7 @@ private struct LiveTVSettingsPage: View {
 
             if prefs.liveTVSource == .custom {
                 Section {
-                    NavigationLink {
-                        CustomPlaylistSettingsPage()
-                            .clearsBottomChrome()
-                    } label: {
+                    NavigationLink(value: Route.settings(.customPlaylist)) {
                         LabeledContent("Custom playlist", value: Self.host(of: prefs.iptvPlaylistURL) ?? "Not set")
                     }
                 } footer: {
@@ -2187,7 +2203,11 @@ enum SettingsCopy {
     )
     static let musicAutoplay = SettingNote(
         name: "Keep playing at the end",
-        text: "When the queue runs out, carry on with songs like the last one, built by the server."
+        text: "When the queue runs out, carry on with a mix of the last song, from the source chosen under Mixes."
+    )
+    static let mixSource = SettingNote(
+        name: "Mixes",
+        text: "Whose mix Instant Mix in the player, Start Station and Keep playing at the end use. Aquarium builds its own from what the server finds similar and re-deals it as you skip; Jellyfin Instant Mix plays the server's mix as it is — on a server with the AudioMuse-AI plugin, that's AudioMuse's. Without a connection to the server it's always Aquarium's, from your downloads."
     )
     static let musicRomanize = SettingNote(
         name: "Romanize artist names",
@@ -2463,7 +2483,10 @@ enum SettingsCopy {
         text: "Your server, your sign-in and everything on this screen follow you to your other Apple TVs, iPhones, iPads and Macs through iCloud. Signing out anywhere signs out everywhere. Volume, the audio delay and this device's identity to the server stay where they are — those describe the room, not the account."
     )
     static let libraryCopy: SettingNote = {
-        var text = "Saves the details of every film, show, season and episode on this device, with their posters, logos and episode stills. After the first sync, opening the app only fetches what changed: library pages open straight away, and can still be browsed when the server can't be reached. Backdrops are saved as you come across them. Turning this off deletes the copy."
+        var text = "Saves the details of every film, show, season and episode on this device, with their posters, episode stills and the title logos shown on Home's banners. After the first sync, opening the app only fetches what changed: library pages open straight away, and can still be browsed when the server can't be reached. Backdrops are saved as you come across them. Turning this off deletes the copy."
+        #if os(iOS)
+        text += " Album and audiobook covers are saved too."
+        #endif
         #if os(tvOS)
         text += " Apple TV may clear the copy when it runs short of storage; it is rebuilt at the next sync."
         #endif
@@ -2475,7 +2498,7 @@ enum SettingsCopy {
     )
     static let libraryCopyContents = SettingNote(
         name: "Saved",
-        text: "How many films, shows, seasons and episodes the copy holds, and the space its artwork takes on this device."
+        text: "How many films, shows, seasons and episodes the copy holds, and the space its artwork — album and audiobook covers included — takes on this device."
     )
     static let syncNow = SettingNote(
         name: "Sync now",

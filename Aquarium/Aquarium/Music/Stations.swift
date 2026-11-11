@@ -12,12 +12,12 @@
 //  skipped feeds `StationSession`, and the music player re-deals what is
 //  still to come from the same pool (see `MusicPlayer.restation`).
 //
-//  Nothing outlives the station but one thing: Surprise Me remembers, by
-//  time of day and by car or not, which genres its sessions leaned toward
-//  (`MoodMemory`), and starts the next one with a light nudge that way. The
-//  nudge fades within a few songs; everything else is the seed, the
-//  server's own record of the account — favourites, play counts — and the
-//  points the listener has spent on what stations favour (`MixPoints`).
+//  Nothing outlives the station: it goes on the seed, the server's own
+//  record of the account — favourites, play counts — and the points the
+//  listener has spent on what stations favour (`MixPoints`).
+//
+//  Whether a mix of one thing is one of these or the server's Instant Mix
+//  is the listener's choice in Settings — see `MixSource` and `MusicMixes`.
 
 import Foundation
 import Observation
@@ -45,14 +45,7 @@ final class LiveStation {
         self.seed = seed
         self.profile = profile
         self.isLocal = isLocal
-        // A Surprise Mix drifts faster — a forty-minute session is a dozen
-        // songs, and the mood at the end of it is not the one at the start —
-        // and opens with the genres this time of day has leaned toward.
-        if profile.isSurprise {
-            session = StationSession(decay: 0.85, prior: MoodMemory.prior())
-        } else {
-            session = StationSession()
-        }
+        session = StationSession()
         add(pool)
     }
 
@@ -80,8 +73,6 @@ final class LiveStation {
 
 enum SpecialStation: String, CaseIterable {
     case rediscover, deepCuts
-    /// Surprise Me. Not a tile: the button on the Discover pages starts it.
-    case surprise
 
     static let prefix = "fj-station:"
 
@@ -94,7 +85,6 @@ enum SpecialStation: String, CaseIterable {
         switch self {
         case .rediscover: "Rediscover"
         case .deepCuts: "Deep Cuts"
-        case .surprise: "Surprise Mix"
         }
     }
 
@@ -102,7 +92,6 @@ enum SpecialStation: String, CaseIterable {
         switch self {
         case .rediscover: "Favourites you haven't played lately"
         case .deepCuts: "Songs you haven't heard by artists you love"
-        case .surprise: "A shuffle of what you play, learning as it goes"
         }
     }
 
@@ -122,8 +111,7 @@ enum SpecialStation: String, CaseIterable {
     }
 
     /// Which of these to offer as tiles. Both are read from the server's
-    /// record of the account, so both are always worth a try. Surprise Me
-    /// has a button of its own.
+    /// record of the account, so both are always worth a try.
     @MainActor
     static func available() -> [SpecialStation] { [.rediscover, .deepCuts] }
 }
@@ -314,32 +302,6 @@ enum StationBuilder {
             q.artistIds = ids
             q.played = false
             return (await fetch(q), MixProfile(open: true))
-        case .surprise:
-            // A shuffle of what this account plays: what it has starred and
-            // played, more by the same artists, and a few songs from
-            // anywhere, so there is something to be surprised by.
-            let favs: JellyfinClient.MusicQuery = {
-                var q = JellyfinClient.MusicQuery(types: "Audio", sort: .random, limit: 150)
-                q.favorites = true
-                return q
-            }()
-            async let starred = fetch(favs)
-            async let top = try? client.mostPlayedSongs(limit: 100)
-            async let recent = try? client.recentlyPlayedSongs(limit: 60)
-            async let anywhere = fetch(JellyfinClient.MusicQuery(types: "Audio", sort: .random, limit: 50))
-            let known = (await starred) + (await top ?? []) + (await recent ?? [])
-            var artistIds: [String] = []
-            for song in known.shuffled() {
-                guard artistIds.count < 25 else { break }
-                if let id = (song.AlbumArtists?.first ?? song.ArtistItems?.first)?.Id, !artistIds.contains(id) { artistIds.append(id) }
-            }
-            var byArtists: [BaseItem] = []
-            if !artistIds.isEmpty {
-                var q = JellyfinClient.MusicQuery(types: "Audio", sort: .random, limit: 250)
-                q.artistIds = artistIds
-                byArtists = await fetch(q)
-            }
-            return (known + byArtists + (await anywhere), MixProfile(open: true, surprise: true))
         }
     }
 
@@ -352,9 +314,8 @@ enum StationBuilder {
 
     // MARK: Widening
 
-    /// Pull in more like `song` — when a Surprise Mix has found a direction
-    /// (see `StationSession.supports`), or when the pool runs low. Once per
-    /// song. False when the pool is no bigger for it.
+    /// Pull in more like `song` when the pool runs low. Once per song. False
+    /// when the pool is no bigger for it.
     @discardableResult
     static func widen(_ station: LiveStation, from song: BaseItem) async -> Bool {
         guard !station.widenedFrom.contains(song.Id) else { return false }
@@ -397,10 +358,6 @@ enum StationBuilder {
                     .reduce(into: Set<String>()) { $0.formUnion(MusicKeys.artists(of: $1)) }
                 pool = songs.filter { !top.isDisjoint(with: MusicKeys.artists(of: $0)) && ($0.userData.PlayCount ?? 0) == 0 }
                 profile = MixProfile(open: true)
-            case .surprise:
-                // Everything on the device: the shuffle is the point, and
-                // the downloads are already what this listener keeps.
-                profile = MixProfile(open: true, surprise: true)
             }
         } else if seed.isArtist {
             let keys = MusicKeys.artist(id: seed.Id, name: seed.Name)
@@ -505,25 +462,19 @@ enum ListenReaction: Sendable {
 /// on beyond its seed. Each reaction fades the ones before it a little, so
 /// the last few songs steer hardest, and the whole of it is forgotten when
 /// the station ends. That is what makes a station change course after two
-/// skips. A Surprise Mix also opens with `prior`, a few genres remembered
-/// from earlier sessions at this time of day, which fades out as soon as
-/// there are reactions of this session's own to go on.
+/// skips.
 struct StationSession: Sendable {
     private(set) var artists: [String: Double] = [:]
     private(set) var genres: [String: Double] = [:]
     /// Skipped or removed while this station played: not again.
     private(set) var passed = Set<String>()
-    /// How many reactions this station has had: how far a Surprise Mix has
-    /// come from being a shuffle.
+    /// How many reactions this station has had.
     private(set) var reactions = 0
     /// How much of what came before each reaction keeps.
     let decay: Double
-    /// Genre keys to -1...1: the opening nudge, from `MoodMemory`.
-    let prior: [String: Double]
 
-    init(decay: Double = 0.9, prior: [String: Double] = [:]) {
+    init(decay: Double = 0.9) {
         self.decay = decay
-        self.prior = prior
     }
     /// How each artist is spelled, by the keys `MusicKeys.artists` gives it
     /// — an id, a lowercased name — so `artistLeanings` can say who.
@@ -567,54 +518,6 @@ struct StationSession: Sendable {
         for k in genres.keys { genres[k]! *= decay }
         shift(song, by: Self.weight(reaction))
         if [.skippedEarly, .skippedMid, .removed].contains(reaction) { passed.insert(song.Id) }
-    }
-
-    /// How far a Surprise Mix's own reactions count yet, 0...1.
-    ///
-    /// The first song finished used to steer the next twenty-five as hard as
-    /// any later one: a song nobody chose, let play because nobody minded,
-    /// tilted the deal toward itself before there was anything else to go
-    /// on. Now the session's leanings come in gradually — about a fifth after
-    /// one reaction, half after three, nine-tenths by the tenth — which, at
-    /// a dozen songs to a forty-minute session, is a shuffle for the first
-    /// few and a mix by the middle.
-    var ramp: Double { 1 - exp(-Double(reactions) / 4) }
-
-    /// What a Surprise Mix makes of the session so far, for one song: its
-    /// leanings let in by `ramp`, and the remembered mood, fading.
-    ///
-    /// Leaning away comes in faster than leaning toward. A skip is the one
-    /// signal that is never passive, and someone who skips a lot is saying
-    /// most of what they have to say that way.
-    func surpriseLean(for song: BaseItem) -> Double {
-        let own = lean(for: song)
-        let share = own >= 0 ? ramp : ramp.squareRoot()
-        return own * share + priorLean(for: song)
-    }
-
-    /// The remembered mood's say over one song: up to a point and a half
-    /// either way to begin with — a nudge against a shuffle's five points of
-    /// luck — and a third of that after three reactions, next to nothing
-    /// after nine.
-    func priorLean(for song: BaseItem) -> Double {
-        guard !prior.isEmpty else { return 0 }
-        let keys = MusicKeys.genres(of: song)
-        guard !keys.isEmpty else { return 0 }
-        let mood = keys.reduce(0.0) { $0 + (prior[$1] ?? 0) } / Double(keys.count)
-        return 1.5 * mood * exp(-Double(reactions) / 3)
-    }
-
-    /// Whether a Surprise Mix has heard enough in this song's direction to
-    /// go looking for more of it: two songs by its artist played out, or two
-    /// in its genre, and never in the first few songs. Before this, every
-    /// song finished pulled sixty like it into the pool — the first one
-    /// included, which is how a session ended up being about whatever
-    /// happened to play first.
-    func supports(_ song: BaseItem) -> Bool {
-        guard reactions >= 3 else { return false }
-        let artist = MusicKeys.artists(of: song).map { artists[$0] ?? 0 }.max() ?? 0
-        let genre = MusicKeys.genres(of: song).map { genres[$0] ?? 0 }.max() ?? 0
-        return artist >= 1.5 || genre >= 0.9
     }
 
     func lean(for song: BaseItem) -> Double {

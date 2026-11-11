@@ -334,7 +334,7 @@ final class WatchLink: NSObject {
             case .seekTo(let seconds): guess.position = seconds
             case .seekBy(let delta): guess.position = max(0, guess.position + delta)
             case .setSpeed(let speed): guess.speed = speed
-            case .next, .previous: break
+            case .next, .previous, .instantMix: break
             }
             guess.at = now
             phonePlayback = guess

@@ -115,7 +115,7 @@ struct OfflineListenNowView: View {
             Text(ListenNowView.greetingText())
                 .font(.largeTitle.weight(.bold))
                 .foregroundStyle(Theme.text)
-            Button { surpriseMe() } label: { Label("Surprise Me", systemImage: "shuffle") }
+            Button { shuffleAll() } label: { Label(MusicMixes.shuffleAllTitle, systemImage: "shuffle") }
                 .appButtonStyle(prominent: true)
                 .buttonBorderShape(.capsule)
                 .controlSize(.small)
@@ -172,10 +172,10 @@ struct OfflineListenNowView: View {
         }
     }
 
-    private func surpriseMe() {
+    private func shuffleAll() {
         Task {
-            let result = await MusicMixes.startSurprise(cover: randomAlbums.randomElement(), localOnly: true)
-            if !result.started { app.toast("Nothing on this device to build a mix from yet", tone: .error) }
+            let result = await MusicMixes.shuffleAll(localOnly: true)
+            if !result.started { app.toast("Nothing on this device to shuffle yet", tone: .error) }
         }
     }
 
@@ -306,7 +306,7 @@ struct OnDeviceLibraryView: View {
 }
 
 /// The stations the offline Discover page builds from downloads, and its
-/// Surprise Me, on the Downloaded page too — where they can be reached with
+/// Shuffle All, on the Downloaded page too — where they can be reached with
 /// the server in reach, and are built from the downloads all the same. For
 /// a flight, or a plan with a cap on it.
 struct DownloadedStationsShelf: View {
@@ -323,11 +323,11 @@ struct DownloadedStationsShelf: View {
                 HStack(alignment: .firstTextBaseline) {
                     ShelfHeading(title: "Your Stations", subtitle: "Built from your downloads")
                     Spacer()
-                    Button { surpriseMe() } label: {
+                    Button { shuffleAll() } label: {
                         if isMixing {
                             ProgressView().controlSize(.small)
                         } else {
-                            Label("Surprise Me", systemImage: "shuffle")
+                            Label(MusicMixes.shuffleAllTitle, systemImage: "shuffle")
                         }
                     }
                     .appButtonStyle(prominent: true)
@@ -385,14 +385,14 @@ struct DownloadedStationsShelf: View {
         }
     }
 
-    /// Surprise Me, from downloads only: a shuffle of everything on the
-    /// device that learns from what is finished and skipped.
-    private func surpriseMe() {
+    /// Shuffle All, from downloads only: everything on the device in a
+    /// random order.
+    private func shuffleAll() {
         isMixing = true
         Task {
             defer { isMixing = false }
-            let result = await MusicMixes.startSurprise(cover: albums.randomElement(), localOnly: true)
-            if !result.started { app.toast("Nothing downloaded to build a mix from yet", tone: .error) }
+            let result = await MusicMixes.shuffleAll(localOnly: true)
+            if !result.started { app.toast("Nothing downloaded to shuffle yet", tone: .error) }
         }
     }
 }
