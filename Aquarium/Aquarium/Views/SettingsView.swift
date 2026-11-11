@@ -996,6 +996,21 @@ struct SettingsPageView: View {
     }
 }
 
+/// The page a `Route.settings` opens — see `SettingsRoute`.
+struct SettingsRouteView: View {
+    let route: SettingsRoute
+
+    var body: some View {
+        switch route {
+        case .appIcon: AppIconSettingsView()
+        case .tabBar: TabBarSettingsView()
+        case .syncMeasure: SyncMeasureView()
+        case .stationMix: StationMixSettingsPage()
+        case .customPlaylist: CustomPlaylistSettingsPage()
+        }
+    }
+}
+
 extension View {
     /// What a settings page wears when it is pushed onto the stack rather than
     /// shown beside the list: its title in the bar, the bar in the app's
@@ -1219,17 +1234,11 @@ private struct AppearanceSettingsPage: View {
 
             Section {
                 if UIApplication.shared.supportsAlternateIcons {
-                    NavigationLink {
-                        AppIconSettingsView()
-                            .clearsBottomChrome()
-                    } label: {
+                    NavigationLink(value: Route.settings(.appIcon)) {
                         LabeledContent("App Icon", value: iconTitle)
                     }
                 }
-                NavigationLink {
-                    TabBarSettingsView()
-                        .clearsBottomChrome()
-                } label: {
+                NavigationLink(value: Route.settings(.tabBar)) {
                     LabeledContent(app.usesSidebar ? "Sidebar" : "Tab Bar",
                                    value: prefs.tabBarOrder.isEmpty ? "Default" : "Custom")
                 }
@@ -1340,10 +1349,7 @@ private struct AudioSettingsPage: View {
             // measured and set; the row below is how.
             #if os(iOS)
             Section {
-                NavigationLink {
-                    SyncMeasureView()
-                        .clearsBottomChrome()
-                } label: {
+                NavigationLink(value: Route.settings(.syncMeasure)) {
                     Text(Copy.measureSync.name ?? "")
                 }
             } header: {
@@ -1415,10 +1421,7 @@ private struct MusicSettingsPage: View {
 
             Section {
                 Toggle(Copy.musicRomanize.name ?? "", isOn: $prefs.musicRomanizeNames)
-                NavigationLink {
-                    StationMixSettingsPage()
-                        .clearsBottomChrome()
-                } label: {
+                NavigationLink(value: Route.settings(.stationMix)) {
                     LabeledContent(Copy.stationMix.name ?? "", value: prefs.mixPoints.presetName)
                 }
             } header: {
@@ -1450,10 +1453,7 @@ private struct LiveTVSettingsPage: View {
 
             if prefs.liveTVSource == .custom {
                 Section {
-                    NavigationLink {
-                        CustomPlaylistSettingsPage()
-                            .clearsBottomChrome()
-                    } label: {
+                    NavigationLink(value: Route.settings(.customPlaylist)) {
                         LabeledContent("Custom playlist", value: Self.host(of: prefs.iptvPlaylistURL) ?? "Not set")
                     }
                 } footer: {

@@ -33,6 +33,20 @@ enum Route: Hashable, Sendable, Codable {
     /// A page inside the Music tab — an artist, an album, a genre, one of the
     /// library's lists. See `MusicRoute`.
     case music(MusicRoute)
+    /// A page a Settings page opens — the app icon, the sidebar's order.
+    /// See `SettingsRoute`.
+    case settings(SettingsRoute)
+}
+
+/// The pages Settings pushes on a phone or an iPad.
+///
+/// Routes on the section's path rather than `NavigationLink`s with a view
+/// inside, because a view-pushed page is not on the path and the model can't
+/// clear it. On an iPad the split view's detail column kept such a page when
+/// the sidebar went to Home: Home's row lit and the App Icon page stayed on
+/// screen. Pages pushed by value are the section's own and leave with it.
+enum SettingsRoute: String, Hashable, Sendable, Codable {
+    case appIcon, tabBar, syncMeasure, stationMix, customPlaylist
 }
 
 /// Where the Music tab can go. Its own enum rather than more cases on
