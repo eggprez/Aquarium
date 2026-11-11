@@ -994,7 +994,7 @@ private struct AudioTab: View {
                 PanelRows {
                     ForEach(options) { option in
                         PanelRow(title: option.label,
-                                 detail: option.needsNewStream ? "Reopens the stream with this track" : nil,
+                                 detail: player.audioDetail(for: option),
                                  isSelected: option.id == selected) {
                             player.selectAudio(option)
                         }
@@ -1017,7 +1017,10 @@ private struct AudioTab: View {
             // this title switches to it now when it has such a track.
             .onChange(of: prefs.audioLanguage) { _, code in
                 guard let option = player.audioOptions.first(where: { Languages.matches(preference: code, tag: $0.language) }),
-                      option.id != player.selectedAudioOption else { return }
+                      option.id != player.selectedAudioOption,
+                      // Not out of a download and onto the network for a
+                      // setting changed in passing.
+                      !(player.isLocal && option.needsNewStream) else { return }
                 player.selectAudio(option)
             }
             #endif

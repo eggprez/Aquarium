@@ -148,17 +148,28 @@ enum DownloadSubtitles {
     /// finished without the item to hand.
     @MainActor
     static func fetch(itemId: String, into folder: URL) async {
-        if let existing = index(in: folder), existing.complete,
-           existing.entries.count == local(in: folder).count { return }
+        let record = DownloadManager.shared.record(for: itemId)
+        let haveSubtitles: Bool = {
+            guard let existing = index(in: folder) else { return false }
+            return existing.complete && existing.entries.count == local(in: folder).count
+        }()
+        // The list of the title's soundtracks rides on the same look-up; see
+        // `DownloadAudioList`.
+        let haveAudioList = record?.isAudio == true || DownloadAudioList.exists(in: folder)
+        if haveSubtitles, haveAudioList { return }
         guard let item = try? await JellyfinClient.shared.item(itemId) else { return }
         // The version that was downloaded, which its address names; the
         // first of several versions has its own, differently numbered,
         // subtitle streams.
-        let downloaded = DownloadManager.shared.record(for: itemId)
+        let downloaded = record
             .flatMap { URLComponents(string: $0.sourceURL)?.queryItems }?
             .first { $0.name.caseInsensitiveCompare("MediaSourceId") == .orderedSame }?.value
         let source = item.MediaSources?.first { $0.Id == downloaded } ?? item.MediaSources?.first
-        await fetch(for: item, source: source, into: folder)
+        if !haveAudioList, let record, let source, source.MediaStreams != nil {
+            DownloadAudioList.save(
+                source: source, sourceURL: record.sourceURL, isStream: record.hlsPath != nil, into: folder)
+        }
+        if !haveSubtitles { await fetch(for: item, source: source, into: folder) }
     }
 
     // MARK: Naming

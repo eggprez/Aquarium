@@ -416,6 +416,7 @@ extension PlayerModel {
             itemId: next.Id, maxBitrate: opts.maxBitrate, forceTranscode: forced, live: false,
             startTicks: startTicks, fullEncode: opts.forceFullEncode,
             audioStreamIndex: opts.audioStreamIndex, subtitleStreamIndex: opts.subtitleStreamIndex,
+            mediaSourceId: next.MediaSources?.first?.Id,
             engine: kind
         ) else { return }
         guard generation == mine, item?.Id == current.Id, prefetched == nil, isActive else {

@@ -209,6 +209,9 @@ struct PlayerScreen: View {
         // and on a Mac the popovers take the window's appearance.
         .preferredColorScheme(.dark)
         .modifier(PlayerScreenLifecycle())
+        #if !os(tvOS)
+        .modifier(StreamForAudioPrompt())
+        #endif
         #if os(iOS)
         // The status bar comes and goes with the controls, as in Apple's
         // player; the home indicator dims on its own over a full-screen video.
@@ -393,3 +396,37 @@ private struct PlayerScreenLifecycle: ViewModifier {
             }
     }
 }
+
+// MARK: - Leaving a download for a soundtrack
+
+#if !os(tvOS)
+/// The question a download asks when a soundtrack it doesn't carry is
+/// picked: that track is on the server alone, so hearing it means streaming
+/// the title instead of playing the copy on this device.
+private struct StreamForAudioPrompt: ViewModifier {
+    @Environment(PlayerModel.self) private var player
+
+    func body(content: Content) -> some View {
+        let asking = Binding(
+            get: { player.audioNeedingStream != nil },
+            set: { if !$0 { player.audioNeedingStream = nil } })
+        content.alert(
+            "That audio track isn’t in the download",
+            isPresented: asking, presenting: player.audioNeedingStream
+        ) { option in
+            if JellyfinClient.shared.isOffline {
+                Button("OK", role: .cancel) {}
+            } else {
+                Button("Stream") { Task { await player.streamForAudio(option) } }
+                Button("Keep Download", role: .cancel) {}
+            }
+        } message: { option in
+            if JellyfinClient.shared.isOffline {
+                Text("“\(option.label)” wasn’t downloaded. To hear it you’ll need to go online and stream this instead.")
+            } else {
+                Text("“\(option.label)” wasn’t downloaded. To hear it, this has to be streamed from the server instead of played from the download, which needs a connection and uses data.")
+            }
+        }
+    }
+}
+#endif

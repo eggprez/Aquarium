@@ -1927,6 +1927,8 @@ final class JellyfinClient {
     /// question for the server rather than something `AVPlayerItem` can be told.
     /// `nil` leaves the choice to the server's own defaults; `-1` for the
     /// subtitle means none, which is Jellyfin's own spelling of off.
+    /// `mediaSourceId` is the version they are counted in, and the server
+    /// ignores them without it — see `PlaybackInfoBody.MediaSourceId`.
     func resolvePlayback(
         itemId: String,
         maxBitrate: Int? = nil,
@@ -1936,6 +1938,7 @@ final class JellyfinClient {
         fullEncode: Bool = false,
         audioStreamIndex: Int? = nil,
         subtitleStreamIndex: Int? = nil,
+        mediaSourceId: String? = nil,
         audio: Bool = false,
         engine: PlaybackEngineKind = .platformDefault
     ) async throws -> PlaybackSource {
@@ -1979,7 +1982,8 @@ final class JellyfinClient {
             EnableDirectStream: !forceTranscode,
             EnableTranscoding: true,
             AudioStreamIndex: audioStreamIndex,
-            SubtitleStreamIndex: subtitleStreamIndex
+            SubtitleStreamIndex: subtitleStreamIndex,
+            MediaSourceId: (mediaSourceId?.isEmpty ?? true) ? nil : mediaSourceId
         )
         // A live channel is given the time it takes — see `patientTimeout`.
         // And a slow tuner is not the server being gone, so it is not counted
@@ -2094,6 +2098,7 @@ final class JellyfinClient {
                 fullEncode: fullEncode,
                 audioStreamIndex: audioStreamIndex,
                 subtitleStreamIndex: subtitleStreamIndex,
+                mediaSourceId: mediaSourceId,
                 audio: audio,
                 engine: engine
             ), escalated.isTranscode {
@@ -2270,6 +2275,15 @@ final class JellyfinClient {
         /// written into the body would be answering a question nobody asked.
         let AudioStreamIndex: Int?
         let SubtitleStreamIndex: Int?
+        /// Which version of the title the two indexes above are counted in.
+        /// Not a nicety: the server applies a chosen audio or subtitle track
+        /// only to the source this names, and with no name it applies them
+        /// to none — the stream comes back with the file's default track and
+        /// an address saying so. It looked as though it worked because the
+        /// server remembers, per person and title, the track the progress
+        /// reports name, and that is the reported one: the first pick of a
+        /// track was ignored and every pick after it honoured.
+        let MediaSourceId: String?
     }
 
     // MARK: - Playback reporting
