@@ -129,12 +129,12 @@ struct ListenNowView: View {
                 .font(.largeTitle.weight(.bold))
                 .foregroundStyle(Theme.text)
             Button {
-                Task { await surpriseMe() }
+                Task { await shuffleAll() }
             } label: {
                 if isMixing {
                     ProgressView().controlSize(.small)
                 } else {
-                    Label("Surprise Me", systemImage: "shuffle")
+                    Label(MusicMixes.shuffleAllTitle, systemImage: "shuffle")
                 }
             }
             .appButtonStyle(prominent: true)
@@ -164,16 +164,14 @@ struct ListenNowView: View {
         if result.isLocal { app.toast("The server didn't answer — mixed from your downloads", tone: .info) }
     }
 
-    /// A mix with nothing picked first. One of the stations the page already
-    /// worked out from what this account plays, chosen at random — and for an
-    /// account that hasn't played or starred anything yet, a random album is
-    /// as good a seed as any.
-    private func surpriseMe() async {
+    /// The whole library in a random order. A mix like one song is the
+    /// player's Instant Mix.
+    private func shuffleAll() async {
         isMixing = true
         defer { isMixing = false }
-        let result = await MusicMixes.startSurprise()
-        if result.isLocal, result.started { app.toast("The server didn't answer — mixed from your downloads", tone: .info) }
-        guard result.started else { return app.toast("Nothing in the library to build a mix from yet", tone: .error) }
+        let result = await MusicMixes.shuffleAll()
+        if result.isLocal, result.started { app.toast("The server didn't answer — shuffling your downloads", tone: .info) }
+        guard result.started else { return app.toast("Nothing in the library to shuffle yet", tone: .error) }
     }
 
     private func reload() async {

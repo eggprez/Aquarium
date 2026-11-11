@@ -608,18 +608,24 @@ struct SettingsView: View {
         }
     }
 
-    /// Stations learn only while they play, so there is nothing kept here
-    /// to count or forget — but for the moods Surprise Me remembers by time
-    /// of day, which are only a place to start (see `MoodMemory`).
+    /// Whose mix the player's Instant Mix plays, and how stations name
+    /// artists. Stations learn only while they play, so there is nothing
+    /// kept here to count or forget.
     private var stationsSection: some View {
         @Bindable var prefs = prefs
         return Section {
+            Picker(selection: $prefs.mixSource) {
+                ForEach(MixSource.allCases, id: \.self) { Text($0.label).tag($0) }
+            } label: {
+                MacSettingLabel(Copy.mixSource)
+            }
+            .note(Copy.mixSource)
             Toggle(isOn: $prefs.musicRomanizeNames) { MacSettingLabel(Copy.musicRomanize) }
                 .note(Copy.musicRomanize)
         } header: {
             Text("Stations")
         } footer: {
-            MacSettingFooter(Copy.musicRomanize)
+            MacSettingFooter(Copy.mixSource, Copy.musicRomanize)
         }
     }
 
@@ -1395,6 +1401,16 @@ private struct MusicSettingsPage: View {
                 Text("Streaming")
             } footer: {
                 SettingsFooter(Copy.losslessOnCellular)
+            }
+
+            Section {
+                Picker(Copy.mixSource.name ?? "", selection: $prefs.mixSource) {
+                    ForEach(MixSource.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+            } header: {
+                Text("Mixes")
+            } footer: {
+                SettingsFooter(Copy.mixSource)
             }
 
             Section {
@@ -2187,7 +2203,11 @@ enum SettingsCopy {
     )
     static let musicAutoplay = SettingNote(
         name: "Keep playing at the end",
-        text: "When the queue runs out, carry on with songs like the last one, built by the server."
+        text: "When the queue runs out, carry on with a mix of the last song, from the source chosen under Mixes."
+    )
+    static let mixSource = SettingNote(
+        name: "Mixes",
+        text: "Whose mix Instant Mix in the player, Start Station and Keep playing at the end use. Aquarium builds its own from what the server finds similar and re-deals it as you skip; Jellyfin Instant Mix plays the server's mix as it is — on a server with the AudioMuse-AI plugin, that's AudioMuse's. Without a connection to the server it's always Aquarium's, from your downloads."
     )
     static let musicRomanize = SettingNote(
         name: "Romanize artist names",

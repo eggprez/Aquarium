@@ -9,7 +9,7 @@
 import * as m from "../musicApi";
 import * as audio from "../audio";
 import { el, clear, art, toast, openActionMenu, type MenuAction } from "../ui";
-import { mi, iconButton, musicActions, showSongInfo, type MusicIcon } from "./musicCommon";
+import { mi, iconButton, musicActions, showSongInfo, instantMixFromCurrent, type MusicIcon } from "./musicCommon";
 import { openMixDialog } from "./music";
 
 let bar: HTMLElement | null = null;
@@ -202,6 +202,12 @@ function buildNowPlaying(): HTMLElement {
   const repeat = iconButton("repeat", "Repeat", () => void audio.cycleRepeat(), "np-toggle");
   const vol = volumeControl();
   const speed = el("button", { class: "btn small np-speed", onClick: (ev: MouseEvent) => openActionMenu(ev.currentTarget as HTMLElement, "Speed", speedActions(), { fixed: true }) });
+  // Instant Mix from the song that's on: it keeps playing and the mix
+  // replaces Up Next. Who builds the mix is the Mixes setting.
+  const mixBtn = iconButton("station", "Instant Mix", () => {
+    mixBtn.disabled = true;
+    void instantMixFromCurrent().finally(() => (mixBtn.disabled = false));
+  }, "np-toggle");
   const sleepBtn = iconButton("sleep", "Sleep timer", (ev) => openActionMenu(ev.currentTarget as HTMLElement, "Sleep Timer", sleepActions(), { fixed: true }), "np-toggle");
   const soundCheck = el("button", {
     class: "btn small np-sc",
@@ -227,7 +233,7 @@ function buildNowPlaying(): HTMLElement {
     el("div", { class: "np-meta" }, [title, sub, chapter]),
     el("div", { class: "np-scrub" }, [scrub.root, el("div", { class: "np-times" }, [tPos, tLeft])]),
     el("div", { class: "np-transport" }, [shuffle, prev, back, playBtn, fwd, next, repeat]),
-    el("div", { class: "np-extras" }, [vol.root, speed, soundCheck, sleepBtn, more]),
+    el("div", { class: "np-extras" }, [vol.root, speed, soundCheck, mixBtn, sleepBtn, more]),
   ]);
   const root = el("div", { id: "now-playing", class: "hidden", role: "dialog", "aria-label": "Now Playing" }, [
     backdrop,
@@ -253,7 +259,7 @@ function buildNowPlaying(): HTMLElement {
         onClick: () => { npTab = k; queueSig = ""; drawPanel(true); },
       }, [label]));
     }
-    const sig = `${npTab}|${q.index}|${q.items.map((i) => i.Id).join(",")}|${item?.Id}|${lyricLines ? lyricLines.length : -1}`;
+    const sig = `${npTab}|${q.offlineMix}|${q.index}|${q.items.map((i) => i.Id).join(",")}|${item?.Id}|${lyricLines ? lyricLines.length : -1}`;
     if (!force && sig === queueSig) return;
     queueSig = sig;
     clear(panel);
@@ -333,6 +339,7 @@ function buildNowPlaying(): HTMLElement {
     speed.toggleAttribute("hidden", !book);
     speed.textContent = `${audio.bookSpeed()}×`;
     soundCheck.toggleAttribute("hidden", book);
+    mixBtn.toggleAttribute("hidden", book || item.Type !== "Audio");
     soundCheck.classList.toggle("active", audio.soundCheckOn());
     sleepBtn.classList.toggle("on", audio.sleepState().mode !== "off");
     vol.sync();
@@ -355,7 +362,10 @@ function upNextList(): HTMLElement {
   const wrap = el("div", { class: "np-queue" });
   const upcoming = audio.upNext();
   wrap.append(el("div", { class: "np-queue-head" }, [
-    el("span", {}, [q.source ? `${q.title} · keeps going` : q.title ? `Playing from ${q.title}` : "Up Next"]),
+    el("div", { class: "np-queue-title" }, [
+      el("span", {}, [q.source ? `${q.title} · keeps going` : q.title ? `Playing from ${q.title}` : "Up Next"]),
+      q.offlineMix ? el("span", { class: "np-offline-mix" }, ["Offline — mixed from your downloads"]) : null,
+    ]),
     upcoming.length ? el("button", { class: "btn small", onClick: () => void audio.clearUpNext() }, ["Clear"]) : null,
   ]));
   if (!upcoming.length) {

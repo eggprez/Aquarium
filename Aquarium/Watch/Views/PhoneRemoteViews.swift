@@ -312,8 +312,18 @@ struct PhonePlayerScreen: View {
                 }
             }
 
+            if !isBook, !state.isVideo {
+                Button { link.remote(.instantMix) } label: {
+                    Label("Instant Mix", systemImage: "wand.and.stars")
+                        .font(.caption2.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+
             if !isBook {
                 let notes = [
+                    state.isOfflineMix ? "Offline mix" : nil,
                     state.upNextCount > 0 ? "\(state.upNextCount) up next" : nil,
                     "On iPhone",
                 ].compactMap { $0 }

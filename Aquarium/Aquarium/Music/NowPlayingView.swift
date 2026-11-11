@@ -129,6 +129,7 @@ struct NowPlayingView: View {
     @State private var showQueue = false
     @State private var showLyrics = false
     @State private var showLeanings = false
+    @State private var isMixing = false
     @State private var scrubbing: Double?
 
     /// What sits where the cover normally is.
@@ -310,6 +311,16 @@ struct NowPlayingView: View {
                     .font(.footnote.weight(.semibold))
                     .lineLimit(1)
                     .foregroundStyle(.white.opacity(0.9))
+                // Said for as long as the offline mix is what's queued — back
+                // online included: it only changes when Instant Mix is
+                // pressed again.
+                if music.mixIsOfflineFallback {
+                    Label("Offline — mixed from your downloads", systemImage: "wifi.slash")
+                        .font(.caption2.weight(.semibold))
+                        .lineLimit(1)
+                        .foregroundStyle(Theme.link)
+                        .padding(.top, 1)
+                }
             }
             .frame(maxWidth: .infinity)
             Menu {
@@ -553,6 +564,11 @@ struct NowPlayingView: View {
                 .disabled(song.isAudiobook)
                 .opacity(song.isAudiobook ? 0.3 : 1)
             }
+            // A mix like this song, after it, in place of what was coming.
+            if song.isSong {
+                Spacer()
+                instantMixButton(song)
+            }
             // A station only: what it has come to lean toward, by points —
             // the artists and genres what was played out and skipped has
             // put ahead.
@@ -583,6 +599,48 @@ struct NowPlayingView: View {
             } else {
                 toggle("list.bullet", isOn: showQueue, label: "Queue") { setQueue(!showQueue) }
             }
+        }
+    }
+
+    private func instantMixButton(_ song: BaseItem) -> some View {
+        Button {
+            Task { await instantMix(from: song) }
+        } label: {
+            Group {
+                if isMixing {
+                    ProgressView().tint(.white)
+                } else {
+                    Image(systemName: "wand.and.stars")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+            }
+            .frame(width: 44, height: 40)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isMixing)
+        .accessibilityLabel("Instant Mix")
+    }
+
+    /// Instant Mix: this song keeps playing, and a mix of it replaces Up
+    /// Next — the server's or Aquarium's, as Settings says. Offline it can
+    /// only be Aquarium's, from downloads, and that is said here and at the
+    /// top of the player.
+    private func instantMix(from song: BaseItem) async {
+        isMixing = true
+        defer { isMixing = false }
+        let result = await MusicMixes.instantMix(from: song)
+        guard result.started else {
+            return app.toast(
+                result.isLocal ? "Nothing on this device to mix with this song" : "Couldn't build a mix from this song",
+                tone: .error
+            )
+        }
+        if music.mixIsOfflineFallback {
+            app.toast("Offline — Instant Mix is Aquarium's, from your downloads", tone: .info)
+        } else {
+            app.toast("Instant Mix is up next", tone: .ok)
         }
     }
 
@@ -631,14 +689,6 @@ private struct StationLeaningsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                if station.profile.isSurprise, !MoodMemory.describe(session.prior).isEmpty, session.reactions < 9 {
-                    // The remembered mood, while it still has a say — see
-                    // `StationSession.priorLean`.
-                    Section {
-                        Text("Started with a lean toward \(MoodMemory.describe(session.prior).formatted(.list(type: .and))), from what you've played at this time of day. It fades as you skip and let songs play.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
                 if session.reactions == 0 {
                     Section {
                         Text("Nothing is ahead yet. Let a few songs play out and skip the ones that don't fit, and the mix starts to lean.")

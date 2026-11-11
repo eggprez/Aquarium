@@ -1007,6 +1007,26 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     ])
   );
 
+  // ---------- Music ----------
+  root.append(
+    el("div", { class: "settings-block" }, [
+      el("h3", {}, ["Music"]),
+      row(
+        "Mixes",
+        "Who builds a mix when you press Instant Mix or start a station. Aquarium's own stations score songs by artist, genre and era (tuned with Station Mix); Jellyfin Instant Mix plays what the server sends, in the server's order.",
+        choice(cfg, "music_mix_source", [
+          ["aquarium", "Aquarium"],
+          ["jellyfin", "Jellyfin Instant Mix"],
+        ])
+      ),
+      el("div", { class: "settings-row" }, [
+        el("div", { class: "sub" }, [
+          "A Jellyfin server running the AudioMuse-AI plugin answers Instant Mix with AudioMuse's similarity automatically. Without a server connection, Aquarium always uses its own mix from your downloads.",
+        ]),
+      ]),
+    ])
+  );
+
   // ---------- Picture ----------
   const pictureSliders = PICTURE_CONTROLS.map((control) => ({
     control,

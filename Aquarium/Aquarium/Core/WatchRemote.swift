@@ -95,6 +95,7 @@ final class WatchRemote {
             _ = music.speed
             _ = music.hasNext
             _ = music.upNextCount
+            _ = music.mixIsOfflineFallback
             _ = music.chapters
             return
         }
@@ -177,6 +178,7 @@ final class WatchRemote {
                 hasNext: music.hasNext,
                 hasPrevious: music.hasPrevious,
                 upNextCount: music.upNextCount,
+                isOfflineMix: music.mixIsOfflineFallback,
                 chapter: music.currentChapter?.Name,
                 volume: volume
             )
@@ -320,6 +322,13 @@ final class WatchRemote {
             case .seekTo(let seconds): music.seek(to: seconds)
             case .seekBy(let delta): music.seek(by: delta)
             case .setSpeed(let speed): music.speed = speed
+            case .instantMix:
+                if let song = music.current, song.isSong {
+                    Task {
+                        await MusicMixes.instantMix(from: song)
+                        changed()
+                    }
+                }
             }
         } else {
             let video = PlayerModel.shared
@@ -328,7 +337,7 @@ final class WatchRemote {
             case .play: video.resume()
             case .pause: video.pause()
             case .togglePlayPause: video.togglePlayPause()
-            case .next, .previous: break
+            case .next, .previous, .instantMix: break
             case .seekTo(let seconds): video.seek(to: seconds)
             case .seekBy(let delta): video.seek(by: delta)
             case .setSpeed(let speed): video.speed = speed

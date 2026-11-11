@@ -12,13 +12,13 @@ import * as m from "../musicApi";
 import * as audio from "../audio";
 import { getCached, setCached, itemSignature } from "../cache";
 import { el, clear, toast, emptyState, errorState, openDialog, skeletonRow, spinner, openActionMenu } from "../ui";
-import { buildSurprise, DIALS, DIAL_INFO, PRESETS, BUDGET, getMixPoints, saveMixPoints, withDial, remaining, presetName, type MixPoints } from "../stations";
+import { DIALS, DIAL_INFO, PRESETS, BUDGET, getMixPoints, saveMixPoints, withDial, remaining, presetName, type MixPoints } from "../stations";
 import {
   getSmartPlaylists, saveSmartPlaylist, deleteSmartPlaylist, smartPlaylistSongs, asItem, describe, blankSmartPlaylist, type SmartPlaylist,
 } from "../smartPlaylists";
 import {
   mi, musicCard, shelf, grid, songList, songRow, pageHeader, playButtons, link, askName, newPlaylistWith,
-  playlistsChanged, startStation, primePlaylists, markPlaying, iconButton, musicActions,
+  playlistsChanged, startStation, shuffleAll, primePlaylists, markPlaying, iconButton, musicActions,
 } from "./musicCommon";
 import { renderDownloaded } from "./musicDownloads";
 
@@ -123,13 +123,10 @@ async function fetchDiscover(): Promise<DiscoverData> {
   };
 }
 
-async function surprise(btn: HTMLButtonElement): Promise<void> {
+async function shuffleAllFrom(btn: HTMLButtonElement): Promise<void> {
   btn.disabled = true;
   try {
-    const { source, first } = await buildSurprise();
-    await audio.play(first, 0, { title: source.title, source });
-  } catch (e) {
-    report(e);
+    await shuffleAll();
   } finally {
     btn.disabled = false;
   }
@@ -160,11 +157,11 @@ function musicTabs(active: string): HTMLElement {
 }
 
 async function renderDiscover(root: HTMLElement): Promise<void> {
-  const surpriseBtn = el("button", { class: "btn primary", onClick: () => void surprise(surpriseBtn) }, [mi("shuffle"), " Surprise Me"]) as HTMLButtonElement;
+  const shuffleBtn = el("button", { class: "btn primary", onClick: () => void shuffleAllFrom(shuffleBtn) }, [mi("shuffle"), " Shuffle All"]) as HTMLButtonElement;
   const head = el("div", { class: "mu-page-head" }, [
     el("h1", { class: "page-title" }, ["Listen Now"]),
     el("div", { class: "mu-head-buttons" }, [
-      surpriseBtn,
+      shuffleBtn,
       el("button", { class: "btn", onClick: openMixDialog }, [mi("mix"), " Station Mix…"]),
     ]),
   ]);

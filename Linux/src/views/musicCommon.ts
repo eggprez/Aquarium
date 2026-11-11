@@ -5,9 +5,9 @@
 import * as api from "../api";
 import * as m from "../musicApi";
 import * as audio from "../audio";
-import { buildStation } from "../stations";
+import { buildStation, buildInstantMix, buildOfflineMix, getMixSource } from "../stations";
 import { smartPlaylistSongs, getSmartPlaylists } from "../smartPlaylists";
-import { downloadMusicAction } from "./musicDownloads";
+import { downloadMusicAction, downloadedItems } from "./musicDownloads";
 import { el, art, toast, openDialog, attachContextMenu, openActionMenu, type MenuAction, noart } from "../ui";
 
 // ---------- Icons the shared set doesn't have ----------
@@ -112,11 +112,85 @@ export async function playThing(item: any, opts: { shuffle?: boolean } = {}): Pr
   }
 }
 
+// ---------- Mixes ----------
+
+const OFFLINE_MIX_NOTE = "Offline — mixed from your downloads";
+
+interface Mix {
+  title: string;
+  items: any[];
+  source: audio.QueueSource | null;
+  offline: boolean;
+}
+
+async function offlineMix(seed: any): Promise<Mix> {
+  const songs = (await downloadedItems()).filter((i) => i.Type === "Audio");
+  const { source, first } = buildOfflineMix(seed, songs);
+  return { title: source.title, items: first, source, offline: true };
+}
+
+/** A mix from `seed`, by whoever the Mixes setting names. With no server it
+ *  is always the app's own, from downloaded songs. A Jellyfin Instant Mix is
+ *  played as the server sent it and doesn't keep going on its own. */
+async function buildMix(seed: any): Promise<Mix> {
+  if (api.isOffline()) return offlineMix(seed);
+  try {
+    if (getMixSource() === "jellyfin") {
+      const items = await buildInstantMix(seed);
+      return { title: `${seed.Name ?? "Instant"} Mix`, items, source: null, offline: false };
+    }
+    const { source, first } = await buildStation(seed);
+    return { title: source.title, items: first, source, offline: false };
+  } catch (e) {
+    // The server went away mid-build: fall back to downloads.
+    if (api.isOffline()) return offlineMix(seed);
+    throw e;
+  }
+}
+
 export async function startStation(item: any): Promise<void> {
   try {
-    toast(`Starting a station from ${item.Name ?? "that"}…`);
-    const { source, first } = await buildStation(item);
-    await audio.play(first, 0, { title: source.title, source });
+    toast(`Starting a mix from ${item.Name ?? "that"}…`);
+    const mix = await buildMix(item);
+    if (mix.offline) toast(OFFLINE_MIX_NOTE, "info");
+    await audio.play(mix.items, 0, { title: mix.title, source: mix.source, offlineMix: mix.offline });
+  } catch (e) {
+    report(e);
+  }
+}
+
+/** Instant Mix from the song that's playing: it keeps playing, and the mix
+ *  replaces everything after it. */
+export async function instantMixFromCurrent(): Promise<void> {
+  const song = audio.current();
+  if (!song || song.Type !== "Audio") return;
+  try {
+    const mix = await buildMix(song);
+    const after = mix.items[0]?.Id === song.Id ? mix.items.slice(1) : mix.items;
+    if (!after.length) throw new Error("Nothing to mix with that song");
+    if (audio.current()?.Id !== song.Id) return;
+    await audio.replaceUpNext(after, { title: mix.title, source: mix.source, offlineMix: mix.offline });
+    toast(mix.offline ? OFFLINE_MIX_NOTE : `Instant Mix from ${song.Name ?? "this song"}`, mix.offline ? "info" : "ok");
+  } catch (e) {
+    report(e);
+  }
+}
+
+/** Shuffle All: the whole library in a random order — a plain shuffle, not a
+ *  station. Offline, every downloaded song. */
+export async function shuffleAll(): Promise<void> {
+  try {
+    let songs: any[];
+    if (api.isOffline()) {
+      songs = (await downloadedItems()).filter((i) => i.Type === "Audio");
+    } else {
+      songs = (await m.music({ types: "Audio", sort: "random", limit: 500 })).Items;
+    }
+    if (!songs.length) {
+      toast(api.isOffline() ? "No downloaded songs to shuffle" : "There's nothing in your music library to shuffle yet", "info");
+      return;
+    }
+    await audio.play(songs, 0, { title: "Shuffle All", shuffle: true });
   } catch (e) {
     report(e);
   }

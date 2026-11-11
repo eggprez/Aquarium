@@ -370,6 +370,9 @@ struct PhonePlaybackState: Codable, Hashable, Sendable {
     var hasNext = false
     var hasPrevious = false
     var upNextCount = 0
+    /// What is queued is a mix the phone built from its downloads because
+    /// it was offline when Instant Mix was pressed.
+    var isOfflineMix = false
     /// The chapter a book is in, when it has them.
     var chapter: String?
     /// The phone's output volume, 0...1, so the watch can show it move.
@@ -384,7 +387,7 @@ struct PhonePlaybackState: Codable, Hashable, Sendable {
 extension PhonePlaybackState {
     private enum CodingKeys: String, CodingKey {
         case itemId, title, subtitle, isAudiobook, isVideo, isPlaying, position, duration, speed
-        case hasNext, hasPrevious, upNextCount, chapter, volume, artwork, at
+        case hasNext, hasPrevious, upNextCount, isOfflineMix, chapter, volume, artwork, at
     }
 
     /// Key by key, for the same reason as `PhoneContext`.
@@ -402,6 +405,7 @@ extension PhonePlaybackState {
         hasNext = try c.decodeIfPresent(Bool.self, forKey: .hasNext) ?? false
         hasPrevious = try c.decodeIfPresent(Bool.self, forKey: .hasPrevious) ?? false
         upNextCount = try c.decodeIfPresent(Int.self, forKey: .upNextCount) ?? 0
+        isOfflineMix = try c.decodeIfPresent(Bool.self, forKey: .isOfflineMix) ?? false
         chapter = try c.decodeIfPresent(String.self, forKey: .chapter)
         volume = try c.decodeIfPresent(Double.self, forKey: .volume)
         artwork = try c.decodeIfPresent(Data.self, forKey: .artwork)
@@ -432,6 +436,8 @@ enum RemoteCommand: Codable, Hashable, Sendable {
     case seekTo(Double)
     case seekBy(Double)
     case setSpeed(Double)
+    /// A mix of the song playing in place of what comes after it.
+    case instantMix
 }
 
 struct WatchLogChunk: Codable, Sendable {
