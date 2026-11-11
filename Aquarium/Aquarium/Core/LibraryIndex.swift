@@ -29,6 +29,11 @@
 
 import Foundation
 import Observation
+#if os(iOS) || os(tvOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 @MainActor
 @Observable
@@ -667,9 +672,12 @@ final class LibraryIndex {
 
     // MARK: - Artwork
 
-    /// Save every poster, logo and episode still that isn't on disk yet.
-    /// Backdrops are left to be saved as they are seen: they are the large
-    /// ones, and most are never looked at.
+    /// Save every poster, logo and episode still that isn't on disk yet, then
+    /// the backdrop of every film and show — what the banner at the top of
+    /// Home draws, at the size it draws it on this screen — so the banner is
+    /// still a picture when the server can't be reached. Backdrops go last:
+    /// they are the large ones, and a page of posters is what most screens
+    /// need first.
     private func startArtwork() {
         guard isEnabled, isReady, artworkTask == nil else { return }
         let urls = artworkURLs()
@@ -734,7 +742,9 @@ final class LibraryIndex {
     private func artworkURLs() -> [URL] {
         let poster = Int(Metrics.posterWidth * 2)
         let still = Int(Metrics.stillWidth * 2)
+        let hero = Self.heroBackdropWidth
         var out: [URL] = []
+        var backdrops: [URL] = []
         out.reserveCapacity(items.count + items.count / 4)
         for item in items.values {
             switch item.kind {
@@ -748,9 +758,38 @@ final class LibraryIndex {
                 // season's logo is its show's, filed once under the show.
                 if let url = Artwork.url(item, type: "Primary", width: poster) { out.append(url) }
                 if let url = Artwork.logo(item, width: 700) { out.append(url) }
+                // The hero's backdrop too, for films and shows — the kinds the
+                // banner draws from the copy (see `spotlight`).
+                if item.kind == "Movie" || item.kind == "Series", item.BackdropImageTags?.isEmpty == false,
+                   let url = Artwork.url(item, type: "Backdrop", width: hero) {
+                    backdrops.append(url)
+                }
             }
         }
-        return out
+        return out + backdrops
+    }
+
+    /// How wide the banner at the top of Home asks for a backdrop on this
+    /// screen: the screen's long side in pixels, in the steps the loader asks
+    /// in, never less than the hero's fixed width and never past 4K. Any saved
+    /// copy at three quarters of the width asked for or more is used as it is
+    /// (see `ImageLoader`), so this answers the hero however the window or
+    /// the device is turned.
+    @MainActor
+    static var heroBackdropWidth: Int {
+        #if os(iOS)
+        let bounds = UIScreen.main.bounds
+        let points = max(bounds.width, bounds.height)
+        let scale = UIScreen.main.scale
+        #elseif os(macOS)
+        let points = NSScreen.main?.frame.width ?? 1440
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        #else
+        let points: CGFloat = 0
+        let scale: CGFloat = 1
+        #endif
+        let asked = ImageLoader.requestWidth(points: points, displayScale: scale)
+        return max(HeroHeader.backdropWidth, min(3840, asked))
     }
 
     private func saveArtwork(_ urls: [URL]) async {

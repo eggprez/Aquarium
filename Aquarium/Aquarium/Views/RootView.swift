@@ -493,16 +493,17 @@ struct RootView: View {
                 MacSidebarRows()
             }
             .navigationTitle("Aquarium")
-            .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 300)
+            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 280)
             .safeAreaInset(edge: .bottom) { SidebarFooter() }
             #else
             // The app's own column — see `PadSidebar`. Its header stands in
             // for the navigation bar, toggle included. Left to itself an
             // iPad's sidebar is 320 points, which held upright is two fifths
-            // of the screen spent on ten short words.
+            // of the screen spent on ten short words. It takes what its
+            // longest row needs and no more; the page beside it is the point.
             PadSidebar { sidebarVisibility = .detailOnly }
                 .toolbar(.hidden, for: .navigationBar)
-                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 300)
+                .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 280)
             #endif
         } detail: {
             withToasts(

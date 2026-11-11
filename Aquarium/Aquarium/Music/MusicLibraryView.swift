@@ -90,10 +90,24 @@ final class PagedItems {
 
     /// The item the A–Z index lands on for `letter`: the first at or after
     /// it, fetching up to there first when it is past what is loaded.
+    ///
+    /// Without a count — songs, whose server-side name filter reads the
+    /// track-numbered `SortName` rather than the title the list is in — it
+    /// reads ahead a few pages at a time until the letter turns up or the
+    /// list ends.
     func jump(to letter: String) async -> String? {
         if let hit = LetterIndex.first(in: items, atOrAfter: letter) { return hit.Id }
-        guard hasMore, let countBefore, let before = try? await countBefore(letter) else { return items.last?.Id }
-        await load(through: before)
+        guard hasMore else { return items.last?.Id }
+        if let countBefore {
+            guard let before = try? await countBefore(letter) else { return items.last?.Id }
+            await load(through: before)
+        } else {
+            while hasMore, !Task.isCancelled, LetterIndex.first(in: items, atOrAfter: letter) == nil {
+                let had = items.count
+                await load(through: items.count + pageSize * 3)
+                if items.count == had { break }
+            }
+        }
         guard !Task.isCancelled else { return nil }
         return LetterIndex.first(in: items, atOrAfter: letter)?.Id ?? items.last?.Id
     }
@@ -321,12 +335,8 @@ struct SongsView: View {
                 q.searchTerm = term.isEmpty ? nil : term
                 return try await client.music(q)
             }
-            p.countBefore = { letter in
-                var q = JellyfinClient.MusicQuery(types: "Audio", sort: .name, startIndex: 0, limit: 1)
-                q.searchTerm = term.isEmpty ? nil : term
-                q.nameLessThan = letter
-                return try await client.music(q).total
-            }
+            // No count: the server's name filter reads a song's track-numbered
+            // `SortName`, not its title. `jump` reads ahead instead.
             paged = p
             await p.reload()
         }
