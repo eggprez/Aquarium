@@ -2483,10 +2483,12 @@ enum SettingsCopy {
         text: "Your server, your sign-in and everything on this screen follow you to your other Apple TVs, iPhones, iPads and Macs through iCloud. Signing out anywhere signs out everywhere. Volume, the audio delay and this device's identity to the server stay where they are — those describe the room, not the account."
     )
     static let libraryCopy: SettingNote = {
-        var text = "Saves the details of every film, show, season and episode on this device, with their posters, episode stills and the title logos shown on Home's banners. After the first sync, opening the app only fetches what changed: library pages open straight away, and can still be browsed when the server can't be reached. Backdrops are saved as you come across them. Turning this off deletes the copy."
         #if os(iOS)
-        text += " Album and audiobook covers are saved too."
+        let covers = " Album and audiobook covers are saved too."
+        #else
+        let covers = ""
         #endif
+        var text = "Saves the details of every film, show, season and episode on this device, with their posters, episode stills and the title logos shown on Home's banners.\(covers) After the first sync, opening the app only fetches what changed: library pages open straight away, and can still be browsed when the server can't be reached. Backdrops are saved as you come across them. Turning this off deletes the copy."
         #if os(tvOS)
         text += " Apple TV may clear the copy when it runs short of storage; it is rebuilt at the next sync."
         #endif
