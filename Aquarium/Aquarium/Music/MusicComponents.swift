@@ -906,6 +906,21 @@ struct MusicItemMenu: View {
         }
     }
 
+    /// About what downloading these adds to this device: songs come down as
+    /// their files, so a figure needs the files' sizes, which the album and
+    /// playlist pages fetch for this menu (see `DownloadSizes`).
+    private func sizeText(_ songs: [BaseItem]) -> String? {
+        DownloadSizes.text(DownloadSizes.shared.bytes(songs, quality: MusicFiles.quality))
+    }
+
+    /// About what the watch will be sent. Every watch download is 128 kbps
+    /// AAC (`JellyfinClient.downloadBitrate` in the watch app), so the running time is enough —
+    /// an album's and a playlist's are their songs' together.
+    private var watchBytes: Int64? {
+        guard let ticks = item.RunTimeTicks, ticks > 0 else { return nil }
+        return Int64(Double(ticks) / 10_000_000 * 128_000 / 8 * 1.03)
+    }
+
     @ViewBuilder
     private var downloadActions: some View {
         if client.showsOffline, DownloadManager.shared.record(for: item.Id)?.status != .complete {
@@ -925,7 +940,7 @@ struct MusicItemMenu: View {
                 }
             } else {
                 Button { Task { await MusicDownloads.download([item]) } } label: {
-                    Label("Download", systemImage: "arrow.down.circle")
+                    DownloadChoiceLabel("Download", size: sizeText([item]), systemImage: "arrow.down.circle")
                 }
             }
         } else if item.isAlbum || item.isPlaylist {
@@ -942,7 +957,9 @@ struct MusicItemMenu: View {
                     }
                 }
             } label: {
-                Label("Download", systemImage: "arrow.down.circle")
+                DownloadChoiceLabel(
+                    "Download", size: DownloadSizes.shared.items(of: item.Id).flatMap(sizeText),
+                    systemImage: "arrow.down.circle")
             }
         }
         #if os(iOS)
@@ -953,7 +970,8 @@ struct MusicItemMenu: View {
                 WatchLink.shared.download(item)
                 app.toast("Sending \(item.title) to the watch", tone: .ok)
             } label: {
-                Label("Download to Apple Watch", systemImage: "applewatch")
+                DownloadChoiceLabel(
+                    "Download to Apple Watch", size: DownloadSizes.text(watchBytes), systemImage: "applewatch")
             }
         }
         #endif
@@ -1036,7 +1054,8 @@ enum MusicDownloads {
     @discardableResult
     static func download(_ songs: [BaseItem]) async -> Bool {
         guard !songs.isEmpty else { return false }
-        let (full, missing) = await MusicFiles.withSources(songs)
+        // The files a page already fetched for its download menu's figure.
+        let (full, missing) = await MusicFiles.withSources(songs.map { DownloadSizes.shared.best($0) })
         let unqueued = missing == 0 ? "" : " · \(missing) couldn't be queued"
         guard !full.isEmpty else {
             AppModel.shared.toast(
