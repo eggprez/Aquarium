@@ -169,6 +169,9 @@ extension PlayerModel {
     /// `nil` turns subtitles off.
     func selectSubtitleTrack(_ index: Int?) {
         if let index, !subtitleTracks.contains(where: { $0.id == index }) { return }
+        #if !os(tvOS)
+        sidecarOverlay = nil
+        #endif
         if audioDelayIsApplied {
             guard selectedSubtitleTrack != index else { return }
             setSelectedSubtitleTrack(index)
@@ -308,8 +311,17 @@ extension PlayerModel {
     /// were added from.
     private func engineTrack(for stream: MediaStream, kind: EngineTrack.Kind) -> Int? {
         if kind == .subtitle, stream.isSidecar {
-            guard let url = externalSubtitleURL(for: stream)?.absoluteString else { return nil }
-            return tracks.first { $0.kind == .subtitle && $0.isExternal && $0.externalURL == url }?.id
+            if let url = externalSubtitleURL(for: stream)?.absoluteString,
+               let added = tracks.first(where: { $0.kind == .subtitle && $0.isExternal && $0.externalURL == url }) {
+                return added.id
+            }
+            // AVPlayer takes no file by URL: a sidecar reaches it in the HLS
+            // manifest, the server having been asked to put it there, as a
+            // track like any other, lined up by name. Without this the track
+            // was in the stream and never switched on — the stream reopened
+            // for the subtitle and showed nothing.
+            guard engine?.kind == .apple, let index = stream.Index else { return nil }
+            return tracks.first { $0.kind == .subtitle && !$0.isExternal && $0.fileIndex == index }?.id
         }
         guard fileIndexIsTheFiles, let index = stream.Index else { return nil }
         return tracks.first { $0.kind == kind && !$0.isExternal && $0.fileIndex == index }?.id
@@ -357,6 +369,11 @@ extension PlayerModel {
 
     var selectedSubtitleOption: TrackOption.ID? {
         let choices = subtitleOptions
+        #if !os(tvOS)
+        if let index = overlaidSidecar?.index, let match = choices.first(where: { $0.serverIndex == index }) {
+            return match.id
+        }
+        #endif
         if let av = selectedSubtitleTrack, let match = choices.first(where: { $0.avIndex == av }) {
             return match.id
         }
@@ -529,6 +546,36 @@ extension PlayerModel {
         return entries
     }
 
+    /// The subtitle file the app is drawing over the download that is
+    /// playing, if it is.
+    var overlaidSidecar: SidecarOverlay? {
+        guard isLocal, let overlay = sidecarOverlay, overlay.recordId == localRecordId else { return nil }
+        return overlay
+    }
+
+    /// The lines of that file on screen now. Read off the engine's own
+    /// clock: the model's position moves twice a second, and a subtitle that
+    /// late is a subtitle out of step.
+    func overlaidSubtitleText() -> String? {
+        guard let overlay = overlaidSidecar, !isOpening else { return nil }
+        return SubtitleCues.text(in: overlay.cues, at: engine?.clock ?? position)
+    }
+
+    /// Draw one of the download's subtitle files over the picture. False
+    /// when the file has no lines that can be read.
+    private func overlaySidecar(_ entry: DownloadSubtitles.Entry, at url: URL, recordId: String) -> Bool {
+        let cues = SubtitleCues.load(url)
+        guard !cues.isEmpty else {
+            Self.log.notice("subtitle file \(entry.fileName, privacy: .public) has no lines that could be read")
+            return false
+        }
+        if selectedSubtitleTrack != nil { engine?.selectSubtitle(trackID: nil) }
+        setSelectedSubtitleTrack(nil)
+        sidecarOverlay = SidecarOverlay(recordId: recordId, index: entry.index, cues: cues)
+        Self.log.info("drawing subtitle file \(entry.fileName, privacy: .public): \(cues.count) lines")
+        return true
+    }
+
     /// The engine's id for a subtitle file once it has been added. mpv lists
     /// it under the URL it was given, which ends in the file's name.
     private func engineTrack(forSidecar entry: DownloadSubtitles.Entry) -> Int? {
@@ -569,14 +616,20 @@ extension PlayerModel {
     /// across the reopen on mpv by the download it was chosen for.
     @MainActor private static var pendingSidecar: (recordId: String, index: Int)?
 
-    /// Show one of the download's subtitle files. mpv adds it; AVPlayer has
-    /// no way to take a file in, so the download is reopened on mpv at the
-    /// same moment, where that is allowed, and the file put on once it opens.
-    /// False when there is no way to show it here.
+    /// Show one of the download's subtitle files. mpv adds it. AVPlayer has
+    /// no way to take a file in, so there the app reads the file and draws
+    /// its lines over the picture itself (`SubtitleFileOverlay`) — the only
+    /// way at all for a download saved as a stream, which mpv can't open,
+    /// and it was being handed to mpv regardless, which is the "unrecognized
+    /// file format" a subtitle on a download used to end in. The one file
+    /// still worth a reopen on mpv is an ASS one beside a file mpv can play,
+    /// for the styling a plain drawing of the words would lose. False when
+    /// there is no way to show it here.
     @discardableResult
     private func loadSidecar(_ entry: DownloadSubtitles.Entry) -> Bool {
         guard let engine, let folder = localFolder, let recordId = localRecordId else { return false }
         if let id = engineTrack(forSidecar: entry) {
+            sidecarOverlay = nil
             engine.selectSubtitle(trackID: id)
             setSelectedSubtitleTrack(id)
             return true
@@ -584,9 +637,13 @@ extension PlayerModel {
         let url = folder.appendingPathComponent(entry.fileName)
         guard FileManager.default.fileExists(atPath: url.path) else { return false }
         if engine.capabilities.contains(.externalSubtitles) {
+            sidecarOverlay = nil
             engine.addExternalSubtitle(url: url, language: entry.language, title: entry.title)
             return true
         }
+        let styled = ["ass", "ssa"].contains(url.pathExtension.lowercased())
+        let worthMPV = styled && !Self.pickingAutomatically && canSwitchEngine(to: .mpv)
+        if !worthMPV, overlaySidecar(entry, at: url, recordId: recordId) { return true }
         // Only for a file someone picked from the menu. Done for a Settings
         // preference, every episode opened twice, and a hand-over to Apple's
         // player for picture in picture or AirPlay re-applied it and went
@@ -635,6 +692,11 @@ extension PlayerModel {
                 return
             }
         }
+
+        // A file already being drawn over this download was chosen for it,
+        // and this is the same download reopened: a hand-over for Picture in
+        // Picture, or played again.
+        if overlaidSidecar != nil { return }
 
         let audioMatches = selectedAudioTrack
             .flatMap { id in audioTracks.first { $0.id == id } }

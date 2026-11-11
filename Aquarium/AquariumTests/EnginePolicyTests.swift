@@ -108,6 +108,21 @@ final class EnginePolicyTests: XCTestCase {
         XCTAssertEqual(EnginePolicy.choose(r), .apple)
     }
 
+    /// A download saved as a stream is a package only AVFoundation opens.
+    func testStreamDownloadsAreApplesWhateverIsAsked() {
+        var r = request(source: nil)
+        r.isDownload = true
+        r.isHLS = true
+        r.preference = .mpv
+        XCTAssertEqual(EnginePolicy.choose(r), .apple)
+        r.preference = .automatic
+        r.audioDelay = 0.1
+        XCTAssertEqual(EnginePolicy.choose(r), .apple)
+        r.audioDelay = 0
+        r.framing = .zoom(1.2)
+        XCTAssertEqual(EnginePolicy.choose(r), .apple)
+    }
+
     func testLiveIsApple() {
         var r = request(source: nil)
         r.isLive = true

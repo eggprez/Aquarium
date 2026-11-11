@@ -124,6 +124,12 @@ enum EnginePolicy {
         //    keep in step, every argument for AVPlayer is the battery's.
         if request.platform == .appleTV { return .mpv }
 
+        // A download saved as a stream is a package AVFoundation wrote and
+        // only AVFoundation opens: mpv answers it with "unrecognized file
+        // format". Whatever the setting, the picture controls or an audio
+        // delay would otherwise ask for, it is AVPlayer's.
+        if request.isDownload, request.isHLS { return .apple }
+
         // 4, taken first: Picture in Picture, AirPlay and SharePlay are
         //    AVPlayer's alone, so asking for one is asking for the engine,
         //    whatever the setting says.

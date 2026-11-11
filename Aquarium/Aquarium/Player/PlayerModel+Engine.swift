@@ -137,6 +137,9 @@ extension PlayerModel {
         switch kind {
         case .mpv:
             if !Self.mpvAvailable { return "The mpv engine is not in this build." }
+            if isLocal, let id = localRecordId, DownloadManager.shared.record(for: id)?.hlsPath != nil {
+                return "A download saved as a stream plays through Apple's engine alone."
+            }
             if SharePlayCoordinator.shared.isActive { return "Watch Together plays through Apple's engine for the length of the session." }
             if prefs.playbackEngine == .apple { return "Settings → Video → Playback engine is set to Apple." }
         case .apple:

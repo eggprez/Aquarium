@@ -65,6 +65,13 @@ struct StartMeta: Sendable {
     /// which for a quality change is seamless and for a subtitle is twelve
     /// seconds of the old stream with none, under a menu saying it is on.
     var forTracks: Bool = false
+    /// A quality somebody picked from the menu, as against one Auto moved
+    /// to. Loaded straight away for the same reason: handed over, the old
+    /// stream played on for twelve seconds and more while the new one was
+    /// lined up behind it, and a choice that changes nothing for that long
+    /// reads as a choice that didn't take. Auto's own moves, which nobody
+    /// is waiting on, are still handed over without a break in the picture.
+    var atOnce: Bool = false
     /// Adaptive quality's announcement of the move this stream is. The start
     /// clears whatever notice was up, so it is shown from there: put up
     /// before the reopen, it was cleared again before it was ever drawn.
@@ -106,6 +113,16 @@ struct TrackOption: Identifiable, Hashable, Sendable {
     var needsNewStream: Bool { avIndex == nil }
     var id: Int { serverIndex ?? -(( avIndex ?? 0) + 1) }
 }
+
+#if !os(tvOS)
+/// One of a download's subtitle files, read into lines: which download and
+/// which of its files, so it is shown over that download and no other.
+struct SidecarOverlay: Equatable, Sendable {
+    var recordId: String
+    var index: Int
+    var cues: [SubtitleCue]
+}
+#endif
 
 /// One selectable track as the engine lists it, the shape the menus are
 /// built on, made from `EngineTrack` on every engine.
@@ -308,6 +325,11 @@ final class PlayerModel {
     var resolvingGeneration: Int?
     /// Whether subtitles are lifted clear of a transport bar.
     var subtitlesRaised = false
+    #if !os(tvOS)
+    /// A download's subtitle file being drawn by the app itself, over an
+    /// engine that can't take a file in. See `SubtitleFileOverlay`.
+    var sidecarOverlay: SidecarOverlay?
+    #endif
 
     var client: JellyfinClient { .shared }
     var prefs: Preferences { .shared }

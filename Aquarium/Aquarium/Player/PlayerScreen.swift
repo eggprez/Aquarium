@@ -67,6 +67,13 @@ struct PlayerScreen: View {
             if player.pictureIsStale {
                 Color.black.ignoresSafeArea()
             }
+            #if !os(tvOS)
+            // A download's subtitle file, where the engine can't take one.
+            if !player.pictureIsStale {
+                SubtitleFileOverlay()
+                    .ignoresSafeArea()
+            }
+            #endif
             #if os(tvOS)
             // The code the iPhone app reads during a sync clip: which rate
             // this is and the delay in force. See `SyncCodeOverlay`.
