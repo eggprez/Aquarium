@@ -40,6 +40,12 @@ struct PlayerPanel: View {
     /// Told whether focus is on the row of tabs, for the swipe up that
     /// closes the panel from there on a television.
     var tabsFocused: ((Bool) -> Void)? = nil
+    #if os(iOS)
+    /// Compact on a phone held sideways, where the sheet is the full height
+    /// of the screen and the system draws no grabber.
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.dismiss) private var dismiss
+    #endif
 
     var body: some View {
         Group {
@@ -73,9 +79,33 @@ struct PlayerPanel: View {
                     content
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+                // Under the close button, which sits over the page's
+                // top-trailing corner — above the page rather than beside
+                // it, so the page keeps the width its two columns need.
+                .padding(.top, sheetFillsScreen ? 56 : 14)
+                .padding(.bottom, 14)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            #if os(iOS)
+            // Sideways the sheet fills the screen with no grabber, so the
+            // only way out was a swipe nobody could see to try.
+            .overlay(alignment: .topTrailing) {
+                if sheetFillsScreen {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .frame(width: 30, height: 30)
+                            .background(Circle().fill(Color.white.opacity(0.08)))
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 16)
+                    .padding(.trailing, 16)
+                    .accessibilityLabel("Close")
+                }
+            }
+            #endif
             // The line-up opens on the channel being watched, as the
             // television's opens with the selector on it: the channels either
             // side are the ones wanted, and in a playlist of a few hundred
@@ -85,6 +115,15 @@ struct PlayerPanel: View {
                 proxy.scrollTo(current, anchor: .center)
             }
         }
+    }
+
+    /// The phone's sheet, sideways: the whole height of the screen.
+    private var sheetFillsScreen: Bool {
+        #if os(iOS)
+        verticalSizeClass == .compact
+        #else
+        false
+        #endif
     }
 
     // MARK: - A television
