@@ -333,10 +333,13 @@ extension PlayerModel {
 
     /// The connection's speed as far as anyone knows it now: the check's,
     /// and what the engine is actually seeing arrive, whichever is lower.
-    /// Only with the speed check on — its step-downs jump to what fits.
+    /// What the engine sees arriving is read whether or not the speed check
+    /// is on: it costs nothing, and without it a stall on a 5 Mbps line
+    /// stepped a 15 Mbps file down one rung, to a stream twice what the line
+    /// carries, and sat frozen there. It only ever sizes a step down.
     var knownThroughput: Double? {
-        guard prefs.speedCheck, let item else { return nil }
-        let remembered = speedMemory?.itemId == item.Id ? speedMemory?.bitsPerSecond : nil
+        guard let item else { return nil }
+        let remembered = prefs.speedCheck && speedMemory?.itemId == item.Id ? speedMemory?.bitsPerSecond : nil
         let observed = engine?.streamFacts.observedBitrate
         return [remembered, observed].compactMap { $0 }.filter { $0 > 0 }.min()
     }

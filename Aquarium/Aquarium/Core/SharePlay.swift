@@ -110,7 +110,9 @@ final class SharePlayCoordinator: NSObject {
             session.activity = activity
             return
         }
-        switch await activity.prepareForActivation() {
+        let outcome = await activity.prepareForActivation()
+        Self.log.info("Watch Together asked; the system answered \(String(describing: outcome), privacy: .public)")
+        switch outcome {
         case .activationPreferred:
             openedItemId = item.Id
             do {

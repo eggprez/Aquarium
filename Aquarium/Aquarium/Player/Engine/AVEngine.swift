@@ -131,11 +131,16 @@ final class AVEngine: PlaybackEngine {
 
     // MARK: - Streams
 
+    /// `EngineLoadRequest.readAhead` for the stream now loaded; zero is
+    /// AVFoundation's own choice.
+    private var readAhead: Double = 0
+
     func load(_ request: EngineLoadRequest) {
         loadGeneration &+= 1
         let mine = loadGeneration
         currentURL = request.url
         loadedLive = request.live
+        readAhead = request.readAhead ?? 0
         hints = request.hints
         hadFirstFrame = false
         // A stored offset is built into the stream as it opens rather than
@@ -205,7 +210,8 @@ final class AVEngine: PlaybackEngine {
         // encoder that falls momentarily behind real time. Live gets the
         // same: how far behind the broadcast you are is decided by where you
         // join the playlist, not by how much is downloaded ahead.
-        newItem.preferredForwardBufferDuration = 0
+        // Unless the model asked for a ceiling: see `EngineLoadRequest.readAhead`.
+        newItem.preferredForwardBufferDuration = readAhead
         // Left alone, AVPlayer joins a live stream at the edge and then,
         // after every rebuffer, resumes from where it stopped — so each stall
         // pushes the playhead further behind until it is behind the oldest
@@ -388,6 +394,7 @@ final class AVEngine: PlaybackEngine {
         loadGeneration &+= 1
         currentURL = request.url
         loadedLive = request.live
+        readAhead = request.readAhead ?? 0
         hints = request.hints
         hadFirstFrame = false
         sourceAsset = asset
@@ -727,6 +734,11 @@ final class AVEngine: PlaybackEngine {
                 ? avItem.currentMediaSelection.selectedMediaOption(in: group).flatMap { group.options.firstIndex(of: $0) }
                 : composed?.subtitle
             for (i, option) in group.options.enumerated() {
+                // AVFoundation lists a "CC" option for any HLS stream whose
+                // manifest doesn't rule captions out, and the server's never
+                // does: a row that ticks and shows nothing. Kept for a
+                // channel, the one place captions do ride in the picture.
+                if option.mediaType == .closedCaption, !loadedLive { continue }
                 list.append(EngineTrack(
                     id: i, kind: .subtitle, title: option.displayName, manifestName: await Self.manifestName(of: option),
                     language: option.extendedLanguageTag ?? option.locale?.identifier,

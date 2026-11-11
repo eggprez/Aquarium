@@ -1,0 +1,7 @@
+#!/bin/zsh
+# mont out.png h img1 img2 ... : side-by-side montage at height h
+out=$1; h=$2; shift 2; args=(); f=""; n=0
+for i in "$@"; do args+=(-i "$i"); f+="[$n:v]scale=-2:${h}[v${n}];"; n=$((n+1)); done
+for ((k=0;k<n;k++)); do f+="[v$k]"; done
+if (( n > 1 )); then f+="hstack=inputs=$n"; else f="[0:v]scale=-2:${h}"; fi
+/opt/homebrew/bin/ffmpeg -y -loglevel error "${args[@]}" -filter_complex "$f" -frames:v 1 "$out"

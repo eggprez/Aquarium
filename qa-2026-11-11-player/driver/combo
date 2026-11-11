@@ -1,0 +1,60 @@
+#!/bin/zsh
+# combo <p|t> <userId> : set speed 1.5, French subs, Fill on, sleep 30, stop-after on, 5 Mbps on QA Show E06; then run each action and verify every setting survived.
+S=${0:A:h}; d=$1; uid=$2; E06=f3876c5d5c1ec8d772fc4101d741e9e1
+q() { $S/q $d "$@"; }
+verify() { # name expectPaused(0/1/-)
+  local L M sub play pos qual fill spd slp stp r=""
+  L=$(q x show labels)
+  play=$(echo $L | grep -oE '^btn \[(Play|Pause|Loading)\]' | grep -oE 'Play|Pause|Loading' | head -1)
+  pos=$(echo $L | grep -E '^oth \[Timeline\]' | sed -E 's/.*=(.*) of .*/\1/')
+  qual=$(echo $L | grep -oE 'btn \[Quality, [^]]*' | sed 's/btn \[Quality, //')
+  fill=$(echo $L | grep -E 'btn \[Fill the screen\]' | grep -oE '=(On|Off)')
+  M=$(q x show "tap More" "wait 0.8" labels "tap Close")
+  spd=$(echo $M | grep -E 'btn \[Speed .*SEL' | grep -oE 'Speed [^]]*')
+  slp=$(echo $M | grep -oE 'Stopping in [0-9]+ min' | head -1)
+  stp=$(echo $M | grep -E 'btn \[Stop after this episode' | grep -c SEL)
+  q n subs.state; sleep 0.8
+  sub=$(q lg 6s 400 | grep 'subtitles: selected' | tail -1 | sed -E 's/.*selected ([^[]*) of .*/\1/')
+  [[ $spd == "Speed 1.5×" ]] || r+=" SPEED[$spd]"
+  [[ $sub == French* ]] || r+=" SUBS[$sub]"
+  [[ $fill == "=On" ]] || r+=" FILL[$fill]"
+  [[ -n $slp ]] || r+=" SLEEP[none]"
+  [[ $stp == 1 ]] || r+=" STOPAFTER[off]"
+  [[ $qual == *"$QEXP"* ]] || r+=" QUALITY[$qual]"
+  if [[ $2 == 1 && $play != Play ]]; then r+=" UNPAUSED"; fi
+  if [[ $2 == 0 && $play != Pause ]]; then r+=" NOTPLAYING[$play]"; fi
+  printf '%-34s %-5s pos=%-22s %s\n' "$1" "${r:+FAIL}" "$pos" "${r:-ok} | $qual | $slp"
+}
+tl() { # tap timeline at fraction $1
+  local f=$(q x show "labels Timeline" | grep -oE '@[0-9]+,[0-9]+ [0-9]+x' | head -1); local cx=${${f#@}%%,*}; local cy=${${f#*,}%% *}; local w=${${f##* }%x}
+  q x show "tapxy $(( cx - w/2 + w*$1 )) $cy" "wait 2" >/dev/null
+}
+$S/reset $uid $E06; q play $E06; sleep 7
+q x show "tap Quality" "wait 0.6" "tap 5 Mbps" "wait 6" >/dev/null
+q x show "tap More" "wait 0.6" "tap Speed 1.5×" "tap Stop in 30 minutes" >/dev/null
+q x show "tap More" "wait 0.6" "tap Stop after this episode" "tap Close" >/dev/null
+q x show "tap Subtitles" "wait 0.6" "tap French" "wait 3" >/dev/null
+q x show "tap Fill the screen" "wait 0.5" >/dev/null
+QEXP="5 Mbps"
+sleep 2
+for mode in playing paused; do
+  pe=0; [[ $mode == paused ]] && { q x show "tap Pause" "wait 1" >/dev/null; pe=1; }
+  verify "[$mode] baseline" $pe
+  q x show "tap Forward 10 seconds" "wait 1.5" >/dev/null; verify "[$mode] skip +10 button" $pe
+  q x "wait 4.5" "dtap 0.2 0.35" "wait 1.5" >/dev/null; verify "[$mode] double-tap back" $pe
+  tl 0.2; verify "[$mode] timeline tap 20%" $pe
+  q x "rotate left" "wait 2.5" >/dev/null; verify "[$mode] rotate landscape" $pe
+  q x "rotate portrait" "wait 2.5" >/dev/null; verify "[$mode] rotate portrait" $pe
+  q x show "tap Episode info" "wait 1" "swipe 0.5 0.55 0.5 0.98" "wait 1" >/dev/null; q x "tapxy 0.5 0.12" "wait 0.5" >/dev/null; verify "[$mode] info open/close" $pe
+  q x show "tap Subtitles" "wait 0.6" "tap English" "wait 3" >/dev/null; q x show "tap Subtitles" "wait 0.6" "tap French" "wait 3" >/dev/null; verify "[$mode] subs EN then FR" $pe
+  if [[ -z $NOBG ]]; then
+  xcrun simctl launch $(q u) com.apple.Preferences >/dev/null; sleep 5; xcrun simctl launch $(q u) scottai.FellyJin >/dev/null; sleep 2.5
+  if [[ $mode == playing ]]; then verify "[$mode] background 5 s + return" -; else verify "[$mode] background 5 s + return" 1; fi
+  fi
+  q x show "tap Quality" "wait 0.6" "tap 2.5 Mbps" "wait 7" >/dev/null; QEXP="2.5 Mbps"; verify "[$mode] quality -> 2.5 Mbps" $pe
+  [[ $mode == paused ]] && { q x show "tap Pause" "wait 1" >/dev/null; }
+  q x show "tap Quality" "wait 0.6" "tap 5 Mbps" "wait 7" >/dev/null; QEXP="5 Mbps"; verify "[$mode] quality -> 5 Mbps" $pe
+  [[ $mode == paused ]] && { q x show "tap Pause" "wait 1" >/dev/null; }
+  if [[ $mode == playing ]]; then q x "wait 4.5" "press 0.5 0.35 3" "wait 1" >/dev/null; verify "[$mode] hold 2x then release" 0; fi
+done
+q x show "tap Play" >/dev/null

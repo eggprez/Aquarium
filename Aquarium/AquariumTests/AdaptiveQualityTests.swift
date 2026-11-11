@@ -62,4 +62,26 @@ final class AdaptiveQualityTests: XCTestCase {
         XCTAssertEqual(decision?.bitrate, 10_000_000)
         XCTAssertEqual(decision?.isDrop, true)
     }
+
+    // MARK: A stream that won't open after a step down
+
+    func testASlowOpeningAfterAStepDownStepsAgainWithoutWaitingOutTheCooldown() {
+        let policy = AdaptiveQuality()
+        // Inherited, as our own switch is: the cooldown has just started.
+        policy.begin(inherited: true, ceiling: nil, powerCap: nil)
+        XCTAssertFalse(policy.noteSlowOpening(for: 10))
+        XCTAssertTrue(policy.noteSlowOpening(for: 26))
+        // Sized by what is arriving: 5 Mbps carries the 2.5 Mbps rung.
+        let decision = policy.decide(currentBitrate: 10_000_000, measured: 5_000_000)
+        XCTAssertEqual(decision?.bitrate, 2_500_000)
+        XCTAssertEqual(decision?.isDrop, true)
+    }
+
+    func testASlowOpeningIsSaidOncePerStream() {
+        let policy = AdaptiveQuality()
+        policy.begin(inherited: true, ceiling: nil, powerCap: nil)
+        XCTAssertTrue(policy.noteSlowOpening(for: 30))
+        _ = policy.decide(currentBitrate: 10_000_000)
+        XCTAssertFalse(policy.noteSlowOpening(for: 60))
+    }
 }

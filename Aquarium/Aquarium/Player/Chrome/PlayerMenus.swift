@@ -264,7 +264,9 @@ private struct SubtitlesMenu: View {
             PanelRow(title: option.label,
                      // Many forced tracks are named so already.
                      detail: [option.isForced && !option.label.localizedCaseInsensitiveContains("forced") ? "Forced" : nil,
-                              option.needsNewStream ? "Drawn by the server · reopens the stream" : nil]
+                              // A download's own subtitle files are drawn
+                              // here, with no server and no reopen.
+                              option.needsNewStream && !player.isLocal ? "Drawn by the server · reopens the stream" : nil]
                         .compactMap { $0 }.joined(separator: " · "),
                      isSelected: option.id == selected) {
                 onInteract()
@@ -325,7 +327,9 @@ private struct QualityMenu: View {
         ForEach(Quality.choices) { choice in
             let playing = player.currentBitrate == choice.maxBitrate
             PanelRow(title: choice.maxBitrate == nil ? "Direct (original)" : choice.label,
-                     detail: playing ? (player.isTranscoding ? "Playing now · transcoding" : "Playing now")
+                     detail: playing ? (player.isTranscoding
+                                        ? (choice.maxBitrate == nil ? "Playing now · converted by the server" : "Playing now · transcoding")
+                                        : "Playing now")
                         : choice.maxBitrate == nil ? "The file as it is, no transcode" : nil,
                      isSelected: !auto && playing,
                      disabledReason: streamable ? nil : "Not for this stream") {
@@ -337,7 +341,11 @@ private struct QualityMenu: View {
 
     /// What Auto has landed on, in the pill's words.
     private var playingNow: String {
-        player.currentBitrate == nil ? "Direct" : Quality.shortLabel(for: player.currentBitrate)
+        // "Direct" only when it is: an original the server has to repackage
+        // or re-encode for this device is still the original, not direct.
+        player.currentBitrate == nil
+            ? (player.isTranscoding ? "Original, converted by the server" : "Direct")
+            : Quality.shortLabel(for: player.currentBitrate)
     }
 
     private func pick(_ selection: PlayerModel.QualitySelection) {
@@ -418,7 +426,9 @@ private struct MoreMenu: View {
     let close: () -> Void
     let openPanel: (PlayerTab) -> Void
 
-    private let chipColumns = [GridItem(.adaptive(minimum: 58), spacing: 6)]
+    /// Wide enough for "Normal" at the card's wider size: at 58 the iPad's
+    /// card fitted five to a row and cut it to "Nor…".
+    private let chipColumns = [GridItem(.adaptive(minimum: 64), spacing: 6)]
 
     var body: some View {
         if !player.isLive {

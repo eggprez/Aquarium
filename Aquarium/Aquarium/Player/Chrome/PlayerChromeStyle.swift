@@ -15,6 +15,9 @@
 //  the same style is the press of a pill.
 
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - Material
 
@@ -150,13 +153,31 @@ enum PlayerMetrics {
     /// How far the title row starts in from the leading edge on a Mac, so
     /// it clears the window's close, minimise and zoom buttons; nothing in
     /// full screen, where they are gone, and nothing anywhere else.
-    static func titleLeadingInset(fullScreen: Bool) -> CGFloat {
+    @MainActor static func titleLeadingInset(fullScreen: Bool) -> CGFloat {
         #if os(macOS)
         fullScreen ? 0 : 58
+        #elseif os(iOS)
+        // An iPad window that isn't the whole screen has the same three
+        // buttons in the same corner, and they sat on top of Back.
+        windowHasSystemControls ? 52 : 0
         #else
         0
         #endif
     }
+
+    #if os(iOS)
+    /// Whether the app's window is an iPad window smaller than its screen,
+    /// which is when the system draws its close, minimise and full-screen
+    /// buttons in the top leading corner.
+    @MainActor static var windowHasSystemControls: Bool {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return false }
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first,
+              let window = scene.keyWindow ?? scene.windows.first else { return false }
+        let screen = scene.screen.bounds.size
+        return window.bounds.width < screen.width - 1 || window.bounds.height < screen.height - 1
+    }
+    #endif
 
     /// Whether the player window is full screen; always false off a Mac.
     @MainActor static var isFullScreen: Bool {

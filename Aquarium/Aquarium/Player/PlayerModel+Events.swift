@@ -103,6 +103,57 @@ extension PlayerModel {
         }
     }
 
+    /// Two things the engine never reports, watched for on a clock of this
+    /// model's own while Auto is choosing the quality.
+    ///
+    /// A picture that has stopped with the engine still saying "playing":
+    /// AVPlayer does this on a stream far bigger than the line — no stall
+    /// flag, no time ticks, so neither `noteBuffering` nor `sample` ever
+    /// hears of it, and it sat frozen for a minute and a half. Counted here
+    /// as the long stall it is.
+    ///
+    /// And a stream Auto stepped down to that won't open: see
+    /// `AdaptiveQuality.noteSlowOpening`.
+    func watchProgress() {
+        progressWatch?.cancel()
+        progressWatch = nil
+        let afterAutoDrop = openingAfterAutoDrop
+        openingAfterAutoDrop = false
+        guard adaptsQuality, isActive, !isLocal, !isExternal, !isLive else { return }
+        let mine = generation
+        progressWatch = Task { [weak self] in
+            var openingFor: TimeInterval = 0
+            var frozenFor: TimeInterval = 0
+            var last: Double = -1
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled, let self, self.isActive, self.generation == mine,
+                      self.errorMessage == nil else { return }
+                guard self.adaptsQuality else { continue }
+                if self.isOpening {
+                    frozenFor = 0
+                    guard afterAutoDrop else { continue }
+                    openingFor += 2
+                    if self.adaptive.noteSlowOpening(for: openingFor) {
+                        Self.log.notice("no picture \(Int(openingFor)) s after stepping down; stepping down again")
+                        self.maybeAdapt()
+                        return
+                    }
+                    continue
+                }
+                let shouldBeMoving = !self.isPaused && !self.isBuffering && !self.stallCounted
+                    && self.duration > 0 && self.duration - self.position > 2
+                if shouldBeMoving, abs(self.position - last) < 0.05 { frozenFor += 2 } else { frozenFor = 0 }
+                last = self.position
+                if frozenFor >= 8, self.adaptive.noteStillStalled(for: frozenFor) {
+                    Self.log.notice("picture stopped for \(Int(frozenFor)) s with nothing reported; counted as a stall")
+                    self.maybeAdapt()
+                    return
+                }
+            }
+        }
+    }
+
     func endStall() {
         stallCounted = false
         stallWatch?.cancel()
@@ -137,8 +188,23 @@ extension PlayerModel {
         }
         Self.log.error(
             "stream failure live=\(self.isLive) external=\(self.isExternal) duringPlayback=\(failure.duringPlayback): \(failure.message ?? "no error", privacy: .public)")
+        // The last segment of a server encode, listed and never made.
+        if recoverFromMissingTail(failure) { return }
         // A session that went bad rather than unplayable media — ask again.
         if failure.isSessionLoss, recoverFromStreamFailure() { return }
+        // A title that was playing a moment ago, reopened at its position,
+        // failing within seconds of the reopen: not a file that won't play.
+        // The server starts one encode for the playlist and replaces it with
+        // another at the position asked for, and now and then the player is
+        // still reading the first when it is deleted (seen as -19602, on
+        // about one quality change in four on a 15 Mbps file). Asked again,
+        // it plays. Within the same budget as any other recovery.
+        if failure.duringPlayback, !isLocal, !isExternal, isTranscoding,
+           let reopened = sameTitleReopenedAt, Date().timeIntervalSince(reopened) < 10,
+           recoverFromStreamFailure() {
+            Self.log.notice("failed \(Date().timeIntervalSince(reopened), format: .fixed(precision: 1)) s after a reopen; asking again")
+            return
+        }
         // Not a session fault — the stream itself. If the server sent the
         // original file, it has another way to send it.
         if escalateToTranscode() { return }
