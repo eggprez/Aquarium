@@ -1614,40 +1614,55 @@ struct ItemDetailView: View {
         Menu {
             if item.isSeries {
                 let whole = seasons.flatMap { DownloadSizes.shared.items(of: $0.Id) ?? [] }
+                let wholeState = EpisodesOnDevice(whole)
                 Menu {
-                    ForEach(DownloadQualities.all) { quality in
-                        Button {
-                            Task { await requestSeriesDownload(item, quality: quality) }
-                        } label: {
-                            DownloadChoiceLabel(quality.label, size: sizeText(whole, quality))
+                    if wholeState.nothingLeft {
+                        alreadyHere(wholeState)
+                    } else {
+                        ForEach(DownloadQualities.all) { quality in
+                            Button {
+                                Task { await requestSeriesDownload(item, quality: quality) }
+                            } label: {
+                                DownloadChoiceLabel(quality.label, size: sizeText(whole, quality, wholeState))
+                            }
                         }
                     }
                 } label: {
-                    Label("Whole Series", systemImage: "square.stack.3d.down.right")
+                    DownloadChoiceLabel("Whole Series", size: wholeState.summary, systemImage: "square.stack.3d.down.right")
                 }
                 // A season at a time is what most people actually want, and
                 // going one level down to the season page to get it is a
                 // detour — every season this series has is offered here.
                 ForEach(seasons) { season in
                     let episodes = DownloadSizes.shared.items(of: season.Id) ?? []
+                    let state = EpisodesOnDevice(episodes)
                     Menu {
-                        ForEach(DownloadQualities.all) { quality in
-                            Button {
-                                Task { await requestSeasonDownload(series: item, season: season, quality: quality) }
-                            } label: {
-                                DownloadChoiceLabel(quality.label, size: sizeText(episodes, quality))
+                        if state.nothingLeft {
+                            alreadyHere(state)
+                        } else {
+                            ForEach(DownloadQualities.all) { quality in
+                                Button {
+                                    Task { await requestSeasonDownload(series: item, season: season, quality: quality) }
+                                } label: {
+                                    DownloadChoiceLabel(quality.label, size: sizeText(episodes, quality, state))
+                                }
                             }
                         }
                     } label: {
-                        Label(season.title, systemImage: "rectangle.stack")
+                        DownloadChoiceLabel(season.title, size: state.summary, systemImage: "rectangle.stack")
                     }
                 }
             } else if item.isSeason {
-                ForEach(DownloadQualities.all) { quality in
-                    Button {
-                        Task { await requestDownload(episodes, quality: quality) }
-                    } label: {
-                        DownloadChoiceLabel("This Season · \(quality.label)", size: sizeText(episodes, quality))
+                let state = EpisodesOnDevice(episodes)
+                if state.nothingLeft {
+                    alreadyHere(state)
+                } else {
+                    ForEach(DownloadQualities.all) { quality in
+                        Button {
+                            Task { await requestDownload(episodes, quality: quality) }
+                        } label: {
+                            DownloadChoiceLabel("This Season · \(quality.label)", size: sizeText(episodes, quality, state))
+                        }
                     }
                 }
             } else {
@@ -1692,7 +1707,11 @@ struct ItemDetailView: View {
                 Label(downloadLabel(existing), systemImage: downloadSymbol(existing))
             }
             #else
-            Label(downloadLabel(existing), systemImage: downloadSymbol(existing))
+            if seasonOrSeriesDone(item) {
+                Label("Downloaded", systemImage: "checkmark.circle.fill")
+            } else {
+                Label(downloadLabel(existing), systemImage: downloadSymbol(existing))
+            }
             #endif
         }
         // A whole series, or one of its seasons, is a size worth knowing
@@ -1711,6 +1730,73 @@ struct ItemDetailView: View {
     /// What a download menu says under a choice: about what it adds.
     private func sizeText(_ items: [BaseItem], _ quality: DownloadQuality) -> String? {
         DownloadSizes.text(DownloadSizes.shared.bytes(items, quality: quality))
+    }
+
+    /// The same for a season or a series, saying how many episodes the
+    /// figure is for when some are already here: it is only theirs.
+    private func sizeText(_ items: [BaseItem], _ quality: DownloadQuality, _ state: EpisodesOnDevice) -> String? {
+        guard let size = sizeText(items, quality) else { return nil }
+        guard state.here > 0 else { return size }
+        return "\(size) for the \(state.left) not downloaded"
+    }
+
+    /// What a season or series menu offers once every episode is downloaded
+    /// or on its way: no qualities — choosing one did nothing but say so —
+    /// and a way to where they are.
+    @ViewBuilder
+    private func alreadyHere(_ state: EpisodesOnDevice) -> some View {
+        Text(state.arriving == 0
+             ? "All \(state.total) episode\(state.total == 1 ? " is" : "s are") downloaded"
+             : "Every episode is downloaded or on its way")
+        Button {
+            app.show(.downloads)
+        } label: {
+            Label("Show in Downloads", systemImage: "arrow.down.circle")
+        }
+    }
+
+    /// How much of a season or series is on the device, for its download
+    /// menu. Empty until the episodes are known, which reads as nothing here.
+    private struct EpisodesOnDevice {
+        var total = 0
+        var downloaded = 0
+        var arriving = 0
+
+        @MainActor
+        init(_ episodes: [BaseItem]) {
+            let manager = DownloadManager.shared
+            total = episodes.count
+            for episode in episodes {
+                if manager.record(for: episode.Id)?.status == .complete {
+                    downloaded += 1
+                } else if manager.isQueuedOrRunning(episode.Id) {
+                    arriving += 1
+                }
+            }
+        }
+
+        var here: Int { downloaded + arriving }
+        var left: Int { total - here }
+        var nothingLeft: Bool { total > 0 && left == 0 }
+
+        /// Under a season's or a series' name in the menu.
+        var summary: String? {
+            guard total > 0, here > 0 else { return nil }
+            if downloaded == total { return "Downloaded" }
+            if left == 0 { return "Downloading" }
+            return "\(downloaded) of \(total) downloaded"
+        }
+    }
+
+    /// The button itself, for a season or series every episode of which is
+    /// here: it says so, as a film's does.
+    private func seasonOrSeriesDone(_ item: BaseItem) -> Bool {
+        if item.isSeason { return EpisodesOnDevice(episodes).downloaded == episodes.count && !episodes.isEmpty }
+        if item.isSeries {
+            let whole = seasons.flatMap { DownloadSizes.shared.items(of: $0.Id) ?? [] }
+            return !whole.isEmpty && EpisodesOnDevice(whole).downloaded == whole.count
+        }
+        return false
     }
 
     private func downloadLabel(_ record: DownloadRecord?) -> String {
