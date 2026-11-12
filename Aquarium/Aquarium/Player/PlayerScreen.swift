@@ -134,9 +134,10 @@ struct PlayerScreen: View {
                 // buttons were centred in that strip, which is why they
                 // rarely worked. So the chrome keeps at least the strip
                 // clear on the front screen.
-                let top = pose == .front ? max(insets.top, Self.frontStatusStrip) : insets.top
+                let top = pose.usesFrontDisplay ? max(insets.top, Self.frontStatusStrip) : insets.top
                 // The front screen's side column (camera, then clock) comes
-                // back as a whole side of safe area, which held the progress
+                // back as a whole side of safe area — closed or stood up as
+                // a tent, which is the same screen part-open, which held the progress
                 // bar and the title row's buttons 84 points short of that
                 // edge. Apple's guidance for an immersive screen that does
                 // not scroll is the full width, clear of the camera and the
@@ -148,7 +149,7 @@ struct PlayerScreen: View {
                 // it while the title row and the pills keep the column.
                 // The camera's clearance is read live: the lens is where it
                 // is whether or not the bar shows. Only the insets are held.
-                let clearance: PlayerSideClearance? = pose == .front
+                let clearance: PlayerSideClearance? = pose.usesFrontDisplay
                     ? PlayerSideClearance(geo, column: insets, titleRowFoot: top + PlayerSideClearance.titleRowDepth,
                                           pillRowHead: insets.top + geo.size.height - PlayerSideClearance.pillRowDepth)
                     : FoldState.shared.innerSideways ? PlayerSideClearance(keeping: insets) : nil

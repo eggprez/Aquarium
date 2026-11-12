@@ -50,6 +50,10 @@ enum DevicePose: String, Equatable, Sendable {
     /// The big screen is the one on, so the layout is the iPad's.
     var usesInnerDisplay: Bool { self == .inside || self == .halfFolded }
 
+    /// The front screen is the one on: closed, or part-open and stood up
+    /// as a tent. Both have the camera and the clock column down one side.
+    var usesFrontDisplay: Bool { self == .front || self == .tent }
+
     /// Whether `LayoutOverride` counts on a device with no hinge: only in a
     /// debug build, for holding a pose on a plain simulator.
     static var overrideWithoutHinge: Bool {
