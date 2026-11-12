@@ -59,4 +59,14 @@ final class DevicePoseTests: XCTestCase {
             partSettled: false, override: .automatic, isPhoneIdiom: true)
         XCTAssertEqual(tent, .tent)
     }
+
+    /// The tent is the front screen part-open: the player steps around the
+    /// camera there as it does closed, rather than keeping the clock column.
+    func testTentUsesTheFrontScreen() {
+        XCTAssertTrue(DevicePose.tent.usesFrontDisplay)
+        XCTAssertTrue(DevicePose.front.usesFrontDisplay)
+        XCTAssertFalse(DevicePose.inside.usesFrontDisplay)
+        XCTAssertFalse(DevicePose.halfFolded.usesFrontDisplay)
+        XCTAssertFalse(DevicePose.standard.usesFrontDisplay)
+    }
 }
