@@ -128,13 +128,23 @@ extension JellyfinClient {
         var excludeItemIds: [String] = []
     }
 
+    /// What to ask the server to sort by. A song's `SortName` is not its
+    /// title: Jellyfin builds it from the disc and track numbers first
+    /// ("0001 - Code Monkey"), so "by name" put every first track ahead of
+    /// every second one, and the A–Z index — which reads the list as being
+    /// in title order — landed nowhere near its letter. Songs by name are by
+    /// `Name`.
+    static func sortBy(_ sort: MusicSort, types: String) -> String {
+        sort == .name && types == "Audio" ? "Name" : sort.rawValue
+    }
+
     func music(_ q: MusicQuery) async throws -> ItemsResponse {
         guard let s = prefs.session else { throw APIError.notConfigured }
         var items: [URLQueryItem] = [
             .init(name: "userId", value: s.userId),
             .init(name: "IncludeItemTypes", value: q.types),
             .init(name: "Recursive", value: q.recursive ? "true" : "false"),
-            .init(name: "SortBy", value: q.sort.rawValue),
+            .init(name: "SortBy", value: Self.sortBy(q.sort, types: q.types)),
             .init(name: "SortOrder", value: (q.descending ?? q.sort.descending) ? "Descending" : "Ascending"),
             .init(name: "Fields", value: q.fields),
             .init(name: "StartIndex", value: String(q.startIndex)),

@@ -434,7 +434,7 @@ extension PlayerModel {
                 tone: .error)
             return
         }
-        audioNeedingStream = nil
+        streamSwitchRequest = nil
         // The title already up, now from its download, keeps "Stop after
         // this episode"; anything else starts clean.
         let sameSitting = isActive && (localRecordId == record.itemId || item?.Id == record.itemId)
@@ -490,7 +490,10 @@ extension PlayerModel {
         let folder = DownloadManager.folder(for: record.itemId)
         segments = record.isAudio ? [] : DownloadSegments.local(in: folder)
         trickplay = nil
-        fullItem = nil
+        // What the Info page says about it: the description kept beside the
+        // download, the library's copy, or what the record itself knows.
+        fullItem = record.isAudio ? nil
+            : DownloadItemInfo.local(in: folder) ?? LibraryIndex.shared.item(record.itemId) ?? record.asVideoItem
         isActive = true
         isBuffering = true
         engineLoad(url: url, startAt: startAt ?? record.resumeSeconds, headers: [:], paused: paused)
@@ -503,6 +506,13 @@ extension PlayerModel {
             // Likewise the markers, and asked again each time: a plugin may
             // have analysed the episode since it was downloaded.
             let mine = generation
+            // And the description, which is also where the Subtitles card
+            // learns of the tracks only the server can draw.
+            Task {
+                guard let described = await DownloadItemInfo.fetch(itemId: record.itemId, into: folder),
+                      generation == mine, localRecordId == record.itemId else { return }
+                fullItem = described
+            }
             Task {
                 let fetched = await DownloadSegments.fetch(itemId: record.itemId, into: folder)
                 guard generation == mine, localRecordId == record.itemId, fetched != segments else { return }
@@ -917,10 +927,15 @@ extension PlayerModel {
             playLocal(record, startAt: position, paused: isPaused)
             #endif
         case .stream(let bitrate):
-            // Not away from a download. Switching reopened the title from
-            // the server — which, offline, failed, and coming back to the
-            // download started it over. The card says why instead.
-            guard !isLocal else { return }
+            // Away from a download only on a yes: it is the copy on this
+            // device traded for a stream. Offline there is no stream to
+            // trade it for, and the card doesn't offer one.
+            if isLocal {
+                #if !os(tvOS)
+                if !JellyfinClient.shared.isOffline { streamSwitchRequest = .quality(bitrate) }
+                #endif
+                return
+            }
             prefs.adaptiveQuality = false
             prefs.defaultBitrate = bitrate
             if currentBitrate != bitrate {

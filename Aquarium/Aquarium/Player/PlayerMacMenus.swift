@@ -200,15 +200,17 @@ struct PlayerMenuItems: View {
             Menu("Quality") {
                 // In the order Auto tries them — see `PlayerModel.QualitySelection`.
                 Picker("Quality", selection: qualityBinding) {
-                    // A download plays as it was saved, and the menu says
-                    // only that: no Auto, no rungs — see `chooseQuality`.
-                    if !player.isLocal {
+                    // Offline, a download plays as it was saved, and the menu
+                    // says only that. Online it lists the lot, and a rung
+                    // asks before leaving the download — see `chooseQuality`.
+                    let streams = !player.isLocal || !JellyfinClient.shared.isOffline
+                    if streams {
                         Text("Auto").tag(PlayerModel.QualitySelection.auto)
                     }
                     if player.downloadedCopy != nil {
                         Text(player.downloadedTitle).tag(PlayerModel.QualitySelection.downloaded)
                     }
-                    if !player.isLocal {
+                    if streams {
                         ForEach(Quality.choices) { choice in
                             Text(choice.maxBitrate == nil ? "Direct (original)" : choice.label)
                                 .tag(PlayerModel.QualitySelection.stream(choice.maxBitrate))
@@ -315,9 +317,9 @@ struct PlayerMenuItems: View {
                     Button("Stop in \(minutes) Minutes") { player.setSleepTimer(minutes: minutes) }
                 }
             }
-            if !player.isLive {
+            if !player.isLive, player.hasUpNext {
                 Divider()
-                Toggle("Stop After This Episode", isOn: Binding(
+                Toggle(player.stopAfterTitle.capitalized, isOn: Binding(
                     get: { player.autoplayCancelled },
                     set: { if $0 { player.cancelAutoplay() } else { player.resumeAutoplay() } }
                 ))
@@ -337,7 +339,8 @@ struct PlayerMenuItems: View {
     /// stream with it in.
     private func trackTitle(_ option: TrackOption) -> String {
         var title = option.isForced ? "\(option.label) (Forced)" : option.label
-        if option.needsNewStream { title += " (reopens the stream)" }
+        // Not on a download, where picking one asks before it streams.
+        if option.needsNewStream, !player.isLocal { title += " (reopens the stream)" }
         return title
     }
 

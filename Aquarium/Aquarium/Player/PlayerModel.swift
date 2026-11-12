@@ -114,12 +114,25 @@ struct TrackOption: Identifiable, Hashable, Sendable {
     var label: String
     var language: String?
     var isForced: Bool
+    /// On a download: a track the copy on this device doesn't hold in any
+    /// form, to be had only by leaving it for the server's stream.
+    var streamOnly = false
 
     var needsNewStream: Bool { avIndex == nil }
     var id: Int { serverIndex ?? -(( avIndex ?? 0) + 1) }
 }
 
 #if !os(tvOS)
+/// Something picked on a download that the download can't give: a soundtrack
+/// or a subtitle it doesn't carry, or one of the server's qualities. Each
+/// means leaving the copy on this device for a stream, which is asked first.
+enum StreamSwitch: Equatable, Sendable {
+    case audio(TrackOption)
+    case subtitle(TrackOption)
+    /// A rung of the Quality card: `nil` is Direct.
+    case quality(Int?)
+}
+
 /// One of a download's subtitle files, read into lines: which download and
 /// which of its files, so it is shown over that download and no other.
 struct SidecarOverlay: Equatable, Sendable {
@@ -352,9 +365,9 @@ final class PlayerModel {
     /// A download's subtitle file being drawn by the app itself, over an
     /// engine that can't take a file in. See `SubtitleFileOverlay`.
     var sidecarOverlay: SidecarOverlay?
-    /// A soundtrack picked on a download that doesn't carry it, waiting on
-    /// the answer to "stream it instead?". See `PlayerModel.selectAudio`.
-    var audioNeedingStream: TrackOption?
+    /// Something picked on a download that only a stream can give, waiting
+    /// on the answer to "switch to streaming?". See `StreamSwitch`.
+    var streamSwitchRequest: StreamSwitch?
     #endif
 
     var client: JellyfinClient { .shared }
@@ -1001,4 +1014,18 @@ final class PlayerModel {
 
     /// The item behind what is on screen, wherever it came from.
     var infoItem: BaseItem? { fullItem ?? item ?? externalChannel?.item }
+
+    /// Whether anything waits behind what is playing: the hand-made queue,
+    /// the series' next episode, or the next download. A film on its own and
+    /// a show's last episode have nothing to stop before.
+    var hasUpNext: Bool { !queue.isEmpty || upNext != nil || upNextLocalId != nil }
+
+    /// What "stop after this" is called: an episode where it is one.
+    var stopAfterTitle: String {
+        var episode = item?.isEpisode == true
+        #if !os(tvOS)
+        if isLocal, let id = localRecordId { episode = DownloadManager.shared.record(for: id)?.isEpisode == true }
+        #endif
+        return episode ? "Stop after this episode" : "Stop after this"
+    }
 }

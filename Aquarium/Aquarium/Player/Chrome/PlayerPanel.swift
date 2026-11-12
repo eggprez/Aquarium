@@ -747,7 +747,7 @@ private struct InfoTab: View {
     @ViewBuilder
     private var actions: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if !player.isLive, player.item?.isEpisode == true {
+            if !player.isLive, player.item?.isEpisode == true, player.hasUpNext {
                 let on = !player.autoplayCancelled
                 PanelRow(title: on ? "Autoplay: On" : "Autoplay: Off", isSelected: on, width: 340) {
                     on ? player.cancelAutoplay() : player.resumeAutoplay()

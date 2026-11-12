@@ -211,7 +211,7 @@ struct PlayerScreen: View {
         .preferredColorScheme(.dark)
         .modifier(PlayerScreenLifecycle())
         #if !os(tvOS)
-        .modifier(StreamForAudioPrompt())
+        .modifier(StreamSwitchPrompt())
         #endif
         #if os(iOS)
         // The status bar comes and goes with the controls, as in Apple's
@@ -398,35 +398,45 @@ private struct PlayerScreenLifecycle: ViewModifier {
     }
 }
 
-// MARK: - Leaving a download for a soundtrack
+// MARK: - Leaving a download for a stream
 
 #if !os(tvOS)
-/// The question a download asks when a soundtrack it doesn't carry is
-/// picked: that track is on the server alone, so hearing it means streaming
-/// the title instead of playing the copy on this device.
-private struct StreamForAudioPrompt: ViewModifier {
+/// The question a download asks when something it can't give is picked — a
+/// soundtrack or a subtitle it doesn't carry, one of the server's qualities:
+/// having it means streaming the title instead of playing the copy on this
+/// device. The rows themselves say nothing of it; this does.
+private struct StreamSwitchPrompt: ViewModifier {
     @Environment(PlayerModel.self) private var player
 
     func body(content: Content) -> some View {
         let asking = Binding(
-            get: { player.audioNeedingStream != nil },
-            set: { if !$0 { player.audioNeedingStream = nil } })
+            get: { player.streamSwitchRequest != nil },
+            set: { if !$0 { player.streamSwitchRequest = nil } })
+        let offline = JellyfinClient.shared.isOffline
         content.alert(
-            "That audio track isn’t in the download",
-            isPresented: asking, presenting: player.audioNeedingStream
-        ) { option in
-            if JellyfinClient.shared.isOffline {
+            offline ? "That isn’t in the download" : "Switch to streaming?",
+            isPresented: asking, presenting: player.streamSwitchRequest
+        ) { request in
+            if offline {
                 Button("OK", role: .cancel) {}
             } else {
-                Button("Stream") { Task { await player.streamForAudio(option) } }
+                Button("Stream") { Task { await player.confirmStreamSwitch(request) } }
                 Button("Keep Download", role: .cancel) {}
             }
-        } message: { option in
-            if JellyfinClient.shared.isOffline {
-                Text("“\(option.label)” wasn’t downloaded. To hear it you’ll need to go online and stream this instead.")
+        } message: { request in
+            if offline {
+                Text("\(Self.subject(request)) wasn’t downloaded. To have it you’ll need to go online and stream this instead.")
             } else {
-                Text("“\(option.label)” wasn’t downloaded. To hear it, this has to be streamed from the server instead of played from the download, which needs a connection and uses data.")
+                Text("You’re watching the downloaded copy. \(Self.subject(request)) isn’t part of it, so picking this switches to streaming from the server.")
             }
+        }
+    }
+
+    private static func subject(_ request: StreamSwitch) -> String {
+        switch request {
+        case .audio(let option): "“\(option.label)”"
+        case .subtitle(let option): "“\(option.label)”"
+        case .quality: "That quality"
         }
     }
 }
