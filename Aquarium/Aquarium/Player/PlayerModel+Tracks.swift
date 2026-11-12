@@ -370,7 +370,10 @@ extension PlayerModel {
     /// What an Audio menu says under a track that isn't in what is playing.
     func audioDetail(for option: TrackOption) -> String? {
         guard option.needsNewStream else { return nil }
-        return isLocal ? "Not in the download: streams from the server" : "Reopens the stream with this track"
+        // Online, a download's missing tracks are rows like any other: the
+        // question asked on picking one says what it takes.
+        if isLocal { return JellyfinClient.shared.isOffline ? "Not in the download: needs a connection" : nil }
+        return "Reopens the stream with this track"
     }
 
     var selectedAudioOption: TrackOption.ID? {
@@ -421,7 +424,7 @@ extension PlayerModel {
         // is the server's stream or nothing, and that is asked first: it
         // needs a connection the download didn't.
         if isLocal {
-            audioNeedingStream = option
+            streamSwitchRequest = .audio(option)
             return
         }
         #endif
@@ -447,9 +450,13 @@ extension PlayerModel {
         guard let index = option.serverIndex else { return }
         #if !os(tvOS)
         // A download has no server to ask; its subtitles are the files saved
-        // beside it.
+        // beside it — or, for one only the server can draw, its stream.
         if isLocal {
-            if let entry = localSidecars.first(where: { $0.index == index }) { loadSidecar(entry) }
+            if option.streamOnly {
+                streamSwitchRequest = .subtitle(option)
+            } else if let entry = localSidecars.first(where: { $0.index == index }) {
+                loadSidecar(entry)
+            }
             return
         }
         #endif
@@ -619,9 +626,24 @@ extension PlayerModel {
 
     /// The answer was yes: leave the download for the server's stream of the
     /// same title, with that soundtrack, from the same moment.
-    func streamForAudio(_ option: TrackOption) async {
-        audioNeedingStream = nil
-        guard isLocal, let id = localRecordId, let index = option.serverIndex else { return }
+    func confirmStreamSwitch(_ request: StreamSwitch) async {
+        streamSwitchRequest = nil
+        switch request {
+        case .quality(let bitrate):
+            // A quality somebody picked is kept, as it is on a stream; left
+            // on Auto, the stream would be traded straight back.
+            prefs.adaptiveQuality = false
+            prefs.defaultBitrate = bitrate
+            await switchQuality(to: bitrate)
+        case .audio(let option):
+            await streamForTrack(audio: option.serverIndex, subtitle: nil)
+        case .subtitle(let option):
+            await streamForTrack(audio: nil, subtitle: option.serverIndex)
+        }
+    }
+
+    private func streamForTrack(audio: Int?, subtitle: Int?) async {
+        guard isLocal, let id = localRecordId, audio != nil || subtitle != nil else { return }
         let resume = position
         guard let streamed = try? await JellyfinClient.shared.item(id) else {
             AppModel.shared.toast("The server can't be reached, so the download plays on", tone: .error)
@@ -629,7 +651,8 @@ extension PlayerModel {
         }
         guard isLocal, localRecordId == id else { return }
         var opts = StreamOptions()
-        opts.audioStreamIndex = index
+        opts.audioStreamIndex = audio
+        opts.subtitleStreamIndex = subtitle
         opts.startSeconds = resume
         await play(item: streamed, options: opts, meta: StartMeta(forTracks: true, leavingDownloadForTrack: true))
     }
@@ -696,6 +719,20 @@ extension PlayerModel {
             out.append(TrackOption(
                 serverIndex: entry.index, avIndex: engineTrack(forSidecar: entry),
                 label: entry.title, language: entry.language, isForced: entry.isForced))
+        }
+        // Then the ones with no file to save: picture subtitles, which only
+        // the server can draw, into a stream. Listed while there is a server
+        // to ask, and not where the download's own file already holds them.
+        if !JellyfinClient.shared.isOffline, let sources = fullItem?.MediaSources {
+            let saved = localAudioList?.mediaSourceId
+            let source = sources.first { $0.Id == saved } ?? sources.first
+            for stream in source?.subtitleStreams ?? [] where stream.isImageSubtitle {
+                guard let index = stream.Index, !out.contains(where: { $0.serverIndex == index }),
+                      !inFile.contains(where: { !$0.isExternal && $0.fileIndex == index }) else { continue }
+                out.append(TrackOption(
+                    serverIndex: index, avIndex: nil, label: stream.menuLabel, language: stream.Language,
+                    isForced: stream.isForced, streamOnly: true))
+            }
         }
         return out
     }

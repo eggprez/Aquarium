@@ -157,6 +157,24 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
         return item
     }
 
+    /// A film or an episode as an item, for the player's Info page when
+    /// nothing fuller is to hand: what it is called and where it sits in its
+    /// show. See `DownloadItemInfo` for the description kept with it.
+    var asVideoItem: BaseItem {
+        var item = BaseItem()
+        item.Id = itemId
+        item.Name = name
+        item.type = type ?? (isEpisode ? "Episode" : "Movie")
+        item.SeriesName = series
+        item.SeriesId = seriesId
+        item.SeasonId = seasonId
+        item.ParentIndexNumber = season
+        item.IndexNumber = episode
+        item.RunTimeTicks = runTimeTicks
+        item.ProductionYear = year
+        return item
+    }
+
     var id: String { itemId }
 
     var isEpisode: Bool { type == "Episode" || (series != nil && type != "Movie") }
@@ -2492,6 +2510,7 @@ final class DownloadManager: NSObject {
             Task {
                 await DownloadSubtitles.fetch(itemId: itemId, into: Self.folder(for: itemId))
                 await DownloadSegments.fetch(itemId: itemId, into: Self.folder(for: itemId))
+                await DownloadItemInfo.fetch(itemId: itemId, into: Self.folder(for: itemId))
             }
         }
     }
@@ -2785,6 +2804,7 @@ final class DownloadManager: NSObject {
                 Task {
                     await DownloadSubtitles.fetch(itemId: itemId, into: Self.folder(for: itemId))
                     await DownloadSegments.fetch(itemId: itemId, into: Self.folder(for: itemId))
+                    await DownloadItemInfo.fetch(itemId: itemId, into: Self.folder(for: itemId))
                 }
             }
             return
@@ -2816,6 +2836,7 @@ final class DownloadManager: NSObject {
             Task {
                 await DownloadSubtitles.fetch(itemId: itemId, into: Self.folder(for: itemId))
                 await DownloadSegments.fetch(itemId: itemId, into: Self.folder(for: itemId))
+                await DownloadItemInfo.fetch(itemId: itemId, into: Self.folder(for: itemId))
             }
             return
         }

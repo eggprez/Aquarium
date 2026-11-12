@@ -132,6 +132,15 @@ final class InfoArtwork {
     private(set) var image: PlatformImage?
 
     static func url(for player: PlayerModel) -> URL? {
+        #if !os(tvOS)
+        // A download's poster is the copy kept with it, which is there
+        // offline: its show's for an episode, as on a stream.
+        if player.isLocal, let id = player.localRecordId, let record = DownloadManager.shared.record(for: id),
+           let kept = (record.isEpisode ? record.seriesArtURL ?? record.seasonArtURL ?? record.artURL : record.artURL)
+            .flatMap(URL.init(string:)) {
+            return kept
+        }
+        #endif
         guard let item = player.infoItem else { return nil }
         return player.isLive ? Artwork.channelLogo(item, width: 400) : Artwork.poster(for: item, width: 400)
     }

@@ -2083,8 +2083,18 @@ struct HeroCarousel: View {
             // of every draw sat half a sidebar to the right of the rest,
             // picture, scrims and text together. Here every page is laid
             // out the same way: the bar's whole width, starting at its edge.
+            //
+            // An ordinary stack, not a lazy one. Everything a page is laid
+            // out from arrives a pass late — the width, the sides and the
+            // top inset are each measured, and start at zero — and a lazy
+            // stack does not reliably hand the new numbers to pages it has
+            // already built: on an iPad the bar took its real size while
+            // the pages inside stayed as the first pass drew them, six
+            // slivers side by side with their buttons crushed. There are
+            // six pages at most, and a minute of turning builds them all
+            // anyway.
             ScrollView(.horizontal) {
-                LazyHStack(spacing: 0) {
+                HStack(spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.Id) { position, item in
                         HeroHeader(
                             item: item,

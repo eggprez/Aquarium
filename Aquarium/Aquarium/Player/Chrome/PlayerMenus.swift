@@ -290,9 +290,11 @@ private struct QualityMenu: View {
     let close: () -> Void
 
     var body: some View {
-        // A download plays as it was saved, and the card says only that:
-        // no Auto, no rungs — see `PlayerModel.chooseQuality`.
-        if player.isLocal {
+        // Offline, a download plays as it was saved, and the card says only
+        // that. With a server in reach it lists everything a stream would,
+        // and picking a rung asks before leaving the download — see
+        // `PlayerModel.chooseQuality`.
+        if player.isLocal, JellyfinClient.shared.isOffline {
             PanelRow(title: player.downloadedTitle, detail: "Playing from this device", isSelected: true) {
                 onInteract()
                 close()
@@ -305,7 +307,10 @@ private struct QualityMenu: View {
     @ViewBuilder private var rungs: some View {
         let selection = player.qualitySelection
         let auto = selection == .auto
-        let streamable = player.offersQuality
+        // A download's card: every row plain, the question on picking one
+        // doing the explaining.
+        let local = player.isLocal
+        let streamable = player.offersQuality || local
 
         if let reason = player.qualityUnavailableReason {
             PanelNote(text: reason)
@@ -313,21 +318,21 @@ private struct QualityMenu: View {
         // Auto first, then the rows in the order Auto tries them: the
         // download, Direct, and the transcodes from the largest down.
         PanelRow(title: "Auto",
-                 detail: auto ? "Playing now · \(playingNow)" : "Downloaded, then Direct, then smaller streams",
+                 detail: local ? nil : auto ? "Playing now · \(playingNow)" : "Downloaded, then Direct, then smaller streams",
                  isSelected: auto) {
             pick(.auto)
         }
         #if !os(tvOS)
         if player.downloadedCopy != nil {
-            PanelRow(title: player.downloadedTitle, detail: "From this device") {
+            PanelRow(title: player.downloadedTitle, detail: local ? nil : "From this device", isSelected: local) {
                 pick(.downloaded)
             }
         }
         #endif
         ForEach(Quality.choices) { choice in
-            let playing = player.currentBitrate == choice.maxBitrate
+            let playing = !local && player.currentBitrate == choice.maxBitrate
             PanelRow(title: choice.maxBitrate == nil ? "Direct (original)" : choice.label,
-                     detail: playing ? (player.isTranscoding
+                     detail: local ? nil : playing ? (player.isTranscoding
                                         ? (choice.maxBitrate == nil ? "Playing now · converted by the server" : "Playing now · transcoding")
                                         : "Playing now")
                         : choice.maxBitrate == nil ? "The file as it is, no transcode" : nil,
@@ -336,7 +341,9 @@ private struct QualityMenu: View {
                 pick(.stream(choice.maxBitrate))
             }
         }
+        if !local {
         PanelNote(text: "Auto plays the downloaded copy if there is one, then Direct — the original file, no transcode — and steps down through the streams below it when the connection struggles, climbing back once it is steady. Picking a quality keeps it there.")
+        }
     }
 
     /// What Auto has landed on, in the pill's words.
@@ -463,9 +470,11 @@ private struct MoreMenu: View {
             }
         }
 
-        if !player.isLive {
+        // Only with something to stop before: a film on its own, or a
+        // show's last episode, has nothing after it.
+        if !player.isLive, player.hasUpNext {
             PanelHeading(text: "After this")
-            PanelRow(title: "Stop after this episode",
+            PanelRow(title: player.stopAfterTitle,
                      detail: player.autoplayCancelled ? "Nothing plays after this one"
                         : player.upNextTitle.map { "Otherwise next: \($0)" },
                      isSelected: player.autoplayCancelled) {

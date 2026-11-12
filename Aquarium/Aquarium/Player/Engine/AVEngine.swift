@@ -73,6 +73,10 @@ final class AVEngine: PlaybackEngine {
     /// See `watchForPicture`.
     private var pictureWatchdog: Task<Void, Never>?
 
+    /// The restarts in a downloaded stream and how late the sound has run
+    /// since the last seek; see `StreamSeams`.
+    private var seamSlip = SeamSlip()
+
     private var timeObserver: Any?
     private var statusObservers: Set<AnyCancellable> = []
     /// Lives as long as the engine does, unlike `statusObservers`, which is
@@ -143,6 +147,7 @@ final class AVEngine: PlaybackEngine {
         readAhead = request.readAhead ?? 0
         hints = request.hints
         hadFirstFrame = false
+        findSeams(in: request.url)
         // A stored offset is built into the stream as it opens rather than
         // applied to it a moment later, so nothing is ever handed to the
         // player at the wrong offset first.
@@ -397,6 +402,7 @@ final class AVEngine: PlaybackEngine {
         readAhead = request.readAhead ?? 0
         hints = request.hints
         hadFirstFrame = false
+        findSeams(in: request.url)
         sourceAsset = asset
         composed = nil
 
@@ -557,6 +563,7 @@ final class AVEngine: PlaybackEngine {
             target = clamped.seconds
         }
         hadFirstFrame = false
+        seamSlip.reset()
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
                     toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
             guard let self, finished else { return }
@@ -1033,6 +1040,38 @@ final class AVEngine: PlaybackEngine {
         deliver(.buffering(buffering))
     }
 
+    /// Read a downloaded stream's seams for the stream now loading. Nothing
+    /// to find in anything but a package on this device.
+    private func findSeams(in url: URL) {
+        seamSlip = SeamSlip()
+        guard url.isFileURL, url.pathExtension.lowercased() == "movpkg" else { return }
+        let mine = loadGeneration
+        Task {
+            let seams = await StreamSeams.seams(inPackage: url)
+            guard loadGeneration == mine, !seams.isEmpty else { return }
+            seamSlip.seams = seams
+        }
+    }
+
+    /// Put the sound back on the picture once a downloaded stream's seams
+    /// have carried it far enough off.
+    ///
+    /// AVPlayer plays the overlapping audio either side of an encoder restart
+    /// end to end, so each one crossed leaves the sound later than the
+    /// picture (see `StreamSeams`). A seek makes it read the timestamps again,
+    /// which is all skipping forward and back ever did to cure it; this is
+    /// that seek, to the frame already showing. It costs a blink — about
+    /// 70 ms on a package — so it waits until the slip is past what reads as
+    /// in sync rather than spending one on every seam.
+    private func reanchorIfSoundHasSlipped(at time: CMTime) {
+        guard time.seconds.isFinite, seamSlip.advance(to: time.seconds) else { return }
+        let slip = seamSlip.slip
+        seamSlip.reset()
+        guard player.timeControlStatus == .playing else { return }
+        Self.log.notice("sound \(Int((slip * 1000).rounded()), privacy: .public) ms late after seams; re-anchoring at \(time.seconds, format: .fixed(precision: 1), privacy: .public)")
+        player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
     private func tick(_ time: CMTime) {
         guard let avItem = playerItem else { return }
         // A stream still opening at a position sits at the position it was
@@ -1041,6 +1080,7 @@ final class AVEngine: PlaybackEngine {
         // to the server as this item's resume point.
         if !holding {
             deliver(.position(time.seconds.isFinite ? time.seconds : 0))
+            reanchorIfSoundHasSlipped(at: time)
         }
         let d = avItem.duration.seconds
         // A live HLS stream has no meaningful duration; the seekable range

@@ -24,8 +24,9 @@ struct PlayerStreamRows {
 
     // MARK: The file
 
-    /// Empty for a channel and for a download: neither has a Jellyfin media
-    /// source behind it, and a column of blanks says less than no column.
+    /// Empty for a channel, which has no Jellyfin media source behind it: a
+    /// column of blanks says less than no column. A download's is the file
+    /// it was made from, as kept by `DownloadItemInfo`.
     var file: [Row] {
         guard let source else { return [] }
         let video = source.streams.first { $0.type == "Video" }
