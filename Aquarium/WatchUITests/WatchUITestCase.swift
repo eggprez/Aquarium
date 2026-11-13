@@ -11,15 +11,6 @@
 import XCTest
 
 class WatchUITestCase: AquariumUITestCase {
-    /// Not terminated after each test: on the watchOS 27 simulator
-    /// `XCUIApplication.terminate()` takes about two minutes to return, while
-    /// the next test's `launch()` replaces the running copy in a second or two.
-    /// The last test's copy is left running (harmless; `simctl terminate` ends it).
-    override func tearDownWithError() throws {
-        app = nil
-        try super.tearDownWithError()
-    }
-
     /// Scrolls the list a little at a time (a plain swipe overshoots on a
     /// watch) until the element is on screen; down again if it went past.
     @discardableResult
