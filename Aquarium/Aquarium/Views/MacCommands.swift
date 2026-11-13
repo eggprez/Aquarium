@@ -152,12 +152,16 @@ struct MacCommands: Commands {
             // The guide's own navigation, live only while it is in front:
             // a page back or forward in time, and back to now.
             Divider()
+            // ⌘← and ⌘→ only while the guide is showing, not merely greyed
+            // out: AppKit stops at the first menu item with a key, enabled or
+            // not, and Go comes before Playback, so a disabled Earlier and
+            // Later swallowed the player's skip keys.
             Button("Earlier") { MacCommandRequests.shared.guideEarlier += 1 }
-                .keyboardShortcut(.leftArrow, modifiers: .command)
+                .keyboardShortcut(isGuideShowing ? KeyboardShortcut(.leftArrow, modifiers: .command) : nil)
                 .disabled(!isGuideShowing)
                 .accessibilityIdentifier(TestID.MacMenu.goEarlier)
             Button("Later") { MacCommandRequests.shared.guideLater += 1 }
-                .keyboardShortcut(.rightArrow, modifiers: .command)
+                .keyboardShortcut(isGuideShowing ? KeyboardShortcut(.rightArrow, modifiers: .command) : nil)
                 .disabled(!isGuideShowing)
                 .accessibilityIdentifier(TestID.MacMenu.goLater)
             Button("Now") { MacCommandRequests.shared.guideNow += 1 }
