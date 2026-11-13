@@ -43,14 +43,16 @@ struct QuickConnectApproveSection: View {
                         if outcome != nil { outcome = nil }
                     }
                     .onSubmit { if code.count == 6 { isConfirming = true } }
+                    .accessibilityIdentifier(TestID.QuickConnect.codeField)
                 #if os(macOS)
                 // The spinner sits beside the button rather than in it, so
                 // the button keeps its width; Return is the button, and the
                 // "…" says a confirmation comes first.
-                if isApproving { ProgressView().controlSize(.small) }
+                if isApproving { ProgressView().controlSize(.small).accessibilityIdentifier(TestID.QuickConnect.busy) }
                 Button("Approve…") { isConfirming = true }
                     .keyboardShortcut(.defaultAction)
                     .disabled(code.count != 6 || isApproving || client.isOffline)
+                    .accessibilityIdentifier(TestID.QuickConnect.approve)
                 #else
                 Button {
                     isConfirming = true
@@ -64,6 +66,7 @@ struct QuickConnectApproveSection: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accentStrong)
                 .disabled(code.count != 6 || isApproving || client.isOffline)
+                .accessibilityIdentifier(TestID.QuickConnect.approve)
                 #endif
             }
             .confirmationDialog(
@@ -72,7 +75,9 @@ struct QuickConnectApproveSection: View {
                 titleVisibility: .visible
             ) {
                 Button("Approve \(code)") { Task { await approve() } }
+                    .accessibilityIdentifier(TestID.QuickConnect.confirm)
                 Button("Cancel", role: .cancel) {}
+                    .accessibilityIdentifier(TestID.QuickConnect.cancel)
             } message: {
                 Text("Only approve a code you can see on your own device's screen right now. Whoever holds the device showing it gets full access to your account.")
             }
@@ -87,12 +92,15 @@ struct QuickConnectApproveSection: View {
                         .foregroundStyle(outcome.tone == .ok ? Color.green : (outcome.tone == .bad ? Color.red : Color.orange))
                 }
                 .font(.callout)
+                .accessibilityIdentifier(TestID.QuickConnect.outcomeText)
                 #else
                 HStack(spacing: 8) {
                     StatusPill(text: outcome.tone == .ok ? "Approved" : "Not approved", tone: outcome.tone)
+                        .accessibilityIdentifier(TestID.QuickConnect.outcome)
                     Text(outcome.text)
                         .font(.caption)
                         .foregroundStyle(Theme.textDim)
+                        .accessibilityIdentifier(TestID.QuickConnect.outcomeText)
                 }
                 #endif
             }

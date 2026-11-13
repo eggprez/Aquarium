@@ -150,6 +150,7 @@ struct PlayerTransport: View {
         }
         .frame(maxHeight: .infinity, alignment: .bottom)
         .ignoresSafeArea()
+        .testAnchor(TestID.Player.controls)
     }
 
     /// Above the band's timeline: the show, the title, and that it is paused.
@@ -228,6 +229,7 @@ struct PlayerTransport: View {
             chrome.pointerOnControls = on
         }
         .onDisappear { chrome.pointerOnControls = false }
+        .testAnchor(TestID.Player.controls)
     }
 
     /// What a row keeps clear beyond the edge inset it already has: the

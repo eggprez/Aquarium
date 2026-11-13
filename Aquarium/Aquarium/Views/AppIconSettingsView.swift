@@ -88,6 +88,7 @@ struct AppIconSettingsView: View {
                             }
                         }
                     }
+                    .testAnchor(TestID.AppIconSettings.shelf(TestID.key(shelf.title)))
                 }
                 Text("Each icon has a dark look and follows the tint you choose for the Home Screen. Holiday icons turn up a month before the day and stay for a month after.")
                     .font(.footnote)
@@ -97,6 +98,7 @@ struct AppIconSettingsView: View {
             .padding(.vertical, 16)
         }
         .background(Theme.background)
+        .testAnchor(TestID.AppIconSettings.root)
         .screenTitle("App Icon")
         .paletteBar()
         .alert("Couldn't change the icon", isPresented: .init(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
@@ -148,6 +150,7 @@ struct AppIconSettingsView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(icon.title), \(icon.blurb)")
         .accessibilityAddTraits(isCurrent ? .isSelected : [])
+        .accessibilityIdentifier(TestID.AppIconSettings.icon(icon.id))
     }
 
     private func choose(_ icon: AppIconChoice) {

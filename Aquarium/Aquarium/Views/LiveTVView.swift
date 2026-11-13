@@ -74,6 +74,7 @@ struct LiveTVView: View {
                     }
                     .help("Fetch the channels and guide again (⌘R)")
                     .disabled(store.isLoading)
+                    .accessibilityIdentifier(TestID.LiveTV.refresh)
                 }
             }
             // View ▸ Refresh, ⌘R. A counter from the menu rather than a
@@ -139,6 +140,7 @@ struct LiveTVView: View {
                     .font(roomy ? .largeTitle.weight(.bold) : .headline)
                     .foregroundStyle(Theme.text)
                     .lineLimit(1)
+                    .accessibilityIdentifier(TestID.LiveTV.title)
             }
         }
     }
@@ -180,6 +182,7 @@ struct LiveTVView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 #endif
         }
+        .testAnchor(TestID.LiveTV.root)
         .screenTitle("Live TV")
         .paletteBar()
         // Keyed rather than bare `.task {}`: a tab's view stays alive when you
@@ -195,14 +198,17 @@ struct LiveTVView: View {
     private var content: some View {
         if store.isLoading, channels.isEmpty {
             ScrollView { SkeletonList(count: 7).padding(.top, 8) }
+                .testAnchor(TestID.LiveTV.loading)
         } else if let error = store.error, channels.isEmpty {
             ErrorState(error: error) { Task { await store.refresh() } }
+                .testAnchor(TestID.LiveTV.error)
         } else if channels.isEmpty {
             EmptyState(
                 symbol: "antenna.radiowaves.left.and.right",
                 title: "No channels",
                 message: emptyChannelsMessage
             )
+            .testAnchor(TestID.LiveTV.empty)
         } else {
             // Not nested in a ScrollView of its own: the guide's vertical
             // scroll region has to be the one giving the page its scroll, or

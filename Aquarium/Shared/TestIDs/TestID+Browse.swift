@@ -427,7 +427,9 @@ extension TestID {
         static let seriesSelectionShowInFinder = "downloads.series.selection.showInFinder"
         static let seriesSelectionDelete = "downloads.series.selection.delete"
 
-        // "Not enough disk space" (a sheet on iPhone and iPad; an alert on the Mac, which takes no names).
+        // "Not enough disk space": a sheet on iPhone and iPad; on the Mac an
+        // alert whose buttons carry the same names (whether AppKit's alert
+        // hands them on is not yet confirmed).
         static let spacePrompt = "downloads.spacePrompt.root"
         /// A smaller quality that would fit, keyed by its label through `TestID.key`.
         static func spacePromptUse(_ label: String) -> String { "downloads.spacePrompt.use.\(TestID.key(label))" }

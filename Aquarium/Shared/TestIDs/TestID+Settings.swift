@@ -219,6 +219,16 @@ extension TestID {
         /// The audio delay row for one frame rate (24, 25, 30, 50, 60); it
         /// opens the sync test.
         static func audioDelay(_ fps: Int) -> String { "tvSettings.audio.delay.\(fps)" }
+        /// The flashing-images warning before the sync test: Play the test.
+        static let syncTestPlay = "tvSettings.syncTest.play"
+        /// The flashing-images warning before the sync test: Cancel.
+        static let syncTestCancel = "tvSettings.syncTest.cancel"
+
+        /// The alert a text row (a playlist address, a user agent) opens: its
+        /// field, Save and Cancel. The row itself is its `Settings` name.
+        static let textEntryField = "tvSettings.textEntry.field"
+        static let textEntrySave = "tvSettings.textEntry.save"
+        static let textEntryCancel = "tvSettings.textEntry.cancel"
 
         /// The dialog a press on another account opens: its Cancel. Switch
         /// and Sign Out are `Settings.accountSwitch` / `accountRemove`.

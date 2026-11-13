@@ -20,6 +20,7 @@ struct TabBarSettingsView: View {
             Section {
                 Label(AppSection.home.title, systemImage: AppSection.home.symbol)
                     .foregroundStyle(Theme.textDim)
+                    .accessibilityIdentifier(TestID.TabBarSettings.home)
             } header: {
                 Text("Always first")
             }
@@ -33,7 +34,9 @@ struct TabBarSettingsView: View {
                         Text(index < slots ? "Tab bar" : "More")
                             .font(.caption)
                             .foregroundStyle(index < slots ? Theme.accent : Theme.textDim)
+                            .accessibilityIdentifier(TestID.TabBarSettings.placement(section.id))
                     }
+                    .testAnchor(TestID.TabBarSettings.row(section.id))
                 }
                 .onMove { from, to in
                     var next = order
@@ -49,6 +52,7 @@ struct TabBarSettingsView: View {
             }
         }
         .environment(\.editMode, .constant(.active))
+        .testAnchor(TestID.TabBarSettings.root)
         // The phone's bar is rebuilt whenever its tabs change, which would
         // take this page down with it mid-drag; it waits until the page is
         // left instead. An iPad's sidebar follows along live.
@@ -61,6 +65,7 @@ struct TabBarSettingsView: View {
             if !prefs.tabBarOrder.isEmpty {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Reset") { prefs.tabBarOrder = [] }
+                        .accessibilityIdentifier(TestID.TabBarSettings.reset)
                 }
             }
         }

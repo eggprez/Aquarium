@@ -257,9 +257,56 @@ extension TestID {
 
     // MARK: - MacMenu
 
-    /// Nothing in the menu bar takes an identifier (see TESTING notes); find
-    /// menu items by title. Here so the name is taken.
-    enum MacMenu {}
+    /// The Mac's menu-bar commands (`MacCommands`). The Playback menu's items
+    /// are `TestID.Player.menu…`, shared with the picture's context menu.
+    enum MacMenu {
+        /// Window ▸ Aquarium (⌥⌘1): the main window forward.
+        static let mainWindow = "macMenu.window.main"
+        /// Aquarium ▸ About Aquarium.
+        static let about = "macMenu.app.about"
+
+        // View
+        /// View ▸ Bigger (⌘=): larger thumbnails.
+        static let bigger = "macMenu.view.bigger"
+        /// View ▸ Smaller (⌘-).
+        static let smaller = "macMenu.view.smaller"
+        /// View ▸ Actual Size (⌘0).
+        static let actualSize = "macMenu.view.actualSize"
+        /// A sidebar section on ⌘1…⌘9, by section.
+        static func section(_ section: String) -> String { "macMenu.view.section.\(section)" }
+        /// View ▸ Refresh (⌘R).
+        static let refresh = "macMenu.view.refresh"
+
+        // Go
+        /// Go ▸ Back (⌘[): the window in front back one page.
+        static let goBack = "macMenu.go.back"
+        /// Go ▸ Home (⇧⌘H).
+        static let goHome = "macMenu.go.home"
+        /// Go ▸ Search (⌘F): the sidebar's search field.
+        static let goSearch = "macMenu.go.search"
+        /// Present only where the server has Live TV.
+        static let goLiveTV = "macMenu.go.liveTV"
+        /// Go ▸ Downloads (⌥⌘J).
+        static let goDownloads = "macMenu.go.downloads"
+        /// Go ▸ Show Downloads in Finder (⌥⌘R).
+        static let goShowDownloadsInFinder = "macMenu.go.showDownloadsInFinder"
+        /// The guide a page back in time (⌘←), live only while it is in front.
+        static let goEarlier = "macMenu.go.earlier"
+        /// The guide a page forward in time (⌘→).
+        static let goLater = "macMenu.go.later"
+        /// The guide back to now (⌘T).
+        static let goNow = "macMenu.go.now"
+
+        // Item: the title page in front
+        /// Play or Resume (⌘↩); its title says which.
+        static let itemPlay = "macMenu.item.play"
+        /// Add to / Remove from Favorites (⌘D).
+        static let itemFavorite = "macMenu.item.favorite"
+        /// Mark as Watched / Unwatched (⇧⌘U).
+        static let itemWatched = "macMenu.item.watched"
+        /// Open in New Window (⌥⌘O).
+        static let itemOpenInNewWindow = "macMenu.item.openInNewWindow"
+    }
 
     // MARK: - Tent
 

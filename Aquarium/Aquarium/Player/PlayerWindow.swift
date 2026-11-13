@@ -208,34 +208,43 @@ struct PlaybackCommands: Commands {
             Button("Play / Pause") { player.togglePlayPause() }
                 .keyboardShortcut(bare(.space))
                 .disabled(!player.isActive)
+                .accessibilityIdentifier(TestID.Player.menuPlayPause)
             Button("Back 10 Seconds") { player.seek(by: -10) }
                 .keyboardShortcut(gated(.leftArrow, .command))
                 .disabled(!player.isActive)
+                .accessibilityIdentifier(TestID.Player.menuSkipBack)
             Button("Forward 10 Seconds") { player.seek(by: 10) }
                 .keyboardShortcut(gated(.rightArrow, .command))
                 .disabled(!player.isActive)
+                .accessibilityIdentifier(TestID.Player.menuSkipForward)
             Button(player.activeSegment?.isOutro == true ? "Skip Credits" : "Skip Intro") {
                 player.skipSegment()
             }
             .keyboardShortcut(bare("s"))
             .disabled(player.activeSegment == nil)
+            .accessibilityIdentifier(TestID.Player.menuSkipSegment)
             Divider()
             Button("Slower") { player.stepSpeed(-1) }
                 .keyboardShortcut(bare("["))
                 .disabled(!player.isActive || player.isLive)
+                .accessibilityIdentifier(TestID.Player.menuSlower)
             Button("Faster") { player.stepSpeed(1) }
                 .keyboardShortcut(bare("]"))
                 .disabled(!player.isActive || player.isLive)
+                .accessibilityIdentifier(TestID.Player.menuFaster)
             Divider()
             Button("Volume Up") { state.stepVolume(player, by: 0.05) }
                 .keyboardShortcut(bare(.upArrow))
                 .disabled(!player.isActive)
+                .accessibilityIdentifier(TestID.Player.menuVolumeUp)
             Button("Volume Down") { state.stepVolume(player, by: -0.05) }
                 .keyboardShortcut(bare(.downArrow))
                 .disabled(!player.isActive)
+                .accessibilityIdentifier(TestID.Player.menuVolumeDown)
             Toggle("Mute", isOn: Binding(get: { player.isMuted }, set: { player.isMuted = $0 }))
                 .keyboardShortcut(bare("m"))
                 .disabled(!player.isActive)
+                .accessibilityIdentifier(TestID.Player.menuMute)
             Divider()
             PlayerMenuItems(player: player, shortcut: gated)
             Divider()
@@ -245,23 +254,28 @@ struct PlaybackCommands: Commands {
             ))
             .keyboardShortcut("i", modifiers: .command)
             .disabled(!player.isActive)
+            .accessibilityIdentifier(TestID.Player.menuStreamInfo)
             // The panel over the picture, for a keyboard that has no pill
             // to click: Info, and the tabs from there.
             Button("Show Panel") { state.togglePanelRequest += 1 }
                 .keyboardShortcut(gated("k", .command))
                 .disabled(!player.isActive)
+                .accessibilityIdentifier(TestID.Player.menuShowPanel)
             Button(state.pictureInPicture?.isActive == true ? "Leave Picture in Picture" : "Picture in Picture") {
                 state.togglePictureInPicture()
             }
             .keyboardShortcut(bare("p"))
             .disabled(!state.canPictureInPicture)
+            .accessibilityIdentifier(TestID.Player.menuPictureInPicture)
             Button(state.isFullScreen ? "Exit Full Screen" : "Enter Full Screen") { state.toggleFullScreen() }
                 .keyboardShortcut(bare("f"))
                 .disabled(!player.isActive)
+                .accessibilityIdentifier(TestID.Player.menuFullScreen)
             Divider()
             Button("Stop") { player.stop() }
                 .keyboardShortcut(".", modifiers: .command)
                 .disabled(!player.isActive)
+                .accessibilityIdentifier(TestID.Player.menuStop)
         }
     }
 

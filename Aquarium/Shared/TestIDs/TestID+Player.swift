@@ -30,6 +30,10 @@ extension TestID {
         static let remoteInput = "player.tv.remoteInput"
         /// The Mac's player window content (the screen, or black while idle).
         static let window = "player.window.root"
+        /// The transport over the picture while it is up: the title row,
+        /// cluster and bottom band on iPhone, iPad and Mac; the band along
+        /// the bottom on an Apple TV. Absent while the controls are hidden.
+        static let controls = "player.controls.root"
 
         // MARK: Title row
 
@@ -257,6 +261,15 @@ extension TestID {
         static let errorSmallerStream = "player.error.smallerStream"
         static let errorClose = "player.error.close"
 
+        // MARK: Switch-to-streaming alert (a download asked for what it lacks)
+
+        /// "Stream": leave the download and stream the title.
+        static let streamSwitchConfirm = "player.streamSwitch.confirm"
+        /// "Keep Download": stay on the copy on this device.
+        static let streamSwitchKeepDownload = "player.streamSwitch.keepDownload"
+        /// "OK" on the offline form of the alert, which offers no stream.
+        static let streamSwitchOK = "player.streamSwitch.ok"
+
         // MARK: Gesture feedback
 
         /// How far a run of skips has gone: "+30 s".
@@ -319,6 +332,25 @@ extension TestID {
         static let menuStreamInfo = menu("streamInfo")
         static let menuPictureInPicture = menu("pictureInPicture")
         static let menuFullScreen = menu("fullScreen")
+        // The Playback menu's own items (menu bar only).
+        /// Back 10 Seconds (⌘←).
+        static let menuSkipBack = menu("skipBack")
+        /// Forward 10 Seconds (⌘→).
+        static let menuSkipForward = menu("skipForward")
+        /// Slower ([): one speed step down.
+        static let menuSlower = menu("slower")
+        /// Faster (]): one speed step up.
+        static let menuFaster = menu("faster")
+        /// Volume Up (↑).
+        static let menuVolumeUp = menu("volumeUp")
+        /// Volume Down (↓).
+        static let menuVolumeDown = menu("volumeDown")
+        /// The Mute toggle (M).
+        static let menuMute = menu("mute")
+        /// Show Panel (⌘K): opens or closes the panel over the picture.
+        static let menuShowPanel = menu("showPanel")
+        /// Stop (⌘.).
+        static let menuStop = menu("stop")
 
         // MARK: Sync code (Apple TV) and Measure Apple TV sync (iPhone)
 
