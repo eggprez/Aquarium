@@ -84,6 +84,7 @@ struct LibrarySelectionMenu: View {
             } label: {
                 Label("Mark as Watched", systemImage: "checkmark.circle")
             }
+            .accessibilityIdentifier(TestID.Library.selectionMarkWatched)
         }
         if anyWatched {
             Button {
@@ -91,6 +92,7 @@ struct LibrarySelectionMenu: View {
             } label: {
                 Label("Mark as Unwatched", systemImage: "arrow.uturn.backward.circle")
             }
+            .accessibilityIdentifier(TestID.Library.selectionMarkUnwatched)
         }
         if anyNotFavorite {
             Button {
@@ -98,6 +100,7 @@ struct LibrarySelectionMenu: View {
             } label: {
                 Label("Add to Favorites", systemImage: "star")
             }
+            .accessibilityIdentifier(TestID.Library.selectionAddFavorite)
         }
         if anyFavorite {
             Button {
@@ -105,6 +108,7 @@ struct LibrarySelectionMenu: View {
             } label: {
                 Label("Remove from Favorites", systemImage: "star.slash")
             }
+            .accessibilityIdentifier(TestID.Library.selectionRemoveFavorite)
         }
     }
 
@@ -151,6 +155,7 @@ struct LibrarySelectionToolbarMenu: View {
             Label("\(selection.count) Selected", systemImage: "checkmark.circle")
         }
         .help("Act on the \(selection.count) selected item\(selection.count == 1 ? "" : "s")")
+        .accessibilityIdentifier(TestID.Library.selectionMenu)
     }
 }
 
@@ -171,8 +176,10 @@ struct LibraryNoResults: View {
             Text(description)
         } actions: {
             Button(hasFilters ? "Clear Filters" : "Clear Search", action: clear)
+                .accessibilityIdentifier(TestID.Library.noResultsClear)
         }
         .frame(maxWidth: .infinity, minHeight: 240)
+        .testAnchor(TestID.Library.noResults)
     }
 
     private var title: String {

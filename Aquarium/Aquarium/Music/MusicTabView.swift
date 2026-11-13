@@ -64,10 +64,11 @@ struct MusicTabView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Picker("Page", selection: $page) {
-                    ForEach(Page.allCases) { Text($0.rawValue).tag($0) }
+                    ForEach(Page.allCases) { Text($0.rawValue).accessibilityIdentifier(TestID.Music.page(TestID.key($0.rawValue))).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 260)
+                .accessibilityIdentifier(TestID.Music.pagePicker)
             }
         }
         // The Add to Playlist menu reads this list; loaded here so it is
@@ -76,6 +77,7 @@ struct MusicTabView: View {
         // What the offline pages are drawn from, topped up while there is a
         // server to ask — see `OfflineMusicIndex.refresh`.
         .task(id: client.showsOffline) { await OfflineMusicIndex.shared.refresh() }
+        .testAnchor(TestID.Music.root)
     }
 
     private var isSearching: Bool {

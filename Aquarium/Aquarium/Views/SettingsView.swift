@@ -104,6 +104,7 @@ struct MacSettingsWindow: View {
         // a table and a form, and neither should be sized for the other.
         .frame(width: 620)
         .onAppear { if !panes.contains(pane) { pane = .general } }
+        .testAnchor(TestID.Settings.window)
     }
 }
 
@@ -221,17 +222,22 @@ struct SettingsView: View {
                     isSigningOut = false
                 }
             }
+            .accessibilityIdentifier(TestID.Settings.signOutConfirm)
             Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(TestID.Settings.signOutCancel)
         } message: {
             Text(Copy.signOut.text)
         }
         .confirmationDialog("Delete the saved copy of your library?",
                             isPresented: $confirmDeleteCopy, titleVisibility: .visible) {
             Button("Delete", role: .destructive) { LibraryIndex.shared.wipe() }
+                .accessibilityIdentifier(TestID.Settings.libraryCopyDeleteConfirm)
             Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(TestID.Settings.libraryCopyDeleteCancel)
         } message: {
             Text(Copy.deleteCopy.text)
         }
+        .testAnchor(pane.map { TestID.Settings.pageRoot($0.rawValue) } ?? TestID.Settings.root)
     }
 
     private func shows(_ group: MacSettingsPane) -> Bool {
@@ -244,12 +250,13 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Picker(selection: $prefs.theme) {
-                Text("System").tag(ThemePref.auto)
-                Text("Light").tag(ThemePref.light)
-                Text("Dark").tag(ThemePref.dark)
+                Text("System").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.theme, ThemePref.auto.rawValue)).tag(ThemePref.auto)
+                Text("Light").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.theme, ThemePref.light.rawValue)).tag(ThemePref.light)
+                Text("Dark").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.theme, ThemePref.dark.rawValue)).tag(ThemePref.dark)
             } label: {
                 MacSettingLabel(Copy.theme)
             }
+            .accessibilityIdentifier(TestID.Settings.theme)
             .pickerStyle(.segmented)
             .note(Copy.theme)
         } header: {
@@ -263,8 +270,10 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Toggle(isOn: $prefs.hidesContinueWatching) { MacSettingLabel(Copy.hideContinueWatching) }
+                .accessibilityIdentifier(TestID.Settings.hideContinueWatching)
                 .note(Copy.hideContinueWatching)
             Toggle(isOn: $prefs.clearsAbandonedEpisodes) { MacSettingLabel(Copy.clearAbandoned) }
+                .accessibilityIdentifier(TestID.Settings.clearAbandoned)
                 .note(Copy.clearAbandoned)
         } header: {
             Text("Home")
@@ -277,14 +286,17 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Picker(selection: $prefs.nextUpDays) {
-                ForEach(Preferences.nextUpDayChoices, id: \.self) { Text(Preferences.nextUpDaysLabel($0)).tag($0) }
+                ForEach(Preferences.nextUpDayChoices, id: \.self) { Text(Preferences.nextUpDaysLabel($0)).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.nextUpDays, "\($0)")).tag($0) }
             } label: {
                 MacSettingLabel(Copy.nextUpDays)
             }
+            .accessibilityIdentifier(TestID.Settings.nextUpDays)
             .note(Copy.nextUpDays)
             Toggle(isOn: $prefs.nextUpIncludesInProgress) { MacSettingLabel(Copy.nextUpInProgress) }
+                .accessibilityIdentifier(TestID.Settings.nextUpInProgress)
                 .note(Copy.nextUpInProgress)
             Toggle(isOn: $prefs.nextUpRewatching) { MacSettingLabel(Copy.nextUpRewatching) }
+                .accessibilityIdentifier(TestID.Settings.nextUpRewatching)
                 .note(Copy.nextUpRewatching)
         } header: {
             Text("Next Up")
@@ -297,6 +309,7 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Toggle(isOn: Self.cloudSyncBinding) { MacSettingLabel(Copy.cloudSync) }
+                .accessibilityIdentifier(TestID.Settings.cloudSync)
                 .disabled(!prefs.cloudIsAvailable)
                 .note(Copy.cloudSync)
         } header: {
@@ -306,6 +319,7 @@ struct SettingsView: View {
                 MacSettingFooter(Copy.cloudSync)
             } else {
                 Text(Copy.cloudUnavailable.text)
+                    .accessibilityIdentifier(TestID.Settings.cloudUnavailable)
             }
         }
     }
@@ -318,6 +332,7 @@ struct SettingsView: View {
             if let session = client.session {
                 LabeledContent {
                     Text(session.userName)
+                        .accessibilityIdentifier(TestID.Settings.accountSignedInAs)
                 } label: {
                     MacSettingLabel(Copy.signedInAs)
                 }
@@ -326,11 +341,13 @@ struct SettingsView: View {
                     Text(session.server)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
+                        .accessibilityIdentifier(TestID.Settings.accountServer)
                 }
                 LabeledContent {
                     Label(session.secure ? "Encrypted" : "Unencrypted",
                           systemImage: session.secure ? "lock.fill" : "lock.open")
                         .foregroundStyle(session.secure ? Color.green : Color.orange)
+                        .accessibilityIdentifier(TestID.Settings.accountConnection)
                 } label: {
                     MacSettingLabel(Copy.connection(secure: session.secure))
                 }
@@ -340,6 +357,7 @@ struct SettingsView: View {
                     Label(session.serverId != nil ? "Pinned" : "Not Pinned",
                           systemImage: session.serverId != nil ? "checkmark.seal.fill" : "seal")
                         .foregroundStyle(session.serverId != nil ? Color.green : Color.orange)
+                        .accessibilityIdentifier(TestID.Settings.accountIdentity)
                 } label: {
                     MacSettingLabel(Copy.identity(pinned: session.serverId != nil))
                 }
@@ -348,6 +366,7 @@ struct SettingsView: View {
                 LabeledContent {
                     Label("Keychain", systemImage: "key.fill")
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier(TestID.Settings.accountAccessToken)
                 } label: {
                     MacSettingLabel(Copy.accessToken)
                 }
@@ -359,6 +378,7 @@ struct SettingsView: View {
                             .fill(client.isOffline ? Color.orange : Color.green)
                             .frame(width: 8, height: 8)
                         Text(client.isOffline ? "Offline" : "Connected")
+                            .accessibilityIdentifier(TestID.Settings.accountStatus)
                     }
                 } label: {
                     MacSettingLabel(Copy.status)
@@ -367,16 +387,17 @@ struct SettingsView: View {
 
                 LabeledContent {
                     HStack(spacing: 8) {
-                        if isSigningOut { ProgressView().controlSize(.small) }
+                        if isSigningOut { ProgressView().controlSize(.small).accessibilityIdentifier(TestID.Settings.signOutBusy) }
                         Button("Sign Out…") { confirmSignOut = true }
                             .disabled(isSigningOut)
+                            .accessibilityIdentifier(TestID.Settings.signOut)
                     }
                 } label: {
                     MacSettingLabel(Copy.signOut, title: "Sign Out")
                 }
                 .note(Copy.signOut)
             } else {
-                Text("Not connected").foregroundStyle(.secondary)
+                Text("Not connected").foregroundStyle(.secondary).accessibilityIdentifier(TestID.Settings.accountNotConnected)
             }
         }
     }
@@ -389,9 +410,11 @@ struct SettingsView: View {
         // player, and only there.
         return Section {
             Toggle(isOn: $prefs.powerAwareQuality) { MacSettingLabel(Copy.powerAwareQuality) }
+                .accessibilityIdentifier(TestID.Settings.videoPowerAwareQuality)
                 .disabled(!prefs.adaptiveQuality)
                 .note(Copy.powerAwareQuality)
             Toggle(isOn: $prefs.speedCheck) { MacSettingLabel(Copy.speedCheck) }
+                .accessibilityIdentifier(TestID.Settings.videoSpeedCheck)
                 .disabled(!prefs.adaptiveQuality)
                 .note(Copy.speedCheck)
         } header: {
@@ -405,11 +428,12 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Picker(selection: $prefs.fillScreen) {
-                Text("Fit — show the whole frame").tag(false)
-                Text("Fill — crop to the screen").tag(true)
+                Text("Fit — show the whole frame").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.videoFraming, "fit")).tag(false)
+                Text("Fill — crop to the screen").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.videoFraming, "fill")).tag(true)
             } label: {
                 MacSettingLabel(Copy.framing)
             }
+            .accessibilityIdentifier(TestID.Settings.videoFraming)
             .pickerStyle(.radioGroup)
             .note(Copy.framing)
             .onChange(of: prefs.fillScreen) { _, _ in player.applyFraming(switchingIfNeeded: true) }
@@ -418,6 +442,7 @@ struct SettingsView: View {
                 .note(Copy.pictureControls)
 
             Toggle(isOn: $prefs.nightMode) { MacSettingLabel(Copy.nightMode) }
+                .accessibilityIdentifier(TestID.Settings.videoNightMode)
                 .note(Copy.nightMode)
                 .onChange(of: prefs.nightMode) { _, _ in player.applyNightMode() }
         } header: {
@@ -432,35 +457,40 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Picker(selection: $prefs.playbackEngine) {
-                ForEach(EnginePolicy.Preference.allCases, id: \.self) { Text($0.title).tag($0) }
+                ForEach(EnginePolicy.Preference.allCases, id: \.self) { Text($0.title).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.videoEngine, $0.rawValue)).tag($0) }
             } label: {
                 MacSettingLabel(Copy.playbackEngineChoice)
             }
+            .accessibilityIdentifier(TestID.Settings.videoEngine)
             .note(Copy.playbackEngineChoice)
 
             Picker(selection: $prefs.batterySaver) {
-                ForEach(EnginePolicy.BatterySaver.allCases, id: \.self) { Text($0.title).tag($0) }
+                ForEach(EnginePolicy.BatterySaver.allCases, id: \.self) { Text($0.title).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.videoBatterySaver, $0.rawValue)).tag($0) }
             } label: {
                 MacSettingLabel(Copy.batterySaver)
             }
+            .accessibilityIdentifier(TestID.Settings.videoBatterySaver)
             .note(Copy.batterySaver)
             .onChange(of: prefs.batterySaver) { _, _ in player.refreshPowerProfile() }
 
             Picker(selection: $prefs.skipInterval) {
-                ForEach(Preferences.skipIntervals, id: \.self) { Text("\($0) seconds").tag($0) }
+                ForEach(Preferences.skipIntervals, id: \.self) { Text("\($0) seconds").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.videoSkipInterval, "\($0)")).tag($0) }
             } label: {
                 MacSettingLabel(Copy.skipInterval)
             }
+            .accessibilityIdentifier(TestID.Settings.videoSkipInterval)
             .note(Copy.skipInterval)
 
             Picker(selection: $prefs.hideControlsAfter) {
-                ForEach(Preferences.hideControlsChoices, id: \.self) { Text("\(Int($0)) seconds").tag($0) }
+                ForEach(Preferences.hideControlsChoices, id: \.self) { Text("\(Int($0)) seconds").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.videoHideControlsAfter, "\(Int($0))")).tag($0) }
             } label: {
                 MacSettingLabel(Copy.hideControlsAfter)
             }
+            .accessibilityIdentifier(TestID.Settings.videoHideControlsAfter)
             .note(Copy.hideControlsAfter)
 
             Toggle(isOn: $prefs.showsRemainingTime) { MacSettingLabel(Copy.showsRemainingTime) }
+                .accessibilityIdentifier(TestID.Settings.videoShowsRemainingTime)
                 .note(Copy.showsRemainingTime)
         } header: {
             Text("Player")
@@ -474,9 +504,11 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Toggle(isOn: $prefs.resumePlayback) { MacSettingLabel(Copy.resume) }
+                .accessibilityIdentifier(TestID.Settings.videoResume)
                 .note(Copy.resume)
 
             Toggle(isOn: $prefs.autoplayNext) { MacSettingLabel(Copy.autoplayNext) }
+                .accessibilityIdentifier(TestID.Settings.videoAutoplayNext)
                 .note(Copy.autoplayNext)
         } header: {
             Text("Playing")
@@ -491,11 +523,12 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Picker(selection: $prefs.audioLanguage) {
-                Text("Whatever the file lists first").tag("")
-                ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
+                Text("Whatever the file lists first").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.audioLanguage, "")).tag("")
+                ForEach(Languages.all, id: \.code) { Text($0.name).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.audioLanguage, $0.code)).tag($0.code) }
             } label: {
                 MacSettingLabel(Copy.audioLanguage)
             }
+            .accessibilityIdentifier(TestID.Settings.audioLanguage)
             .note(Copy.audioLanguage)
         } header: {
             Text("Language")
@@ -510,15 +543,17 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Toggle(isOn: $prefs.stereoDownmix) { MacSettingLabel(Copy.downmix) }
+                .accessibilityIdentifier(TestID.Settings.audioDownmix)
                 .note(Copy.downmix)
 
             Picker(selection: Self.audioDelayBinding) {
                 ForEach(Self.audioDelayChoices, id: \.self) { milliseconds in
-                    Text(PlayerModel.audioDelayName(milliseconds)).tag(milliseconds)
+                    Text(PlayerModel.audioDelayName(milliseconds)).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.audioDelay, "\(milliseconds)")).tag(milliseconds)
                 }
             } label: {
                 MacSettingLabel(Copy.audioDelay)
             }
+            .accessibilityIdentifier(TestID.Settings.audioDelay)
             .note(Copy.audioDelay)
         } header: {
             Text("Output")
@@ -533,16 +568,18 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Picker(selection: $prefs.subtitleLanguage) {
-                Text("Only when the file turns them on").tag("")
-                Text("Never — no subtitles").tag("off")
-                Text("Forced only — signs and foreign lines").tag(TrackPreference.forcedOnly)
-                ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
+                Text("Only when the file turns them on").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.subtitlesLanguage, "")).tag("")
+                Text("Never — no subtitles").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.subtitlesLanguage, "off")).tag("off")
+                Text("Forced only — signs and foreign lines").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.subtitlesLanguage, TrackPreference.forcedOnly)).tag(TrackPreference.forcedOnly)
+                ForEach(Languages.all, id: \.code) { Text($0.name).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.subtitlesLanguage, $0.code)).tag($0.code) }
             } label: {
                 MacSettingLabel(Copy.subtitleLanguage, title: "Language")
             }
+            .accessibilityIdentifier(TestID.Settings.subtitlesLanguage)
             .note(Copy.subtitleLanguage)
 
             Toggle(isOn: $prefs.forcedSubtitlesOnly) { MacSettingLabel(Copy.forcedOnly, Copy.trackMemory) }
+                .accessibilityIdentifier(TestID.Settings.subtitlesForcedOnly)
                 .note(Copy.forcedOnly, Copy.trackMemory)
         } header: {
             Text("Language")
@@ -565,10 +602,12 @@ struct SettingsView: View {
                     }
                     .labelsHidden()
                     .frame(width: 200)
+                    .accessibilityIdentifier(TestID.Settings.subtitlesSize)
                     Text("\(Int(prefs.subtitleSize))%")
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                         .frame(width: 44, alignment: .trailing)
+                        .accessibilityIdentifier(TestID.Settings.value(TestID.Settings.subtitlesSize))
                 }
             } label: {
                 MacSettingLabel(Copy.subtitleSize)
@@ -577,10 +616,11 @@ struct SettingsView: View {
             .note(Copy.subtitleSize)
 
             Picker(selection: $prefs.subtitleBackground) {
-                ForEach(SubtitleBackground.allCases, id: \.self) { Text($0.label).tag($0) }
+                ForEach(SubtitleBackground.allCases, id: \.self) { Text($0.label).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.subtitlesBackground, $0.rawValue)).tag($0) }
             } label: {
                 MacSettingLabel(Copy.subtitleBackground)
             }
+            .accessibilityIdentifier(TestID.Settings.subtitlesBackground)
             .onChange(of: prefs.subtitleBackground) { _, _ in player.refreshSubtitleStyling() }
             .note(Copy.subtitleBackground)
         } header: {
@@ -598,8 +638,10 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Toggle(isOn: $prefs.musicAutoplay) { MacSettingLabel(Copy.musicAutoplay) }
+                .accessibilityIdentifier(TestID.Settings.musicAutoplay)
                 .note(Copy.musicAutoplay)
             Toggle(isOn: $prefs.normalizeVolume) { MacSettingLabel(Copy.normalizeVolume) }
+                .accessibilityIdentifier(TestID.Settings.musicNormalizeVolume)
                 .note(Copy.normalizeVolume)
         } header: {
             Text("Playing")
@@ -615,12 +657,14 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Picker(selection: $prefs.mixSource) {
-                ForEach(MixSource.allCases, id: \.self) { Text($0.label).tag($0) }
+                ForEach(MixSource.allCases, id: \.self) { Text($0.label).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.musicMixSource, $0.rawValue)).tag($0) }
             } label: {
                 MacSettingLabel(Copy.mixSource)
             }
+            .accessibilityIdentifier(TestID.Settings.musicMixSource)
             .note(Copy.mixSource)
             Toggle(isOn: $prefs.musicRomanizeNames) { MacSettingLabel(Copy.musicRomanize) }
+                .accessibilityIdentifier(TestID.Settings.musicRomanize)
                 .note(Copy.musicRomanize)
         } header: {
             Text("Stations")
@@ -636,10 +680,11 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         Section {
             Picker(selection: $prefs.liveTVSource) {
-                ForEach(LiveTVSource.allCases, id: \.self) { Text($0.label).tag($0) }
+                ForEach(LiveTVSource.allCases, id: \.self) { Text($0.label).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.liveTVSource, $0.rawValue)).tag($0) }
             } label: {
                 MacSettingLabel(Copy.liveTVSource)
             }
+            .accessibilityIdentifier(TestID.Settings.liveTVSource)
             .note(Copy.liveTVSource)
         } header: {
             Text("Source")
@@ -651,6 +696,7 @@ struct SettingsView: View {
             Section {
                 LabeledContent {
                     TextField("M3U playlist URL", text: $prefs.iptvPlaylistURL, prompt: Text("https://example.com/playlist.m3u"))
+                        .accessibilityIdentifier(TestID.Settings.liveTVPlaylistURL)
                         .textFieldStyle(.roundedBorder)
                         .labelsHidden()
                         .frame(minWidth: 240)
@@ -660,6 +706,7 @@ struct SettingsView: View {
                 .note(Copy.iptvPlaylist)
                 LabeledContent {
                     TextField("XMLTV guide URL", text: $prefs.iptvGuideURL, prompt: Text("Optional"))
+                        .accessibilityIdentifier(TestID.Settings.liveTVGuideURL)
                         .textFieldStyle(.roundedBorder)
                         .labelsHidden()
                         .frame(minWidth: 240)
@@ -669,6 +716,7 @@ struct SettingsView: View {
                 .note(Copy.iptvGuide)
                 LabeledContent {
                     TextField("User agent", text: $prefs.iptvUserAgent, prompt: Text(Preferences.defaultIPTVUserAgent))
+                        .accessibilityIdentifier(TestID.Settings.liveTVUserAgent)
                         .textFieldStyle(.roundedBorder)
                         .labelsHidden()
                         .frame(minWidth: 240)
@@ -678,10 +726,11 @@ struct SettingsView: View {
                 .note(Copy.iptvUserAgent)
 
                 Picker(selection: $prefs.iptvRefreshMinutes) {
-                    ForEach(Self.iptvRefreshChoices, id: \.minutes) { Text($0.label).tag($0.minutes) }
+                    ForEach(Self.iptvRefreshChoices, id: \.minutes) { Text($0.label).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.liveTVRefreshInterval, "\($0.minutes)")).tag($0.minutes) }
                 } label: {
                     MacSettingLabel(Copy.iptvRefresh)
                 }
+                .accessibilityIdentifier(TestID.Settings.liveTVRefreshInterval)
                 .note(Copy.iptvRefresh)
 
                 ArtworkProbeRow()
@@ -695,6 +744,7 @@ struct SettingsView: View {
                 // apart by looking at the guide. This tells them apart.
                 if let summary = LiveTVStore.shared.summary {
                     Text("Last read: " + Self.playlistSummary(summary))
+                        .accessibilityIdentifier(TestID.Settings.liveTVPlaylistSummary)
                 } else {
                     MacSettingFooter(Copy.iptvPlaylist, Copy.iptvGuide)
                 }
@@ -707,6 +757,7 @@ struct SettingsView: View {
                     prefs.liveTVRefreshToken += 1
                     app.toast("Refreshing Live TV…", tone: .info)
                 }
+                .accessibilityIdentifier(TestID.Settings.liveTVRefreshNow)
             } label: {
                 MacSettingLabel(Copy.refreshNow, title: "Channel List & Guide")
             }
@@ -722,23 +773,28 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Picker("Default Quality", selection: $prefs.downloadQuality) {
-                ForEach(DownloadQualities.all) { Text($0.label).tag($0.label) }
+                ForEach(DownloadQualities.all) { Text($0.label).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.downloadsQuality, TestID.key($0.label))).tag($0.label) }
             }
+            .accessibilityIdentifier(TestID.Settings.downloadsQuality)
             LabeledContent {
                 Stepper(value: $prefs.downloadConcurrency, in: 1...Preferences.maxDownloadConcurrency) {
                     Text("\(prefs.downloadConcurrency)")
                         .monospacedDigit()
                         .frame(minWidth: 16, alignment: .trailing)
+                        .accessibilityIdentifier(TestID.Settings.value(TestID.Settings.downloadsConcurrency))
                 }
+                .accessibilityIdentifier(TestID.Settings.downloadsConcurrency)
             } label: {
                 MacSettingLabel(Copy.concurrency)
             }
             .note(Copy.concurrency)
             Toggle(isOn: $prefs.downloadsWiFiOnly) { MacSettingLabel(Copy.wifiOnly) }
+                .accessibilityIdentifier(TestID.Settings.downloadsWifiOnly)
                 .note(Copy.wifiOnly)
             LabeledContent {
                 Button("Show in Finder") { DownloadManager.revealInFinder() }
                     .help(DownloadManager.root.path)
+                    .accessibilityIdentifier(TestID.Settings.downloadsShowInFinder)
             } label: {
                 Text("Kept In")
             }
@@ -753,6 +809,7 @@ struct SettingsView: View {
         @Bindable var prefs = prefs
         return Section {
             Toggle(isOn: $prefs.keepsLibraryCopy) { MacSettingLabel(Copy.libraryCopy) }
+                .accessibilityIdentifier(TestID.Settings.libraryCopyKeep)
                 .onChange(of: prefs.keepsLibraryCopy) { _, on in LibraryIndex.shared.setEnabled(on) }
                 .note(Copy.libraryCopy)
             if prefs.keepsLibraryCopy {
@@ -761,6 +818,7 @@ struct SettingsView: View {
                     Text(LibraryCopyText.status(index))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.trailing)
+                        .accessibilityIdentifier(TestID.Settings.libraryCopyStatus)
                 } label: {
                     MacSettingLabel(Copy.libraryCopyStatus)
                 }
@@ -768,17 +826,19 @@ struct SettingsView: View {
                 LabeledContent {
                     Text(LibraryCopyText.contents(index))
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier(TestID.Settings.libraryCopyContents)
                 } label: {
                     MacSettingLabel(Copy.libraryCopyContents)
                 }
                 .note(Copy.libraryCopyContents)
                 LabeledContent {
                     HStack(spacing: 8) {
-                        if index.isSyncing { ProgressView().controlSize(.small) }
+                        if index.isSyncing { ProgressView().controlSize(.small).accessibilityIdentifier(TestID.Settings.libraryCopySyncBusy) }
                         Button("Sync Now") {
                             Task { await LibraryIndex.shared.sync(force: true) }
                         }
                         .disabled(index.isSyncing)
+                        .accessibilityIdentifier(TestID.Settings.libraryCopySyncNow)
                     }
                 } label: {
                     MacSettingLabel(Copy.syncNow, title: "Sync")
@@ -786,6 +846,7 @@ struct SettingsView: View {
                 .note(Copy.syncNow)
                 LabeledContent {
                     Button("Delete the Copy…") { confirmDeleteCopy = true }
+                        .accessibilityIdentifier(TestID.Settings.libraryCopyDelete)
                 } label: {
                     MacSettingLabel(Copy.deleteCopy, title: "Saved Copy")
                 }
@@ -846,6 +907,7 @@ struct SettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .testAnchor(TestID.Settings.root)
     }
 }
 
@@ -887,6 +949,7 @@ private struct SettingsSplitPage: View {
             }
             .listStyle(.insetGrouped)
             .frame(width: listWidth)
+            .testAnchor(TestID.Settings.splitList)
 
             Divider()
 
@@ -900,6 +963,7 @@ private struct SettingsSplitPage: View {
                         Text(page.title)
                             .font(.title2.weight(.semibold))
                             .foregroundStyle(Theme.text)
+                            .accessibilityIdentifier(TestID.Settings.splitPageTitle)
                         Text(page.note)
                             .font(.subheadline)
                             .foregroundStyle(Theme.textDim)
@@ -965,6 +1029,7 @@ private struct SettingsMapRows: View {
                         .foregroundStyle(Theme.text)
                 }
             }
+            .accessibilityIdentifier(TestID.Settings.cloudSync)
             .disabled(!prefs.cloudIsAvailable)
             row(.about, value: Bundle.appVersion)
         } header: {
@@ -983,7 +1048,7 @@ private struct SettingsMapRows: View {
     @ViewBuilder
     private func row<Label: View>(_ page: SettingsPage, @ViewBuilder label: () -> Label) -> some View {
         if selectable {
-            label().tag(page)
+            label().accessibilityIdentifier(TestID.Settings.pageLink(page.rawValue)).tag(page)
         } else {
             NavigationLink {
                 SettingsPageView(page: page)
@@ -991,6 +1056,7 @@ private struct SettingsMapRows: View {
             } label: {
                 label()
             }
+            .accessibilityIdentifier(TestID.Settings.pageLink(page.rawValue))
         }
     }
 
@@ -1175,14 +1241,17 @@ private struct AccountSettingsPage: View {
             Section {
                 if let session = client.session {
                     LabeledContent("Signed in as", value: session.userName)
+                        .accessibilityIdentifier(TestID.Settings.accountSignedInAs)
                         .note(Copy.signedInAs)
                     LabeledContent("Server") {
                         Text(session.server)
                             .foregroundStyle(Theme.textDim)
                             .textSelection(.enabled)
+                            .accessibilityIdentifier(TestID.Settings.accountServer)
                     }
                     LabeledContent("Connection") {
                         StatusPill(text: session.secure ? "HTTPS" : "HTTP", tone: session.secure ? .ok : .warn)
+                            .accessibilityIdentifier(TestID.Settings.accountConnection)
                     }
                     .note(Copy.connection(secure: session.secure))
                     LabeledContent("Server identity") {
@@ -1190,10 +1259,12 @@ private struct AccountSettingsPage: View {
                             text: session.serverId != nil ? "Pinned" : "Unpinned",
                             tone: session.serverId != nil ? .ok : .warn
                         )
+                        .accessibilityIdentifier(TestID.Settings.accountIdentity)
                     }
                     .note(Copy.identity(pinned: session.serverId != nil))
                     LabeledContent("Access token") {
                         StatusPill(text: "Keychain", tone: .ok)
+                            .accessibilityIdentifier(TestID.Settings.accountAccessToken)
                     }
                     .note(Copy.accessToken)
                     LabeledContent("Status") {
@@ -1201,10 +1272,11 @@ private struct AccountSettingsPage: View {
                             text: client.isOffline ? "Offline" : "Connected",
                             tone: client.isOffline ? .warn : .ok
                         )
+                        .accessibilityIdentifier(TestID.Settings.accountStatus)
                     }
                     .note(Copy.status)
                 } else {
-                    Text("Not connected").foregroundStyle(Theme.textDim)
+                    Text("Not connected").foregroundStyle(Theme.textDim).accessibilityIdentifier(TestID.Settings.accountNotConnected)
                 }
             } header: {
                 Text("Server")
@@ -1222,6 +1294,7 @@ private struct AccountSettingsPage: View {
                             Text("Sign out")
                         }
                     }
+                    .accessibilityIdentifier(TestID.Settings.signOut)
                     .disabled(isSigningOut)
                 } footer: {
                     SettingsFooter(Copy.signOut)
@@ -1238,8 +1311,11 @@ private struct AccountSettingsPage: View {
                     isSigningOut = false
                 }
             }
+            .accessibilityIdentifier(TestID.Settings.signOutConfirm)
             Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(TestID.Settings.signOutCancel)
         }
+        .testAnchor(TestID.Settings.pageRoot("account"))
     }
 }
 
@@ -1254,8 +1330,9 @@ private struct AppearanceSettingsPage: View {
         Form {
             Section {
                 Picker(Copy.theme.name ?? "", selection: $prefs.theme) {
-                    ForEach(ThemePref.allCases, id: \.self) { Text($0.label).tag($0) }
+                    ForEach(ThemePref.allCases, id: \.self) { Text($0.label).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.theme, $0.rawValue)).tag($0) }
                 }
+                .accessibilityIdentifier(TestID.Settings.theme)
             } footer: {
                 SettingsFooter(Copy.theme)
             }
@@ -1265,11 +1342,13 @@ private struct AppearanceSettingsPage: View {
                     NavigationLink(value: Route.settings(.appIcon)) {
                         LabeledContent("App Icon", value: iconTitle)
                     }
+                    .accessibilityIdentifier(TestID.Settings.appIcon)
                 }
                 NavigationLink(value: Route.settings(.tabBar)) {
                     LabeledContent(app.usesSidebar ? "Sidebar" : "Tab Bar",
                                    value: prefs.tabBarOrder.isEmpty ? "Default" : "Custom")
                 }
+                .accessibilityIdentifier(TestID.Settings.tabBar)
             } footer: {
                 Text(app.usesSidebar
                      ? "The order of the sections in the sidebar."
@@ -1278,6 +1357,7 @@ private struct AppearanceSettingsPage: View {
 
             Section {
                 Toggle(Copy.hideContinueWatching.name ?? "", isOn: $prefs.hidesContinueWatching)
+                    .accessibilityIdentifier(TestID.Settings.hideContinueWatching)
             } header: {
                 Text("Home")
             } footer: {
@@ -1286,10 +1366,13 @@ private struct AppearanceSettingsPage: View {
 
             Section {
                 Picker(Copy.nextUpDays.name ?? "", selection: $prefs.nextUpDays) {
-                    ForEach(Preferences.nextUpDayChoices, id: \.self) { Text(Preferences.nextUpDaysLabel($0)).tag($0) }
+                    ForEach(Preferences.nextUpDayChoices, id: \.self) { Text(Preferences.nextUpDaysLabel($0)).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.nextUpDays, "\($0)")).tag($0) }
                 }
+                .accessibilityIdentifier(TestID.Settings.nextUpDays)
                 Toggle(Copy.nextUpInProgress.name ?? "", isOn: $prefs.nextUpIncludesInProgress)
+                    .accessibilityIdentifier(TestID.Settings.nextUpInProgress)
                 Toggle(Copy.nextUpRewatching.name ?? "", isOn: $prefs.nextUpRewatching)
+                    .accessibilityIdentifier(TestID.Settings.nextUpRewatching)
             } header: {
                 Text("Next Up")
             } footer: {
@@ -1298,6 +1381,7 @@ private struct AppearanceSettingsPage: View {
         }
         .formStyle(.grouped)
         .onAppear { iconTitle = AppIconChoice.current.title }
+        .testAnchor(TestID.Settings.pageRoot("appearance"))
     }
 }
 
@@ -1311,10 +1395,12 @@ private struct VideoSettingsPage: View {
             // place it is kept: Auto, or one rung held for every stream.
             Section {
                 Picker(Copy.defaultQuality.name ?? "", selection: Self.qualityBinding) {
-                    Text("Auto").tag(PlayerModel.QualitySelection.auto)
-                    ForEach(Quality.choices, id: \.label) { Text($0.label).tag(PlayerModel.QualitySelection.stream($0.maxBitrate)) }
+                    Text("Auto").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.videoQuality, "auto")).tag(PlayerModel.QualitySelection.auto)
+                    ForEach(Quality.choices, id: \.label) { Text($0.label).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.videoQuality, "\($0.maxBitrate ?? 0)")).tag(PlayerModel.QualitySelection.stream($0.maxBitrate)) }
                 }
+                .accessibilityIdentifier(TestID.Settings.videoQuality)
                 Toggle(Copy.speedCheck.name ?? "", isOn: $prefs.speedCheck)
+                    .accessibilityIdentifier(TestID.Settings.videoSpeedCheck)
                     .disabled(!prefs.adaptiveQuality)
             } header: {
                 Text("Quality")
@@ -1324,7 +1410,9 @@ private struct VideoSettingsPage: View {
 
             Section {
                 Toggle(Copy.resume.name ?? "", isOn: $prefs.resumePlayback)
+                    .accessibilityIdentifier(TestID.Settings.videoResume)
                 Toggle(Copy.autoplayNext.name ?? "", isOn: $prefs.autoplayNext)
+                    .accessibilityIdentifier(TestID.Settings.videoAutoplayNext)
             } header: {
                 Text("Playing")
             } footer: {
@@ -1332,6 +1420,7 @@ private struct VideoSettingsPage: View {
             }
         }
         .formStyle(.grouped)
+        .testAnchor(TestID.Settings.pageRoot("video"))
     }
 
     /// Auto, or the rung kept in `defaultBitrate`.
@@ -1364,9 +1453,10 @@ private struct AudioSettingsPage: View {
         Form {
             Section {
                 Picker(Copy.audioLanguage.name ?? "", selection: $prefs.audioLanguage) {
-                    Text("File's choice").tag("")
-                    ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
+                    Text("File's choice").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.audioLanguage, "")).tag("")
+                    ForEach(Languages.all, id: \.code) { Text($0.name).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.audioLanguage, $0.code)).tag($0.code) }
                 }
+                .accessibilityIdentifier(TestID.Settings.audioLanguage)
             } header: {
                 Text("Language")
             } footer: {
@@ -1380,6 +1470,7 @@ private struct AudioSettingsPage: View {
                 NavigationLink(value: Route.settings(.syncMeasure)) {
                     Text(Copy.measureSync.name ?? "")
                 }
+                .accessibilityIdentifier(TestID.Settings.audioMeasureSync)
             } header: {
                 Text("Apple TV")
             } footer: {
@@ -1388,6 +1479,7 @@ private struct AudioSettingsPage: View {
             #endif
         }
         .formStyle(.grouped)
+        .testAnchor(TestID.Settings.pageRoot("audio"))
     }
 }
 
@@ -1399,11 +1491,12 @@ private struct SubtitlesSettingsPage: View {
         Form {
             Section {
                 Picker("Language", selection: $prefs.subtitleLanguage) {
-                    Text("File's choice").tag("")
-                    Text("Never").tag("off")
-                    Text("Forced only").tag(TrackPreference.forcedOnly)
-                    ForEach(Languages.all, id: \.code) { Text($0.name).tag($0.code) }
+                    Text("File's choice").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.subtitlesLanguage, "")).tag("")
+                    Text("Never").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.subtitlesLanguage, "off")).tag("off")
+                    Text("Forced only").accessibilityIdentifier(TestID.Settings.option(TestID.Settings.subtitlesLanguage, TrackPreference.forcedOnly)).tag(TrackPreference.forcedOnly)
+                    ForEach(Languages.all, id: \.code) { Text($0.name).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.subtitlesLanguage, $0.code)).tag($0.code) }
                 }
+                .accessibilityIdentifier(TestID.Settings.subtitlesLanguage)
             } header: {
                 Text("Language")
             } footer: {
@@ -1411,6 +1504,7 @@ private struct SubtitlesSettingsPage: View {
             }
         }
         .formStyle(.grouped)
+        .testAnchor(TestID.Settings.pageRoot("subtitles"))
     }
 }
 
@@ -1422,7 +1516,9 @@ private struct MusicSettingsPage: View {
         Form {
             Section {
                 Toggle(Copy.musicAutoplay.name ?? "", isOn: $prefs.musicAutoplay)
+                    .accessibilityIdentifier(TestID.Settings.musicAutoplay)
                 Toggle(Copy.normalizeVolume.name ?? "", isOn: $prefs.normalizeVolume)
+                    .accessibilityIdentifier(TestID.Settings.musicNormalizeVolume)
             } header: {
                 Text("Playing")
             } footer: {
@@ -1431,6 +1527,7 @@ private struct MusicSettingsPage: View {
 
             Section {
                 Toggle(Copy.losslessOnCellular.name ?? "", isOn: $prefs.losslessOnCellular)
+                    .accessibilityIdentifier(TestID.Settings.musicLosslessOnCellular)
             } header: {
                 Text("Streaming")
             } footer: {
@@ -1439,8 +1536,9 @@ private struct MusicSettingsPage: View {
 
             Section {
                 Picker(Copy.mixSource.name ?? "", selection: $prefs.mixSource) {
-                    ForEach(MixSource.allCases, id: \.self) { Text($0.label).tag($0) }
+                    ForEach(MixSource.allCases, id: \.self) { Text($0.label).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.musicMixSource, $0.rawValue)).tag($0) }
                 }
+                .accessibilityIdentifier(TestID.Settings.musicMixSource)
             } header: {
                 Text("Mixes")
             } footer: {
@@ -1449,9 +1547,11 @@ private struct MusicSettingsPage: View {
 
             Section {
                 Toggle(Copy.musicRomanize.name ?? "", isOn: $prefs.musicRomanizeNames)
+                    .accessibilityIdentifier(TestID.Settings.musicRomanize)
                 NavigationLink(value: Route.settings(.stationMix)) {
                     LabeledContent(Copy.stationMix.name ?? "", value: prefs.mixPoints.presetName)
                 }
+                .accessibilityIdentifier(TestID.Settings.musicStationMix)
             } header: {
                 Text("Stations")
             } footer: {
@@ -1459,6 +1559,7 @@ private struct MusicSettingsPage: View {
             }
         }
         .formStyle(.grouped)
+        .testAnchor(TestID.Settings.pageRoot("music"))
     }
 }
 
@@ -1471,8 +1572,9 @@ private struct LiveTVSettingsPage: View {
         Form {
             Section {
                 Picker(Copy.liveTVSource.name ?? "", selection: $prefs.liveTVSource) {
-                    ForEach(LiveTVSource.allCases, id: \.self) { Text($0.label).tag($0) }
+                    ForEach(LiveTVSource.allCases, id: \.self) { Text($0.label).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.liveTVSource, $0.rawValue)).tag($0) }
                 }
+                .accessibilityIdentifier(TestID.Settings.liveTVSource)
             } header: {
                 Text("Source")
             } footer: {
@@ -1484,11 +1586,13 @@ private struct LiveTVSettingsPage: View {
                     NavigationLink(value: Route.settings(.customPlaylist)) {
                         LabeledContent("Custom playlist", value: Self.host(of: prefs.iptvPlaylistURL) ?? "Not set")
                     }
+                    .accessibilityIdentifier(TestID.Settings.liveTVCustomPlaylist)
                 } footer: {
                     // What the playlist and guide actually produced, last time
                     // they were read — see the Mac's page for why.
                     if let summary = LiveTVStore.shared.summary {
                         Text("Last read: " + SettingsView.playlistSummary(summary) + ".")
+                            .accessibilityIdentifier(TestID.Settings.liveTVPlaylistSummary)
                     } else {
                         Text("The playlist and guide addresses, how often they are re-read, and a check on the channel artwork.")
                     }
@@ -1500,11 +1604,13 @@ private struct LiveTVSettingsPage: View {
                     prefs.liveTVRefreshToken += 1
                     app.toast("Refreshing Live TV…", tone: .info)
                 }
+                .accessibilityIdentifier(TestID.Settings.liveTVRefreshNow)
             } footer: {
                 SettingsFooter(Copy.refreshNow)
             }
         }
         .formStyle(.grouped)
+        .testAnchor(TestID.Settings.pageRoot("liveTV"))
     }
 
     /// The server a URL names, for a row with no room for the whole address.
@@ -1523,6 +1629,7 @@ private struct CustomPlaylistSettingsPage: View {
         Form {
             Section {
                 TextField("https://example.com/playlist.m3u", text: $prefs.iptvPlaylistURL)
+                    .accessibilityIdentifier(TestID.Settings.liveTVPlaylistURL)
                     .textFieldStyle(.plain)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
@@ -1535,6 +1642,7 @@ private struct CustomPlaylistSettingsPage: View {
 
             Section {
                 TextField("Optional", text: $prefs.iptvGuideURL)
+                    .accessibilityIdentifier(TestID.Settings.liveTVGuideURL)
                     .textFieldStyle(.plain)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
@@ -1547,12 +1655,14 @@ private struct CustomPlaylistSettingsPage: View {
 
             Section {
                 TextField(Preferences.defaultIPTVUserAgent, text: $prefs.iptvUserAgent)
+                    .accessibilityIdentifier(TestID.Settings.liveTVUserAgent)
                     .textFieldStyle(.plain)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 Picker(Copy.iptvRefresh.name ?? "", selection: $prefs.iptvRefreshMinutes) {
-                    ForEach(SettingsView.iptvRefreshChoices, id: \.minutes) { Text($0.label).tag($0.minutes) }
+                    ForEach(SettingsView.iptvRefreshChoices, id: \.minutes) { Text($0.label).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.liveTVRefreshInterval, "\($0.minutes)")).tag($0.minutes) }
                 }
+                .accessibilityIdentifier(TestID.Settings.liveTVRefreshInterval)
             } header: {
                 Text("Fetching")
             } footer: {
@@ -1571,6 +1681,7 @@ private struct CustomPlaylistSettingsPage: View {
         .screenTitle("Custom playlist")
         .paletteBar()
         .palettePage()
+        .testAnchor(TestID.Settings.pageRoot("customPlaylist"))
     }
 }
 
@@ -1582,8 +1693,9 @@ private struct DownloadsSettingsPage: View {
         Form {
             Section {
                 Picker("Default quality", selection: $prefs.downloadQuality) {
-                    ForEach(DownloadQualities.all) { Text($0.label).tag($0.label) }
+                    ForEach(DownloadQualities.all) { Text($0.label).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.downloadsQuality, TestID.key($0.label))).tag($0.label) }
                 }
+                .accessibilityIdentifier(TestID.Settings.downloadsQuality)
             } header: {
                 Text("Quality")
             } footer: {
@@ -1598,9 +1710,12 @@ private struct DownloadsSettingsPage: View {
                         Text("\(prefs.downloadConcurrency)")
                             .foregroundStyle(Theme.textDim)
                             .monospacedDigit()
+                            .accessibilityIdentifier(TestID.Settings.value(TestID.Settings.downloadsConcurrency))
                     }
                 }
+                .accessibilityIdentifier(TestID.Settings.downloadsConcurrency)
                 Toggle(Copy.wifiOnly.name ?? "", isOn: $prefs.downloadsWiFiOnly)
+                    .accessibilityIdentifier(TestID.Settings.downloadsWifiOnly)
             } header: {
                 Text("Transfers")
             } footer: {
@@ -1608,6 +1723,7 @@ private struct DownloadsSettingsPage: View {
             }
         }
         .formStyle(.grouped)
+        .testAnchor(TestID.Settings.pageRoot("downloads"))
     }
 }
 
@@ -1621,6 +1737,7 @@ private struct LibraryCopySettingsPage: View {
         Form {
             Section {
                 Toggle(Copy.libraryCopy.name ?? "", isOn: $prefs.keepsLibraryCopy)
+                    .accessibilityIdentifier(TestID.Settings.libraryCopyKeep)
                     .onChange(of: prefs.keepsLibraryCopy) { _, on in LibraryIndex.shared.setEnabled(on) }
             } footer: {
                 SettingsFooter(Copy.libraryCopy)
@@ -1631,10 +1748,12 @@ private struct LibraryCopySettingsPage: View {
                         Text(LibraryCopyText.status(index))
                             .foregroundStyle(Theme.textDim)
                             .multilineTextAlignment(.trailing)
+                            .accessibilityIdentifier(TestID.Settings.libraryCopyStatus)
                     }
                     LabeledContent("Saved") {
                         Text(LibraryCopyText.contents(index))
                             .foregroundStyle(Theme.textDim)
+                            .accessibilityIdentifier(TestID.Settings.libraryCopyContents)
                     }
                 } footer: {
                     SettingsFooter(Copy.libraryCopyStatus)
@@ -1643,10 +1762,12 @@ private struct LibraryCopySettingsPage: View {
                     Button(Copy.syncNow.name ?? "") {
                         Task { await LibraryIndex.shared.sync(force: true) }
                     }
+                    .accessibilityIdentifier(TestID.Settings.libraryCopySyncNow)
                     .disabled(index.isSyncing)
                     Button(Copy.deleteCopy.name ?? "", role: .destructive) {
                         confirmDelete = true
                     }
+                    .accessibilityIdentifier(TestID.Settings.libraryCopyDelete)
                 } footer: {
                     SettingsFooter(Copy.syncNow, Copy.deleteCopy)
                 }
@@ -1656,10 +1777,13 @@ private struct LibraryCopySettingsPage: View {
         .confirmationDialog("Delete the saved copy of your library?",
                             isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) { LibraryIndex.shared.wipe() }
+                .accessibilityIdentifier(TestID.Settings.libraryCopyDeleteConfirm)
             Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(TestID.Settings.libraryCopyDeleteCancel)
         } message: {
             Text(Copy.deleteCopy.text)
         }
+        .testAnchor(TestID.Settings.pageRoot("libraryCopy"))
     }
 }
 
@@ -1672,6 +1796,7 @@ private struct StationMixSettingsPage: View {
         .screenTitle(Copy.stationMix.name ?? "")
         .paletteBar()
         .palettePage()
+        .testAnchor(TestID.Settings.pageRoot("stationMix"))
     }
 }
 
@@ -1682,7 +1807,9 @@ private struct AboutSettingsPage: View {
         Form {
             Section {
                 LabeledContent("Aquarium", value: "\(Bundle.appVersion) (\(Bundle.appBuild))")
+                    .accessibilityIdentifier(TestID.Settings.aboutVersion)
                 LabeledContent("Playback engine", value: player.engineDescription)
+                    .accessibilityIdentifier(TestID.Settings.aboutEngine)
             } footer: {
                 SettingsFooter(Copy.playbackEngine)
             }
@@ -1691,9 +1818,11 @@ private struct AboutSettingsPage: View {
                     .font(.caption)
                     .foregroundStyle(Theme.textDim)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(TestID.Settings.aboutText)
             }
         }
         .formStyle(.grouped)
+        .testAnchor(TestID.Settings.pageRoot("about"))
     }
 }
 #endif
@@ -1733,6 +1862,7 @@ struct AccountsSection: View {
                     AccountAvatar(account: account, size: 28)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(account.userName.isEmpty ? "Unnamed user" : account.userName)
+                            .accessibilityIdentifier(TestID.Settings.account(account.accountKey))
                         Text(account.serverLabel)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -1744,8 +1874,9 @@ struct AccountsSection: View {
                         Text("Signed In")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .accessibilityIdentifier(TestID.Settings.accountSignedInMark(account.accountKey))
                     } else if app.switchingTo?.accountKey == account.accountKey {
-                        ProgressView().controlSize(.small)
+                        ProgressView().controlSize(.small).accessibilityIdentifier(TestID.Settings.accountSwitching(account.accountKey))
                     }
                 }
                 .padding(.vertical, 2)
@@ -1755,13 +1886,16 @@ struct AccountsSection: View {
             .contextMenu(forSelectionType: String.self) { keys in
                 if let account = client.accounts.first(where: { keys.contains($0.accountKey) }) {
                     Button("Switch to \(account.userName)") { switchTo(account) }
+                        .accessibilityIdentifier(TestID.Settings.accountSwitch(account.accountKey))
                         .disabled(isCurrent(account) || app.switchingTo != nil)
                     Button("Sign Out of This Mac…", role: .destructive) { removing = account }
+                        .accessibilityIdentifier(TestID.Settings.accountRemove(account.accountKey))
                         .disabled(isCurrent(account))
                 }
             } primaryAction: { keys in
                 if let account = client.accounts.first(where: { keys.contains($0.accountKey) }) { switchTo(account) }
             }
+            .testAnchor(TestID.Settings.accountsList)
             HStack(spacing: 0) {
                 Button {
                     // The sign-in sheet is the main window's (see
@@ -1777,6 +1911,7 @@ struct AccountsSection: View {
                 }
                 .help("Add Account… — " + SettingsCopy.addAccount.text)
                 .accessibilityLabel("Add Account")
+                .accessibilityIdentifier(TestID.Settings.addAccount)
                 Button {
                     if let account = selectedAccount { removing = account }
                 } label: {
@@ -1786,19 +1921,23 @@ struct AccountsSection: View {
                 .disabled(selectedAccount == nil || selectedAccount.map(isCurrent) == true)
                 .help("Sign Out of This Mac — forgets the selected account here, without touching the one in use.")
                 .accessibilityLabel("Remove Account")
+                .accessibilityIdentifier(TestID.Settings.removeSelectedAccount)
                 Spacer()
                 Button("Switch") {
                     if let account = selectedAccount { switchTo(account) }
                 }
                 .disabled(selectedAccount == nil || selectedAccount.map(isCurrent) == true || app.switchingTo != nil)
                 .help("Sign in as the selected account. Switching is instant and needs no password.")
+                .accessibilityIdentifier(TestID.Settings.switchSelectedAccount)
             }
             .controlSize(.small)
             .confirmationDialog("Sign \(removing?.userName ?? "this account") out of this Mac?",
                                 isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
                                 titleVisibility: .visible, presenting: removing) { account in
                 Button("Sign Out", role: .destructive) { Task { await app.remove(account) } }
+                    .accessibilityIdentifier(TestID.Settings.removeAccountConfirm)
                 Button("Cancel", role: .cancel) {}
+                    .accessibilityIdentifier(TestID.Settings.removeAccountCancel)
             } message: { _ in
                 Text("The account's token is removed from this Mac's keychain. Signing in again asks for the password.")
             }
@@ -1822,11 +1961,13 @@ struct AccountsSection: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(app.switchingTo != nil)
+                .accessibilityIdentifier(TestID.Settings.account(account.accountKey))
                 .contextMenu {
                     if !isCurrent {
                         Button("Sign Out of This Device", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                             Task { await app.remove(account) }
                         }
+                        .accessibilityIdentifier(TestID.Settings.accountRemove(account.accountKey))
                     }
                 }
                 #if os(iOS)
@@ -1835,6 +1976,7 @@ struct AccountsSection: View {
                         Button("Sign Out", role: .destructive) {
                             Task { await app.remove(account) }
                         }
+                        .accessibilityIdentifier(TestID.Settings.accountRemove(account.accountKey))
                     }
                 }
                 #endif
@@ -1844,6 +1986,7 @@ struct AccountsSection: View {
             } label: {
                 Label("Add Account…", systemImage: "person.badge.plus")
             }
+            .accessibilityIdentifier(TestID.Settings.addAccount)
             .note(SettingsCopy.addAccount)
         } header: {
             Text("Accounts")
@@ -1867,9 +2010,9 @@ struct StationMixSection: View {
         let coverage = TagCoverage.recent
         Section {
             Picker(selection: preset) {
-                ForEach(MixPoints.presets, id: \.name) { Text($0.name).tag($0.name) }
+                ForEach(MixPoints.presets, id: \.name) { Text($0.name).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.stationMixPreset, TestID.key($0.name))).tag($0.name) }
                 if points.presetName == MixPoints.customName {
-                    Text(MixPoints.customName).tag(MixPoints.customName)
+                    Text(MixPoints.customName).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.stationMixPreset, TestID.key(MixPoints.customName))).tag(MixPoints.customName)
                 }
             } label: {
                 #if os(macOS)
@@ -1878,6 +2021,7 @@ struct StationMixSection: View {
                 Text(SettingsCopy.mixPreset.name ?? "")
                 #endif
             }
+            .accessibilityIdentifier(TestID.Settings.stationMixPreset)
             .note(SettingsCopy.mixPreset)
 
             ForEach(MixPoints.Dial.allCases) { dial in
@@ -1889,7 +2033,9 @@ struct StationMixSection: View {
                             Text("\(points[dial])")
                                 .monospacedDigit()
                                 .frame(minWidth: 16, alignment: .trailing)
+                                .accessibilityIdentifier(TestID.Settings.value(TestID.Settings.stationMixDial(dial.rawValue)))
                         }
+                        .accessibilityIdentifier(TestID.Settings.stationMixDial(dial.rawValue))
                     } label: {
                         MacSettingLabel(note)
                     }
@@ -1901,14 +2047,17 @@ struct StationMixSection: View {
                             Text("\(points[dial])")
                                 .foregroundStyle(Theme.textDim)
                                 .monospacedDigit()
+                                .accessibilityIdentifier(TestID.Settings.value(TestID.Settings.stationMixDial(dial.rawValue)))
                         }
                     }
+                    .accessibilityIdentifier(TestID.Settings.stationMixDial(dial.rawValue))
                     #endif
                     if let warning = coverage.note(for: dial) {
                         Label(warning, systemImage: "exclamationmark.triangle")
                             .font(.caption)
                             .foregroundStyle(Theme.warn)
                             .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier(TestID.Settings.stationMixDialWarning(dial.rawValue))
                     }
                 }
                 .note(note)
@@ -1917,6 +2066,7 @@ struct StationMixSection: View {
             Text(SettingsCopy.stationMix.name ?? "")
         } footer: {
             Text("\(SettingsCopy.mixPointsLeft(points)) \(SettingsCopy.stationMix.text)")
+                .accessibilityIdentifier(TestID.Settings.stationMixPointsLeft)
         }
     }
 
@@ -1946,44 +2096,50 @@ struct PictureAdjustRows: View {
     var body: some View {
         @Bindable var prefs = prefs
         Group {
-            slider("Brightness", value: $prefs.pictureBrightness)
-            slider("Contrast", value: $prefs.pictureContrast)
-            slider("Saturation", value: $prefs.pictureSaturation)
-            slider("Gamma", value: $prefs.pictureGamma)
+            slider("Brightness", value: $prefs.pictureBrightness, id: TestID.Settings.videoBrightness)
+            slider("Contrast", value: $prefs.pictureContrast, id: TestID.Settings.videoContrast)
+            slider("Saturation", value: $prefs.pictureSaturation, id: TestID.Settings.videoSaturation)
+            slider("Gamma", value: $prefs.pictureGamma, id: TestID.Settings.videoGamma)
             HStack {
                 Text("Zoom")
                 Spacer(minLength: 16)
                 Text("\(prefs.pictureZoom.formatted(.number.precision(.fractionLength(2))))×")
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                    .accessibilityIdentifier(TestID.Settings.value(TestID.Settings.videoZoom))
                 Slider(value: $prefs.pictureZoom, in: 1...2, step: 0.05)
                     .frame(maxWidth: 220)
                     .accessibilityLabel("Zoom")
+                    .accessibilityIdentifier(TestID.Settings.videoZoom)
             }
             .onChange(of: prefs.pictureZoom) { _, _ in player.applyFraming(switchingIfNeeded: true) }
             Picker("Aspect ratio", selection: $prefs.aspectOverride) {
-                ForEach(Preferences.aspectChoices, id: \.ratio) { Text($0.label).tag($0.ratio) }
+                ForEach(Preferences.aspectChoices, id: \.ratio) { Text($0.label).accessibilityIdentifier(TestID.Settings.option(TestID.Settings.videoAspect, "\($0.ratio)")).tag($0.ratio) }
             }
+            .accessibilityIdentifier(TestID.Settings.videoAspect)
             .onChange(of: prefs.aspectOverride) { _, _ in player.applyFraming(switchingIfNeeded: true) }
             Button("Reset Picture") {
                 prefs.resetPicture()
                 player.applyPicture()
                 player.applyFraming()
             }
+            .accessibilityIdentifier(TestID.Settings.videoResetPicture)
             .disabled(!prefs.pictureIsAdjusted)
         }
     }
 
-    private func slider(_ name: String, value: Binding<Double>) -> some View {
+    private func slider(_ name: String, value: Binding<Double>, id: String) -> some View {
         HStack {
             Text(name)
             Spacer(minLength: 16)
             Text("\(Int(value.wrappedValue))")
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
+                .accessibilityIdentifier(TestID.Settings.value(id))
             Slider(value: value, in: -100...100, step: 1)
                 .frame(maxWidth: 220)
                 .accessibilityLabel(name)
+                .accessibilityIdentifier(id)
         }
         .onChange(of: value.wrappedValue) { _, _ in player.applyPicture(switchingIfNeeded: true) }
     }
@@ -2037,10 +2193,11 @@ private struct ArtworkProbeRow: View {
         #if os(macOS)
         LabeledContent {
             HStack(spacing: 8) {
-                if isRunning { ProgressView().controlSize(.small) }
+                if isRunning { ProgressView().controlSize(.small).accessibilityIdentifier(TestID.Settings.liveTVArtworkBusy) }
                 Button(hasRun ? "Check Again" : "Check Now") {
                     Task { await run() }
                 }
+                .accessibilityIdentifier(TestID.Settings.liveTVArtworkCheck)
                 .disabled(isRunning)
             }
         } label: {
@@ -2051,6 +2208,7 @@ private struct ArtworkProbeRow: View {
         if hasRun, results.isEmpty {
             Text(SettingsView.noChannelsYet)
                 .foregroundStyle(.secondary)
+                .accessibilityIdentifier(TestID.Settings.liveTVArtworkEmpty)
         }
 
         ForEach(results) { ArtworkProbeResultView(result: $0) }
@@ -2061,15 +2219,17 @@ private struct ArtworkProbeRow: View {
             } label: {
                 HStack(spacing: 8) {
                     Text(hasRun ? "Check channel artwork again" : "Check channel artwork")
-                    if isRunning { ProgressView().controlSize(.small) }
+                    if isRunning { ProgressView().controlSize(.small).accessibilityIdentifier(TestID.Settings.liveTVArtworkBusy) }
                 }
             }
+            .accessibilityIdentifier(TestID.Settings.liveTVArtworkCheck)
             .disabled(isRunning)
 
             if hasRun, results.isEmpty {
                 Text(SettingsView.noChannelsYet)
                     .font(.caption)
                     .foregroundStyle(Theme.textDim)
+                    .accessibilityIdentifier(TestID.Settings.liveTVArtworkEmpty)
             }
 
             ForEach(results) { ArtworkProbeResultView(result: $0) }
@@ -2117,6 +2277,7 @@ struct ArtworkProbeResultView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .testAnchor(TestID.Settings.liveTVArtworkResult(TestID.key(result.channel)))
     }
 }
 

@@ -111,23 +111,28 @@ struct ChromeMenuLayer: View {
             PlayerMenuCard(title: "Audio", symbol: "speaker.wave.2", maxHeight: maxHeight, close: close) {
                 AudioMenu(onInteract: onInteract, close: close)
             }
+            .testAnchor(TestID.Player.cardAudio)
         case .subtitles:
             PlayerMenuCard(title: "Subtitles", symbol: "captions.bubble", maxHeight: maxHeight, close: close) {
                 SubtitlesMenu(onInteract: onInteract, close: close)
             }
+            .testAnchor(TestID.Player.cardSubtitles)
         case .quality:
             PlayerMenuCard(title: "Quality", symbol: "slider.horizontal.3", maxHeight: maxHeight, close: close) {
                 QualityMenu(onInteract: onInteract, close: close)
             }
+            .testAnchor(TestID.Player.cardQuality)
         case .upNext:
             PlayerMenuCard(title: "Up Next", symbol: "text.line.first.and.arrowtriangle.forward",
                            maxHeight: maxHeight, close: close) {
                 UpNextMenu(onInteract: onInteract, close: close)
             }
+            .testAnchor(TestID.Player.cardUpNext)
         case .more:
             PlayerMenuCard(title: "More", symbol: "ellipsis.circle", maxHeight: maxHeight, close: close) {
                 MoreMenu(onInteract: onInteract, close: close, openPanel: openPanel)
             }
+            .testAnchor(TestID.Player.cardMore)
         }
     }
 }
@@ -168,6 +173,7 @@ struct PlayerMenuCard<Content: View>: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Close")
+                .accessibilityIdentifier(TestID.Player.cardClose)
             }
             .padding(.leading, 16)
             .padding(.trailing, 8)
@@ -233,6 +239,7 @@ private struct AudioMenu: View {
         let selected = player.selectedAudioOption
         if options.isEmpty {
             PanelNote(text: player.isOpening ? "The stream is still opening." : "This stream lists no audio tracks.")
+                .accessibilityIdentifier(TestID.Player.audioEmpty)
         } else {
             ForEach(options) { option in
                 PanelRow(title: option.label,
@@ -242,6 +249,7 @@ private struct AudioMenu: View {
                     player.selectAudio(option)
                     close()
                 }
+                .accessibilityIdentifier(TestID.Player.audioOption(TestID.Player.trackKey(option.id)))
             }
         }
     }
@@ -260,6 +268,7 @@ private struct SubtitlesMenu: View {
             player.selectSubtitles(nil)
             close()
         }
+        .accessibilityIdentifier(TestID.Player.subtitlesOff)
         ForEach(options) { option in
             PanelRow(title: option.label,
                      // Many forced tracks are named so already.
@@ -273,9 +282,11 @@ private struct SubtitlesMenu: View {
                 player.selectSubtitles(option)
                 close()
             }
+            .accessibilityIdentifier(TestID.Player.subtitleOption(TestID.Player.trackKey(option.id)))
         }
         if options.isEmpty {
             PanelNote(text: "This stream has no subtitle tracks.")
+                .accessibilityIdentifier(TestID.Player.subtitlesEmpty)
         }
     }
 }
@@ -299,6 +310,7 @@ private struct QualityMenu: View {
                 onInteract()
                 close()
             }
+            .accessibilityIdentifier(TestID.Player.qualityDownloaded)
         } else {
             rungs
         }
@@ -314,6 +326,7 @@ private struct QualityMenu: View {
 
         if let reason = player.qualityUnavailableReason {
             PanelNote(text: reason)
+                .accessibilityIdentifier(TestID.Player.qualityUnavailable)
         }
         // Auto first, then the rows in the order Auto tries them: the
         // download, Direct, and the transcodes from the largest down.
@@ -322,11 +335,13 @@ private struct QualityMenu: View {
                  isSelected: auto) {
             pick(.auto)
         }
+        .accessibilityIdentifier(TestID.Player.qualityAuto)
         #if !os(tvOS)
         if player.downloadedCopy != nil {
             PanelRow(title: player.downloadedTitle, detail: local ? nil : "From this device", isSelected: local) {
                 pick(.downloaded)
             }
+            .accessibilityIdentifier(TestID.Player.qualityDownloaded)
         }
         #endif
         ForEach(Quality.choices) { choice in
@@ -340,9 +355,11 @@ private struct QualityMenu: View {
                      disabledReason: streamable ? nil : "Not for this stream") {
                 pick(.stream(choice.maxBitrate))
             }
+            .accessibilityIdentifier(TestID.Player.qualityOption(TestID.Player.qualityKey(choice.maxBitrate)))
         }
         if !local {
         PanelNote(text: "Auto plays the downloaded copy if there is one, then Direct — the original file, no transcode — and steps down through the streams below it when the connection struggles, climbing back once it is steady. Picking a quality keeps it there.")
+            .accessibilityIdentifier(TestID.Player.qualityNote)
         }
     }
 
@@ -382,12 +399,14 @@ private struct UpNextMenu: View {
                 } leading: {
                     still(entry)
                 }
+                .accessibilityIdentifier(TestID.Player.upNextItem(entry.Id))
             }
             PanelRow(title: "Clear up next", detail: "Forget what was queued by hand") {
                 onInteract()
                 player.clearQueue()
                 close()
             }
+            .accessibilityIdentifier(TestID.Player.upNextClear)
         } else {
             ForEach(player.upNextList, id: \.Id) { entry in
                 PanelRow(title: PlayerModel.upNextRowTitle(entry),
@@ -399,6 +418,7 @@ private struct UpNextMenu: View {
                 } leading: {
                     still(entry)
                 }
+                .accessibilityIdentifier(TestID.Player.upNextItem(entry.Id))
             }
             #if !os(tvOS)
             ForEach(player.upNextLocal, id: \.itemId) { record in
@@ -407,6 +427,7 @@ private struct UpNextMenu: View {
                     close()
                     player.playLocal(record, keepShuffle: true)
                 }
+                .accessibilityIdentifier(TestID.Player.upNextItem(record.itemId))
             }
             #endif
         }
@@ -447,6 +468,7 @@ private struct MoreMenu: View {
                         player.speed = rate
                     }
                     .accessibilityLabel("Speed \(PlayerModel.speedName(rate))")
+                    .accessibilityIdentifier(TestID.Player.speedOption(TestID.Player.speedKey(rate)))
                 }
             }
         }
@@ -457,6 +479,7 @@ private struct MoreMenu: View {
                 onInteract()
                 player.cancelSleepTimer()
             }
+            .accessibilityIdentifier(TestID.Player.sleepCancel)
         } else {
             HStack(spacing: 6) {
                 ForEach([15, 30, 60, 90], id: \.self) { minutes in
@@ -466,6 +489,7 @@ private struct MoreMenu: View {
                         close()
                     }
                     .accessibilityLabel("Stop in \(minutes) minutes")
+                    .accessibilityIdentifier(TestID.Player.sleepOption(minutes))
                 }
             }
         }
@@ -481,6 +505,7 @@ private struct MoreMenu: View {
                 onInteract()
                 if player.autoplayCancelled { player.resumeAutoplay() } else { player.cancelAutoplay() }
             }
+            .accessibilityIdentifier(TestID.Player.stopAfterThis)
         }
 
         if player.isLive, player.channelLineup.count > 1 {
@@ -490,6 +515,7 @@ private struct MoreMenu: View {
                 close()
                 openPanel(.channels)
             }
+            .accessibilityIdentifier(TestID.Player.moreChannels)
         }
 
         #if !os(tvOS)
@@ -503,6 +529,7 @@ private struct MoreMenu: View {
                     shareplay.leave()
                     close()
                 }
+                .accessibilityIdentifier(TestID.Player.sharePlayLeave)
             } else {
                 // On mpv the stream is handed to AVPlayer first, whose player
                 // the session coordinates.
@@ -515,6 +542,7 @@ private struct MoreMenu: View {
                         await shareplay.share(item)
                     }
                 }
+                .accessibilityIdentifier(TestID.Player.sharePlayStart)
             }
         }
         #endif

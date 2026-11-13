@@ -56,12 +56,14 @@ struct LibrariesView: View {
                 }
                 .padding(.horizontal, Metrics.gutter)
                 .padding(.vertical, 16)
+                .testAnchor(TestID.Library.listLoading)
             } else if app.libraries.isEmpty {
                 EmptyState(
                     symbol: "books.vertical",
                     title: "No libraries",
                     message: "This server has no film or television libraries you can see. Anything added in Jellyfin shows up here after the next scan."
                 )
+                .testAnchor(TestID.Library.listEmpty)
             } else {
                 LazyVGrid(columns: columns, spacing: Metrics.gridRowSpacing) {
                     ForEach(tiles) { library in
@@ -75,6 +77,7 @@ struct LibrariesView: View {
                             LibraryTile(library: library, width: isPhone ? nil : Metrics.stillWidth)
                         }
                         .buttonStyle(PosterButtonStyle())
+                        .accessibilityIdentifier(TestID.Library.tile(library.Id))
                     }
                 }
                 .padding(.horizontal, Metrics.gutter)
@@ -86,6 +89,7 @@ struct LibrariesView: View {
         .task {
             if app.libraries.isEmpty { await app.loadLibraries() }
         }
+        .testAnchor(TestID.Library.listRoot)
     }
 }
 
@@ -113,6 +117,7 @@ struct LibraryChipsRow: View {
                 }
                 .padding(.horizontal, Metrics.gutter)
             }
+            .testAnchor(TestID.Library.chips)
         }
     }
 
@@ -135,6 +140,7 @@ struct LibraryChipsRow: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier(TestID.Library.chip(library.Id))
         #if os(macOS)
         .macHover(cornerRadius: 18)
         .help(LibraryTile.summary(of: library))
@@ -148,6 +154,7 @@ struct LibraryChipsRow: View {
             } label: {
                 Label("Open in New Window", systemImage: "macwindow.badge.plus")
             }
+            .accessibilityIdentifier(TestID.Library.openInNewWindow(library.Id))
         }
         #endif
     }
@@ -323,6 +330,7 @@ struct LibraryTilesRow: View {
                 scroller
                     .focusRegion()
             }
+            .testAnchor(TestID.Library.tilesRow)
         }
     }
 
@@ -332,6 +340,7 @@ struct LibraryTilesRow: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(PosterButtonStyle())
+        .accessibilityIdentifier(TestID.Library.tile(library.Id))
         #if os(macOS)
         .help(LibraryTile.summary(of: library))
         .contextMenu {
@@ -344,6 +353,7 @@ struct LibraryTilesRow: View {
             } label: {
                 Label("Open in New Window", systemImage: "macwindow.badge.plus")
             }
+            .accessibilityIdentifier(TestID.Library.openInNewWindow(library.Id))
         }
         #endif
     }
@@ -380,11 +390,13 @@ struct LibraryTilesRow: View {
         .scrollPosition(id: $scrolledID)
         .overlay(alignment: .leading) {
             ShelfPagingButton(direction: .back) { page(by: -layout.count) }
+                .accessibilityIdentifier(TestID.Library.tilesPageBack)
                 .padding(.leading, 4)
                 .opacity(isHovering && canPage(by: -1) ? 1 : 0)
         }
         .overlay(alignment: .trailing) {
             ShelfPagingButton(direction: .forward) { page(by: layout.count) }
+                .accessibilityIdentifier(TestID.Library.tilesPageForward)
                 .padding(.trailing, 4)
                 .opacity(isHovering && canPage(by: layout.count) ? 1 : 0)
         }

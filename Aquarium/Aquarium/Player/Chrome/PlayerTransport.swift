@@ -133,6 +133,7 @@ struct PlayerTransport: View {
                 HStack(spacing: 10) {
                     Image(systemName: "chevron.down")
                     Text(remoteHint)
+                        .accessibilityIdentifier(TestID.Player.remoteHint)
                 }
                 .font(.caption)
                 .foregroundStyle(Theme.textDim)
@@ -177,6 +178,7 @@ struct PlayerTransport: View {
                 .lineLimit(1)
         }
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.Player.title)
     }
 
     /// What the remote does from here, in a line. The remote's alone.
@@ -265,6 +267,7 @@ struct PlayerTransport: View {
             if showsBackButton {
                 PlayerGlyphButton(symbol: "chevron.backward", label: "Back", size: 20, action: onDismiss)
                     .accessibilityHint("Closes the player")
+                    .accessibilityIdentifier(TestID.Player.back)
             }
 
             VStack(alignment: .leading, spacing: 2) {
@@ -290,6 +293,7 @@ struct PlayerTransport: View {
             .foregroundStyle(.white)
             .padding(.leading, 4)
             .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(TestID.Player.title)
 
             Spacer(minLength: 8)
 
@@ -300,6 +304,7 @@ struct PlayerTransport: View {
                 PlayerAirPlayButton()
                     .frame(width: 40, height: 40)
                     .accessibilityLabel("AirPlay")
+                    .accessibilityIdentifier(TestID.Player.airPlay)
             }
 
             if let pip = pictureInPicture, pip.isPossible || pip.isActive || player.canHandOverForPictureInPicture {
@@ -315,6 +320,7 @@ struct PlayerTransport: View {
                         pip.toggle()
                     }
                 }
+                .accessibilityIdentifier(TestID.Player.pictureInPicture)
             }
 
             moreButton
@@ -419,6 +425,7 @@ struct PlayerTransport: View {
         PlayerGlyphButton(symbol: "ellipsis", label: "More", size: 18, isOn: chrome.menu == .more) {
             toggleMenu(.more)
         }
+        .accessibilityIdentifier(TestID.Player.more)
         .chromeMenuAnchor(.more)
     }
 
@@ -455,6 +462,7 @@ struct PlayerTransport: View {
             onInteract()
             player.switchChannel(by: next ? 1 : -1)
         }
+        .accessibilityIdentifier(next ? TestID.Player.channelNext : TestID.Player.channelPrevious)
     }
 
     private func skipButton(forward: Bool) -> some View {
@@ -469,6 +477,7 @@ struct PlayerTransport: View {
             chrome.countSkip(forward ? skip : -skip)
         }
         .disabled(player.isOpening)
+        .accessibilityIdentifier(forward ? TestID.Player.skipForward : TestID.Player.skipBack)
     }
 
     private var playPauseButton: some View {
@@ -494,6 +503,7 @@ struct PlayerTransport: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(player.isBuffering ? "Loading" : player.isPaused ? "Play" : "Pause")
+        .accessibilityIdentifier(TestID.Player.playPause)
     }
 
     // MARK: - Bottom
@@ -521,6 +531,7 @@ struct PlayerTransport: View {
         return HStack {
             Text(PlayerTime.format(shown))
                 .accessibilityLabel("Elapsed \(PlayerTime.spoken(shown))")
+                .accessibilityIdentifier(TestID.Player.elapsed)
             Spacer()
             Button {
                 onInteract()
@@ -535,6 +546,7 @@ struct PlayerTransport: View {
                 ? "Total length \(PlayerTime.spoken(player.duration))"
                 : "Remaining \(PlayerTime.spoken(remaining))")
             .accessibilityHint("Switches between time remaining and total length")
+            .accessibilityIdentifier(TestID.Player.remaining)
         }
         .font(PlayerMetrics.television ? .callout.monospacedDigit() : .caption.monospacedDigit())
         .foregroundStyle(.white.opacity(0.9))
@@ -563,6 +575,7 @@ struct PlayerTransport: View {
                 .scrollClipDisabled()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .testAnchor(TestID.Player.pillRow)
     }
 
     /// Which pills keep their words.
@@ -584,17 +597,21 @@ struct PlayerTransport: View {
                      label: "Channels", tab: .channels, anchor: .channels)
             }
             menuPill(.audio, symbol: "speaker.wave.2", title: plain ? "Audio" : nil, label: "Audio tracks")
+                .accessibilityIdentifier(TestID.Player.pillAudio)
             menuPill(.subtitles, symbol: "captions.bubble", title: plain ? "Subtitles" : nil, label: "Subtitles")
+                .accessibilityIdentifier(TestID.Player.pillSubtitles)
             if player.offersQualityChoice {
                 menuPill(.quality, symbol: "slider.horizontal.3",
                          title: state ? qualityTitle : nil,
                          label: player.isCheckingSpeed ? "Quality, checking the connection speed" : "Quality, \(qualitySpoken)",
                          busy: player.isCheckingSpeed)
+                    .accessibilityIdentifier(TestID.Player.pillQuality)
             }
             if !player.isLive, player.upNextCount > 0 {
                 menuPill(.upNext, symbol: "text.line.first.and.arrowtriangle.forward",
                          title: !state ? nil : player.queue.isEmpty ? "Up Next" : "Up Next · \(player.queue.count)",
                          label: "Up next, \(player.upNextCount) waiting")
+                    .accessibilityIdentifier(TestID.Player.pillUpNext)
             }
             Button {
                 onInteract()
@@ -610,6 +627,7 @@ struct PlayerTransport: View {
             .buttonStyle(PlayerPillStyle())
             .accessibilityLabel("Fill the screen")
             .accessibilityValue(prefs.fillScreen ? "On" : "Off")
+            .accessibilityIdentifier(TestID.Player.pillFill)
         }
         .padding(.horizontal, 2)
         .padding(.vertical, 2)
@@ -653,6 +671,7 @@ struct PlayerTransport: View {
         .buttonStyle(PlayerPillStyle())
         .accessibilityLabel(label)
         .accessibilityHint("Opens the \(tab.title) panel")
+        .accessibilityIdentifier(TestID.Player.pill(tab.rawValue))
         .panelPopover(isPresented: popover(for: anchor), arrowEdge: .bottom) { panelPopover }
     }
 

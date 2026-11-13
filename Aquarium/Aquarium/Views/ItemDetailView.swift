@@ -124,6 +124,8 @@ struct ItemDetailView: View {
             // its title.
             scrolledPastHero = -offset > 80
         }
+        .testAnchor(TestID.Detail.root)
+        .testAnchor(TestID.Detail.page(itemId))
         #elseif os(tvOS)
         scroll()
             .screenTitle(navigationTitle)
@@ -137,6 +139,8 @@ struct ItemDetailView: View {
                 // away before the season it names had loaded its episodes.
                 if case .episode = target { app.pendingEpisodeHighlight = nil }
             }
+            .testAnchor(TestID.Detail.root)
+            .testAnchor(TestID.Detail.page(itemId))
         #else
         scroll()
             .screenTitle(navigationTitle)
@@ -157,6 +161,8 @@ struct ItemDetailView: View {
                 }
             }
             .focusedSceneValue(\.itemMenuActions, menuActions)
+            .testAnchor(TestID.Detail.root)
+            .testAnchor(TestID.Detail.page(itemId))
         #endif
     }
 
@@ -181,6 +187,7 @@ struct ItemDetailView: View {
             Label("Open in New Window", systemImage: "macwindow.badge.plus")
         }
         .help("Open in New Window (⌥⌘O)")
+        .accessibilityIdentifier(TestID.Detail.openInNewWindow)
     }
     /// This page's actions, for the Item menu while it is in front.
     private var menuActions: ItemMenuActions? {
@@ -286,14 +293,17 @@ struct ItemDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Show sidebar")
+                .accessibilityIdentifier(TestID.Detail.showSidebar)
             }
             BarBackButton()
+                .accessibilityIdentifier(TestID.Detail.back)
             if scrolledPastHero {
                 Text(navigationTitle)
                     .font(.headline)
                     .foregroundStyle(Theme.text)
                     .lineLimit(1)
                     .transition(.opacity)
+                    .accessibilityIdentifier(TestID.Detail.barTitle)
             }
             Spacer(minLength: 12)
         }
@@ -310,12 +320,14 @@ struct ItemDetailView: View {
         AppTopBar {
             HStack(spacing: 4) {
                 BarBackButton()
+                    .accessibilityIdentifier(TestID.Detail.back)
                 if scrolledPastHero {
                     Text(navigationTitle)
                         .font(.headline)
                         .foregroundStyle(Theme.text)
                         .lineLimit(1)
                         .transition(.opacity)
+                        .accessibilityIdentifier(TestID.Detail.barTitle)
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: scrolledPastHero)
@@ -473,9 +485,11 @@ struct ItemDetailView: View {
                 }
                 .padding(.top, skeletonInset)
                 .padding(.bottom, 40)
+                .testAnchor(TestID.Detail.loading)
             } else if let error, item == nil {
                 ErrorState(error: error) { Task { await load() } }
                     .padding(.top, skeletonInset)
+                    .testAnchor(TestID.Detail.error)
             } else if let item {
                 // Eager on a television, lazy everywhere else.
                 //
@@ -507,11 +521,13 @@ struct ItemDetailView: View {
                 LazyVStack(alignment: .leading, spacing: 26) { headerSections(item) }
                     .padding(.bottom, 24)
             }
+            .testAnchor(TestID.Detail.foldUpper)
         } lower: {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 26) { bodySections(item) }
                     .padding(.vertical, 24)
             }
+            .testAnchor(TestID.Detail.foldLower)
         }
     }
     #endif
@@ -586,6 +602,7 @@ struct ItemDetailView: View {
                 qualityMenu(target)
             }
             Button("Cancel", role: .cancel) { qualityChoice = nil }
+                .accessibilityIdentifier(TestID.Detail.qualityCancel)
         }
         #endif
     }
@@ -630,19 +647,23 @@ struct ItemDetailView: View {
         if Metrics.phoneLayout {
             HeroHeader(item: item, style: .detail)
                 .id(Self.topAnchor)
+                .testAnchor(TestID.Detail.hero)
             details(item)
         } else {
             padHeader(item)
                 .id(Self.topAnchor)
+                .testAnchor(TestID.Detail.hero)
         }
         #elseif os(macOS)
         // The iPad's header: the poster beside the facts on a wash of the
         // backdrop, under the toolbar.
         padHeader(item)
             .id(Self.topAnchor)
+            .testAnchor(TestID.Detail.hero)
         #else
         HeroHeader(item: item, style: .detail)
             .id(Self.topAnchor)
+            .testAnchor(TestID.Detail.hero)
         details(item)
         #endif
     }
@@ -672,6 +693,7 @@ struct ItemDetailView: View {
         #endif
         castSection(item)
         MediaShelf(title: "More Like This", items: similar) { app.push(.item($0.Id)) }
+            .testAnchor(TestID.Detail.moreLikeThis)
     }
 
     private static let scrollSpace = "itemDetailScroll"
@@ -719,10 +741,12 @@ struct ItemDetailView: View {
                     // stack step away, because the two are one heading.
                     #if !os(tvOS)
                     AncestorTrail(item: item)
+                        .testAnchor(TestID.Detail.ancestors)
                     #endif
                     Text(item.title)
                         .font(.title2.weight(.semibold))
                         .foregroundStyle(Theme.text)
+                        .accessibilityIdentifier(TestID.Detail.title)
                 }
             }
             if let tagline = item.Taglines?.first, !tagline.isEmpty {
@@ -730,9 +754,11 @@ struct ItemDetailView: View {
                     .font(.subheadline.italic())
                     .foregroundStyle(Theme.textDim)
                     .macSelectable()
+                    .accessibilityIdentifier(TestID.Detail.tagline)
             }
             FactsLine(item: item)
                 .macSelectable()
+                .testAnchor(TestID.Detail.facts)
 
             // Which episode Play would start, where that isn't this page's own
             // item — a show plays whatever is next, a season the first thing in
@@ -742,6 +768,7 @@ struct ItemDetailView: View {
             if let target = playable(for: item), target.Id != item.Id, target.isEpisode {
                 upNextLine(target)
                     .lineLimit(2)
+                    .accessibilityIdentifier(TestID.Detail.upNext)
             }
 
             // Where you got to — in whatever Play would actually start, which on
@@ -752,11 +779,14 @@ struct ItemDetailView: View {
             // Play will do sits where the Play button is.
             if let target = playable(for: item), let progress = target.progressFraction {
                 resumeLine(progress, of: target)
+                    .testAnchor(TestID.Detail.resumeProgress)
             }
 
             actionRow(item)
+                .testAnchor(TestID.Detail.actions)
 
             MediaSummaryLine(item: item)
+                .testAnchor(TestID.Detail.sourceInfo)
 
             if let overview = item.Overview, !overview.isEmpty {
                 Text(overview)
@@ -764,6 +794,7 @@ struct ItemDetailView: View {
                     .foregroundStyle(Theme.textBody)
                     .fixedSize(horizontal: false, vertical: true)
                     .macSelectable()
+                    .accessibilityIdentifier(TestID.Detail.overview)
             }
 
             // Genres, the studios and the description of the file were three
@@ -780,12 +811,14 @@ struct ItemDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .macSelectable()
+                    .accessibilityIdentifier(TestID.Detail.genres)
                 #else
                 WrappingRow(spacing: 8, rowSpacing: 8) {
                     ForEach(genres.prefix(6), id: \.self) { genre in
                         MetaChip(text: genre)
                     }
                 }
+                .testAnchor(TestID.Detail.genres)
                 #endif
             }
             if let studios = item.Studios?.compactMap(\.Name).filter({ !$0.isEmpty }), !studios.isEmpty {
@@ -793,6 +826,7 @@ struct ItemDetailView: View {
                     .font(.caption)
                     .foregroundStyle(Theme.textDim)
                     .macSelectable()
+                    .accessibilityIdentifier(TestID.Detail.studios)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -849,12 +883,14 @@ struct ItemDetailView: View {
         VStack(alignment: .leading, spacing: 4) {
             if item.isEpisode || item.isSeason {
                 AncestorTrail(item: item)
+                    .testAnchor(TestID.Detail.ancestors)
             }
             Text(item.title)
                 .font(.system(size: compact ? 30 : 40, weight: .heavy))
                 .foregroundStyle(Theme.text)
                 .lineLimit(2)
                 .minimumScaleFactor(0.7)
+                .accessibilityIdentifier(TestID.Detail.title)
         }
     }
 
@@ -867,9 +903,11 @@ struct ItemDetailView: View {
                 .font(.callout.italic())
                 .foregroundStyle(Theme.textDim)
                 .macSelectable()
+                .accessibilityIdentifier(TestID.Detail.tagline)
         }
         FactsLine(item: item)
             .macSelectable()
+            .testAnchor(TestID.Detail.facts)
         if let genres = item.Genres, !genres.isEmpty {
             #if os(macOS)
             // One line of secondary text, the way the TV app lists them:
@@ -878,12 +916,14 @@ struct ItemDetailView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .macSelectable()
+                .accessibilityIdentifier(TestID.Detail.genres)
             #else
             WrappingRow(spacing: 8, rowSpacing: 8) {
                 ForEach(genres.prefix(6), id: \.self) { genre in
                     MetaChip(text: genre)
                 }
             }
+            .testAnchor(TestID.Detail.genres)
             #endif
         }
     }
@@ -901,6 +941,7 @@ struct ItemDetailView: View {
                 .frame(maxWidth: 680, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .macSelectable()
+                .accessibilityIdentifier(TestID.Detail.overview)
             #else
             // Four lines, and the rest on a tap: a page's worth of synopsis
             // above the episodes pushed them off the screen.
@@ -916,24 +957,29 @@ struct ItemDetailView: View {
                 }
                 .accessibilityAddTraits(.isButton)
                 .accessibilityHint(padOverviewExpanded ? "Folds the overview" : "Unfolds the overview")
+                .accessibilityIdentifier(TestID.Detail.overview)
             #endif
         }
         if let target = playable(for: item), target.Id != item.Id, target.isEpisode {
             upNextLine(target)
                 .lineLimit(2)
+                .accessibilityIdentifier(TestID.Detail.upNext)
         }
 
         padActions(item)
             .padding(.top, 4)
+            .testAnchor(TestID.Detail.actions)
 
         MediaSummaryLine(item: item)
             .fixedSize(horizontal: false, vertical: true)
             .macSelectable()
+            .testAnchor(TestID.Detail.sourceInfo)
         if let studios = item.Studios?.compactMap(\.Name).filter({ !$0.isEmpty }), !studios.isEmpty {
             Label(studios.joined(separator: " · "), systemImage: "building.2")
                 .font(.caption)
                 .foregroundStyle(Theme.textDim)
                 .macSelectable()
+                .accessibilityIdentifier(TestID.Detail.studios)
         }
     }
 
@@ -952,6 +998,7 @@ struct ItemDetailView: View {
         }
         .clipShape(shape)
         .shadow(color: .black.opacity(0.45), radius: 24, y: 12)
+        .testAnchor(TestID.Detail.artwork)
     }
 
     /// The backdrop as a wash under the header: blurred until it is colour
@@ -1002,10 +1049,12 @@ struct ItemDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .help("\(playLabel(playable)) (⌘↩)")
+                    .accessibilityIdentifier(TestID.Detail.play)
                     if let progress = playable.progressFraction {
                         Text(remainingText(progress, of: playable))
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(Theme.textDim)
+                            .accessibilityIdentifier(TestID.Detail.remaining)
                     }
                 }
             }
@@ -1023,6 +1072,7 @@ struct ItemDetailView: View {
             .labelStyle(IconDiscLabelStyle(tint: item.userData.isFavorite ? Theme.warn : nil))
             .buttonStyle(.plain)
             .help(item.userData.isFavorite ? "Remove from Favorites (⌘D)" : "Add to Favorites (⌘D)")
+            .accessibilityIdentifier(TestID.Detail.favorite)
 
             // A show is marked a season at a time — see `ItemMenuActions.isWatched`.
             if !item.isSeries {
@@ -1038,6 +1088,7 @@ struct ItemDetailView: View {
                 .labelStyle(IconDiscLabelStyle(tint: item.userData.played ? Theme.accent : nil))
                 .buttonStyle(.plain)
                 .help(item.userData.played ? "Mark as Unwatched (⇧⌘U)" : "Mark as Watched (⇧⌘U)")
+                .accessibilityIdentifier(TestID.Detail.watched)
             } else {
                 // A show is put on Next Up rather than marked watched — see
                 // `JellyfinClient.addToNextUp`.
@@ -1049,6 +1100,7 @@ struct ItemDetailView: View {
                 .labelStyle(IconDiscLabelStyle())
                 .buttonStyle(.plain)
                 .help("Add to Next Up")
+                .accessibilityIdentifier(TestID.Detail.addToNextUp)
             }
 
             downloadMenu(item)
@@ -1065,6 +1117,7 @@ struct ItemDetailView: View {
                 .labelStyle(IconDiscLabelStyle())
                 .buttonStyle(.plain)
                 .help("Play Trailer")
+                .accessibilityIdentifier(TestID.Detail.trailer)
             }
 
             if let playable {
@@ -1076,6 +1129,7 @@ struct ItemDetailView: View {
                 .labelStyle(IconDiscLabelStyle())
                 .discMenuStyle()
                 .help("Play at a set quality")
+                .accessibilityIdentifier(TestID.Detail.quality)
             }
         }
     }
@@ -1106,12 +1160,14 @@ struct ItemDetailView: View {
                             }
                         }
                     }
+                    .testAnchor(TestID.Detail.seasonPicker)
                 }
                 Spacer(minLength: 8)
                 if !episodes.isEmpty {
                     Text(padEpisodeSummary)
                         .font(.footnote)
                         .foregroundStyle(Theme.textDim)
+                        .accessibilityIdentifier(TestID.Detail.episodeSummary)
                 }
             }
             if episodes.isEmpty {
@@ -1119,11 +1175,13 @@ struct ItemDetailView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
+                        .accessibilityIdentifier(TestID.Detail.episodesLoading)
                 } else {
                     Text("Nothing in this season yet.")
                         .font(.subheadline)
                         .foregroundStyle(Theme.textDim)
                         .padding(.vertical, 8)
+                        .accessibilityIdentifier(TestID.Detail.episodesEmpty)
                 }
             } else {
                 #if os(macOS)
@@ -1154,6 +1212,7 @@ struct ItemDetailView: View {
             }
         }
         .padding(.horizontal, Metrics.gutter)
+        .testAnchor(TestID.Detail.episodes)
     }
 
     /// One season on the switch. A press-and-hold has the season's own menu,
@@ -1175,6 +1234,7 @@ struct ItemDetailView: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier(TestID.Detail.season(season.Id))
         .itemContextMenu(season, allowsOpen: true)
         .help(season.title)
     }
@@ -1263,6 +1323,7 @@ struct ItemDetailView: View {
                 #endif
                 .foregroundStyle(Theme.textDim)
                 .macSelectable()
+                .accessibilityIdentifier(TestID.Detail.remaining)
         }
     }
 
@@ -1301,6 +1362,7 @@ struct ItemDetailView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .help("\(playLabel(playable)) (⌘↩)")
+                .accessibilityIdentifier(TestID.Detail.play)
             }
             if Trailers.has(item) {
                 Button {
@@ -1311,6 +1373,7 @@ struct ItemDetailView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.large)
                 .help("Play Trailer")
+                .accessibilityIdentifier(TestID.Detail.trailer)
             }
         }
         #else
@@ -1383,6 +1446,7 @@ struct ItemDetailView: View {
             Label(playLabel(playable), systemImage: "play.fill")
         }
         .appButtonStyle(prominent: true)
+        .accessibilityIdentifier(TestID.Detail.play)
         #if os(tvOS)
         .focused($focus, equals: .play)
         #endif
@@ -1400,6 +1464,7 @@ struct ItemDetailView: View {
                     )
                 }
             }
+            .accessibilityIdentifier(TestID.Detail.qualityOption(choice.maxBitrate))
         }
     }
 
@@ -1423,6 +1488,7 @@ struct ItemDetailView: View {
             }
             .appButtonStyle()
             .focused($focus, equals: .quality)
+            .accessibilityIdentifier(TestID.Detail.quality)
             #else
             Menu {
                 qualityMenu(playable)
@@ -1430,6 +1496,7 @@ struct ItemDetailView: View {
                 Label("Quality", systemImage: "slider.horizontal.3")
             }
             .buttonStyle(.bordered)
+            .accessibilityIdentifier(TestID.Detail.quality)
             #endif
         }
 
@@ -1444,6 +1511,7 @@ struct ItemDetailView: View {
             .symbolEffect(.bounce, value: item.userData.isFavorite)
         }
         .appButtonStyle(highlight: item.userData.isFavorite ? Theme.warn : nil)
+        .accessibilityIdentifier(TestID.Detail.favorite)
         #if os(tvOS)
         .focused($focus, equals: .favorite)
         #endif
@@ -1460,6 +1528,7 @@ struct ItemDetailView: View {
                 .symbolEffect(.bounce, value: item.userData.played)
             }
             .appButtonStyle()
+            .accessibilityIdentifier(TestID.Detail.watched)
             #if os(tvOS)
             .focused($focus, equals: .watched)
             #endif
@@ -1474,6 +1543,7 @@ struct ItemDetailView: View {
                 Label("Add to Next Up", systemImage: "text.badge.plus")
             }
             .appButtonStyle()
+            .accessibilityIdentifier(TestID.Detail.addToNextUp)
         }
 
         if Trailers.has(item) {
@@ -1483,6 +1553,7 @@ struct ItemDetailView: View {
                 Label("Trailer", systemImage: "film")
             }
             .appButtonStyle()
+            .accessibilityIdentifier(TestID.Detail.trailer)
             #if os(tvOS)
             .focused($focus, equals: .trailer)
             #endif
@@ -1514,6 +1585,7 @@ struct ItemDetailView: View {
             .symbolEffect(.bounce, value: item.userData.isFavorite)
         }
         .appButtonStyle(highlight: item.userData.isFavorite ? Theme.warn : nil)
+        .accessibilityIdentifier(TestID.Detail.favorite)
 
         #if !os(tvOS)
         // Its word only while there is room for it. From the second size up
@@ -1539,6 +1611,7 @@ struct ItemDetailView: View {
                 } label: {
                     Label("Watch trailer", systemImage: "film")
                 }
+                .accessibilityIdentifier(TestID.Detail.trailer)
             }
             if let playable {
                 Menu {
@@ -1546,6 +1619,7 @@ struct ItemDetailView: View {
                 } label: {
                     Label("Play at a set quality", systemImage: "slider.horizontal.3")
                 }
+                .accessibilityIdentifier(TestID.Detail.quality)
             }
             if !item.isSeries {
                 Button {
@@ -1556,12 +1630,14 @@ struct ItemDetailView: View {
                         systemImage: item.userData.played ? "arrow.uturn.backward.circle" : "checkmark.circle"
                     )
                 }
+                .accessibilityIdentifier(TestID.Detail.watched)
             } else {
                 Button {
                     NextUpAdding.ask(item, app: app)
                 } label: {
                     Label("Add to Next Up", systemImage: "text.badge.plus")
                 }
+                .accessibilityIdentifier(TestID.Detail.addToNextUp)
             }
         } label: {
             // Sized by a star it doesn't show. A button is as tall as its
@@ -1578,6 +1654,7 @@ struct ItemDetailView: View {
             .labelStyle(.iconOnly)
         }
         .buttonStyle(.bordered)
+        .accessibilityIdentifier(TestID.Detail.more)
     }
     #endif
 
@@ -1625,11 +1702,13 @@ struct ItemDetailView: View {
                             } label: {
                                 DownloadChoiceLabel(quality.label, size: sizeText(whole, quality, wholeState))
                             }
+                            .accessibilityIdentifier(TestID.Detail.downloadSeriesQuality(quality.label))
                         }
                     }
                 } label: {
                     DownloadChoiceLabel("Whole Series", size: wholeState.summary, systemImage: "square.stack.3d.down.right")
                 }
+                .accessibilityIdentifier(TestID.Detail.downloadSeries)
                 // A season at a time is what most people actually want, and
                 // going one level down to the season page to get it is a
                 // detour — every season this series has is offered here.
@@ -1646,11 +1725,13 @@ struct ItemDetailView: View {
                                 } label: {
                                     DownloadChoiceLabel(quality.label, size: sizeText(episodes, quality, state))
                                 }
+                                .accessibilityIdentifier(TestID.Detail.downloadSeasonQuality(season.Id, quality.label))
                             }
                         }
                     } label: {
                         DownloadChoiceLabel(season.title, size: state.summary, systemImage: "rectangle.stack")
                     }
+                    .accessibilityIdentifier(TestID.Detail.downloadSeason(season.Id))
                 }
             } else if item.isSeason {
                 let state = EpisodesOnDevice(episodes)
@@ -1663,6 +1744,7 @@ struct ItemDetailView: View {
                         } label: {
                             DownloadChoiceLabel("This Season · \(quality.label)", size: sizeText(episodes, quality, state))
                         }
+                        .accessibilityIdentifier(TestID.Detail.downloadQuality(quality.label))
                     }
                 }
             } else {
@@ -1674,12 +1756,14 @@ struct ItemDetailView: View {
                         } label: {
                             Label("Show in Finder", systemImage: "folder")
                         }
+                        .accessibilityIdentifier(TestID.Detail.downloadShowInFinder)
                     }
                     #endif
                     Button("Delete Download", role: .destructive) {
                         DownloadManager.shared.delete(item.Id)
                         app.toast("Download deleted", tone: .ok)
                     }
+                    .accessibilityIdentifier(TestID.Detail.downloadDelete)
                 } else {
                     ForEach(DownloadQualities.all) { quality in
                         Button {
@@ -1687,6 +1771,7 @@ struct ItemDetailView: View {
                         } label: {
                             DownloadChoiceLabel(quality.label, size: sizeText([item], quality))
                         }
+                        .accessibilityIdentifier(TestID.Detail.downloadQuality(quality.label))
                     }
                 }
             }
@@ -1714,6 +1799,7 @@ struct ItemDetailView: View {
             }
             #endif
         }
+        .accessibilityIdentifier(TestID.Detail.download)
         // A whole series, or one of its seasons, is a size worth knowing
         // before choosing it: each season's episodes, from the library copy
         // where there is one, else the server, with their files.
@@ -1748,11 +1834,13 @@ struct ItemDetailView: View {
         Text(state.arriving == 0
              ? "All \(state.total) episode\(state.total == 1 ? " is" : "s are") downloaded"
              : "Every episode is downloaded or on its way")
+             .accessibilityIdentifier(TestID.Detail.downloadAllHere)
         Button {
             app.show(.downloads)
         } label: {
             Label("Show in Downloads", systemImage: "arrow.down.circle")
         }
+        .accessibilityIdentifier(TestID.Detail.downloadShowInDownloads)
     }
 
     /// How much of a season or series is on the device, for its download
@@ -1846,6 +1934,7 @@ struct ItemDetailView: View {
                                 )
                             }
                             .buttonStyle(PosterButtonStyle())
+                            .accessibilityIdentifier(TestID.Detail.season(season.Id))
                             #if os(tvOS)
                             .focused($focus, equals: .season(season.Id))
                             #endif
@@ -1859,6 +1948,7 @@ struct ItemDetailView: View {
                 }
                 .focusRegion()
             }
+            .testAnchor(TestID.Detail.seasons)
         }
     }
 
@@ -1881,6 +1971,7 @@ struct ItemDetailView: View {
                     Task { await markWatched(ids, played: played) }
                 }
             }
+            .testAnchor(TestID.Detail.episodes)
             .focusRegion()
         }
         #else
@@ -1910,6 +2001,7 @@ struct ItemDetailView: View {
             }
         }
         .padding(.horizontal, Metrics.gutter)
+        .testAnchor(TestID.Detail.episodes)
         .focusRegion()
         #endif
     }
@@ -2021,6 +2113,7 @@ struct ItemDetailView: View {
                             #endif
                             .macOpensOnReturn { openPerson(person) }
                             .help(castHelp(person))
+                            .accessibilityIdentifier(TestID.Detail.castPerson(person.id))
                         }
                     }
                     .padding(.horizontal, Metrics.gutter)
@@ -2031,6 +2124,7 @@ struct ItemDetailView: View {
                 }
                 .focusRegion()
             }
+            .testAnchor(TestID.Detail.cast)
         }
     }
 
@@ -2349,10 +2443,12 @@ struct EpisodeRow: View {
         #if os(tvOS)
         Button(action: onPlay) { rowContent }
             .rowButtonStyle()
+            .accessibilityIdentifier(TestID.Detail.episode(episode.Id))
             .itemContextMenu(episode, allowsOpen: true)
         #else
         Button(action: onOpen) { rowContent }
             .rowButtonStyle()
+            .accessibilityIdentifier(TestID.Detail.episode(episode.Id))
             .background { marker }
             .itemContextMenu(episode)
         #endif
@@ -2463,6 +2559,7 @@ struct EpisodeRow: View {
                 .foregroundStyle(Theme.accent)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier(TestID.Detail.episodePlay(episode.Id))
         #endif
     }
 }
@@ -2502,13 +2599,17 @@ struct SpacePromptView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accentStrong)
+                .accessibilityIdentifier(TestID.Downloads.spacePromptUse(alternative.label))
             }
 
             Button("Download anyway", role: .destructive) { onChoose(prompt.requested) }
+                .accessibilityIdentifier(TestID.Downloads.spacePromptAnyway)
             Button("Cancel", role: .cancel) { onChoose(nil) }
+                .accessibilityIdentifier(TestID.Downloads.spacePromptCancel)
         }
         .padding(24)
         .frame(maxWidth: 480)
+        .testAnchor(TestID.Downloads.spacePrompt)
     }
 }
 #endif

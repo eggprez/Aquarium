@@ -70,6 +70,7 @@ struct HeroCarousel: View {
         .overlay(alignment: .leading) {
             if items.count > 1 {
                 ShelfPagingButton(direction: .back) { turn(by: -1) }
+                    .accessibilityIdentifier(TestID.Home.heroPrevious)
                     .padding(.leading, 10)
                     .opacity(showsChevrons ? 1 : 0)
             }
@@ -77,6 +78,7 @@ struct HeroCarousel: View {
         .overlay(alignment: .trailing) {
             if items.count > 1 {
                 ShelfPagingButton(direction: .forward) { turn(by: 1) }
+                    .accessibilityIdentifier(TestID.Home.heroNext)
                     .padding(.trailing, 10)
                     .opacity(showsChevrons ? 1 : 0)
             }
@@ -93,6 +95,7 @@ struct HeroCarousel: View {
         .onKeyPress(.rightArrow) { turn(by: 1); return .handled }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Featured")
+        .accessibilityIdentifier(TestID.Home.hero)
         .onReceive(ticker) { _ in
             guard !reduceMotion, !isHovering, !isFocused, items.count > 1 else { return }
             withAnimation(.easeInOut(duration: 0.6)) {
@@ -156,6 +159,7 @@ struct HeroCarousel: View {
                 .buttonStyle(.plain)
                 .help(HeroHeader.displayTitle(of: items[position]))
                 .accessibilityLabel("Show \(HeroHeader.displayTitle(of: items[position]))")
+                .accessibilityIdentifier(TestID.Home.heroDot(position))
             }
         }
         .padding(.horizontal, 8)
@@ -164,6 +168,7 @@ struct HeroCarousel: View {
         .padding(.trailing, Metrics.gutter)
         .padding(.bottom, 12)
         .animation(.easeOut(duration: 0.25), value: index)
+        .testAnchor(TestID.Home.heroCurrentPage(index))
     }
 
     /// What else is in the bar, as a row of its backdrops in the corner: the
@@ -192,11 +197,13 @@ struct HeroCarousel: View {
                 .help(HeroHeader.displayTitle(of: items[position]))
                 .accessibilityLabel("Show \(HeroHeader.displayTitle(of: item))")
                 .accessibilityAddTraits(position == index ? [.isButton, .isSelected] : .isButton)
+                .accessibilityIdentifier(TestID.Home.heroThumb(item.Id))
             }
         }
         .padding(.trailing, Metrics.gutter)
         .padding(.bottom, 38)
         .animation(.easeOut(duration: 0.25), value: index)
+        .testAnchor(TestID.Home.heroCurrentPage(index))
     }
 }
 

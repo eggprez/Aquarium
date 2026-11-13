@@ -122,6 +122,7 @@ struct RouteWindow: View {
                 }
             } else {
                 EmptyState(symbol: "film", title: "Nothing to Show", message: "This window's page isn't available.")
+                    .testAnchor(TestID.Detail.windowEmpty)
             }
         }
         .frame(minWidth: 720, minHeight: 520)
@@ -170,6 +171,7 @@ struct RouteWindow: View {
         // Outermost, so the toasts' overlay and every page know which window
         // they are in.
         .environment(\.routeWindowNavigator, navigator)
+        .testAnchor(TestID.Detail.window)
     }
 
     private func release() {

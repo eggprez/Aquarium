@@ -31,6 +31,7 @@ struct SmartPlaylistEditor: View {
             Form {
                 Section {
                     TextField("Name", text: $playlist.name)
+                        .accessibilityIdentifier(TestID.SmartPlaylists.editorName)
                 }
 
                 Section {
@@ -45,6 +46,7 @@ struct SmartPlaylistEditor: View {
                                 .lineLimit(1)
                         }
                     }
+                    .accessibilityIdentifier(TestID.SmartPlaylists.editorGenres)
                 } footer: {
                     Text(playlist.genres.isEmpty ? "Any genre." : "Songs in any of the chosen genres.")
                 }
@@ -53,6 +55,7 @@ struct SmartPlaylistEditor: View {
                     ForEach(playlist.artists) { artist in
                         HStack {
                             Text(artist.Name ?? "")
+                                .accessibilityIdentifier(TestID.SmartPlaylists.editorArtist(artist.Id ?? ""))
                             Spacer()
                             Button(role: .destructive) {
                                 playlist.artists.removeAll { $0.id == artist.id }
@@ -61,10 +64,12 @@ struct SmartPlaylistEditor: View {
                             }
                             .buttonStyle(.plain)
                             .foregroundStyle(Theme.danger)
+                            .accessibilityIdentifier(TestID.SmartPlaylists.editorArtistRemove(artist.Id ?? ""))
                         }
                     }
                     TextField("Add an artist", text: $artistSearch)
                         .onChange(of: artistSearch) { _, term in searchArtists(term) }
+                        .accessibilityIdentifier(TestID.SmartPlaylists.editorArtistSearch)
                     ForEach(artistMatches) { match in
                         Button {
                             if !playlist.artists.contains(where: { $0.Id == match.Id }) {
@@ -75,6 +80,7 @@ struct SmartPlaylistEditor: View {
                         } label: {
                             Label(match.title, systemImage: "plus")
                         }
+                        .accessibilityIdentifier(TestID.SmartPlaylists.editorArtistMatch(match.Id))
                     }
                 } header: {
                     Text("Artists")
@@ -84,36 +90,43 @@ struct SmartPlaylistEditor: View {
 
                 Section("Years") {
                     HStack {
-                        TextField("From", text: $yearFromText).keyboardType(.numberPad)
+                        TextField("From", text: $yearFromText).keyboardType(.numberPad).accessibilityIdentifier(TestID.SmartPlaylists.editorYearFrom)
                         Text("–").foregroundStyle(Theme.textDim)
-                        TextField("To", text: $yearToText).keyboardType(.numberPad)
+                        TextField("To", text: $yearToText).keyboardType(.numberPad).accessibilityIdentifier(TestID.SmartPlaylists.editorYearTo)
                     }
                 }
 
                 Section("Listening") {
                     Picker("Added in the last", selection: $addedDays) {
                         ForEach(dayChoices, id: \.self) { d in
-                            Text(d == 0 ? "Any time" : "\(d) days").tag(d)
+                            Text(d == 0 ? "Any time" : "\(d) days").accessibilityIdentifier(TestID.SmartPlaylists.editorAddedWithinOption(d)).tag(d)
                         }
                     }
+                    .accessibilityIdentifier(TestID.SmartPlaylists.editorAddedWithin)
                     Picker("Played", selection: $playlist.played) {
-                        ForEach(SmartPlaylist.PlayedFilter.allCases, id: \.self) { Text($0.label).tag($0) }
+                        ForEach(SmartPlaylist.PlayedFilter.allCases, id: \.self) { Text($0.label).accessibilityIdentifier(TestID.SmartPlaylists.editorPlayedOption($0.rawValue)).tag($0) }
                     }
+                    .accessibilityIdentifier(TestID.SmartPlaylists.editorPlayed)
                     Stepper("Played at least \(minPlays) time\(minPlays == 1 ? "" : "s")", value: $minPlays, in: 0...50)
+                        .accessibilityIdentifier(TestID.SmartPlaylists.editorMinPlays)
                     Toggle("Favourites only", isOn: $playlist.favoritesOnly)
+                        .accessibilityIdentifier(TestID.SmartPlaylists.editorFavoritesOnly)
                 }
 
                 Section {
                     Picker("Sort", selection: $playlist.sort) {
-                        ForEach(MusicSort.allCases) { Text($0.label).tag($0) }
+                        ForEach(MusicSort.allCases) { Text($0.label).accessibilityIdentifier(TestID.SmartPlaylists.editorSortOption($0.rawValue)).tag($0) }
                     }
+                    .accessibilityIdentifier(TestID.SmartPlaylists.editorSort)
                     Picker("Limit", selection: $playlist.limit) {
-                        ForEach(limitChoices, id: \.self) { Text("\($0) songs").tag($0) }
+                        ForEach(limitChoices, id: \.self) { Text("\($0) songs").accessibilityIdentifier(TestID.SmartPlaylists.editorLimitOption($0)).tag($0) }
                     }
+                    .accessibilityIdentifier(TestID.SmartPlaylists.editorLimit)
                 } header: {
                     Text("Order")
                 } footer: {
                     Text(preview.summary)
+                        .accessibilityIdentifier(TestID.SmartPlaylists.editorSummary)
                 }
             }
             .scrollContentBackground(.hidden)
@@ -121,13 +134,14 @@ struct SmartPlaylistEditor: View {
             .navigationTitle("Smart Playlist")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.accessibilityIdentifier(TestID.SmartPlaylists.editorCancel) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         onSave(preview)
                         dismiss()
                     }
                     .disabled(playlist.name.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .accessibilityIdentifier(TestID.SmartPlaylists.editorSave)
                 }
             }
             .task {
@@ -143,6 +157,7 @@ struct SmartPlaylistEditor: View {
                 if genreOptions.isEmpty { genreOptions = OfflineMusic.genres }
             }
         }
+        .testAnchor(TestID.SmartPlaylists.editor)
     }
 
     /// The playlist as the fields currently describe it.
@@ -198,6 +213,7 @@ struct GenrePicker: View {
                             Label(genre, systemImage: "checkmark.circle.fill")
                                 .foregroundStyle(Theme.text)
                         }
+                        .accessibilityIdentifier(TestID.SmartPlaylists.genreChosen(TestID.key(genre)))
                     }
                 }
             }
@@ -214,6 +230,7 @@ struct GenrePicker: View {
                             }
                         }
                     }
+                    .accessibilityIdentifier(TestID.SmartPlaylists.genreOption(TestID.key(genre)))
                 }
             }
         }
@@ -221,6 +238,7 @@ struct GenrePicker: View {
         .background(Theme.background)
         .navigationTitle("Genres")
         .searchable(text: $filter, placement: .navigationBarDrawer(displayMode: .always), prompt: "Filter genres")
+        .testAnchor(TestID.SmartPlaylists.genres)
     }
 }
 
@@ -260,10 +278,12 @@ struct SmartPlaylistDetailView: View {
                             .font(.caption)
                             .multilineTextAlignment(.leading)
                             .foregroundStyle(Theme.textDim)
+                            .accessibilityIdentifier(TestID.SmartPlaylists.detailSummary)
                         if isLocal {
                             Label("Offline — answered from your downloads", systemImage: "wifi.slash")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(Theme.warn)
+                                .accessibilityIdentifier(TestID.SmartPlaylists.detailOffline)
                         }
                     }
 
@@ -276,10 +296,13 @@ struct SmartPlaylistDetailView: View {
 
                     if isLoading, songs.isEmpty {
                         SkeletonList(count: 8)
+                            .testAnchor(TestID.Music.loading)
                     } else if let error, songs.isEmpty {
                         ErrorState(error: error) { Task { await load() } }
+                            .testAnchor(TestID.Music.error)
                     } else if songs.isEmpty {
                         EmptyState(symbol: "sparkles", title: "Nothing matches", message: "Loosen the rules and try again.")
+                            .testAnchor(TestID.Music.empty)
                     } else {
                         ForEach(songs) { song in
                             SongRow(song: song, isCurrent: music.current?.Id == song.Id, isPlaying: music.isPlaying) {
@@ -291,6 +314,7 @@ struct SmartPlaylistDetailView: View {
                 .padding(.bottom, 32)
             } else {
                 EmptyState(symbol: "sparkles", title: "Gone", message: "This smart playlist was deleted.")
+                    .testAnchor(TestID.SmartPlaylists.detailGone)
             }
         }
         .navigationTitle(playlist?.name ?? "Smart Playlist")
@@ -300,20 +324,25 @@ struct SmartPlaylistDetailView: View {
             if let playlist {
                 Menu {
                     Button { editing = playlist } label: { Label("Edit Rules", systemImage: "slider.horizontal.3") }
+                        .accessibilityIdentifier(TestID.SmartPlaylists.detailEdit)
                     Button { Task { await load() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                        .accessibilityIdentifier(TestID.SmartPlaylists.detailRefresh)
                     Button { Task { await freeze(playlist) } } label: {
                         Label("Save as Playlist on Server", systemImage: "square.and.arrow.up")
                     }
                     .disabled(songs.isEmpty || isFreezing || isLocal)
+                    .accessibilityIdentifier(TestID.SmartPlaylists.detailSaveToServer)
                     Divider()
                     Button(role: .destructive) {
                         store.delete(playlist.id)
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                    .accessibilityIdentifier(TestID.SmartPlaylists.detailDelete)
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .accessibilityIdentifier(TestID.SmartPlaylists.detailMore)
             }
         }
         .task(id: playlist) { await load() }
@@ -322,6 +351,7 @@ struct SmartPlaylistDetailView: View {
         .sheet(item: $editing) { list in
             SmartPlaylistEditor(playlist: list) { store.upsert($0) }
         }
+        .testAnchor(TestID.SmartPlaylists.detail)
     }
 
     private func load() async {

@@ -39,6 +39,7 @@ struct NowPlayingScreen: View {
             if phase == .active { claimCrown() }
         }
         .onDisappear { nav.playerLeft() }
+        .testAnchor(TestID.Watch.nowPlayingRoot)
     }
 
     private func claimCrown() { crownClaim &+= 1 }
@@ -53,8 +54,10 @@ struct NowPlayingScreen: View {
                 Label("Resume Audiobook", systemImage: "book")
             }
             .font(.footnote)
+            .accessibilityIdentifier(TestID.Watch.nowPlayingResumeBook)
         }
         .padding()
+        .testAnchor(TestID.Watch.nowPlayingIdle)
     }
 
     /// Not a scroll view: one would want the crown too. So it has to fit:
@@ -77,6 +80,7 @@ struct NowPlayingScreen: View {
                     .accessibilityHidden(true)
                 VolumePopup()
             }
+            .testAnchor(TestID.Watch.nowPlayingVolume)
         }
     }
 
@@ -88,9 +92,10 @@ struct NowPlayingScreen: View {
         return VStack(spacing: compact ? 4 : 6) {
             HStack(alignment: .top, spacing: 8) {
                 Artwork(item: item, size: compact ? 38 : 46, corner: 7)
+                    .testAnchor(TestID.Watch.nowPlayingArtwork)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title).font(.footnote.weight(.semibold)).lineLimit(lines)
-                    Text(subtitle(item)).font(.caption2).foregroundStyle(WatchTheme.dim).lineLimit(lines)
+                    Text(item.title).font(.footnote.weight(.semibold)).lineLimit(lines).accessibilityIdentifier(TestID.Watch.nowPlayingTitle)
+                    Text(subtitle(item)).font(.caption2).foregroundStyle(WatchTheme.dim).lineLimit(lines).accessibilityIdentifier(TestID.Watch.nowPlayingSubtitle)
                 }
                 Spacer(minLength: 0)
             }
@@ -98,17 +103,18 @@ struct NowPlayingScreen: View {
             VStack(spacing: 2) {
                 ProgressView(value: player.duration > 0 ? min(1, player.position / player.duration) : 0)
                     .tint(WatchTheme.accent)
+                    .accessibilityIdentifier(TestID.Watch.nowPlayingProgress)
                 HStack {
-                    Text(Format.clock(player.position))
+                    Text(Format.clock(player.position)).accessibilityIdentifier(TestID.Watch.nowPlayingElapsed)
                     Spacer()
-                    if player.duration > 0 { Text("-" + Format.clock(max(0, player.duration - player.position))) }
+                    if player.duration > 0 { Text("-" + Format.clock(max(0, player.duration - player.position))).accessibilityIdentifier(TestID.Watch.nowPlayingRemaining) }
                 }
                 .font(.system(size: 10).monospacedDigit())
                 .foregroundStyle(WatchTheme.dim)
             }
 
             if let error = player.errorMessage {
-                Text(error).font(.caption2).foregroundStyle(.orange).lineLimit(2)
+                Text(error).font(.caption2).foregroundStyle(.orange).lineLimit(2).accessibilityIdentifier(TestID.Watch.nowPlayingError)
             }
 
             HStack(spacing: 4) {
@@ -121,6 +127,7 @@ struct NowPlayingScreen: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: glyph, weight: .semibold))
+                .accessibilityIdentifier(isBook ? TestID.Watch.nowPlayingSkipBack : TestID.Watch.nowPlayingPrevious)
 
                 Button { player.togglePlayPause() } label: {
                     ZStack {
@@ -136,6 +143,7 @@ struct NowPlayingScreen: View {
                     .frame(width: main, height: main)
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier(TestID.Watch.nowPlayingPlayPause)
 
                 Button {
                     if isBook { player.seek(by: 30) } else { player.skipNext() }
@@ -147,6 +155,7 @@ struct NowPlayingScreen: View {
                 .buttonStyle(.plain)
                 .font(.system(size: glyph, weight: .semibold))
                 .disabled(!isBook && !player.hasNext)
+                .accessibilityIdentifier(isBook ? TestID.Watch.nowPlayingSkipForward : TestID.Watch.nowPlayingNext)
             }
 
             if isBook {
@@ -157,6 +166,7 @@ struct NowPlayingScreen: View {
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
                     .simultaneousGesture(LongPressGesture().onEnded { _ in player.speed = 1 })
+                    .accessibilityIdentifier(TestID.Watch.nowPlayingSpeed)
                     if !player.chapters.isEmpty {
                         Button { showsChapters = true } label: {
                             Image(systemName: "list.bullet").font(.caption2.weight(.semibold))
@@ -164,6 +174,7 @@ struct NowPlayingScreen: View {
                         .buttonStyle(.bordered)
                         .controlSize(.mini)
                         .accessibilityLabel("Chapters")
+                        .accessibilityIdentifier(TestID.Watch.nowPlayingChapters)
                     }
                 }
             }
@@ -178,11 +189,13 @@ struct NowPlayingScreen: View {
                         .font(.caption2)
                         .foregroundStyle(WatchTheme.dim)
                         .lineLimit(1)
+                        .accessibilityIdentifier(TestID.Watch.nowPlayingNotes)
                 }
             }
         }
         .padding(.horizontal, 4)
         .padding(.top, 4)
+        .testAnchor(TestID.Watch.nowPlayingLayout(compact ? "compact" : "full"))
     }
 
     private var speedLabel: String {
@@ -215,8 +228,10 @@ struct NowPlayingScreen: View {
                         Text(Format.clock(chapter.startSeconds)).font(.caption2.monospacedDigit()).foregroundStyle(WatchTheme.dim)
                     }
                 }
+                .accessibilityIdentifier(TestID.Watch.nowPlayingChapter(i))
             }
         }
+        .testAnchor(TestID.Watch.nowPlayingChapterList)
     }
 }
 

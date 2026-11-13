@@ -171,6 +171,11 @@
 			path = Watch;
 			sourceTree = "<group>";
 		};
+		FE11A5D00000000000000810 /* TestIDs */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TestIDs;
+			sourceTree = "<group>";
+		};
 		FE11A5D00000000000000710 /* AquariumTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = AquariumTests;
@@ -273,6 +278,7 @@
 				FE11A5D00000000000000207 /* WatchWidgetSnapshot.swift */,
 				FE11A5D00000000000000107 /* WidgetTypes.swift */,
 				FE11A5D00000000000000601 /* FollowTypes.swift */,
+				FE11A5D00000000000000810 /* TestIDs */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -323,6 +329,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				D296FAB9302815340097E3E7 /* Aquarium */,
+				FE11A5D00000000000000810 /* TestIDs */,
 			);
 			name = Aquarium;
 			packageProductDependencies = (
@@ -386,6 +393,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				FE11A5D00000000000000210 /* Watch */,
+				FE11A5D00000000000000810 /* TestIDs */,
 			);
 			name = AquariumWatch;
 			packageProductDependencies = (

@@ -84,6 +84,7 @@ struct PlayerWindow: View {
                 fit(to: player.pictureSize)
             }
         }
+        .testAnchor(TestID.Player.window)
     }
 
     private var streamInfoBinding: Binding<Bool> {

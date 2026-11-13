@@ -68,14 +68,17 @@ struct ListenNowView: View {
                     SkeletonShelf(squareWidth: MusicMetrics.tileWidth)
                 }
                 .padding(.top, 12)
+                .testAnchor(TestID.Music.loading)
             } else if let error, isBare {
                 ErrorState(error: error) { Task { await reload() } }
+                    .testAnchor(TestID.Music.error)
             } else if isBare {
                 EmptyState(
                     symbol: "music.note.list",
                     title: "Nothing to suggest yet",
                     message: "Once your music library has been scanned, and once you've played a few things, this page fills in with what to play next."
                 )
+                .testAnchor(TestID.Music.empty)
             } else {
                 LazyVStack(alignment: .leading, spacing: Metrics.shelfSpacing) {
                     greeting
@@ -93,11 +96,13 @@ struct ListenNowView: View {
                                                 .contentShape(Rectangle())
                                         }
                                         .buttonStyle(PosterButtonStyle())
+                                        .accessibilityIdentifier(TestID.Stations.card(station.id))
                                     }
                                 }
                                 .padding(.horizontal, Metrics.gutter)
                             }
                         }
+                        .testAnchor(TestID.Stations.shelf)
                     }
                     SongColumnsShelf(title: "Your Top Songs", items: topSongs, ranked: true) { song in
                         music.play(topSongs, startingAt: topSongs.position(of: song) ?? 0, title: "Top Songs")
@@ -118,6 +123,7 @@ struct ListenNowView: View {
             }
         }
         .refreshable { await reload() }
+        .testAnchor(TestID.Music.listenNow)
     }
 
     /// The time of day, and under it the one button that needs no choosing
@@ -128,6 +134,7 @@ struct ListenNowView: View {
             Text(Self.greetingText())
                 .font(.largeTitle.weight(.bold))
                 .foregroundStyle(Theme.text)
+                .accessibilityIdentifier(TestID.Music.greeting)
             Button {
                 Task { await shuffleAll() }
             } label: {
@@ -141,6 +148,7 @@ struct ListenNowView: View {
             .buttonBorderShape(.capsule)
             .controlSize(.small)
             .disabled(isMixing)
+            .accessibilityIdentifier(TestID.Music.shuffleAll)
         }
         .padding(.horizontal, Metrics.gutter)
     }

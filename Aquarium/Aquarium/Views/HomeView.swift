@@ -306,6 +306,7 @@ struct HomeView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Show sidebar")
+                .accessibilityIdentifier(TestID.Sidebar.show)
             }
             if padScrolled {
                 BrandMark()
@@ -321,9 +322,11 @@ struct HomeView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Search")
+            .accessibilityIdentifier(TestID.Home.search)
             RefreshButton(isRefreshing: isRefreshing) {
                 Task { await reload(fresh: true) }
             }
+            .accessibilityIdentifier(TestID.Home.refresh)
         }
         .padding(.horizontal, Metrics.gutter)
         .frame(height: Metrics.topBar)
@@ -349,6 +352,7 @@ struct HomeView: View {
             // page answers it through `MacCommandRequests.refresh` below.
             .disabled(isRefreshing)
             .help("Refresh (⌘R)")
+            .accessibilityIdentifier(TestID.Home.refresh)
         }
         ToolbarItem(placement: .primaryAction) {
             Button {
@@ -359,6 +363,7 @@ struct HomeView: View {
             }
             .disabled(featured == nil)
             .help(featured.map { "Play \(HeroHeader.displayTitle(of: $0))" } ?? "Play Featured")
+            .accessibilityIdentifier(TestID.Home.playFeatured)
         }
     }
     #endif
@@ -371,6 +376,7 @@ struct HomeView: View {
         ) {
             Task { await reload(fresh: true) }
         }
+        .accessibilityIdentifier(TestID.Home.refresh)
     }
 
     /// The refresh button in the media bar's top corner: over the artwork,
@@ -433,9 +439,11 @@ struct HomeView: View {
                 }
                 .padding(.bottom, 24)
                 .insetForBleed(bleed)
+                .testAnchor(TestID.Home.loading)
             } else if let error, isBare {
                 ErrorState(error: error) { Task { await load() } }
                     .insetForBleed(bleed)
+                    .testAnchor(TestID.Home.error)
             } else if isBare {
                 EmptyState(
                     symbol: "film.stack",
@@ -443,6 +451,7 @@ struct HomeView: View {
                     message: "Once your Jellyfin libraries have been scanned, what's new and what you've started will show up here."
                 )
                 .insetForBleed(bleed)
+                .testAnchor(TestID.Home.empty)
             } else {
                 LazyVStack(alignment: .leading, spacing: Metrics.shelfSpacing) {
                     #if os(iOS)
@@ -469,6 +478,7 @@ struct HomeView: View {
                         HeroHeader(item: hero)
                             .onAppear { featured = hero }
                             .onChange(of: hero.Id) { _, _ in featured = hero }
+                            .testAnchor(TestID.Home.hero)
                     }
                     #endif
                     // Eager rather than lazy on a television, and inset back
@@ -613,15 +623,18 @@ struct HomeView: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Search")
+                            .accessibilityIdentifier(TestID.Home.search)
                             RefreshButton(isRefreshing: isRefreshing) {
                                 Task { await reload(fresh: true) }
                             }
+                            .accessibilityIdentifier(TestID.Home.refresh)
                         }
                     }
                 }
             }
         }
         #endif
+        .testAnchor(TestID.Home.root)
     }
 
     /// What's below the media bar: the user's own Jellyfin home rows, in the
@@ -649,6 +662,7 @@ struct HomeView: View {
                 app.show(.music)
                 app.push(.music(.songList(title: "Recently Played", kind: .recentlyPlayed)))
             }
+            .testAnchor(TestID.Home.shelf(TestID.Home.rowMusicRecent))
             AlbumShelf(title: "New Music", items: musicNew) { album in
                 app.show(.music)
                 app.push(.music(.album(album.Id)))
@@ -656,6 +670,7 @@ struct HomeView: View {
                 app.show(.music)
                 app.push(.music(.recentlyAdded))
             }
+            .testAnchor(TestID.Home.shelf(TestID.Home.rowMusicNew))
         }
         #endif
     }
@@ -670,20 +685,25 @@ struct HomeView: View {
             // before the first row of anything to watch.
             if Metrics.phoneLayout {
                 LibraryTilesRow(libraries: app.libraries) { openLibrary($0) }
+                    .testAnchor(TestID.Home.shelf(TestID.Home.rowLibraries))
             } else {
                 LibraryChipsRow(libraries: app.libraries) { openLibrary($0) }
+                    .testAnchor(TestID.Home.shelf(TestID.Home.rowLibraries))
             }
             #elseif os(macOS)
             // The same strip on the Mac, whose sidebar also lists them.
             LibraryChipsRow(libraries: app.libraries) { openLibrary($0) }
+                .testAnchor(TestID.Home.shelf(TestID.Home.rowLibraries))
             #else
             LibraryTilesRow(libraries: app.libraries) { openLibrary($0) }
+                .testAnchor(TestID.Home.shelf(TestID.Home.rowLibraries))
             #endif
         case .resume:
             // Turned off in Settings, the slot draws nothing — Next Up keeps
             // its own place below.
             if !prefs.hidesContinueWatching {
                 MediaShelf(title: "Continue Watching", items: resume, wide: true) { open($0) }
+                    .testShelfKey(TestID.Home.rowResume)
             }
         case .nextUp:
             // Portrait, and a picture of the *season* rather than of the
@@ -699,6 +719,7 @@ struct HomeView: View {
                 menuOpensDetails: true,
                 menuRemovesFromNextUp: true
             ) { openNextUp($0) }
+            .testShelfKey(TestID.Home.rowNextUp)
         case .latest:
             // One row per library, which is how Jellyfin draws this slot too —
             // it is a single setting that expands into as many rows as the
@@ -716,6 +737,7 @@ struct HomeView: View {
                         collectionType: entry.library.CollectionType
                     ))
                 }
+                .testShelfKey(TestID.Home.rowLatest(entry.library.Id))
             }
         case .liveTV:
             // Drawn from the channel list the app already warms at launch
@@ -732,6 +754,7 @@ struct HomeView: View {
             } seeAll: {
                 app.show(.liveTV)
             }
+            .testShelfKey(TestID.Home.rowLiveTV)
         }
     }
 
@@ -1319,6 +1342,7 @@ struct HeroHeader: View {
             .itemContextMenu(item, allowsOpen: true)
             .accessibilityLabel(Self.displayTitle(of: item))
             .accessibilityHint("Opens the title")
+            .accessibilityIdentifier(TestID.Home.heroBackdrop(item.Id))
             #elseif os(iOS)
             // Edge to edge, under whatever the system keeps at the sides — on
             // a foldable's front screen the tab bar stands in a column down
@@ -1361,6 +1385,7 @@ struct HeroHeader: View {
         // new one per title, so a missing wordmark has to stop being missing
         // when the item under it changes.
         .onChange(of: item.Id) { _, _ in logoUnavailable = false }
+        .testAnchor(TestID.Home.heroPage(item.Id))
     }
 
     /// The artwork and everything that darkens it, at the hero's full size.
@@ -1594,6 +1619,7 @@ struct HeroHeader: View {
                 // A long title shrinks a little rather than wrapping to a third
                 // line and pushing the buttons off the artwork.
                 .minimumScaleFactor(0.75)
+                .accessibilityIdentifier(TestID.Home.heroTitle(item.Id))
         }
     }
 
@@ -1715,6 +1741,7 @@ struct HeroHeader: View {
                 .font(.caption.weight(.medium))
                 #endif
                 .foregroundStyle(.white.opacity(0.82))
+                .accessibilityIdentifier(TestID.Home.heroRemaining(item.Id))
         }
         .padding(.top, 2)
     }
@@ -1735,10 +1762,12 @@ struct HeroHeader: View {
             }
             .appButtonStyle(prominent: true)
             .focused($focus, equals: .play)
+            .accessibilityIdentifier(TestID.Home.heroPlay(item.Id))
 
             Button("Details") { app.push(.item(item.Id)) }
                 .appButtonStyle()
                 .focused($focus, equals: .details)
+                .accessibilityIdentifier(TestID.Home.heroDetails(item.Id))
             #elseif os(macOS)
             // A Mac button, in the accent colour, with the hover and the press
             // a Mac button has. Its own style rather than `.borderedProminent`:
@@ -1760,11 +1789,13 @@ struct HeroHeader: View {
             .buttonStyle(MacHeroButtonStyle())
             .controlSize(.large)
             .help("\(playLabel) \(Self.displayTitle(of: item))")
+            .accessibilityIdentifier(TestID.Home.heroPlay(item.Id))
 
             Button("Details") { app.push(.item(item.Id)) }
                 .buttonStyle(MacHeroButtonStyle(prominent: false))
                 .controlSize(.large)
                 .help("Show details for \(Self.displayTitle(of: item))")
+                .accessibilityIdentifier(TestID.Home.heroDetails(item.Id))
             #else
             if Metrics.phoneLayout {
                 Button {
@@ -1776,6 +1807,7 @@ struct HeroHeader: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accentStrong)
+                .accessibilityIdentifier(TestID.Home.heroPlay(item.Id))
             } else {
                 // White on the artwork, not the accent: purple over a
                 // different backdrop every few seconds fights half of them,
@@ -1793,6 +1825,7 @@ struct HeroHeader: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier(TestID.Home.heroPlay(item.Id))
             }
 
             // Not `.bordered`: its fill is drawn for a page background, and over
@@ -1810,6 +1843,7 @@ struct HeroHeader: View {
                     .contentShape(Capsule())
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier(TestID.Home.heroDetails(item.Id))
             #endif
         }
         .padding(.top, 2)
@@ -2001,6 +2035,7 @@ struct HeroCarousel: View {
         // the two.
         .onChange(of: pages.map(\.Id)) { _, _ in position = pages.first?.Id }
         .task(id: items.map(\.Id)) { await prefetch() }
+        .testAnchor(TestID.Home.hero)
     }
 
     /// Everything but the first page, pulled into the image cache. The pages
@@ -2029,6 +2064,7 @@ struct HeroCarousel: View {
         .padding(.bottom, 30)
         .animation(.easeOut(duration: 0.25), value: index)
         .accessibilityHidden(true)
+        .testAnchor(TestID.Home.heroCurrentPage(index))
     }
 }
 #endif
@@ -2162,6 +2198,7 @@ struct HeroCarousel: View {
             instant.disablesAnimations = true
             withTransaction(instant) { index = 0 }
         }
+        .testAnchor(TestID.Home.hero)
     }
 
     /// Where you are in the set. The system's own page dots are white on white
@@ -2187,6 +2224,7 @@ struct HeroCarousel: View {
         .padding(.bottom, 12)
         .animation(.easeOut(duration: 0.25), value: index)
         .accessibilityHidden(true)
+        .testAnchor(TestID.Home.heroCurrentPage(index))
     }
 
     /// What else is in the bar, as a row of its backdrops in the corner: the
@@ -2214,11 +2252,13 @@ struct HeroCarousel: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(HeroHeader.displayTitle(of: item))
                 .accessibilityAddTraits(position == index ? [.isButton, .isSelected] : .isButton)
+                .accessibilityIdentifier(TestID.Home.heroThumb(item.Id))
             }
         }
         .padding(.trailing, Metrics.gutter)
         .padding(.bottom, 38)
         .animation(.easeOut(duration: 0.25), value: index)
+        .testAnchor(TestID.Home.heroCurrentPage(index))
     }
 }
 

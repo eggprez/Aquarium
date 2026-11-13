@@ -67,12 +67,14 @@ struct LyricsView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .testAnchor(TestID.Lyrics.root)
     }
 
     @ViewBuilder
     private func content(for song: BaseItem) -> some View {
         if store.isLoading, store.lyrics == nil {
             ProgressView().tint(.white)
+                .accessibilityIdentifier(TestID.Lyrics.loading)
         } else if let lyrics = store.lyrics, !lyrics.lines.isEmpty {
             ScrollViewReader { proxy in
                 ScrollView(showsIndicators: false) {
@@ -87,6 +89,7 @@ struct LyricsView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                                 .id(line.id)
+                                .accessibilityIdentifier(TestID.Lyrics.line("\(line.id)"))
                                 .onTapGesture {
                                     if let at = line.startSeconds {
                                         music.seek(to: at)
@@ -111,6 +114,7 @@ struct LyricsView: View {
                     }
                 }
             }
+            .testAnchor(TestID.Lyrics.lines)
         } else {
             VStack(spacing: 8) {
                 Image(systemName: "text.quote").font(.title).foregroundStyle(.white.opacity(0.4))
@@ -123,6 +127,7 @@ struct LyricsView: View {
                     .foregroundStyle(.white.opacity(0.4))
             }
             .padding(.horizontal, 24)
+            .testAnchor(TestID.Lyrics.empty)
         }
     }
 }

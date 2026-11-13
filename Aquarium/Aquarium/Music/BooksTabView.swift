@@ -51,6 +51,7 @@ struct BooksTabView: View {
             placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Titles and authors"
         )
         .task(id: client.showsOffline) { await OfflineMusicIndex.shared.refresh() }
+        .testAnchor(TestID.Books.root)
     }
 
     private var front: some View {
@@ -61,8 +62,10 @@ struct BooksTabView: View {
                     AlbumGrid(items: [], pendingCount: 6) { _ in }
                 }
                 .padding(.top, 12)
+                .testAnchor(TestID.Books.loading)
             } else if let error, inProgress.isEmpty, recent.isEmpty, (paged?.items.isEmpty ?? true) {
                 ErrorState(error: error) { Task { await load() } }
+                    .testAnchor(TestID.Books.error)
             } else {
                 LazyVStack(alignment: .leading, spacing: Metrics.shelfSpacing) {
                     // In the page rather than pinned over it: an inset at the
@@ -71,9 +74,11 @@ struct BooksTabView: View {
                     AlbumShelf(title: "Continue Listening", items: inProgress, subtitleFor: { Self.progressLine($0) }) {
                         open($0)
                     }
+                    .testAnchor(TestID.Books.shelf("continueListening"))
                     AlbumShelf(title: "Recently Added", items: recent, subtitleFor: { $0.AlbumArtist ?? $0.artistLine }) {
                         open($0)
                     }
+                    .testAnchor(TestID.Books.shelf("recentlyAdded"))
                     // Names, not pictures. An author is an artist entry on the
                     // server and the artwork it picks up comes from music
                     // metadata providers, which match a novelist's name to
@@ -96,17 +101,20 @@ struct BooksTabView: View {
                                                 .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 0.5))
                                         }
                                         .buttonStyle(.plain)
+                                        .accessibilityIdentifier(TestID.Books.authorChip(author.Id))
                                     }
                                 }
                                 .padding(.horizontal, Metrics.gutter)
                             }
                         }
+                        .testAnchor(TestID.Books.shelf("authors"))
                     }
                     if let paged {
                         VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
                             ShelfHeading(title: "All Books", subtitle: "\(paged.total) title\(paged.total == 1 ? "" : "s")")
                             if paged.items.isEmpty, !paged.isLoading {
                                 EmptyState(symbol: "book", title: "No audiobooks", message: "Nothing has been scanned into this library yet.")
+                                    .testAnchor(TestID.Books.empty)
                             } else {
                                 AlbumGrid(items: paged.items, pendingCount: paged.isLoading ? 2 : 0, subtitleFor: { $0.AlbumArtist ?? $0.artistLine }) {
                                     open($0)
@@ -115,6 +123,7 @@ struct BooksTabView: View {
                                 }
                             }
                         }
+                        .testAnchor(TestID.Books.shelf("allBooks"))
                     }
                     if DownloadManager.shared.records.contains(where: { $0.type == "AudioBook" && $0.status == .complete }) {
                         Button {
@@ -124,6 +133,7 @@ struct BooksTabView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .appButtonStyle()
+                        .accessibilityIdentifier(TestID.Books.downloadedBooks)
                         .padding(.horizontal, Metrics.gutter)
                     }
                 }
@@ -201,10 +211,13 @@ struct BookSearchView: View {
             let query = term.trimmingCharacters(in: .whitespaces)
             if query.isEmpty {
                 EmptyState(symbol: "magnifyingglass", title: "Search your audiobooks", message: "By title or by author.")
+                    .testAnchor(TestID.Books.searchPrompt)
             } else if isSearching, books.isEmpty {
                 AlbumGrid(items: [], pendingCount: 4) { _ in }.padding(.top, 12)
+                    .testAnchor(TestID.Books.loading)
             } else if books.isEmpty {
                 EmptyState(symbol: "magnifyingglass", title: "No matches", message: "No audiobook matches “\(query)”.")
+                    .testAnchor(TestID.Books.empty)
             } else {
                 AlbumGrid(items: books, subtitleFor: { $0.AlbumArtist ?? $0.artistLine }) {
                     app.push(.music(.audiobook($0.Id)))
@@ -213,6 +226,7 @@ struct BookSearchView: View {
             }
         }
         .onChange(of: term, initial: true) { _, new in schedule(new.trimmingCharacters(in: .whitespaces)) }
+        .testAnchor(TestID.Books.searchRoot)
     }
 
     private func schedule(_ query: String) {
@@ -249,13 +263,16 @@ struct AuthorView: View {
         ScrollView {
             if isLoading, books.isEmpty {
                 AlbumGrid(items: [], pendingCount: 4) { _ in }.padding(.top, 12)
+                    .testAnchor(TestID.Books.loading)
             } else if let error, books.isEmpty {
                 ErrorState(error: error) { Task { await load() } }
+                    .testAnchor(TestID.Books.error)
             } else if books.isEmpty {
                 EmptyState(
                     symbol: "book", title: "No audiobooks",
                     message: client.showsOffline ? "Nothing by \(name) is on this device." : "Nothing by \(name) has been scanned in."
                 )
+                .testAnchor(TestID.Books.empty)
             } else {
                 AlbumGrid(items: books, subtitleFor: { BooksTabView.progressLine($0) ?? $0.ProductionYear.map(String.init) }) {
                     app.push(.music(.audiobook($0.Id)))
@@ -267,6 +284,7 @@ struct AuthorView: View {
         .paletteBar()
         .task(id: authorId) { await load() }
         .reloadWhenItemsChange { await load() }
+        .testAnchor(TestID.Books.authorRoot)
     }
 
     private func load() async {

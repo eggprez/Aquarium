@@ -33,6 +33,7 @@ final class VideoLayerHostView: UIView {
         isAccessibilityElement = true
         accessibilityLabel = "Video"
         accessibilityTraits = .image
+        accessibilityIdentifier = TestID.Player.video
         // The display scale changes when the view moves between screens
         // (AirPlay mirroring, an external display): the layer is told so it
         // keeps drawing at the new screen's pixel size.
@@ -89,6 +90,7 @@ final class VideoLayerHostView: NSView {
         setAccessibilityElement(true)
         setAccessibilityLabel("Video")
         setAccessibilityRole(.image)
+        setAccessibilityIdentifier(TestID.Player.video)
     }
 
     @available(*, unavailable)

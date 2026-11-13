@@ -99,8 +99,10 @@ struct SearchView: View {
                             prefs.rememberSearch(term)
                             schedule(immediate: true)
                         }
+                        .accessibilityIdentifier(TestID.Search.field)
                     if isSearching {
                         ProgressView()
+                            .accessibilityIdentifier(TestID.Search.searching)
                     }
                 }
                 .padding(.horizontal, Metrics.gutter)
@@ -119,15 +121,18 @@ struct SearchView: View {
                     Color.clear.frame(height: 1)
                     #else
                     SkeletonGrid(count: 9)
+                        .testAnchor(TestID.Search.loading)
                     #endif
                 } else if let error, !isPending {
                     ErrorState(error: error) { schedule(immediate: true) }
+                        .testAnchor(TestID.Search.error)
                 } else if results.isEmpty, music.isEmpty {
                     EmptyState(
                         symbol: "magnifyingglass",
                         title: "No matches",
                         message: noMatchesMessage
                     )
+                    .testAnchor(TestID.Search.empty)
                 } else {
                     #if os(iOS)
                     musicResults
@@ -141,6 +146,7 @@ struct SearchView: View {
                     // the count of the audiobooks.
                     if !results.isEmpty, !music.isEmpty {
                         ShelfHeading(title: "Films & TV", subtitle: "\(total) result\(total == 1 ? "" : "s")")
+                            .testAnchor(TestID.Search.videoHeading)
                     } else if !results.isEmpty {
                         resultCount
                     }
@@ -154,6 +160,7 @@ struct SearchView: View {
                         groupedResults
                     } else if !results.isEmpty {
                         resultGrid(results, pages: true)
+                            .testAnchor(TestID.Search.results)
                     }
                     #else
                     if !results.isEmpty {
@@ -168,6 +175,7 @@ struct SearchView: View {
                         Task { await loadMore() }
                     }
                     .padding(.bottom, 24)
+                    .testAnchor(TestID.Search.results)
                     }
                     #endif
                 }
@@ -205,14 +213,16 @@ struct SearchView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Picker("Show", selection: $scope) {
-                    ForEach(Scope.allCases) { Text($0.title).tag($0) }
+                    ForEach(Scope.allCases) { Text($0.title).accessibilityIdentifier(TestID.Search.scope($0.rawValue)).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .help("Which kind of title to search for")
+                .accessibilityIdentifier(TestID.Search.scopePicker)
             }
             ToolbarItem(placement: .primaryAction) {
                 if isSearching {
                     ProgressView().controlSize(.small)
+                        .accessibilityIdentifier(TestID.Search.searching)
                 }
             }
         }
@@ -223,6 +233,7 @@ struct SearchView: View {
         }
         #endif
         .onChange(of: term) { _, _ in schedule() }
+        .testAnchor(TestID.Search.root)
         // A watched tick or a star set from a result's own press-and-hold menu
         // is drawn on the card it was set from, and the card is a copy of what
         // the server said a moment ago.
@@ -303,6 +314,7 @@ struct SearchView: View {
         AppTopBar {
             HStack(spacing: 10) {
                 BarBackButton()
+                    .accessibilityIdentifier(TestID.Search.back)
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(Theme.textDim)
@@ -314,6 +326,7 @@ struct SearchView: View {
                             prefs.rememberSearch(term)
                             schedule(immediate: true)
                         }
+                        .accessibilityIdentifier(TestID.Search.field)
                     if !term.isEmpty {
                         Button {
                             term = ""
@@ -324,6 +337,7 @@ struct SearchView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Clear")
+                        .accessibilityIdentifier(TestID.Search.clear)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -399,11 +413,13 @@ struct SearchView: View {
                         Button("Show Only \(group.0)") { self.scope = scope }
                             .buttonStyle(.link)
                             .font(.subheadline)
+                            .accessibilityIdentifier(TestID.Search.sectionShowOnly(TestID.key(group.0)))
                     }
                 }
                 .padding(.horizontal, Metrics.gutter)
                 resultGrid(group.1, pages: index == groups.count - 1)
             }
+            .testAnchor(TestID.Search.section(TestID.key(group.0)))
         }
     }
 
@@ -428,6 +444,7 @@ struct SearchView: View {
             title: "Search Your Libraries",
             message: "Type a film, show or episode name in the sidebar's search field and press Return."
         )
+        .testAnchor(TestID.Search.prompt)
         #else
         if prefs.recentSearches.isEmpty {
             EmptyState(
@@ -437,6 +454,7 @@ struct SearchView: View {
                     ? "Find a film, a show, an episode, an artist, an album, a song or an audiobook by name."
                     : "Find a film, a show or a single episode by name."
             )
+            .testAnchor(TestID.Search.prompt)
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -449,6 +467,7 @@ struct SearchView: View {
                         .buttonStyle(.plain)
                         .font(.caption)
                         .foregroundStyle(Theme.accent)
+                        .accessibilityIdentifier(TestID.Search.recentsClear)
                     #endif
                 }
                 ForEach(prefs.recentSearches, id: \.self) { recent in
@@ -465,6 +484,7 @@ struct SearchView: View {
                         .contentShape(Rectangle())
                     }
                     .rowButtonStyle()
+                    .accessibilityIdentifier(TestID.Search.recent(recent))
                 }
                 #if os(tvOS)
                 // Under the list rather than beside its heading. Up there it
@@ -475,10 +495,12 @@ struct SearchView: View {
                     .buttonStyle(.plain)
                     .font(.caption)
                     .foregroundStyle(Theme.accent)
+                    .accessibilityIdentifier(TestID.Search.recentsClear)
                     .padding(.top, 10)
                 #endif
             }
             .padding(.horizontal, Metrics.gutter)
+            .testAnchor(TestID.Search.recents)
         }
         #endif
     }
@@ -489,6 +511,7 @@ struct SearchView: View {
             .font(.caption)
             .foregroundStyle(Theme.textDim)
             .padding(.horizontal, Metrics.gutter)
+            .accessibilityIdentifier(TestID.Search.resultCount)
     }
     #endif
 
@@ -517,8 +540,10 @@ struct SearchView: View {
                     app.show(.books)
                     app.push(.music(.audiobook(book.Id)))
                 }
+                .testAnchor(TestID.Search.audiobooks)
             }
             .padding(.bottom, 8)
+            .testAnchor(TestID.Search.musicResults)
         }
     }
     #endif

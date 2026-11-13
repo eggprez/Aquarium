@@ -35,8 +35,10 @@ struct AlbumDetailView: View {
                     CollectionHeaderSkeleton()
                     SkeletonList(count: 8)
                 }
+                .testAnchor(TestID.Music.loading)
             } else if let error, album == nil {
                 ErrorState(error: error) { Task { await load() } }
+                    .testAnchor(TestID.Music.error)
             } else if let album {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     header(album)
@@ -56,6 +58,7 @@ struct AlbumDetailView: View {
                                 .padding(.horizontal, Metrics.gutter)
                                 .padding(.top, 14)
                                 .padding(.bottom, 4)
+                                .accessibilityIdentifier(TestID.Music.albumDisc(disc.number ?? 1))
                         }
                         ForEach(disc.tracks) { track in
                             SongRow(
@@ -74,6 +77,7 @@ struct AlbumDetailView: View {
                             app.push(.music(.album($0.Id)))
                         }
                         .padding(.top, 24)
+                        .testAnchor(TestID.Music.shelf("moreByArtist"))
                     }
                 }
                 .padding(.bottom, 32)
@@ -89,10 +93,12 @@ struct AlbumDetailView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .accessibilityIdentifier(TestID.Music.detailMore)
             }
         }
         .task(id: albumId) { await load() }
         .reloadWhenItemsChange { await load() }
+        .testAnchor(TestID.Music.album)
     }
 
     private func header(_ album: BaseItem) -> some View {
@@ -108,8 +114,9 @@ struct AlbumDetailView: View {
                         .foregroundStyle(Theme.link)
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier(TestID.Music.detailArtist)
             } else if !album.artistLine.isEmpty {
-                Text(album.artistLine).font(.subheadline).lineLimit(2).foregroundStyle(Theme.textDim)
+                Text(album.artistLine).font(.subheadline).lineLimit(2).foregroundStyle(Theme.textDim).accessibilityIdentifier(TestID.Music.detailArtist)
             }
             HeaderFacts(parts: Self.facts(album))
         }
@@ -119,6 +126,7 @@ struct AlbumDetailView: View {
         let total = tracks.reduce(0.0) { $0 + $1.runtimeSeconds }
         return VStack(alignment: .leading, spacing: 2) {
             Text("\(tracks.count) song\(tracks.count == 1 ? "" : "s"), \(Self.minutes(total))")
+                .accessibilityIdentifier(TestID.Music.detailFooter)
         }
         .font(.caption)
         .foregroundStyle(Theme.textDim)
@@ -189,8 +197,10 @@ struct ArtistDetailView: View {
                     SkeletonHero()
                     SkeletonShelf(squareWidth: MusicMetrics.tileWidth)
                 }
+                .testAnchor(TestID.Music.loading)
             } else if let error, artist == nil {
                 ErrorState(error: error) { Task { await load() } }
+                    .testAnchor(TestID.Music.error)
             } else if let artist {
                 LazyVStack(alignment: .leading, spacing: Metrics.shelfSpacing) {
                     hero(artist)
@@ -208,6 +218,7 @@ struct ArtistDetailView: View {
                                 }
                             }
                         }
+                        .testAnchor(TestID.Music.shelf("top-songs"))
                     }
                     // Every album, wrapping, rather than a shelf to scroll
                     // sideways: a discography is a thing to see whole.
@@ -218,6 +229,7 @@ struct ArtistDetailView: View {
                                 app.push(.music(.album($0.Id)))
                             }
                         }
+                        .testAnchor(TestID.Music.shelf("albums"))
                     }
                     AlbumShelf(title: "Appears On", items: appearsOn) { app.push(.music(.album($0.Id))) }
                     if let overview = artist.Overview, !overview.isEmpty {
@@ -228,12 +240,15 @@ struct ArtistDetailView: View {
                                 .foregroundStyle(Theme.textBody)
                                 .lineLimit(bioExpanded ? nil : 4)
                                 .padding(.horizontal, Metrics.gutter)
+                                .accessibilityIdentifier(TestID.Music.artistBio)
                             Button(bioExpanded ? "Less" : "More") { withAnimation { bioExpanded.toggle() } }
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.link)
                                 .buttonStyle(.plain)
                                 .padding(.horizontal, Metrics.gutter)
+                                .accessibilityIdentifier(TestID.Music.artistBioToggle)
                         }
+                        .testAnchor(TestID.Music.shelf("about"))
                     }
                     ArtistShelf(title: "Similar Artists", items: similar) { app.push(.music(.artist($0.Id))) }
                 }
@@ -250,10 +265,12 @@ struct ArtistDetailView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .accessibilityIdentifier(TestID.Music.detailMore)
             }
         }
         .task(id: artistId) { await load() }
         .reloadWhenItemsChange { await load() }
+        .testAnchor(TestID.Music.artist)
     }
 
     private func hero(_ artist: BaseItem) -> some View {
@@ -278,6 +295,7 @@ struct ArtistDetailView: View {
                 Text(artist.title)
                     .font(.largeTitle.weight(.bold))
                     .foregroundStyle(.white)
+                    .accessibilityIdentifier(TestID.Music.artistName)
                 if let genres = artist.Genres, !genres.isEmpty {
                     Text(genres.prefix(3).joined(separator: " · "))
                         .font(.subheadline.weight(.semibold))
@@ -287,6 +305,7 @@ struct ArtistDetailView: View {
             .padding(Metrics.gutter)
         }
         .frame(height: 260)
+        .testAnchor(TestID.Music.artistHero)
     }
 
     private func playAll(shuffle: Bool) async {
@@ -354,10 +373,13 @@ struct GenreDetailView: View {
                     ArtistShelf(title: "Artists", items: artists) { app.push(.music(.artist($0.Id))) }
                     if paged.isLoading, paged.items.isEmpty {
                         AlbumGrid(items: [], pendingCount: 6) { _ in }
+                            .testAnchor(TestID.Music.loading)
                     } else if let error = paged.error, paged.items.isEmpty {
                         ErrorState(error: error) { Task { await paged.reload() } }
+                            .testAnchor(TestID.Music.error)
                     } else if paged.items.isEmpty {
                         EmptyState(symbol: "guitars", title: "No albums", message: "Nothing in this genre.")
+                            .testAnchor(TestID.Music.empty)
                     } else {
                         ShelfHeading(title: "Albums")
                         AlbumGrid(items: paged.items, pendingCount: paged.isLoading ? 2 : 0) {
@@ -385,6 +407,7 @@ struct GenreDetailView: View {
             artists = (try? await client.music(artistQuery).items) ?? []
             await a
         }
+        .testAnchor(TestID.Music.genre)
     }
 
     private func play(shuffle: Bool) async {
@@ -427,8 +450,10 @@ struct PlaylistDetailView: View {
         Group {
             if isLoading, playlist == nil {
                 ScrollView { SkeletonList(count: 10) }
+                    .testAnchor(TestID.Music.loading)
             } else if let error, playlist == nil {
                 ScrollView { ErrorState(error: error) { Task { await load() } } }
+                    .testAnchor(TestID.Music.error)
             } else if let playlist {
                 if isEditing {
                     editor(playlist)
@@ -445,6 +470,7 @@ struct PlaylistDetailView: View {
                 if isEditing {
                     Button("Done") { withAnimation { isEditing = false } }
                         .disabled(isSaving)
+                        .accessibilityIdentifier(TestID.Playlists.editDone)
                 } else {
                     Menu {
                         MusicItemMenu(item: playlist)
@@ -452,14 +478,17 @@ struct PlaylistDetailView: View {
                         Button { withAnimation { isEditing = true } } label: {
                             Label("Edit Songs", systemImage: "pencil")
                         }
+                        .accessibilityIdentifier(TestID.Playlists.editSongs)
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
+                    .accessibilityIdentifier(TestID.Music.detailMore)
                 }
             }
         }
         .task(id: playlistId) { await load() }
         .reloadWhenItemsChange { if !isEditing { await load() } }
+        .testAnchor(TestID.Playlists.detail)
     }
 
     private func page(_ playlist: BaseItem) -> some View {
@@ -476,12 +505,14 @@ struct PlaylistDetailView: View {
                     // The playlist loaded and its songs did not. Said as
                     // that, rather than as a playlist with nothing in it.
                     ErrorState(error: songsError) { Task { await load() } }
+                        .testAnchor(TestID.Music.error)
                 } else if songs.isEmpty, !isLoading {
                     EmptyState(
                         symbol: "music.note.list",
                         title: "Empty playlist",
                         message: "Press and hold any song, album or artist and choose Add to Playlist."
                     )
+                    .testAnchor(TestID.Music.empty)
                 }
                 ForEach(rows) { row in
                     let song = row.song
@@ -496,6 +527,7 @@ struct PlaylistDetailView: View {
                         } label: {
                             Label("Remove from Playlist", systemImage: "minus.circle")
                         }
+                        .accessibilityIdentifier(TestID.Playlists.removeSong)
                     }
                 }
             }
@@ -518,6 +550,7 @@ struct PlaylistDetailView: View {
                             Text(song.artistLine).font(.caption).lineLimit(1).foregroundStyle(Theme.textDim)
                         }
                     }
+                    .testAnchor(TestID.Playlists.editorRow(row.id))
                     .listRowBackground(Theme.background)
                 }
                 .onDelete { offsets in
@@ -529,12 +562,14 @@ struct PlaylistDetailView: View {
                 }
             } header: {
                 Text(isSaving ? "Saving…" : "Drag to reorder, swipe to remove")
+                    .accessibilityIdentifier(TestID.Playlists.editorStatus)
             }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Theme.background)
         .environment(\.editMode, .constant(.active))
+        .testAnchor(TestID.Playlists.editor)
     }
 
     private func header(_ playlist: BaseItem) -> some View {
@@ -630,25 +665,28 @@ struct AudiobookDetailView: View {
         ScrollView {
             if isLoading, book == nil {
                 CollectionHeaderSkeleton()
+                    .testAnchor(TestID.Books.loading)
             } else if let error, book == nil {
                 ErrorState(error: error) { Task { await load() } }
+                    .testAnchor(TestID.Books.error)
             } else if let book {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     CollectionHeader(kicker: "Audiobook", title: book.title, wash: book) {
                         MusicArtwork(item: book, width: 800, placeholderSymbol: "book")
                     } detail: {
                         if let author = book.AlbumArtist ?? book.Artists?.first {
-                            Text(author).font(.subheadline.weight(.semibold)).lineLimit(2).foregroundStyle(Theme.textBody)
+                            Text(author).font(.subheadline.weight(.semibold)).lineLimit(2).foregroundStyle(Theme.textBody).accessibilityIdentifier(TestID.Books.detailAuthor)
                         }
                         HeaderFacts(parts: facts(book))
                     }
 
                     if let progress = book.progressFraction {
                         VStack(alignment: .leading, spacing: 6) {
-                            ProgressView(value: progress).tint(Theme.accent)
+                            ProgressView(value: progress).tint(Theme.accent).accessibilityIdentifier(TestID.Books.detailProgress)
                             Text("\(Int(progress * 100))% · \(Format.ticks(Int64(Double(book.RunTimeTicks ?? 0) * (1 - progress)))) left")
                                 .font(.caption)
                                 .foregroundStyle(Theme.textDim)
+                                .accessibilityIdentifier(TestID.Books.detailProgressText)
                         }
                         .padding(.horizontal, Metrics.gutter)
                     }
@@ -667,6 +705,7 @@ struct AudiobookDetailView: View {
                                 .background(Theme.accentStrong, in: Capsule())
                                 .contentShape(Capsule())
                         }
+                        .accessibilityIdentifier(TestID.Books.detailPlay)
                         if book.progressFraction != nil {
                             Button {
                                 if isCurrent { music.seek(to: 0) } else { music.play([book], title: book.title, at: 0) }
@@ -680,6 +719,7 @@ struct AudiobookDetailView: View {
                                     .contentShape(Circle())
                             }
                             .accessibilityLabel("Start Over")
+                            .accessibilityIdentifier(TestID.Books.detailStartOver)
                         }
                         Spacer(minLength: 0)
                     }
@@ -695,10 +735,12 @@ struct AudiobookDetailView: View {
                                 .font(.body)
                                 .foregroundStyle(Theme.textBody)
                                 .lineLimit(overviewExpanded ? nil : 5)
+                                .accessibilityIdentifier(TestID.Books.detailOverview)
                             Button(overviewExpanded ? "Less" : "More") { withAnimation { overviewExpanded.toggle() } }
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.link)
                                 .buttonStyle(.plain)
+                                .accessibilityIdentifier(TestID.Books.detailOverviewToggle)
                         }
                         .padding(.horizontal, Metrics.gutter)
                     }
@@ -734,8 +776,10 @@ struct AudiobookDetailView: View {
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(RowPressStyle())
+                                .accessibilityIdentifier(TestID.Books.chapter(index))
                             }
                         }
+                        .testAnchor(TestID.Books.detailChapters)
                     }
                 }
                 .padding(.bottom, 32)
@@ -747,10 +791,12 @@ struct AudiobookDetailView: View {
         .toolbar {
             if let book {
                 Menu { MusicItemMenu(item: book) } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityIdentifier(TestID.Books.detailMore)
             }
         }
         .task(id: bookId) { await load() }
         .reloadWhenItemsChange { await load() }
+        .testAnchor(TestID.Books.detail)
     }
 
     private func playLabel(_ book: BaseItem) -> String {

@@ -72,6 +72,7 @@ struct PlayerScreen: View {
             if !player.pictureIsStale {
                 SubtitleFileOverlay()
                     .ignoresSafeArea()
+                    .testAnchor(TestID.Player.subtitleOverlay)
             }
             #endif
             #if os(tvOS)
@@ -230,6 +231,7 @@ struct PlayerScreen: View {
         // Playback menu has, in the place a Mac user asks for them.
         .contextMenu { PlayerContextMenu(player: player) }
         #endif
+        .testAnchor(TestID.Player.root)
     }
 }
 

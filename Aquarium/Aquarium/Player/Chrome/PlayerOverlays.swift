@@ -82,6 +82,7 @@ struct PlayerErrorCard: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white.opacity(0.8))
                 .frame(maxWidth: PlayerMetrics.television ? 900 : 420)
+                .accessibilityIdentifier(TestID.Player.errorMessage)
             HStack(spacing: 12) {
                 if player.canRetry {
                     Button(PlayerOverlayText.label(mac: "Try Again", elsewhere: "Try again")) {
@@ -90,6 +91,7 @@ struct PlayerErrorCard: View {
                     .appButtonStyle(prominent: true)
                     .playerDefaultAction()
                     .focused($focused, equals: .retry)
+                    .accessibilityIdentifier(TestID.Player.errorRetry)
                 }
                 // Only for a stream the server is choosing a bitrate for.
                 if player.item != nil {
@@ -98,11 +100,13 @@ struct PlayerErrorCard: View {
                     }
                     .appButtonStyle(prominent: !player.canRetry)
                     .focused($focused, equals: .smaller)
+                    .accessibilityIdentifier(TestID.Player.errorSmallerStream)
                 }
                 Button("Close") { player.stop(reason: "error card closed") }
                     .appButtonStyle()
                     .playerCancelAction()
                     .focused($focused, equals: .close)
+                    .accessibilityIdentifier(TestID.Player.errorClose)
             }
         }
         .padding(PlayerMetrics.television ? 60 : 28)
@@ -113,6 +117,7 @@ struct PlayerErrorCard: View {
         #if os(macOS)
         .focusedValue(\.playerKeysYielded, true)
         #endif
+        .testAnchor(TestID.Player.errorCard)
     }
 }
 
@@ -147,12 +152,14 @@ struct PlayerNoVideoBanner: View {
             .buttonStyle(.plain)
             .help("Dismiss")
             .accessibilityLabel("Dismiss")
+            .accessibilityIdentifier(TestID.Player.noVideoDismiss)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .overlayBackdrop(RoundedRectangle(cornerRadius: PlayerOverlayText.corner, style: .continuous), opacity: 0.6)
         .padding(.horizontal, 16)
         .playerOverlayScheme()
+        .testAnchor(TestID.Player.noVideoBanner)
     }
 }
 
@@ -225,6 +232,7 @@ struct PlayerUpNextCard: View {
         )
         .playerOverlayScheme()
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.Player.upNextCard)
     }
 
     private var handheld: some View {
@@ -234,6 +242,7 @@ struct PlayerUpNextCard: View {
                  : (startsByItself ? "Up next · in \(count)s" : "Up next"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.75))
+                .accessibilityIdentifier(TestID.Player.upNextCountdown)
             Group {
                 if let next, next.isEpisode {
                     EpisodeLine.text(for: next, font: .subheadline, tone: .picture)
@@ -250,16 +259,19 @@ struct PlayerUpNextCard: View {
                     .tint(Theme.accentStrong)
                     .controlSize(.small)
                     .playerDefaultAction()
+                    .accessibilityIdentifier(TestID.Player.upNextPlay)
                 Button(PlayerOverlayText.label(mac: "Not Now", elsewhere: "Not now")) { player.cancelAutoplay() }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .playerCancelAction()
+                    .accessibilityIdentifier(TestID.Player.upNextCancel)
             }
         }
         .padding(14)
         .frame(maxWidth: compact ? 260 : 320, alignment: .leading)
         .overlayBackdrop(RoundedRectangle(cornerRadius: PlayerOverlayText.corner, style: .continuous), opacity: 0.65)
         .playerOverlayScheme()
+        .testAnchor(TestID.Player.upNextCard)
     }
 }
 
@@ -283,6 +295,7 @@ struct PlayerSkipSegmentButton: View {
             .shadow(color: Theme.accent.opacity(0.5), radius: 20, y: 8)
             .accessibilityElement(children: .combine)
             .accessibilityHint("Click to skip")
+            .accessibilityIdentifier(isOutro ? TestID.Player.skipCredits : TestID.Player.skipIntro)
         } else {
             button
         }
@@ -303,6 +316,7 @@ struct PlayerSkipSegmentButton: View {
         }
         .buttonStyle(.plain)
         .help(isOutro ? "Skip the credits (S)" : "Skip the intro (S)")
+        .accessibilityIdentifier(isOutro ? TestID.Player.skipCredits : TestID.Player.skipIntro)
         .playerOverlayScheme()
     }
 }
@@ -352,6 +366,7 @@ struct BitrateBadge: View {
         .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
         .playerOverlayScheme()
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.Player.bitrateBadge)
     }
 }
 
@@ -422,6 +437,7 @@ struct EdgeLevelIndicator: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(level.kind == .brightness ? "Brightness" : "Volume")
         .accessibilityValue("\(Int((level.level * 100).rounded())) percent")
+        .accessibilityIdentifier(level.kind == .brightness ? TestID.Player.hudBrightness : TestID.Player.hudVolume)
     }
 
     private var symbol: String {

@@ -102,6 +102,7 @@ struct WideTabBar: View {
         .buttonStyle(.plain)
         .accessibilityLabel(section.title)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier(TestID.Tab.item(section.id))
     }
 }
 #endif

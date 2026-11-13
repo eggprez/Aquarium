@@ -39,6 +39,7 @@ struct MacSidebarRows: View {
                 // The whole name, for a library whose name the sidebar's
                 // width cuts short.
                 .help(section.title)
+                .accessibilityIdentifier(TestID.Sidebar.row(section.id))
                 .tag(section)
                 .contextMenu { menu(for: section) }
                 .simultaneousGesture(TapGesture().onEnded { reselected(section) })
@@ -75,6 +76,7 @@ struct MacSidebarRows: View {
     private func menu(for section: AppSection) -> some View {
         if let route = windowRoute(for: section) {
             Button("Open in New Window") { openWindow(id: RouteWindow.id, value: route) }
+                .accessibilityIdentifier(TestID.Sidebar.rowOpenInNewWindow(section.id))
         }
         switch section {
         case .library, .libraries, .favorites, .collections, .home:
@@ -85,12 +87,14 @@ struct MacSidebarRows: View {
                 // so it is brought up to date along with the page.
                 Task { await LibraryIndex.shared.sync(force: true) }
             }
+            .accessibilityIdentifier(TestID.Sidebar.rowRefresh(section.id))
         case .liveTV:
             Button("Refresh Guide") {
                 app.selection = section
                 MacCommandRequests.shared.refresh += 1
                 Task { await LiveTVStore.shared.refresh() }
             }
+            .accessibilityIdentifier(TestID.Sidebar.rowRefresh(section.id))
         default:
             EmptyView()
         }
@@ -178,7 +182,9 @@ struct MacSidebarFooter<Status: View>: View {
             titleVisibility: .visible
         ) {
             Button("Sign Out", role: .destructive) { Task { await app.signOut() } }
+                .accessibilityIdentifier(TestID.Shell.signOutConfirm)
             Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(TestID.Shell.signOutCancel)
         }
     }
 
@@ -199,6 +205,7 @@ struct MacSidebarFooter<Status: View>: View {
                     .font(.caption.weight(.medium))
                     .lineLimit(1)
                     .help(player.title)
+                    .accessibilityIdentifier(TestID.Sidebar.nowPlayingTitle)
             }
             Spacer(minLength: 4)
             Button {
@@ -209,6 +216,7 @@ struct MacSidebarFooter<Status: View>: View {
             }
             .buttonStyle(.borderless)
             .help(player.isPaused ? "Play" : "Pause")
+            .accessibilityIdentifier(TestID.Sidebar.nowPlayingPlayPause)
         }
         .padding(8)
         // A quaternary fill rather than a painted card: on the sidebar's
@@ -223,6 +231,7 @@ struct MacSidebarFooter<Status: View>: View {
             openWindow(id: PlayerWindow.id)
         }
         .help("Show the Player")
+        .testAnchor(TestID.Sidebar.nowPlaying)
     }
 
     @ViewBuilder
@@ -255,14 +264,18 @@ struct MacSidebarFooter<Status: View>: View {
                             }
                         }
                         .disabled(isCurrent || app.switchingTo != nil)
+                        .accessibilityIdentifier(TestID.Sidebar.accountMenuSwitch(saved.accountKey))
                     }
                 }
             }
             Button("Add Account…") { app.isAddingAccount = true }
+                .accessibilityIdentifier(TestID.Sidebar.accountMenuAdd)
             Divider()
             SettingsLink { Text("Settings…") }
+                .accessibilityIdentifier(TestID.Sidebar.accountMenuSettings)
             Divider()
             Button("Sign Out…") { confirmSignOut = true }
+                .accessibilityIdentifier(TestID.Sidebar.accountMenuSignOut)
         } label: {
             HStack(spacing: 8) {
                 if let session = client.session {
@@ -289,6 +302,7 @@ struct MacSidebarFooter<Status: View>: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .help("Account, Settings and Sign Out")
+        .accessibilityIdentifier(TestID.Sidebar.accountMenu)
     }
 
     private func host(_ server: String) -> String {

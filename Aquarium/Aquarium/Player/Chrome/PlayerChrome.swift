@@ -401,6 +401,7 @@ struct PlayerChrome: View {
 
             if chrome.holdingDoubleSpeed {
                 HoldSpeedBadge()
+                    .testAnchor(TestID.Player.hudDoubleSpeed)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .padding(.top, compact ? 64 : 88)
                     .transition(.opacity)
@@ -568,6 +569,7 @@ struct PlayerChrome: View {
                 ProgressView()
                     .controlSize(.large)
                     .tint(.white)
+                    .accessibilityIdentifier(TestID.Player.buffering)
                     .padding(34)
                     .playerGlass(cornerRadius: 30)
                     .allowsHitTesting(false)

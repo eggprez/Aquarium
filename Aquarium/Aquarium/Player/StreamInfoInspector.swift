@@ -26,11 +26,14 @@ struct StreamInfoInspector: View {
         Form {
             Section("Now Playing") {
                 LabeledContent("Title", value: player.title)
+                    .accessibilityIdentifier(TestID.Player.streamInfoRow("title"))
                 if !player.subtitle.isEmpty {
                     LabeledContent("Episode", value: player.subtitle)
+                        .accessibilityIdentifier(TestID.Player.streamInfoRow("episode"))
                 }
                 if let facts = factsLine {
                     LabeledContent("Details", value: facts)
+                        .accessibilityIdentifier(TestID.Player.streamInfoRow("details"))
                 }
             }
             let file = rows.file
@@ -42,6 +45,7 @@ struct StreamInfoInspector: View {
         }
         .formStyle(.grouped)
         .textSelection(.enabled)
+        .testAnchor(TestID.Player.streamInfo)
         // No title of its own: an inspector column has nowhere to draw one,
         // and a `navigationTitle` here would be taken for the window's,
         // which is the title of what is playing.
@@ -54,6 +58,7 @@ struct StreamInfoInspector: View {
                     // A host name or a codec string wider than the column
                     // is still worth reading in full.
                     .help(row.value)
+                    .accessibilityIdentifier(TestID.Player.streamInfoRow(TestID.key(row.label)))
             }
         }
     }

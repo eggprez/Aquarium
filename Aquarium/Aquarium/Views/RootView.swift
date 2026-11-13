@@ -54,12 +54,14 @@ struct RootView: View {
                     // left it, until something happened to reload it.
                     shell
                         .id(client.session?.accountKey)
+                        .testAnchor(TestID.Shell.root)
                 } else {
                     // The saved Home and library list being read off disk —
                     // see `AppModel.launchSettled`. A few milliseconds, so
                     // nothing is drawn over the background: a spinner would
                     // only flash.
                     Color.clear
+                        .testAnchor(TestID.Shell.launching)
                 }
             } else {
                 #if DEBUG
@@ -69,9 +71,11 @@ struct RootView: View {
                     NavigationStack { SettingsView() }
                 } else {
                     LoginView()
+                        .testAnchor(TestID.Shell.signedOut)
                 }
                 #else
                 LoginView()
+                    .testAnchor(TestID.Shell.signedOut)
                 #endif
             }
         }
@@ -187,8 +191,10 @@ struct RootView: View {
                         Text("Switching to \(next.userName)…")
                             .font(.headline)
                             .foregroundStyle(Theme.text)
+                            .accessibilityIdentifier(TestID.Shell.switchingAccountText)
                     }
                 }
+                .testAnchor(TestID.Shell.switchingAccount)
                 .transition(.opacity)
             }
         }
@@ -482,7 +488,10 @@ struct RootView: View {
                     }
                 )
                 .focusRegion()
-                .tabItem { Label(section.title, systemImage: section.symbol) }
+                .tabItem {
+                    Label(section.title, systemImage: section.symbol)
+                        .accessibilityIdentifier(TestID.Tab.item(section.id))
+                }
                 .tag(section)
             }
         }
@@ -500,6 +509,7 @@ struct RootView: View {
             .navigationTitle("Aquarium")
             .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 280)
             .safeAreaInset(edge: .bottom) { SidebarFooter() }
+            .testAnchor(TestID.Sidebar.root)
             #else
             // The app's own column — see `PadSidebar`. Its header stands in
             // for the navigation bar, toggle included. Left to itself an
@@ -559,6 +569,7 @@ struct RootView: View {
             if app.sidebarSearchTerm.isEmpty {
                 ForEach(prefs.recentSearches, id: \.self) { recent in
                     Label(recent, systemImage: "clock.arrow.circlepath")
+                        .accessibilityIdentifier(TestID.Sidebar.searchSuggestion(TestID.key(recent)))
                         .searchCompletion(recent)
                 }
             }
@@ -688,7 +699,10 @@ struct RootView: View {
                 TabView(selection: app.shownSelectionBinding) {
                     ForEach(app.tabSections) { section in
                         tabPage(section)
-                            .tabItem { Label(section.title, systemImage: section.symbol) }
+                            .tabItem {
+                                Label(section.title, systemImage: section.symbol)
+                                    .accessibilityIdentifier(TestID.Tab.item(section.id))
+                            }
                             .tag(section)
                     }
                 }
@@ -825,6 +839,7 @@ struct SectionView: View {
         #if !os(macOS)
         .background(Theme.background)
         #endif
+        .testAnchor(TestID.Shell.section(section.id))
     }
 
     @ViewBuilder
@@ -895,12 +910,14 @@ struct MoreView: View {
                     Label(section.title, systemImage: section.symbol)
                         .foregroundStyle(Theme.text)
                 }
+                .accessibilityIdentifier(TestID.Shell.moreRow(section.id))
                 .listRowBackground(Theme.raised)
             }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.background)
         .navigationTitle("More")
+        .testAnchor(TestID.Shell.more)
     }
 }
 #endif
@@ -979,6 +996,7 @@ struct SidebarFooter: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Settings")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier(TestID.Sidebar.settings)
     }
     #endif
 
@@ -998,6 +1016,7 @@ struct SidebarFooter: View {
             Text(text(running: running, pending: pending))
                 .font(.caption)
                 .foregroundStyle(Theme.textDim)
+                .accessibilityIdentifier(TestID.Sidebar.status)
         }
         #if os(macOS)
         // Under the account's name in `MacSidebarFooter`, which draws the rule.

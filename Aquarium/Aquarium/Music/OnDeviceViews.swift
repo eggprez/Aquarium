@@ -31,6 +31,7 @@ private struct NothingOnDevice: View {
                 ? "Next time the server is in reach, press and hold an audiobook and choose Download. It then plays here, chapters and all, with no server."
                 : "Next time the server is in reach, press and hold an album or a playlist and choose Download. Stations, smart playlists and search then work here with no server."
         )
+        .testAnchor(books ? TestID.Books.onDeviceEmpty : TestID.Music.onDeviceEmpty)
     }
 }
 
@@ -74,11 +75,13 @@ struct OfflineListenNowView: View {
                                                 .contentShape(Rectangle())
                                         }
                                         .buttonStyle(PosterButtonStyle())
+                                        .accessibilityIdentifier(TestID.Stations.card(station.id))
                                     }
                                 }
                                 .padding(.horizontal, Metrics.gutter)
                             }
                         }
+                        .testAnchor(TestID.Stations.shelf)
                     }
                     SongColumnsShelf(title: "Your Top Songs", items: topSongs, ranked: true) { song in
                         music.play(topSongs, startingAt: topSongs.position(of: song) ?? 0, title: "Top Songs")
@@ -108,6 +111,7 @@ struct OfflineListenNowView: View {
         .task { load() }
         .onChange(of: downloads.records.count) { load() }
         .onChange(of: index.revision) { load(reshuffle: false) }
+        .testAnchor(TestID.Music.onDeviceListenNow)
     }
 
     private var greeting: some View {
@@ -115,10 +119,12 @@ struct OfflineListenNowView: View {
             Text(ListenNowView.greetingText())
                 .font(.largeTitle.weight(.bold))
                 .foregroundStyle(Theme.text)
+                .accessibilityIdentifier(TestID.Music.greeting)
             Button { shuffleAll() } label: { Label(MusicMixes.shuffleAllTitle, systemImage: "shuffle") }
                 .appButtonStyle(prominent: true)
                 .buttonBorderShape(.capsule)
                 .controlSize(.small)
+                .accessibilityIdentifier(TestID.Music.shuffleAll)
         }
         .padding(.horizontal, Metrics.gutter)
     }
@@ -151,11 +157,13 @@ struct OfflineListenNowView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(PosterButtonStyle())
+                            .accessibilityIdentifier(TestID.SmartPlaylists.card(list.id.uuidString))
                         }
                     }
                     .padding(.horizontal, Metrics.gutter)
                 }
             }
+            .testAnchor(TestID.SmartPlaylists.shelf)
         }
     }
 
@@ -277,8 +285,10 @@ struct OnDeviceLibraryView: View {
                 MusicSearchField(term: $term, prompt: "Downloaded music", isFocused: $isFieldFocused)
             }
             .scrollDismissesKeyboard(.immediately)
+            .testAnchor(TestID.Music.downloaded)
         } else {
             content
+                .testAnchor(TestID.Music.onDeviceLibrary)
         }
     }
 
@@ -295,6 +305,7 @@ struct OnDeviceLibraryView: View {
                         .padding(.horizontal, Metrics.gutter)
                         .padding(.top, 24)
                         .padding(.bottom, 12)
+                        .accessibilityIdentifier(TestID.Music.shelfTitle("recently-downloaded"))
                     AlbumGrid(items: recent) { app.pushOnDevice(.album($0.Id)) }
                         .padding(.bottom, 24)
                 }
@@ -334,6 +345,7 @@ struct DownloadedStationsShelf: View {
                     .buttonBorderShape(.capsule)
                     .controlSize(.small)
                     .disabled(isMixing)
+                    .accessibilityIdentifier(TestID.Stations.shuffleDownloads)
                     .padding(.trailing, Metrics.gutter)
                 }
                 if !stations.isEmpty {
@@ -345,6 +357,7 @@ struct DownloadedStationsShelf: View {
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(PosterButtonStyle())
+                                .accessibilityIdentifier(TestID.Stations.card(station.id))
                             }
                         }
                         .padding(.horizontal, Metrics.gutter)
@@ -352,6 +365,7 @@ struct DownloadedStationsShelf: View {
                 }
             }
             .padding(.top, 24)
+            .testAnchor(TestID.Stations.shelf)
             .task { load() }
             .onChange(of: downloads.records.count) { load() }
             .onChange(of: index.revision) { load() }
@@ -481,6 +495,7 @@ struct OnDeviceListView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier(TestID.Music.onDeviceGenre(TestID.key(genre.name)))
                     }
                 case .playlists:
                     ForEach(items) { list in
@@ -504,11 +519,13 @@ struct OnDeviceListView: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(RowPressStyle())
+                            .accessibilityIdentifier(TestID.SmartPlaylists.row(list.id.uuidString))
                         }
                     }
                 }
                 if isEmpty {
                     EmptyState(symbol: "arrow.down.circle", title: "Nothing downloaded here", message: emptyMessage)
+                        .testAnchor(TestID.Music.empty)
                 }
             }
             .padding(.vertical, 8)
@@ -516,6 +533,7 @@ struct OnDeviceListView: View {
         .navigationTitle(title)
         .paletteBar()
         .task { load() }
+        .testAnchor(TestID.Music.onDeviceList(String(describing: kind)))
     }
 
     private var isEmpty: Bool {
@@ -601,6 +619,7 @@ struct OnDeviceCollectionView: View {
                                 }
                             }
                             .padding(.vertical, 12)
+                            .testAnchor(TestID.Music.shelf("albums"))
                         } else {
                             AlbumShelf(title: "Albums", items: albums) { app.pushOnDevice(.album($0.Id)) }
                                 .padding(.vertical, 12)
@@ -620,6 +639,7 @@ struct OnDeviceCollectionView: View {
                         .foregroundStyle(Theme.textDim)
                         .padding(.horizontal, Metrics.gutter)
                         .padding(.top, 14)
+                        .accessibilityIdentifier(TestID.Music.detailFooter)
                 }
                 .padding(.bottom, 32)
             } else {
@@ -632,6 +652,7 @@ struct OnDeviceCollectionView: View {
                         ? "None of this has been downloaded, and the server is out of reach. It opens as usual once you're back online."
                         : "None of this is downloaded any more. It is still in the library."
                 )
+                .testAnchor(TestID.Music.empty)
             }
         }
         .navigationTitle(subject?.title ?? (client.showsOffline ? "Offline" : "Downloaded"))
@@ -640,10 +661,12 @@ struct OnDeviceCollectionView: View {
         .toolbar {
             if let subject, !songs.isEmpty {
                 Menu { MusicItemMenu(item: subject) } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityIdentifier(TestID.Music.detailMore)
             }
         }
         .task(id: kind) { load() }
         .onChange(of: downloads.records.count) { load() }
+        .testAnchor(TestID.Music.onDeviceCollection)
     }
 
     private var kicker: String {
@@ -674,6 +697,7 @@ struct OnDeviceCollectionView: View {
                     Text(artist).font(.subheadline.weight(.semibold)).lineLimit(2).foregroundStyle(Theme.link)
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier(TestID.Music.detailArtist)
             }
             Button {
                 // From the downloads alone, like the stations on the
@@ -692,6 +716,7 @@ struct OnDeviceCollectionView: View {
             .buttonBorderShape(.capsule)
             .controlSize(.small)
             .padding(.top, 4)
+            .accessibilityIdentifier(TestID.Stations.start)
         }
     }
 
@@ -769,11 +794,13 @@ struct OfflineBooksView: View {
                     let found = OfflineMusic.searchBooks(query)
                     if found.isEmpty {
                         EmptyState(symbol: "magnifyingglass", title: "No matches", message: "No downloaded audiobook matches “\(query)”.")
+                            .testAnchor(TestID.Books.empty)
                     } else {
                         AlbumGrid(items: found, subtitleFor: { $0.AlbumArtist ?? $0.artistLine }) { open($0) }
                     }
                 } else {
                     AlbumShelf(title: "Continue Listening", items: inProgress, subtitleFor: { BooksTabView.progressLine($0) }) { open($0) }
+                        .testAnchor(TestID.Books.shelf("continueListening"))
                     if authors.count > 1 {
                         VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
                             ShelfHeading(title: "Authors")
@@ -792,16 +819,19 @@ struct OfflineBooksView: View {
                                                 .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 0.5))
                                         }
                                         .buttonStyle(.plain)
+                                        .accessibilityIdentifier(TestID.Books.authorChip(TestID.key(author)))
                                     }
                                 }
                                 .padding(.horizontal, Metrics.gutter)
                             }
                         }
+                        .testAnchor(TestID.Books.shelf("authors"))
                     }
                     VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
                         ShelfHeading(title: "On This Device", subtitle: "\(books.count) title\(books.count == 1 ? "" : "s")")
                         AlbumGrid(items: books, subtitleFor: { BooksTabView.progressLine($0) ?? $0.AlbumArtist }) { open($0) }
                     }
+                    .testAnchor(TestID.Books.shelf("onThisDevice"))
                 }
             }
             .padding(.top, 8)
@@ -809,6 +839,7 @@ struct OfflineBooksView: View {
         }
         .task { books = OfflineMusic.books }
         .onChange(of: downloads.records) { books = OfflineMusic.books }
+        .testAnchor(TestID.Books.onDeviceRoot)
     }
 
     private func open(_ book: BaseItem) { app.pushOnDevice(.audiobook(book.Id)) }

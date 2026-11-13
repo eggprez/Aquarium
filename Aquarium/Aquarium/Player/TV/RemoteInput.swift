@@ -56,6 +56,7 @@ struct RemoteInput: UIViewRepresentable {
         view.onEvent = onEvent
         view.isInputEnabled = isEnabled
         view.panelOpen = panelOpen
+        view.accessibilityIdentifier = TestID.Player.remoteInput
         return view
     }
 

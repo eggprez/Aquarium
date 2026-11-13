@@ -101,6 +101,7 @@ struct MacEpisodeList: View {
             measuredHeight = nil
         }
         .accessibilityLabel("Episodes")
+        .testAnchor(TestID.Detail.episodeList)
     }
 
     /// One row held: its own menu, which already has Play, Get Info and the
@@ -119,6 +120,7 @@ struct MacEpisodeList: View {
                 } label: {
                     Label("Mark as Watched", systemImage: "checkmark.circle")
                 }
+                .accessibilityIdentifier(TestID.Detail.episodesMarkWatched)
             }
             if chosen.contains(where: { $0.userData.played }) {
                 Button {
@@ -126,6 +128,7 @@ struct MacEpisodeList: View {
                 } label: {
                     Label("Mark as Unwatched", systemImage: "arrow.uturn.backward.circle")
                 }
+                .accessibilityIdentifier(TestID.Detail.episodesMarkUnwatched)
             }
         }
     }
@@ -213,6 +216,7 @@ struct MacEpisodeRow: View {
         // The whole overview, for the line that only shows its start.
         .help(episode.Overview ?? "")
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.Detail.episode(episode.Id))
     }
 
     private var still: some View {

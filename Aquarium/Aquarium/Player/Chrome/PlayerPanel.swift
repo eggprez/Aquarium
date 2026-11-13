@@ -61,6 +61,7 @@ struct PlayerPanel: View {
         .onChange(of: player.panelTabs, initial: true) { _, tabs in
             if !tabs.contains(tab) { tab = .info }
         }
+        .testAnchor(TestID.Player.panel)
     }
 
     // MARK: - A phone, an iPad, a Mac
@@ -75,6 +76,7 @@ struct PlayerPanel: View {
                         Text(tab.title)
                             .font(.headline)
                             .accessibilityAddTraits(.isHeader)
+                            .accessibilityIdentifier(TestID.Player.panelTitle)
                     }
                     content
                 }
@@ -103,6 +105,7 @@ struct PlayerPanel: View {
                     .padding(.top, 16)
                     .padding(.trailing, 16)
                     .accessibilityLabel("Close")
+                    .accessibilityIdentifier(TestID.Player.panelClose)
                 }
             }
             #endif
@@ -277,6 +280,7 @@ private struct TelevisionPanelBody<Content: View>: View {
                 // lights up for a moment even when put right.
                 .disabled(focusedTab == nil && item != tab)
                 .accessibilityAddTraits(item == tab ? [.isSelected] : [])
+                .accessibilityIdentifier(TestID.Player.panelTab(item.rawValue))
             }
         }
         // The full width of the panel, so that Up finds the tabs from a
@@ -644,6 +648,7 @@ private struct PanelSlider: View {
             }
             .panelEntryOnly(isEntry)
             .accessibilityLabel("Decrease \(name)")
+            .accessibilityIdentifier(TestID.Player.pictureDecrease(TestID.key(name)))
             VStack(spacing: 6) {
                 Text(format(value))
                     .font(.headline.monospacedDigit())
@@ -663,11 +668,13 @@ private struct PanelSlider: View {
             }
             .panelEntryOnly(false)
             .accessibilityLabel("Increase \(name)")
+            .accessibilityIdentifier(TestID.Player.pictureIncrease(TestID.key(name)))
         }
         .opacity(enabled ? 1 : 0.5)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(name)
         .accessibilityValue(format(value))
+        .accessibilityIdentifier(TestID.Player.pictureSlider(TestID.key(name)))
         #else
         HStack(spacing: 12) {
             Text(name)
@@ -678,6 +685,7 @@ private struct PanelSlider: View {
                 .disabled(!enabled)
                 .accessibilityLabel(name)
                 .accessibilityValue(format(value))
+                .accessibilityIdentifier(TestID.Player.pictureSlider(TestID.key(name)))
             Text(format(value))
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(Theme.textDim)
@@ -716,6 +724,7 @@ private struct InfoTab: View {
                 poster(url)
                     .frame(width: player.isLive ? 150 : 104, height: player.isLive ? 96 : 156)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .testAnchor(TestID.Player.infoPoster)
             }
             VStack(alignment: .leading, spacing: 4) {
                 if player.isLive { live } else { onDemand }
@@ -723,6 +732,7 @@ private struct InfoTab: View {
                     .font(.caption)
                     .foregroundStyle(Theme.textDim)
                     .lineLimit(2)
+                    .accessibilityIdentifier(TestID.Player.infoSummary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             actions
@@ -752,11 +762,13 @@ private struct InfoTab: View {
                 PanelRow(title: on ? "Autoplay: On" : "Autoplay: Off", isSelected: on, width: 340) {
                     on ? player.cancelAutoplay() : player.resumeAutoplay()
                 }
+                .accessibilityIdentifier(TestID.Player.stopAfterThis)
             }
             if let left = player.sleepMinutesRemaining {
                 PanelRow(title: "Sleep: \(left) min left", detail: "Click to cancel", isSelected: true, width: 340) {
                     player.cancelSleepTimer()
                 }
+                .accessibilityIdentifier(TestID.Player.sleepCancel)
             } else {
                 HStack(spacing: 10) {
                     Text("Sleep")
@@ -767,6 +779,7 @@ private struct InfoTab: View {
                             player.setSleepTimer(minutes: minutes)
                         }
                         .accessibilityLabel("Stop in \(minutes) minutes")
+                        .accessibilityIdentifier(TestID.Player.sleepOption(minutes))
                     }
                 }
             }
@@ -803,6 +816,7 @@ private struct InfoTab: View {
                 poster(url)
                     .frame(width: player.isLive ? 110 : 84, height: player.isLive ? 70 : 126)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .testAnchor(TestID.Player.infoPoster)
             }
             VStack(alignment: .leading, spacing: 4) {
                 if player.isLive { live } else { onDemand }
@@ -844,6 +858,7 @@ private struct InfoTab: View {
                 }
                 .font(.footnote)
                 .accessibilityElement(children: .combine)
+                .accessibilityIdentifier(TestID.Player.infoFact(TestID.key(row.label)))
             }
         }
         .padding(12)
@@ -879,6 +894,7 @@ private struct InfoTab: View {
         // each set as it is on a card, ahead of the facts.
         Text(item?.title ?? player.title)
             .font(item?.isEpisode == true ? heading.titleRole(.episode) : tv ? heading.weight(.bold) : heading)
+            .accessibilityIdentifier(TestID.Player.infoTitle)
         if let facts = Self.facts(item), !facts.isEmpty {
             let rest = Text(facts).font(line).foregroundStyle(Theme.textBody)
             Group {
@@ -886,8 +902,10 @@ private struct InfoTab: View {
                     let names = EpisodeLine.text(for: item, episode: false, font: line)
                     let gap = Text("  ·  ").font(line).foregroundStyle(Theme.textDim)
                     Text("\(names)\(gap)\(rest)")
+                        .accessibilityIdentifier(TestID.Player.infoDetails)
                 } else {
                     rest
+                        .accessibilityIdentifier(TestID.Player.infoDetails)
                 }
             }
             .lineLimit(tv ? 1 : nil)
@@ -898,6 +916,7 @@ private struct InfoTab: View {
                 .font(tv ? .callout : .subheadline)
                 .foregroundStyle(Theme.textBody)
                 .lineLimit(tv ? 2 : nil)
+                .accessibilityIdentifier(TestID.Player.infoOverview)
         }
     }
 
@@ -907,6 +926,7 @@ private struct InfoTab: View {
         if let now = schedule.now {
             Text(now.title)
                 .font(tv ? .title3.weight(.bold) : .headline)
+                .accessibilityIdentifier(TestID.Player.infoTitle)
             // The episode under the show, for a programme that is one of a
             // series: "Night Dispatch" alone says which show, not which night.
             // Set as an episode's name is anywhere else, or as a label
@@ -920,16 +940,19 @@ private struct InfoTab: View {
                 Text("\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))")
                     .font(tv ? .callout : .subheadline)
                     .foregroundStyle(Theme.textBody)
+                    .accessibilityIdentifier(TestID.Player.infoDetails)
             }
             if let overview = now.Overview, !overview.isEmpty {
                 Text(overview)
                     .font(tv ? .callout : .subheadline)
                     .foregroundStyle(Theme.textBody)
                     .lineLimit(tv ? 2 : 3)
+                    .accessibilityIdentifier(TestID.Player.infoOverview)
             }
         } else {
             Text(player.title)
                 .font(tv ? .title3.weight(.bold) : .headline)
+                .accessibilityIdentifier(TestID.Player.infoTitle)
         }
         if !schedule.upcoming.isEmpty {
             if tv {
@@ -942,6 +965,7 @@ private struct InfoTab: View {
                             .font(.caption)
                             .foregroundStyle(Theme.textBody)
                             .lineLimit(1)
+                            .accessibilityIdentifier(TestID.Player.infoUpcoming(programme.Id))
                     }
                 }
             } else {
@@ -955,6 +979,7 @@ private struct InfoTab: View {
                             .font(.caption)
                             .foregroundStyle(Theme.textBody)
                             .lineLimit(1)
+                            .accessibilityIdentifier(TestID.Player.infoUpcoming(programme.Id))
                     }
                 }
             }
@@ -1006,6 +1031,7 @@ private struct ChannelsTab: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .focused($focused, equals: channel.Id)
+                .accessibilityIdentifier(TestID.Player.channelRow(channel.Id))
                 #if !os(tvOS)
                 // What `PlayerPanel.stacked` scrolls to as the page opens.
                 .id(channel.Id)
@@ -1029,6 +1055,7 @@ private struct AudioTab: View {
         VStack(alignment: .leading, spacing: 6) {
             if options.isEmpty {
                 PanelNote(text: player.isOpening ? "The stream is still opening." : "This stream lists no audio tracks.")
+                    .accessibilityIdentifier(TestID.Player.audioEmpty)
             } else {
                 PanelRows {
                     ForEach(options) { option in
@@ -1037,6 +1064,7 @@ private struct AudioTab: View {
                                  isSelected: option.id == selected) {
                             player.selectAudio(option)
                         }
+                        .accessibilityIdentifier(TestID.Player.audioOption(TestID.Player.trackKey(option.id)))
                     }
                 }
             }
@@ -1052,6 +1080,7 @@ private struct AudioTab: View {
             }
             .pickerStyle(.menu)
             .tint(Theme.link)
+            .accessibilityIdentifier(TestID.Player.audioLanguagePicker)
             // A language chosen here is kept for everything played after, and
             // this title switches to it now when it has such a track.
             .onChange(of: prefs.audioLanguage) { _, code in
@@ -1080,6 +1109,7 @@ private struct SubtitlesTab: View {
                 PanelRow(title: "Off", isSelected: selected == nil, width: 200) {
                     player.selectSubtitles(nil)
                 }
+                .accessibilityIdentifier(TestID.Player.subtitlesOff)
                 ForEach(options) { option in
                     PanelRow(title: option.label,
                              detail: [option.isForced ? "Forced" : nil,
@@ -1088,10 +1118,12 @@ private struct SubtitlesTab: View {
                              isSelected: option.id == selected) {
                         player.selectSubtitles(option)
                     }
+                    .accessibilityIdentifier(TestID.Player.subtitleOption(TestID.Player.trackKey(option.id)))
                 }
             }
             if options.isEmpty {
                 PanelNote(text: "This stream has no subtitle tracks.")
+                    .accessibilityIdentifier(TestID.Player.subtitlesEmpty)
             }
 
             #if !os(tvOS)
@@ -1103,6 +1135,7 @@ private struct SubtitlesTab: View {
             }
             .pickerStyle(.menu)
             .tint(Theme.link)
+            .accessibilityIdentifier(TestID.Player.subtitleLanguagePicker)
             .onChange(of: prefs.subtitleLanguage) { _, code in
                 if code == "off" {
                     if player.selectedSubtitleOption != nil { player.selectSubtitles(nil) }
@@ -1139,9 +1172,11 @@ private struct QualityTab: View {
                 PanelRows(fills: true) {
                     PanelRow(title: player.downloadedTitle, detail: PlayerMetrics.television ? nil : "Playing from this device",
                              isSelected: true, height: PlayerMetrics.television ? 96 : nil) {}
+                        .accessibilityIdentifier(TestID.Player.qualityDownloaded)
                 }
             } else if let reason = player.qualityUnavailableReason {
                 PanelNote(text: reason)
+                    .accessibilityIdentifier(TestID.Player.qualityUnavailable)
             }
             if !player.isLocal {
                 PanelRows(fills: true) {
@@ -1156,11 +1191,13 @@ private struct QualityTab: View {
                             guard !current else { return }
                             Task { await player.switchQuality(to: choice.maxBitrate) }
                         }
+                        .accessibilityIdentifier(TestID.Player.qualityOption(TestID.Player.qualityKey(choice.maxBitrate)))
                     }
                 }
             }
             if prefs.adaptiveQuality, player.offersQuality, !PlayerMetrics.television {
                 PanelNote(text: "The stream steps down on its own when the connection struggles, and back up once it is steady. Picking a quality keeps it there.")
+                    .accessibilityIdentifier(TestID.Player.qualityNote)
             }
         }
     }
@@ -1184,6 +1221,7 @@ private struct SpeedTab: View {
         VStack(alignment: .leading, spacing: 6) {
             if player.isLive {
                 PanelNote(text: "A live channel plays at its own pace.")
+                    .accessibilityIdentifier(TestID.Player.speedUnavailable)
             }
             PanelRows(fills: true) {
                 ForEach(PlayerModel.speeds, id: \.self) { rate in
@@ -1194,6 +1232,7 @@ private struct SpeedTab: View {
                              centered: PlayerMetrics.television) {
                         player.speed = rate
                     }
+                    .accessibilityIdentifier(TestID.Player.speedOption(TestID.Player.speedKey(rate)))
                 }
             }
         }
@@ -1230,6 +1269,7 @@ private struct SyncTab: View {
         VStack(alignment: .leading, spacing: 10) {
             if let reason {
                 PanelNote(text: reason)
+                    .accessibilityIdentifier(TestID.Player.syncUnavailable)
             }
             HStack(spacing: tv ? 20 : 8) {
                 step(-50, current: current, reason: reason)
@@ -1246,6 +1286,7 @@ private struct SyncTab: View {
                 }
                 .frame(maxWidth: tv ? 380 : .infinity)
                 .accessibilityElement(children: .combine)
+                .accessibilityIdentifier(TestID.Player.syncValue)
                 step(5, current: current, reason: reason)
                 step(50, current: current, reason: reason)
                 if tv {
@@ -1269,12 +1310,14 @@ private struct SyncTab: View {
                                  detail: "Flushes picture and sound and starts them together again. A visible hiccup, so it is never done unasked.") {
                             player.resyncAudio()
                         }
+                        .accessibilityIdentifier(TestID.Player.syncResync)
                     }
                     if player.canReencodeForSync {
                         PanelRow(title: "Re-encode for sync",
                                  detail: "Asks the server to encode picture and sound together rather than copying either through — for a transcode that drifts.") {
                             Task { await player.reencodeForSync() }
                         }
+                        .accessibilityIdentifier(TestID.Player.syncReencode)
                     }
                 }
             }
@@ -1308,6 +1351,7 @@ private struct SyncTab: View {
             set(target)
         }
         .accessibilityLabel(delta > 0 ? "Sound \(delta) milliseconds earlier" : "Sound \(-delta) milliseconds later")
+        .accessibilityIdentifier(TestID.Player.syncStep(delta))
     }
 
     private func reset(current: Int, reason: String?) -> some View {
@@ -1317,6 +1361,7 @@ private struct SyncTab: View {
                  width: 180, height: PlayerMetrics.television ? 64 : nil, centered: PlayerMetrics.television) {
             set(0)
         }
+        .accessibilityIdentifier(TestID.Player.syncReset)
     }
 
     private func set(_ value: Int) {
@@ -1360,6 +1405,7 @@ private struct PictureTab: View {
         VStack(alignment: .leading, spacing: 10) {
             if let reason {
                 PanelNote(text: reason)
+                    .accessibilityIdentifier(TestID.Player.pictureUnavailable)
                 if player.canSwitchEngine(to: .mpv) {
                     EngineSwitchRow(reason: "picture controls")
                 }
@@ -1405,6 +1451,7 @@ private struct PictureTab: View {
                         prefs.aspectOverride = choice.ratio
                         player.applyFraming()
                     }
+                    .accessibilityIdentifier(TestID.Player.pictureAspect(TestID.Player.aspectKey(choice.ratio)))
                 }
             }
             .panelEntryOnly(false)
@@ -1443,6 +1490,7 @@ private struct PictureTab: View {
             player.applyNightMode()
         }
         .accessibilityValue(prefs.nightMode ? "On" : "Off")
+        .accessibilityIdentifier(TestID.Player.nightMode)
     }
 
     private func zoom(enabled: Bool) -> some View {
@@ -1464,6 +1512,7 @@ private struct PictureTab: View {
             player.applyPicture()
             player.applyFraming()
         }
+        .accessibilityIdentifier(TestID.Player.pictureReset)
     }
 }
 
@@ -1478,5 +1527,6 @@ private struct EngineSwitchRow: View {
                  detail: "Reopens where it is now. Apple's engine comes back for the next title, or for Picture in Picture and AirPlay.") {
             Task { await player.switchEngine(to: .mpv, reason: reason) }
         }
+        .accessibilityIdentifier(TestID.Player.switchToMpv)
     }
 }

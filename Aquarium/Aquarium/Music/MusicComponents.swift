@@ -241,12 +241,14 @@ struct AlbumShelf: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(PosterButtonStyle())
+                            .accessibilityIdentifier(item.isAudiobook ? TestID.Books.card(item.Id) : TestID.Music.card(item.Id))
                             .musicContextMenu(item)
                         }
                     }
                     .padding(.horizontal, Metrics.gutter)
                 }
             }
+            .testAnchor(TestID.Music.shelf(TestID.key(title)))
         }
     }
 }
@@ -268,12 +270,14 @@ struct ArtistShelf: View {
                                 ArtistTile(item: item).contentShape(Rectangle())
                             }
                             .buttonStyle(PosterButtonStyle())
+                            .accessibilityIdentifier(TestID.Music.card(item.Id))
                             .musicContextMenu(item)
                         }
                     }
                     .padding(.horizontal, Metrics.gutter)
                 }
             }
+            .testAnchor(TestID.Music.shelf(TestID.key(title)))
         }
     }
 }
@@ -311,6 +315,7 @@ struct SongColumnsShelf: View {
                     .padding(.horizontal, Metrics.gutter)
                 }
             }
+            .testAnchor(TestID.Music.shelf(TestID.key(title)))
         }
     }
 }
@@ -331,10 +336,12 @@ struct ShelfHeading: View {
                 Text(title)
                     .font(.title3.weight(.bold))
                     .foregroundStyle(Theme.text)
+                    .accessibilityIdentifier(TestID.Music.shelfTitle(TestID.key(title)))
             }
             Spacer()
             if let seeAll {
                 SeeAllButton(action: seeAll)
+                    .accessibilityIdentifier(TestID.Music.shelfSeeAll(TestID.key(title)))
             }
         }
         .padding(.horizontal, Metrics.gutter)
@@ -402,12 +409,14 @@ struct SongRow: View {
                         .frame(width: 32, height: 32)
                         .contentShape(Rectangle())
                 }
+                .accessibilityIdentifier(TestID.Music.songMore(song.Id))
             }
             .padding(.vertical, 6)
             .padding(.horizontal, style == .compact ? 0 : Metrics.gutter)
             .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
+        .accessibilityIdentifier(TestID.Music.song(song.Id))
         .musicContextMenu(song)
     }
 
@@ -494,6 +503,7 @@ struct MusicListRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
+        .accessibilityIdentifier(TestID.Music.row(item.Id))
         .musicContextMenu(item)
     }
 }
@@ -518,6 +528,7 @@ struct PlayShuffleBar: View {
                     .background(Theme.accentStrong, in: Capsule())
                     .contentShape(Capsule())
             }
+            .accessibilityIdentifier(TestID.Music.playBarPlay)
             Button(action: onShuffle) {
                 Image(systemName: "shuffle")
                     .font(.headline)
@@ -528,6 +539,7 @@ struct PlayShuffleBar: View {
                     .contentShape(Circle())
             }
             .accessibilityLabel("Shuffle")
+            .accessibilityIdentifier(TestID.Music.playBarShuffle)
             Spacer(minLength: 0)
         }
         .buttonStyle(PosterButtonStyle())
@@ -568,12 +580,14 @@ struct CollectionHeader<Art: View, Detail: View>: View {
                     .textCase(.uppercase)
                     .tracking(1.1)
                     .foregroundStyle(Theme.link)
+                    .accessibilityIdentifier(TestID.Music.headerKicker)
                 Text(title)
                     .font(.title2.weight(.bold))
                     .lineLimit(3)
                     .minimumScaleFactor(0.8)
                     .multilineTextAlignment(.leading)
                     .foregroundStyle(Theme.text)
+                    .accessibilityIdentifier(TestID.Music.headerTitle)
                 detail()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -581,6 +595,7 @@ struct CollectionHeader<Art: View, Detail: View>: View {
         .padding(.horizontal, Metrics.gutter)
         .padding(.top, 20)
         .background(alignment: .top) { washLayer }
+        .testAnchor(TestID.Music.header)
     }
 
     @ViewBuilder
@@ -629,6 +644,7 @@ struct HeaderFacts: View {
             Text(parts.joined(separator: " · "))
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Theme.textDim)
+                .accessibilityIdentifier(TestID.Music.headerFacts)
         }
     }
 }
@@ -679,9 +695,11 @@ struct LibraryDoors: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(PosterButtonStyle())
+                .accessibilityIdentifier(TestID.Music.libraryDoor(TestID.key(door.title)))
             }
         }
         .padding(.horizontal, Metrics.gutter)
+        .testAnchor(TestID.Music.libraryDoors)
     }
 }
 
@@ -713,6 +731,7 @@ struct AlbumGrid: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PosterButtonStyle())
+                .accessibilityIdentifier(item.isAudiobook ? TestID.Books.card(item.Id) : TestID.Music.card(item.Id))
                 .musicContextMenu(item)
                 .id(item.Id)
                 .onAppear {
@@ -732,6 +751,7 @@ struct AlbumGrid: View {
             }
         }
         .padding(.horizontal, Metrics.gutter)
+        .testAnchor(TestID.Music.grid)
     }
 }
 
@@ -760,38 +780,46 @@ struct MusicItemMenu: View {
         Button { Task { await play(shuffle: false) } } label: {
             Label("Play", systemImage: "play.fill")
         }
+        .accessibilityIdentifier(TestID.Music.menuPlay)
         if isCollection {
             Button { Task { await play(shuffle: true) } } label: {
                 Label("Shuffle", systemImage: "shuffle")
             }
+            .accessibilityIdentifier(TestID.Music.menuShuffle)
         }
         Button { Task { await queue(next: true) } } label: {
             Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
         }
+        .accessibilityIdentifier(TestID.Music.menuPlayNext)
         Button { Task { await queue(next: false) } } label: {
             Label("Play Later", systemImage: "text.line.last.and.arrowtriangle.forward")
         }
+        .accessibilityIdentifier(TestID.Music.menuPlayLater)
         if !item.isAudiobook {
             Button { Task { await startMix() } } label: {
                 Label("Start Station", systemImage: "dot.radiowaves.left.and.right")
             }
+            .accessibilityIdentifier(TestID.Music.menuStartStation)
         }
         Divider()
         if item.isSong, let albumId = item.AlbumId, !albumId.isEmpty {
             Button { app.push(.music(.album(albumId))) } label: {
                 Label("Go to Album", systemImage: "square.stack")
             }
+            .accessibilityIdentifier(TestID.Music.menuGoToAlbum)
         }
         if item.isSong || item.isAlbum, let artist = item.ArtistItems?.first ?? item.AlbumArtists?.first,
            let artistId = artist.Id, !artistId.isEmpty {
             Button { app.push(.music(.artist(artistId))) } label: {
                 Label("Go to Artist", systemImage: "music.mic")
             }
+            .accessibilityIdentifier(TestID.Music.menuGoToArtist)
         }
         if item.isSong {
             Button { SongInfoPrompt.shared.item = item } label: {
                 Label("Song Info", systemImage: "info.circle")
             }
+            .accessibilityIdentifier(TestID.Music.menuSongInfo)
         }
         Divider()
         // Playlists are the server's to change; with it gone the menu would
@@ -805,6 +833,7 @@ struct MusicItemMenu: View {
                 systemImage: item.userData.isFavorite ? "star.slash" : "star"
             )
         }
+        .accessibilityIdentifier(TestID.Music.menuFavorite)
         downloadActions
     }
 
@@ -818,6 +847,7 @@ struct MusicItemMenu: View {
             } label: {
                 Label("New Playlist…", systemImage: "plus")
             }
+            .accessibilityIdentifier(TestID.Music.menuNewPlaylist)
             let lists = PlaylistStore.shared.playlists
             if !lists.isEmpty { Divider() }
             ForEach(lists) { list in
@@ -826,10 +856,12 @@ struct MusicItemMenu: View {
                 } label: {
                     Label(list.title, systemImage: "music.note.list")
                 }
+                .accessibilityIdentifier(TestID.Music.menuPlaylist(list.Id))
             }
         } label: {
             Label("Add to Playlist", systemImage: "text.badge.plus")
         }
+        .accessibilityIdentifier(TestID.Music.menuAddToPlaylist)
     }
 
     private func add(to list: BaseItem) async {
@@ -934,14 +966,17 @@ struct MusicItemMenu: View {
                 } label: {
                     Label("Remove Download", systemImage: "trash")
                 }
+                .accessibilityIdentifier(TestID.Music.menuRemoveDownload)
             } else if DownloadManager.shared.isQueuedOrRunning(item.Id) {
                 Button { app.show(.downloads) } label: {
                     Label("Downloading…", systemImage: "arrow.down.circle.dotted")
                 }
+                .accessibilityIdentifier(TestID.Music.menuDownloading)
             } else {
                 Button { Task { await MusicDownloads.download([item]) } } label: {
                     DownloadChoiceLabel("Download", size: sizeText([item]), systemImage: "arrow.down.circle")
                 }
+                .accessibilityIdentifier(TestID.Music.menuDownload)
             }
         } else if item.isAlbum || item.isPlaylist {
             Button {
@@ -961,6 +996,7 @@ struct MusicItemMenu: View {
                     "Download", size: DownloadSizes.shared.items(of: item.Id).flatMap(sizeText),
                     systemImage: "arrow.down.circle")
             }
+            .accessibilityIdentifier(TestID.Music.menuDownload)
         }
         #if os(iOS)
         // The watch fetches it from the server itself, so this needs the
@@ -973,6 +1009,7 @@ struct MusicItemMenu: View {
                 DownloadChoiceLabel(
                     "Download to Apple Watch", size: DownloadSizes.text(watchBytes), systemImage: "applewatch")
             }
+            .accessibilityIdentifier(TestID.Music.menuDownloadToWatch)
         }
         #endif
     }
@@ -1178,7 +1215,7 @@ struct SongInfoSheet: View {
             .navigationTitle("Song Info")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.accessibilityIdentifier(TestID.Music.songInfoDone) }
             }
         }
         // The list a song was pressed in carries what a row draws; the file
@@ -1189,6 +1226,7 @@ struct SongInfoSheet: View {
                   let full = try? await client.musicItem(song.Id) else { return }
             song = full
         }
+        .testAnchor(TestID.Music.songInfo)
     }
 
     private var missesWhatStationsRead: Bool {
@@ -1198,11 +1236,11 @@ struct SongInfoSheet: View {
     private func row(_ name: String, _ value: String?, stationsReadIt: Bool = false) -> some View {
         LabeledContent(name) {
             if let value, !value.isEmpty {
-                Text(value).multilineTextAlignment(.trailing)
+                Text(value).multilineTextAlignment(.trailing).accessibilityIdentifier(TestID.Music.songInfoValue(TestID.key(name)))
             } else if stationsReadIt {
-                Label("Missing", systemImage: "exclamationmark.triangle").foregroundStyle(Theme.warn)
+                Label("Missing", systemImage: "exclamationmark.triangle").foregroundStyle(Theme.warn).accessibilityIdentifier(TestID.Music.songInfoValue(TestID.key(name)))
             } else {
-                Text("—").foregroundStyle(Theme.textDim)
+                Text("—").foregroundStyle(Theme.textDim).accessibilityIdentifier(TestID.Music.songInfoValue(TestID.key(name)))
             }
         }
     }

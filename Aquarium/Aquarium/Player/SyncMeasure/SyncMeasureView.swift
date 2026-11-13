@@ -35,14 +35,15 @@ struct SyncMeasureView: View {
                 Section {
                     Text("The beats were timed, but the phone never read the code on the screen, so it doesn't know which rate this is or what the Apple TV has set. Fill those in below and the answer appears.")
                         .font(.callout)
+                        .accessibilityIdentifier(TestID.Player.syncMeasureNoCode)
                     manualFields
                 }
             }
             if case .failed(let message) = capture.phase {
-                Section { Text(message).font(.callout) }
+                Section { Text(message).font(.callout).accessibilityIdentifier(TestID.Player.syncMeasureMessage) }
             }
             if case .unavailable(let message) = capture.phase {
-                Section { Text(message).font(.callout) }
+                Section { Text(message).font(.callout).accessibilityIdentifier(TestID.Player.syncMeasureMessage) }
             }
             Section {
                 Stepper(value: $distance, in: 0...15, step: 0.25) {
@@ -50,10 +51,12 @@ struct SyncMeasureView: View {
                         .formatted(.measurement(width: .abbreviated, usage: .general, numberFormatStyle: .number.precision(.fractionLength(0...1)))))
                 }
                 .disabled(capture.isRunning)
+                .accessibilityIdentifier(TestID.Player.syncMeasureDistance)
                 Button(capture.isRunning ? "Stop" : "Measure") {
                     if capture.isRunning { capture.stop() } else { capture.start() }
                 }
                 .frame(maxWidth: .infinity)
+                .accessibilityIdentifier(TestID.Player.syncMeasureStart)
             } footer: {
                 Text("On the Apple TV, open Settings → Audio and press the frame rate to measure. Turn the sound up, hold the phone so the whole television is in the picture, and keep it still until the number comes up — about twenty seconds.")
             }
@@ -76,6 +79,7 @@ struct SyncMeasureView: View {
         .onChange(of: capture.isRunning) { _, running in
             UIApplication.shared.isIdleTimerDisabled = running
         }
+        .testAnchor(TestID.Player.syncMeasure)
     }
 
     private var lookingTooLong: Bool {
@@ -94,6 +98,7 @@ struct SyncMeasureView: View {
                 Text(status)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.white)
+                    .accessibilityIdentifier(TestID.Player.syncMeasureStatus)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(.black.opacity(0.55), in: Capsule())
@@ -101,6 +106,7 @@ struct SyncMeasureView: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .testAnchor(TestID.Player.syncMeasurePreview)
     }
 
     private var status: String {
@@ -129,18 +135,22 @@ struct SyncMeasureView: View {
                 Text("Set \(code.fps) fps to")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier(TestID.Player.syncMeasureResultRate)
                 Text(SyncAdvice.tabText(advice.tabMilliseconds))
                     .font(.system(size: 44, weight: .bold, design: .rounded).monospacedDigit())
+                    .accessibilityIdentifier(TestID.Player.syncMeasureResultValue)
                 Text(advice.tabMilliseconds == advice.tabNowMilliseconds
                      ? "That is what the Sync tab reads now: the room is in step."
                      : "The Sync tab reads \(SyncAdvice.tabText(advice.tabNowMilliseconds)) now. Swipe down on the clip and press \(advice.tabMilliseconds > advice.tabNowMilliseconds ? "+" : "−") until it reads this.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier(TestID.Player.syncMeasureResultAdvice)
             }
             .padding(.vertical, 6)
             if result.spread > 0.005 {
                 Label("The beats disagreed by ±\(Self.ms(result.spread)). Hold the phone still, keep the television filling the picture, and measure again.", systemImage: "exclamationmark.triangle")
                     .font(.callout)
+                    .accessibilityIdentifier(TestID.Player.syncMeasureResultWarning)
             }
         } header: {
             Text("Result")
@@ -160,13 +170,16 @@ struct SyncMeasureView: View {
             Picker("Rate playing", selection: $manualFps) {
                 ForEach([24, 25, 30, 50, 60], id: \.self) { Text("\($0) fps").tag($0) }
             }
+            .accessibilityIdentifier(TestID.Player.syncMeasureManualRate)
             Stepper(value: $manualTab, in: -1000...1000, step: 5) {
                 LabeledContent("Sync tab reads", value: SyncAdvice.tabText(manualTab))
             }
+            .accessibilityIdentifier(TestID.Player.syncMeasureManualOffset)
             Button("Use these") {
                 capture.useManualCode(SyncCode(fps: manualFps, delayMilliseconds: -manualTab))
                 showsManual = false
             }
+            .accessibilityIdentifier(TestID.Player.syncMeasureManualUse)
         }
     }
 
@@ -176,26 +189,37 @@ struct SyncMeasureView: View {
         Section("Readings") {
             if let code = capture.code {
                 LabeledContent("Code on screen", value: "\(code.fps) fps, Sync tab \(SyncAdvice.tabText(-code.delayMilliseconds))")
+                    .accessibilityIdentifier(TestID.Player.syncMeasureReading("code"))
             }
             LabeledContent("Flashes seen", value: "\(capture.flashes)")
+                .accessibilityIdentifier(TestID.Player.syncMeasureReading("flashes"))
             LabeledContent("Beeps heard", value: "\(capture.beeps)")
+                .accessibilityIdentifier(TestID.Player.syncMeasureReading("beeps"))
             if !capture.camera.isEmpty {
                 LabeledContent("Camera", value: capture.camera)
+                    .accessibilityIdentifier(TestID.Player.syncMeasureReading("camera"))
             }
             LabeledContent("Microphone lag", value: Self.ms(capture.microphoneLatency))
+                .accessibilityIdentifier(TestID.Player.syncMeasureReading("microphoneLag"))
             LabeledContent("Sound travel", value: Self.ms(distance / Self.speedOfSound))
+                .accessibilityIdentifier(TestID.Player.syncMeasureReading("soundTravel"))
             if capture.droppedFrames > 0 {
                 LabeledContent("Frames dropped", value: "\(capture.droppedFrames)")
+                    .accessibilityIdentifier(TestID.Player.syncMeasureReading("framesDropped"))
             }
             if let result = capture.result {
                 LabeledContent("Median", value: Self.signedMs(result.residual))
+                    .accessibilityIdentifier(TestID.Player.syncMeasureReading("median"))
                 LabeledContent("Spread", value: "±\(Self.ms(result.spread))")
+                    .accessibilityIdentifier(TestID.Player.syncMeasureReading("spread"))
                 if let readout = result.readoutPerBand {
                     LabeledContent("Sensor readout", value: "\(Self.ms(abs(readout) * 8)) a frame")
+                        .accessibilityIdentifier(TestID.Player.syncMeasureReading("sensorReadout"))
                 }
                 ForEach(Array(result.pairs.enumerated()), id: \.offset) { index, pair in
                     LabeledContent("Beat \(index + 1)", value: Self.signedMs(pair.residual))
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier(TestID.Player.syncMeasureReading("beat\(index + 1)"))
                 }
             }
         }
