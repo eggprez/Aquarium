@@ -7,6 +7,7 @@ import XCTest
 final class WatchLibraryTests: WatchUITestCase {
     func testAudiobooksAndABooksPage() throws {
         let book = try WatchFixtures.require().book("FX Chaptered Audiobook")
+        try JellyfinAPI.signIn().setResume(book.id, seconds: 400)
         launchHome()
         open(TestID.Watch.rootDoor("books"))
         app.element(TestID.Watch.booksRoot).waitToExist()
@@ -156,7 +157,13 @@ final class WatchLibraryTests: WatchUITestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 30), "genres listed")
         open(first.identifier)
         app.element(TestID.Watch.collectionRoot).waitToExist()
-        XCTAssertTrue(app.elements(prefix: "watch.library.song.").firstMatch.waitForExistence(timeout: 30), "the genre's songs")
+        // Its songs, or its honest "Nothing here" when the server has none for it.
+        let songs = app.elements(prefix: "watch.library.song.").firstMatch
+        let empty = app.element(TestID.Watch.statusEmpty)
+        let end = Date().addingTimeInterval(30)
+        while !songs.exists && !empty.exists && Date() < end { Thread.sleep(forTimeInterval: 0.5) }
+        XCTAssertTrue(songs.exists || empty.exists, "the genre's songs, or that it has none")
+        XCTAssertFalse(app.element(TestID.Watch.statusError).exists, "no error")
     }
 
     func testAPlaylistsPage() throws {

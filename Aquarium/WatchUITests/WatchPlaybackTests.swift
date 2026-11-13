@@ -6,6 +6,13 @@
 import XCTest
 
 final class WatchPlaybackTests: WatchUITestCase {
+    /// Each test starts the book at 6:40, suite-reset's baseline, whatever
+    /// an earlier test (or a copy of the app still sending) left.
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        let book = try WatchFixtures.require().book("FX Chaptered Audiobook")
+        try JellyfinAPI.signIn().setResume(book.id, seconds: 400)
+    }
     private func elapsed() -> Double? { Self.seconds(text(TestID.Watch.nowPlayingElapsed)) }
 
     private func waitForElapsed(timeout: TimeInterval = 30, _ test: @escaping (Double) -> Bool) -> Double? {

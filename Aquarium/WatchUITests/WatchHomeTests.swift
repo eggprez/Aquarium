@@ -20,6 +20,7 @@ final class WatchHomeTests: WatchUITestCase {
     /// 6:40) is offered under Continue.
     func testTheBookInProgressIsOfferedToContinue() throws {
         let book = try WatchFixtures.require().book("FX Chaptered Audiobook")
+        try JellyfinAPI.signIn().setResume(book.id, seconds: 400)
         launchHome()
         let row = app.element(TestID.Watch.rootContinue(book.id))
         row.waitToExist(30)
