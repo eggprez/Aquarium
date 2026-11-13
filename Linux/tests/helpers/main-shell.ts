@@ -466,3 +466,67 @@ export function propSets(name: string): any[] {
     .filter((c) => c[0] === "set_property" && c[1] === name)
     .map((c) => c[2]);
 }
+
+// ---------- A world with something to play ----------
+
+export const EP1 = { ...EPISODE, Id: "ep-1", Name: "The First One", IndexNumber: 1, UserData: { Played: true } };
+export const EP3 = {
+  ...EPISODE,
+  Id: "ep-3",
+  Name: "The Third One",
+  IndexNumber: 3,
+  RunTimeTicks: 13_200_000_000,
+  ImageTags: { Primary: "p3" },
+};
+export const EP4 = { ...EPISODE, Id: "ep-4", Name: undefined, IndexNumber: undefined, RunTimeTicks: 0 };
+/** Season 1 of series-1, with EPISODE second. */
+export const SEASON = [EP1, EPISODE, EP3, EP4];
+
+export interface PlayWorld extends BootOptions {
+  /** Episodes of series-1 season-1 (a function may throw or hang). */
+  episodes?: any[] | (() => any);
+  /** MediaSegments answer. */
+  segments?: any[];
+  /** The Trickplay answer for the playing item. */
+  trickplay?: any;
+}
+
+/** The Jellyfin routes a playing episode needs: PlaybackInfo for any item,
+ *  its season, its segments and its trickplay. */
+export function playRoutes(w: PlayWorld): Array<[string | RegExp, any]> {
+  return [
+    ...(w.routes ?? []),
+    [/\/Items\/([^/]+)\/PlaybackInfo/, (a: any) => playbackInfo(/\/Items\/([^/]+)\//.exec(a.path)![1]!)],
+    [
+      /\/Shows\/series-1\/Episodes/,
+      () => {
+        const e = w.episodes ?? SEASON;
+        return { Items: typeof e === "function" ? e() : e };
+      },
+    ],
+    [/\/Shows\/series-1\/Seasons/, { Items: [{ Id: "season-1" }] }],
+    [/\/MediaSegments\//, { Items: w.segments ?? [] }],
+    [/\/Items\/[^/?]+\?.*Trickplay/, w.trickplay ?? {}],
+  ];
+}
+
+/** A shell whose server can play SEASON. */
+export async function bootPlayer(w: PlayWorld = {}): Promise<Shell> {
+  return bootShell({ ...w, routes: playRoutes(w) });
+}
+
+/** A shell with `item` (EPISODE by default) playing, two status ticks in:
+ *  the second arrives after the item's extras (segments, the next episode)
+ *  have been looked up, as it would a second later in the app. */
+export async function startPlaying(w: PlayWorld = {}, status: Record<string, any> = {}, item: any = EPISODE): Promise<Shell> {
+  const shell = await bootPlayer(w);
+  await shell.play(item, status);
+  await settle();
+  shell.status();
+  return shell;
+}
+
+/** mpv's track list, as `player-tracks` delivers it. */
+export function sendTracks(list: any[]): void {
+  emitEvent("player-tracks", list);
+}

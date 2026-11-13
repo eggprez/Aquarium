@@ -38,13 +38,19 @@ use tokio::sync::mpsc;
 /// mpv config dir shipped with the package (uosc UI + our control layout).
 /// Installed at /usr/share/aquarium/mpv, found relative to the executable.
 pub fn resolve_mpv_config_dir() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("AQUARIUM_MPV_CONFIG") {
+    config_dir_from(std::env::var("AQUARIUM_MPV_CONFIG").ok(), std::env::current_exe().ok())
+}
+
+/// [`resolve_mpv_config_dir`] with the environment and the executable's path
+/// passed in, so tests need not change the process environment.
+fn config_dir_from(env: Option<String>, exe: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(p) = env {
         let p = PathBuf::from(p);
         if p.is_dir() {
             return Some(p);
         }
     }
-    if let Ok(exe) = std::env::current_exe() {
+    if let Some(exe) = exe {
         if let Some(dir) = exe.parent() {
             let cand = dir.join("../share/aquarium/mpv");
             if cand.is_dir() {
@@ -70,7 +76,17 @@ pub fn remove_logs() {
 /// with this on holds a live token, so it must not be shared as it is.
 pub fn mpv_log_path() -> Option<PathBuf> {
     std::env::var_os("AQUARIUM_MPV_LOG")?;
-    let dir = crate::config::data_dir().join("mpv-logs");
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    new_log_in(&crate::config::data_dir().join("mpv-logs"), ts)
+}
+
+/// The part of [`mpv_log_path`] after the opt-in check: make `dir`, keep the
+/// 5 newest logs in it, and name a new one for `ts` (seconds).
+fn new_log_in(dir: &std::path::Path, ts: u64) -> Option<PathBuf> {
+    let dir = dir.to_path_buf();
     std::fs::create_dir_all(&dir).ok()?;
     // Prune: keep the 5 newest logs.
     if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -88,10 +104,6 @@ pub fn mpv_log_path() -> Option<PathBuf> {
             let _ = std::fs::remove_file(old.path());
         }
     }
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
     Some(dir.join(format!("mpv-{}.log", ts)))
 }
 
@@ -158,6 +170,12 @@ pub fn audio_devices() -> Vec<(String, String)> {
     }
     let value = node_to_json(&node);
     unsafe { libmpv2_sys::mpv_free_node_contents(&mut node) };
+    devices_from(&value)
+}
+
+/// `audio-device-list`, as JSON, to `(name, description)` pairs: entries
+/// without a name are dropped, and an empty description falls back to the name.
+fn devices_from(value: &Value) -> Vec<(String, String)> {
     value
         .as_array()
         .map(|devices| {
@@ -1083,6 +1101,390 @@ mod tests {
             .command(json!(["script-message-to", "uosc", "update-menu", "{}"]))
             .expect("message to a uosc loaded on demand");
         assert!(!session.ensure_ui(), "loaded twice");
+        let _ = session.command(json!(["quit"]));
+    }
+
+    // ------------------------------------------------------------------
+    // Headless tests added with the test suite. The ones that start a core
+    // use `vo=null`/`ao=null`, like the tests above.
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("aquarium-mpv-{tag}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn quiet_session() -> (Session, mpsc::UnboundedReceiver<Value>) {
+        Session::start(Options {
+            prefs: vec!["--ao=null".into(), "--vo=null".into()],
+            ..Options::default()
+        })
+        .expect("mpv core")
+    }
+
+    #[test]
+    fn the_config_dir_from_the_environment_wins_when_it_exists() {
+        let dir = temp_dir("cfg-env");
+        let exe = dir.join("bin/aquarium");
+        assert_eq!(
+            config_dir_from(Some(dir.to_string_lossy().into_owned()), Some(exe)),
+            Some(dir.clone())
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The package installs the config at /usr/share/aquarium/mpv next to
+    /// /usr/bin/aquarium; an `AQUARIUM_MPV_CONFIG` that is not a folder is
+    /// ignored rather than handed to mpv.
+    #[test]
+    fn the_packaged_config_dir_is_found_beside_the_executable() {
+        let base = temp_dir("cfg-pkg");
+        std::fs::create_dir_all(base.join("bin")).unwrap();
+        std::fs::create_dir_all(base.join("share/aquarium/mpv")).unwrap();
+        let exe = base.join("bin/aquarium");
+        let not_a_dir = base.join("missing").to_string_lossy().into_owned();
+        assert_eq!(
+            config_dir_from(Some(not_a_dir), Some(exe.clone())),
+            Some(base.join("share/aquarium/mpv").canonicalize().unwrap())
+        );
+        assert_eq!(config_dir_from(None, Some(exe)), base.join("share/aquarium/mpv").canonicalize().ok());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn no_config_dir_means_none() {
+        let base = temp_dir("cfg-none");
+        assert_eq!(config_dir_from(None, Some(base.join("bin/aquarium"))), None);
+        assert_eq!(config_dir_from(None, None), None);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// The log records the access token, so it is off unless asked for
+    /// (regression: f1e01de mpv's log is off unless AQUARIUM_MPV_LOG is set).
+    #[test]
+    fn the_mpv_log_is_off_without_the_opt_in() {
+        if std::env::var_os("AQUARIUM_MPV_LOG").is_some() {
+            eprintln!("AQUARIUM_MPV_LOG is set for this run; skipping");
+            return;
+        }
+        assert_eq!(mpv_log_path(), None);
+    }
+
+    #[test]
+    fn a_new_log_keeps_only_the_five_newest() {
+        let dir = temp_dir("logs");
+        for i in 0..7u64 {
+            let p = dir.join(format!("old-{i}.log"));
+            std::fs::write(&p, b"x").unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(&p)
+                .unwrap()
+                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000 + i))
+                .unwrap();
+        }
+        std::fs::write(dir.join("notes.txt"), b"keep").unwrap();
+        let path = new_log_in(&dir, 42).expect("a log path");
+        assert_eq!(path, dir.join("mpv-42.log"));
+        let mut left: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            vec!["notes.txt", "old-2.log", "old-3.log", "old-4.log", "old-5.log", "old-6.log"]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn new_log_in_makes_its_folder() {
+        let base = temp_dir("logs-new");
+        let dir = base.join("mpv-logs");
+        assert_eq!(new_log_in(&dir, 7), Some(dir.join("mpv-7.log")));
+        assert!(dir.is_dir());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Sign-out and launch delete every log (regression: f1e01de old logs go
+    /// at launch and sign-out).
+    #[test]
+    fn remove_logs_deletes_the_whole_folder() {
+        let _s = crate::test_support::sandbox();
+        let dir = crate::config::data_dir().join("mpv-logs");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("mpv-1.log"), b"Token=\"secret\"").unwrap();
+        remove_logs();
+        assert!(!dir.exists());
+        // Nothing there is not an error.
+        remove_logs();
+    }
+
+    #[test]
+    fn audio_devices_need_a_name_and_fall_back_to_it_for_a_description() {
+        let list = json!([
+            { "name": "auto", "description": "Autoselect device" },
+            { "name": "pipewire/alsa_output.hdmi", "description": "" },
+            { "name": "pulse/x" },
+            { "description": "no name" },
+            "not a map",
+        ]);
+        assert_eq!(
+            devices_from(&list),
+            vec![
+                ("auto".to_string(), "Autoselect device".to_string()),
+                ("pipewire/alsa_output.hdmi".to_string(), "pipewire/alsa_output.hdmi".to_string()),
+                ("pulse/x".to_string(), "pulse/x".to_string()),
+            ]
+        );
+        assert!(devices_from(&json!(null)).is_empty());
+        assert!(devices_from(&json!({ "name": "x" })).is_empty());
+    }
+
+    #[test]
+    fn runtime_version_is_asked_once_and_kept() {
+        assert_eq!(runtime_version(), runtime_version());
+    }
+
+    #[test]
+    fn check_passes_counts_and_names_errors() {
+        assert_eq!(check(0), Ok(()));
+        assert_eq!(check(3), Ok(()));
+        let e = check(libmpv2_sys::mpv_error_MPV_ERROR_PROPERTY_NOT_FOUND).unwrap_err();
+        assert_eq!(e, libmpv2_sys::mpv_error_str(libmpv2_sys::mpv_error_MPV_ERROR_PROPERTY_NOT_FOUND));
+        assert!(!e.is_empty());
+    }
+
+    /// mpv's own JSON writer has no NaN or infinity, and neither may ours:
+    /// serde_json would otherwise have nothing to write.
+    #[test]
+    fn doubles_json_cannot_hold_become_null() {
+        for d in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let node = libmpv2_sys::mpv_node {
+                u: libmpv2_sys::mpv_node__bindgen_ty_1 { double_: d },
+                format: libmpv2_sys::mpv_format_MPV_FORMAT_DOUBLE,
+            };
+            assert_eq!(node_to_json(&node), Value::Null);
+        }
+    }
+
+    #[test]
+    fn node_shapes_json_has_no_spelling_for() {
+        // A flag is any non-zero int.
+        let flag = libmpv2_sys::mpv_node {
+            u: libmpv2_sys::mpv_node__bindgen_ty_1 { flag: 2 },
+            format: libmpv2_sys::mpv_format_MPV_FORMAT_FLAG,
+        };
+        assert_eq!(node_to_json(&flag), json!(true));
+        // Byte arrays and NONE are written as null, as mpv does.
+        let bytes = libmpv2_sys::mpv_node {
+            u: libmpv2_sys::mpv_node__bindgen_ty_1 { int64: 0 },
+            format: libmpv2_sys::mpv_format_MPV_FORMAT_BYTE_ARRAY,
+        };
+        assert_eq!(node_to_json(&bytes), Value::Null);
+        assert_eq!(node_to_json(&empty_node()), Value::Null);
+        // A null string pointer reads as empty rather than crashing.
+        let null_string = libmpv2_sys::mpv_node {
+            u: libmpv2_sys::mpv_node__bindgen_ty_1 { string: std::ptr::null_mut() },
+            format: libmpv2_sys::mpv_format_MPV_FORMAT_STRING,
+        };
+        assert_eq!(node_to_json(&null_string), json!(""));
+    }
+
+    #[test]
+    fn null_or_odd_lists_read_as_empty_or_indexed() {
+        let null_array = libmpv2_sys::mpv_node {
+            u: libmpv2_sys::mpv_node__bindgen_ty_1 { list: std::ptr::null_mut() },
+            format: libmpv2_sys::mpv_format_MPV_FORMAT_NODE_ARRAY,
+        };
+        assert_eq!(node_to_json(&null_array), json!([]));
+        let null_map = libmpv2_sys::mpv_node {
+            u: libmpv2_sys::mpv_node__bindgen_ty_1 { list: std::ptr::null_mut() },
+            format: libmpv2_sys::mpv_format_MPV_FORMAT_NODE_MAP,
+        };
+        assert_eq!(node_to_json(&null_map), json!({}));
+
+        // A map with no key array is keyed by position.
+        let mut arena = Arena::default();
+        let mut values = [arena.node(&json!(1)), arena.node(&json!("x"))];
+        let mut list = libmpv2_sys::mpv_node_list {
+            num: 2,
+            values: values.as_mut_ptr(),
+            keys: std::ptr::null_mut(),
+        };
+        let keyless = libmpv2_sys::mpv_node {
+            u: libmpv2_sys::mpv_node__bindgen_ty_1 { list: &mut list },
+            format: libmpv2_sys::mpv_format_MPV_FORMAT_NODE_MAP,
+        };
+        assert_eq!(node_to_json(&keyless), json!({ "0": 1, "1": "x" }));
+
+        // A negative count is treated as none.
+        let mut negative = libmpv2_sys::mpv_node_list {
+            num: -3,
+            values: values.as_mut_ptr(),
+            keys: std::ptr::null_mut(),
+        };
+        let node = libmpv2_sys::mpv_node {
+            u: libmpv2_sys::mpv_node__bindgen_ty_1 { list: &mut negative },
+            format: libmpv2_sys::mpv_format_MPV_FORMAT_NODE_ARRAY,
+        };
+        assert_eq!(node_to_json(&node), json!([]));
+    }
+
+    /// A NUL can't cross the C API; the argument is cut there, as C would.
+    #[test]
+    fn a_nul_in_an_argument_truncates_it() {
+        let mut arena = Arena::default();
+        let node = arena.node(&json!("ab\u{0}cd"));
+        assert_eq!(node_to_json(&node), json!("ab"));
+        let node = arena.node(&json!({ "k\u{0}ey": "v" }));
+        assert_eq!(node_to_json(&node), json!({ "k": "v" }));
+    }
+
+    /// Strings and child lists are boxed so no pointer moves while the tree
+    /// is still being built; a large command exercises the growth.
+    #[test]
+    fn a_large_tree_keeps_every_pointer_valid() {
+        let items: Vec<Value> = (0..500)
+            .map(|i| json!({ "name": format!("item-{i}"), "list": [i, format!("s{i}"), [true, null]] }))
+            .collect();
+        let v = Value::Array(items);
+        let mut arena = Arena::default();
+        let node = arena.node(&v);
+        assert_eq!(node_to_json(&node), v);
+    }
+
+    #[test]
+    fn the_handle_is_the_same_core() {
+        let (session, _rx) = quiet_session();
+        assert!(Arc::ptr_eq(&session.handle(), &session.handle()));
+        let _ = session.command(json!(["quit"]));
+    }
+
+    /// The two IPC-only commands refuse malformed arguments with a message
+    /// rather than passing them to mpv.
+    #[test]
+    fn ipc_only_commands_check_their_arguments() {
+        let (session, _rx) = quiet_session();
+        let err = |cmd: Value| session.command(cmd).unwrap_err();
+        assert!(err(json!(["observe_property", "x", "volume"])).contains("bad id"));
+        assert!(err(json!(["observe_property", 1])).contains("bad name"));
+        assert!(err(json!(["observe_property_string", 1, 5])).contains("bad name"));
+        assert!(err(json!(["set_property"])).contains("set_property: bad name"));
+        assert!(err(json!(["set_property", 3, 1])).contains("set_property: bad name"));
+        assert!(err(json!(["unobserve_property", "x"])).contains("bad id"));
+        // Removing an observation that doesn't exist removes nothing, which
+        // is a success (the count, 0), not an error code.
+        assert_eq!(session.command(json!(["unobserve_property", 99])), Ok(()));
+        assert_eq!(session.command(json!(["observe_property_string", 5, "volume"])), Ok(()));
+        assert_eq!(session.command(json!(["unobserve_property", 5])), Ok(()));
+        // An unknown command is mpv's error, not a panic.
+        assert!(session.command(json!(["no-such-command"])).is_err());
+        let _ = session.command(json!(["quit"]));
+    }
+
+    /// The `{"command": [...]}` envelope the supervisor queues reaches the
+    /// same `mpv_set_property` mapping (CLAUDE.md invariant).
+    #[test]
+    fn set_property_in_an_envelope_is_still_a_property_write() {
+        let (session, _rx) = quiet_session();
+        session
+            .command(json!({ "command": ["set_property", "volume", 61] }))
+            .expect("enveloped set_property");
+        assert_eq!(session.mpv.get_property::<f64>("volume").unwrap(), 61.0);
+        let _ = session.command(json!(["quit"]));
+    }
+
+    /// A value of a type the property won't take is retried as text through
+    /// the option parser, booleans spelled the way mpv spells them.
+    #[test]
+    fn set_property_retries_a_mistyped_value_as_text() {
+        let (session, _rx) = quiet_session();
+        session.command(json!(["set_property", "hwdec", true])).expect("hwdec from a bool");
+        assert_eq!(session.get_string("hwdec").as_deref(), Some("yes"));
+        session.command(json!(["set_property", "loop-file", "inf"])).expect("loop-file from text");
+        assert_eq!(session.get_string("loop-file").as_deref(), Some("inf"));
+        session.command(json!(["set_property", "speed", 1.5])).expect("speed from a double");
+        assert_eq!(session.mpv.get_property::<f64>("speed").unwrap(), 1.5);
+        let _ = session.command(json!(["quit"]));
+    }
+
+    #[test]
+    fn get_string_reads_display_strings_and_none_for_unknown_ones() {
+        let (session, _rx) = quiet_session();
+        assert!(session.get_string("mpv-version").is_some_and(|v| v.contains("mpv")));
+        assert_eq!(session.get_string("no-such-property"), None);
+        assert_eq!(session.get_string("bad\u{0}name"), None);
+        let _ = session.command(json!(["quit"]));
+    }
+
+    /// mpv checks certificates and only then gets the token (regression:
+    /// f1e01de mpv now verifies HTTPS certificates).
+    #[test]
+    fn tls_is_verified_against_the_system_bundle() {
+        let (session, _rx) = quiet_session();
+        assert_eq!(session.get_string("tls-verify").as_deref(), Some("yes"));
+        let bundle = "/etc/ssl/certs/ca-certificates.crt";
+        if std::path::Path::new(bundle).exists() {
+            assert_eq!(session.get_string("tls-ca-file").as_deref(), Some(bundle));
+        }
+        let _ = session.command(json!(["quit"]));
+    }
+
+    #[test]
+    fn a_session_without_a_bundled_ui_never_loads_one() {
+        let (session, _rx) = quiet_session();
+        if session.ui_script.is_some() {
+            eprintln!("bundled uosc present; covered by uosc_loads_on_first_use");
+        } else {
+            assert!(!session.ensure_ui());
+            // Addressing uosc must not fail just because there is none to load.
+            let _ = session.command(json!(["script-binding", "uosc/flash-pause-indicator"]));
+            assert!(!session.ensure_ui());
+        }
+        let _ = session.command(json!(["quit"]));
+    }
+
+    /// The event thread's one-second wait is how it notices the supervisor
+    /// has gone: it then lets go of its handle, so the core can be destroyed
+    /// even without a shutdown event.
+    #[test]
+    fn the_event_thread_lets_go_once_the_receiver_is_dropped() {
+        let (session, rx) = quiet_session();
+        let handle = session.handle();
+        drop(rx);
+        let started = std::time::Instant::now();
+        // session.mpv + `handle`; the event thread's own reference is gone.
+        while Arc::strong_count(&handle) > 2 {
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(20),
+                "event thread still holds the core"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    /// Volume is clamped to mpv's 0–130 and the start point is relative.
+    #[test]
+    fn options_are_clamped_and_formatted() {
+        let (session, _rx) = Session::start(Options {
+            volume: 400.0,
+            start: Some(12.345),
+            prefs: vec!["--ao=null".into(), "--vo=null".into(), "not-an-option".into()],
+            ..Options::default()
+        })
+        .expect("mpv core");
+        assert_eq!(session.mpv.get_property::<f64>("volume").unwrap(), 130.0);
+        assert_eq!(session.get_string("start").as_deref(), Some("+12.3"));
+        let _ = session.command(json!(["quit"]));
+        let (session, _rx) = Session::start(Options {
+            volume: -5.0,
+            prefs: vec!["--ao=null".into(), "--vo=null".into()],
+            ..Options::default()
+        })
+        .expect("mpv core");
+        assert_eq!(session.mpv.get_property::<f64>("volume").unwrap(), 0.0);
         let _ = session.command(json!(["quit"]));
     }
 }

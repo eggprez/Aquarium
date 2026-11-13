@@ -104,3 +104,78 @@ fn apply(interface: &str, changed: &PropMap) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dbus::arg::{RefArg, Variant};
+
+    /// The two flags are process-wide; these tests take turns with them.
+    static FLAGS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn props(key: &str, value: Box<dyn RefArg>) -> PropMap {
+        let mut m = PropMap::new();
+        m.insert(key.to_string(), Variant(value));
+        m
+    }
+
+    fn reset() {
+        ON_BATTERY.store(false, Ordering::SeqCst);
+        POWER_SAVER.store(false, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn battery_or_power_saver_is_low_power() {
+        let _g = FLAGS.lock().unwrap_or_else(|e| e.into_inner());
+        reset();
+        assert!(!low_power());
+        apply(UPOWER, &props("OnBattery", Box::new(true)));
+        assert!(low_power());
+        apply(UPOWER, &props("OnBattery", Box::new(false)));
+        assert!(!low_power());
+        for (name, _) in PROFILES {
+            apply(name, &props("ActiveProfile", Box::new("power-saver".to_string())));
+            assert!(low_power(), "{name}");
+            apply(name, &props("ActiveProfile", Box::new("balanced".to_string())));
+            assert!(!low_power(), "{name}");
+        }
+        reset();
+    }
+
+    /// A change that doesn't carry the property, or comes from some other
+    /// interface, leaves the answer as it was.
+    #[test]
+    fn unrelated_changes_change_nothing() {
+        let _g = FLAGS.lock().unwrap_or_else(|e| e.into_inner());
+        reset();
+        apply(UPOWER, &props("OnBattery", Box::new(true)));
+        apply(UPOWER, &props("Percentage", Box::new(50.0f64)));
+        assert!(low_power());
+        apply("org.example.Other", &props("OnBattery", Box::new(false)));
+        assert!(low_power());
+        // A profile name on the UPower interface is not a profile change.
+        apply(UPOWER, &props("ActiveProfile", Box::new("performance".to_string())));
+        assert!(ON_BATTERY.load(Ordering::SeqCst) && !POWER_SAVER.load(Ordering::SeqCst));
+        // A wrongly typed value is ignored.
+        apply(UPOWER, &props("OnBattery", Box::new("no".to_string())));
+        assert!(low_power());
+        reset();
+    }
+
+    #[test]
+    fn both_power_profiles_daemon_names_are_watched() {
+        let names: Vec<&str> = PROFILES.iter().map(|(n, _)| *n).collect();
+        assert_eq!(names, ["org.freedesktop.UPower.PowerProfiles", "net.hadess.PowerProfiles"]);
+        assert_eq!(UPOWER_PATH, "/org/freedesktop/UPower");
+    }
+
+    /// Without a system bus (the test sandbox has none) the watcher thread
+    /// gives up quietly and nothing reads as low-power.
+    #[test]
+    fn no_system_bus_is_not_low_power() {
+        let _g = FLAGS.lock().unwrap_or_else(|e| e.into_inner());
+        reset();
+        assert!(Connection::new_system().is_err() || crate::test_support::real_dbus());
+        assert!(!low_power());
+    }
+}

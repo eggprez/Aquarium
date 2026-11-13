@@ -23,6 +23,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { afterAll } from "vitest";
 import { onInvokes } from "./tauri";
 
 export interface QaAccount {
@@ -49,7 +50,12 @@ export interface Qa {
 }
 
 const SERVER = (process.env.AQUARIUM_QA_SERVER ?? "http://127.0.0.1:8196").replace(/\/+$/, "");
-const DEVICE_ID = "aquarium-linux-vitest";
+// A device id of its own for each test file that signs in. Jellyfin revokes
+// every other token a device id holds for the account when that id signs in
+// again, so files run in parallel (or two runs at once) sharing one id signed
+// each other out mid-run. Each file signs its session out when it finishes
+// (below), so the ids leave no device behind on the server.
+const DEVICE_ID = `aquarium-linux-vitest-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 
 function qaDir(): string {
   if (process.env.AQUARIUM_QA_DIR) return process.env.AQUARIUM_QA_DIR;
@@ -232,6 +238,16 @@ async function connect(): Promise<Qa | null> {
 
 /** The connection, or null when the QA server is unreachable or no account is known. */
 export const qa: Qa | null = await connect();
+
+if (qa) {
+  try {
+    afterAll(async () => {
+      await qa.request("/Sessions/Logout", "POST").catch(() => {});
+    });
+  } catch {
+    /* imported outside a test file: nothing to sign out at the end of */
+  }
+}
 
 /** True when the tests may change server state with the signed-in account. */
 export const qaWritable = !!qa?.account.writable;

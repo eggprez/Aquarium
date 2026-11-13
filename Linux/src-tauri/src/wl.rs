@@ -1197,4 +1197,116 @@ mod tests {
         }
         assert!(clock.pending(), "stale answer cleared the live request");
     }
+
+    // ------------------------------------------------------------------
+    // Added with the test suite.
+
+    fn name(p: *const c_char) -> String {
+        unsafe { CStr::from_ptr(p) }.to_str().unwrap().to_string()
+    }
+
+    /// Every hand-written descriptor: the counts match the arrays, and each
+    /// message's `types` has an entry for every argument in its signature,
+    /// which libwayland indexes per argument.
+    #[test]
+    fn hand_written_interfaces_are_self_consistent() {
+        let ifaces: [(&wl_interface, &[wl_message], &[wl_message]); 4] = [
+            (&WP_VIEWPORTER_INTERFACE, &WP_VIEWPORTER_METHODS, &[]),
+            (&WP_VIEWPORT_INTERFACE, &WP_VIEWPORT_METHODS, &[]),
+            (&WP_PRESENTATION_INTERFACE, &WP_PRESENTATION_METHODS, &WP_PRESENTATION_EVENTS),
+            (&WP_PRESENTATION_FEEDBACK_INTERFACE, &[], &WP_PRESENTATION_FEEDBACK_EVENTS),
+        ];
+        let type_slots = |m: &wl_message| -> usize {
+            let t = m.types;
+            [
+                (NULL_TYPES.0.as_ptr(), 4),
+                (SEVEN_NULL_TYPES.0.as_ptr(), 7),
+                (GET_VIEWPORT_TYPES.0.as_ptr(), 2),
+                (FEEDBACK_TYPES.0.as_ptr(), 2),
+            ]
+            .iter()
+            .find(|(p, _)| *p == t)
+            .map(|(_, n)| *n)
+            .unwrap_or_else(|| panic!("{} uses an unknown types array", name(m.name)))
+        };
+        for (iface, methods, events) in ifaces {
+            assert_eq!(iface.method_count as usize, methods.len(), "{}", name(iface.name));
+            assert_eq!(iface.event_count as usize, events.len(), "{}", name(iface.name));
+            if !methods.is_empty() {
+                assert_eq!(iface.methods, methods.as_ptr());
+            }
+            if !events.is_empty() {
+                assert_eq!(iface.events, events.as_ptr());
+            }
+            assert_eq!(iface.version, 1);
+            for m in methods.iter().chain(events.iter()) {
+                let args = name(m.signature).chars().filter(|c| c.is_ascii_alphabetic()).count();
+                assert!(type_slots(m) >= args, "{}.{}", name(iface.name), name(m.name));
+            }
+        }
+        assert_eq!(name(WP_VIEWPORT_METHODS[2].name), "set_destination");
+        assert_eq!(name(WP_VIEWPORT_METHODS[2].signature), "ii");
+        assert_eq!(name(WP_PRESENTATION_FEEDBACK_INTERFACE.name), "wp_presentation_feedback");
+    }
+
+    /// The listener structs are read by libwayland as arrays of function
+    /// pointers, one per event, in protocol order.
+    #[test]
+    fn listeners_have_one_slot_per_event() {
+        let fp = std::mem::size_of::<usize>();
+        assert_eq!(std::mem::size_of::<FeedbackListener>(), 3 * fp);
+        assert_eq!(std::mem::size_of::<CallbackListener>(), fp);
+        assert_eq!(std::mem::size_of::<RegistryListener>(), 2 * fp);
+    }
+
+    /// The registry listener keeps the four globals the video surface needs
+    /// and ignores the rest.
+    #[test]
+    fn the_registry_listener_records_what_it_needs() {
+        let mut found = Found::default();
+        let data = &mut found as *mut Found as *mut c_void;
+        let announce = |iface: &str, n: u32, v: u32| {
+            let c = std::ffi::CString::new(iface).unwrap();
+            unsafe { on_global(data, ptr::null_mut(), n, c.as_ptr(), v) };
+        };
+        announce("wl_compositor", 1, 6);
+        announce("wl_seat", 2, 9);
+        announce("wl_subcompositor", 3, 1);
+        announce("wp_viewporter", 4, 1);
+        announce("wp_presentation", 5, 2);
+        announce("wl_compositorX", 6, 1);
+        unsafe { on_global_remove(data, ptr::null_mut(), 2) };
+        assert_eq!(found.compositor, Some((1, 6)));
+        assert_eq!(found.subcompositor, Some((3, 1)));
+        assert_eq!(found.viewporter, Some((4, 1)));
+        assert_eq!(found.presentation, Some((5, 2)));
+    }
+
+    #[test]
+    fn a_null_display_is_refused() {
+        let err = Globals::new(ptr::null_mut()).err().expect("no globals without a display");
+        assert!(err == "no wl_display" || err == "libwayland-client is not available", "{err}");
+    }
+
+    #[test]
+    fn a_fresh_clock_may_ask_at_once() {
+        let clock = FrameClock::new();
+        assert!(!clock.pending());
+        assert!(clock.requested_at.lock().unwrap().elapsed() >= REQUEST_EVERY);
+        assert!(OVERDUE_AFTER > REQUEST_EVERY);
+    }
+
+    #[test]
+    fn presentation_counters_only_go_up() {
+        let (a, b, c) = presentation_stats();
+        let (a2, b2, c2) = presentation_stats();
+        assert!(a2 >= a && b2 >= b && c2 >= c);
+        assert!(b <= a, "zero-copy frames are a subset of presented ones");
+        assert_eq!(PRESENTATION_KIND_ZERO_COPY, 0x8);
+    }
+
+    #[test]
+    fn available_is_api_loaded() {
+        assert_eq!(available(), api().is_some());
+    }
 }

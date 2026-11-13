@@ -47,7 +47,7 @@ const TRACKLIST_IFACE: &str = "org.mpris.MediaPlayer2.TrackList";
 
 /// Music is playing (audio.rs) and video isn't: the shell's controls are the
 /// music player's.
-fn music(app: &AppHandle) -> Option<tauri::State<'_, AudioPlayer>> {
+fn music<R: tauri::Runtime>(app: &AppHandle<R>) -> Option<tauri::State<'_, AudioPlayer>> {
     let video = app.try_state::<Player>().map(|p| p.is_active()).unwrap_or(false);
     if video {
         return None;
@@ -92,7 +92,7 @@ fn dispatch(app: &AppHandle, cmd: serde_json::Value) {
     });
 }
 
-fn status_of(app: &AppHandle) -> crate::player::Status {
+fn status_of<R: tauri::Runtime>(app: &AppHandle<R>) -> crate::player::Status {
     if let Some(audio) = music(app) {
         let a = audio.status();
         return Status {
@@ -124,11 +124,11 @@ fn playback_status_of(st: &Status) -> String {
     .to_string()
 }
 
-fn playback_status(app: &AppHandle) -> String {
+fn playback_status<R: tauri::Runtime>(app: &AppHandle<R>) -> String {
     playback_status_of(&status_of(app))
 }
 
-fn next_available(app: &AppHandle) -> bool {
+fn next_available<R: tauri::Runtime>(app: &AppHandle<R>) -> bool {
     if let Some(audio) = music(app) {
         return audio.can_next();
     }
@@ -178,28 +178,7 @@ fn announce(app: &AppHandle, c: &LocalConnection, last: &mut Option<Announced>) 
         queue,
     );
 
-    let changed_keys: Vec<&str> = match last.as_ref() {
-        None => vec!["PlaybackStatus", "Metadata", "Volume", "CanGoNext", "Tracks"],
-        Some(prev) => {
-            let mut keys = Vec::new();
-            if prev.0 != now.0 {
-                keys.push("PlaybackStatus");
-            }
-            if prev.1 != now.1 {
-                keys.push("Metadata");
-            }
-            if (prev.2 - now.2).abs() > 0.5 {
-                keys.push("Volume");
-            }
-            if prev.3 != now.3 {
-                keys.push("CanGoNext");
-            }
-            if prev.4 != now.4 {
-                keys.push("Tracks");
-            }
-            keys
-        }
-    };
+    let changed_keys = changed_keys(last.as_ref(), &now);
     if changed_keys.is_empty() {
         return;
     }
@@ -250,6 +229,34 @@ fn announce(app: &AppHandle, c: &LocalConnection, last: &mut Option<Announced>) 
     *last = Some(now);
 }
 
+/// Which of the announced values differ between `last` and `now`; all of them
+/// when nothing has been announced yet. Volume moves of half a percent or less
+/// are not worth a signal.
+fn changed_keys(last: Option<&Announced>, now: &Announced) -> Vec<&'static str> {
+    match last {
+        None => vec!["PlaybackStatus", "Metadata", "Volume", "CanGoNext", "Tracks"],
+        Some(prev) => {
+            let mut keys = Vec::new();
+            if prev.0 != now.0 {
+                keys.push("PlaybackStatus");
+            }
+            if prev.1 != now.1 {
+                keys.push("Metadata");
+            }
+            if (prev.2 - now.2).abs() > 0.5 {
+                keys.push("Volume");
+            }
+            if prev.3 != now.3 {
+                keys.push("CanGoNext");
+            }
+            if prev.4 != now.4 {
+                keys.push("Tracks");
+            }
+            keys
+        }
+    }
+}
+
 /// Sleep until D-Bus has something to read or `notify` pokes us, whichever
 /// comes first. The timeout is not a tick — nothing is polled for here — it's
 /// how long it takes to notice a bus that has gone away.
@@ -297,7 +304,7 @@ fn queue_path(index: usize, item_id: &str) -> dbus::Path<'static> {
 }
 
 /// The music queue's track ids and the current one's.
-fn track_ids(app: &AppHandle) -> (Vec<dbus::Path<'static>>, dbus::Path<'static>) {
+fn track_ids<R: tauri::Runtime>(app: &AppHandle<R>) -> (Vec<dbus::Path<'static>>, dbus::Path<'static>) {
     let Some(audio) = music(app) else {
         return (Vec::new(), dbus::Path::from("/org/mpris/MediaPlayer2/TrackList/NoTrack"));
     };
@@ -337,7 +344,7 @@ fn track_metadata(t: &AudioTrack, trackid: dbus::Path<'static>, duration: f64) -
     m
 }
 
-fn metadata(app: &AppHandle) -> Metadata {
+fn metadata<R: tauri::Runtime>(app: &AppHandle<R>) -> Metadata {
     if let Some(audio) = music(app) {
         if let Some(t) = audio.current() {
             let (_, current) = track_ids(app);
@@ -369,6 +376,19 @@ fn metadata(app: &AppHandle) -> Metadata {
     m
 }
 
+/// The bus name to take, and whether this is a test instance: any
+/// `AQUARIUM_TEST_*` variable in `vars` makes it one, and a test instance takes
+/// `<BUS_NAME>.instance<pid>`.
+fn own_name(mut vars: impl Iterator<Item = (String, String)>, pid: u32) -> (String, bool) {
+    let testing = vars.any(|(k, _)| k.starts_with("AQUARIUM_TEST_"));
+    let name = if testing {
+        format!("{}.instance{}", BUS_NAME, pid)
+    } else {
+        BUS_NAME.to_string()
+    };
+    (name, testing)
+}
+
 fn serve(app: AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // Built from a Channel rather than `new_session` so the watch is enabled:
     // that's what exposes the socket's fd, and the fd is what lets this thread
@@ -384,12 +404,7 @@ fn serve(app: AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // A test instance (any AQUARIUM_TEST_* hook set) takes an instance name
     // instead, as the spec allows, so it never takes the shell's controls
     // away from the copy of the app the user is actually running.
-    let testing = std::env::vars().any(|(k, _)| k.starts_with("AQUARIUM_TEST_"));
-    let name = if testing {
-        format!("{}.instance{}", BUS_NAME, std::process::id())
-    } else {
-        BUS_NAME.to_string()
-    };
+    let (name, testing) = own_name(std::env::vars(), std::process::id());
     c.request_name(name.as_str(), false, !testing, false)?;
 
     let mut cr = Crossroads::new();
@@ -591,5 +606,251 @@ fn serve(app: AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         while c.process(Duration::ZERO)? {}
         announce(&app, &c, &mut last);
         park(dbus_fd, wake_fd);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio::AudioStatus;
+
+    fn mock() -> tauri::App<tauri::test::MockRuntime> {
+        tauri::test::mock_builder()
+            .manage(Player::new())
+            .manage(AudioPlayer::new())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app")
+    }
+
+    fn song(id: &str) -> AudioTrack {
+        AudioTrack {
+            item_id: id.into(),
+            url: format!("http://srv/Audio/{id}"),
+            title: format!("Title {id}"),
+            artist: "Artist".into(),
+            album: "Album".into(),
+            album_artist: "Band".into(),
+            art_url: Some(format!("http://srv/Items/{id}/Images/Primary")),
+            duration: 200.0,
+            track_number: Some(3),
+            is_local: false,
+        }
+    }
+
+    fn text(m: &Metadata, key: &str) -> Option<String> {
+        m.get(key).and_then(|v| v.0.as_str()).map(str::to_string)
+    }
+
+    fn int(m: &Metadata, key: &str) -> Option<i64> {
+        m.get(key).and_then(|v| v.0.as_i64())
+    }
+
+    fn list(m: &Metadata, key: &str) -> Option<Vec<String>> {
+        m.get(key).and_then(|v| v.0.as_iter()).map(|it| it.filter_map(|s| s.as_str().map(str::to_string)).collect())
+    }
+
+    #[test]
+    fn playback_status_names() {
+        let mut st = Status::default();
+        assert_eq!(playback_status_of(&st), "Stopped");
+        st.active = true;
+        assert_eq!(playback_status_of(&st), "Playing");
+        st.paused = true;
+        assert_eq!(playback_status_of(&st), "Paused");
+        st.active = false;
+        assert_eq!(playback_status_of(&st), "Stopped");
+    }
+
+    /// A Jellyfin id that isn't a valid D-Bus path element would make the
+    /// whole Metadata map unsendable.
+    #[test]
+    fn track_paths_are_always_valid_object_paths() {
+        assert_eq!(&*track_path("abc123"), "/org/mpris/MediaPlayer2/aquarium/abc123");
+        assert_eq!(&*track_path("a-b.c/d é"), "/org/mpris/MediaPlayer2/aquarium/a_b_c_d__");
+        assert_eq!(&*track_path(""), "/org/mpris/MediaPlayer2/aquarium/notrack");
+        // The same song twice in the queue is two tracks.
+        assert_eq!(&*queue_path(0, "s1"), "/org/mpris/MediaPlayer2/aquarium/q0_s1");
+        assert_ne!(queue_path(0, "s1"), queue_path(1, "s1"));
+    }
+
+    #[test]
+    fn song_metadata_has_what_the_shell_shows() {
+        let t = song("s1");
+        let m = track_metadata(&t, track_path("s1"), 0.0);
+        assert_eq!(text(&m, "mpris:trackid").as_deref(), Some("/org/mpris/MediaPlayer2/aquarium/s1"));
+        assert_eq!(int(&m, "mpris:length"), Some(200_000_000));
+        assert_eq!(text(&m, "xesam:title").as_deref(), Some("Title s1"));
+        assert_eq!(list(&m, "xesam:artist"), Some(vec!["Artist".to_string()]));
+        assert_eq!(text(&m, "xesam:album").as_deref(), Some("Album"));
+        assert_eq!(list(&m, "xesam:albumArtist"), Some(vec!["Band".to_string()]));
+        assert_eq!(int(&m, "xesam:trackNumber"), Some(3));
+        assert_eq!(text(&m, "mpris:artUrl").as_deref(), Some("http://srv/Items/s1/Images/Primary"));
+        // mpv's measured duration wins over the server's when it has one.
+        let m = track_metadata(&t, track_path("s1"), 201.5);
+        assert_eq!(int(&m, "mpris:length"), Some(201_500_000));
+    }
+
+    #[test]
+    fn empty_song_fields_are_left_out() {
+        let t = AudioTrack { item_id: "x".into(), art_url: Some(String::new()), ..Default::default() };
+        let m = track_metadata(&t, track_path("x"), 0.0);
+        for key in ["mpris:length", "xesam:artist", "xesam:album", "xesam:albumArtist", "xesam:trackNumber", "mpris:artUrl"] {
+            assert!(!m.contains_key(key), "{key} should be absent");
+        }
+        assert_eq!(text(&m, "xesam:title").as_deref(), Some(""));
+    }
+
+    fn announced(status: &str, meta: &str, volume: f64, next: bool, queue: &str) -> Announced {
+        (status.into(), meta.into(), volume, next, queue.into())
+    }
+
+    #[test]
+    fn the_first_announcement_sends_everything() {
+        let now = announced("Playing", "a|T", 100.0, false, "");
+        assert_eq!(changed_keys(None, &now), vec!["PlaybackStatus", "Metadata", "Volume", "CanGoNext", "Tracks"]);
+    }
+
+    #[test]
+    fn only_what_moved_is_announced() {
+        let prev = announced("Playing", "a|T", 100.0, false, "a,b");
+        assert!(changed_keys(Some(&prev), &prev).is_empty(), "nothing moved, nothing sent");
+        assert_eq!(changed_keys(Some(&prev), &announced("Paused", "a|T", 100.0, false, "a,b")), vec!["PlaybackStatus"]);
+        assert_eq!(changed_keys(Some(&prev), &announced("Playing", "b|U", 100.0, false, "a,b")), vec!["Metadata"]);
+        assert_eq!(changed_keys(Some(&prev), &announced("Playing", "a|T", 100.0, true, "a,b")), vec!["CanGoNext"]);
+        assert_eq!(changed_keys(Some(&prev), &announced("Playing", "a|T", 100.0, false, "a,b,c")), vec!["Tracks"]);
+        // Half a percent of volume is not worth waking every listener.
+        assert!(changed_keys(Some(&prev), &announced("Playing", "a|T", 99.5, false, "a,b")).is_empty());
+        assert_eq!(changed_keys(Some(&prev), &announced("Playing", "a|T", 99.4, false, "a,b")), vec!["Volume"]);
+        assert_eq!(
+            changed_keys(Some(&prev), &announced("Stopped", "", 0.0, true, "")),
+            vec!["PlaybackStatus", "Metadata", "Volume", "CanGoNext", "Tracks"]
+        );
+    }
+
+    /// A test instance takes an instance name, so it never takes the shell's
+    /// controls from the copy the user is running (regression: 32f1e9f test
+    /// instances take an MPRIS instance name).
+    #[test]
+    fn a_test_instance_takes_its_own_bus_name() {
+        let vars = |keys: &[&str]| keys.iter().map(|k| (k.to_string(), "1".to_string())).collect::<Vec<_>>().into_iter();
+        assert_eq!(own_name(vars(&["HOME", "PATH"]), 42), (BUS_NAME.to_string(), false));
+        assert_eq!(
+            own_name(vars(&["HOME", "AQUARIUM_TEST_PLAY"]), 42),
+            ("org.mpris.MediaPlayer2.aquarium.instance42".to_string(), true)
+        );
+        // Other Aquarium variables are not test hooks.
+        assert_eq!(own_name(vars(&["AQUARIUM_MPV_LOG"]), 1).1, false);
+        assert!(dbus::strings::BusName::new(own_name(vars(&["AQUARIUM_TEST_X"]), 123).0).is_ok());
+    }
+
+    #[test]
+    fn with_nothing_playing_the_shell_sees_a_stopped_player() {
+        let app = mock();
+        let h = app.handle();
+        assert!(music(h).is_none());
+        assert_eq!(playback_status(h), "Stopped");
+        assert!(!next_available(h));
+        let (ids, current) = track_ids(h);
+        assert!(ids.is_empty());
+        assert_eq!(&*current, "/org/mpris/MediaPlayer2/TrackList/NoTrack");
+        let m = metadata(h);
+        assert_eq!(text(&m, "mpris:trackid").as_deref(), Some("/org/mpris/MediaPlayer2/aquarium/notrack"));
+        assert!(!m.contains_key("mpris:length"));
+    }
+
+    /// Episode titles arrive as "Series S01E02 · Episode"; the shell's two
+    /// lines are artist and title.
+    #[test]
+    fn video_metadata_splits_the_series_from_the_episode() {
+        let app = mock();
+        let h = app.handle();
+        app.state::<Player>().set_status_for_tests(Status {
+            active: true,
+            item_id: "ep1".into(),
+            title: "Show S01E02 · The Episode".into(),
+            duration: 1800.0,
+            ..Default::default()
+        });
+        app.state::<Player>().set_next_available(true);
+        assert_eq!(playback_status(h), "Playing");
+        assert!(next_available(h));
+        let m = metadata(h);
+        assert_eq!(text(&m, "xesam:title").as_deref(), Some("The Episode"));
+        assert_eq!(list(&m, "xesam:artist"), Some(vec!["Show S01E02".to_string()]));
+        assert_eq!(int(&m, "mpris:length"), Some(1_800_000_000));
+        assert_eq!(text(&m, "mpris:trackid").as_deref(), Some("/org/mpris/MediaPlayer2/aquarium/ep1"));
+
+        app.state::<Player>().set_status_for_tests(Status { active: true, title: "A Film".into(), ..Default::default() });
+        let m = metadata(h);
+        assert_eq!(text(&m, "xesam:title").as_deref(), Some("A Film"));
+        assert!(!m.contains_key("xesam:artist"));
+    }
+
+    #[test]
+    fn music_owns_the_controls_while_it_plays() {
+        let app = mock();
+        let h = app.handle();
+        let audio = app.state::<AudioPlayer>();
+        audio.set_for_tests(
+            AudioStatus { active: true, paused: true, position: 12.0, duration: 200.0, item_id: "s2".into(), volume: 40.0, speed: 1.0, ..Default::default() },
+            Some(song("s2")),
+        );
+        audio.set_queue(vec![song("s1"), song("s2")], 1, false, true);
+        assert!(music(h).is_some());
+        let st = status_of(h);
+        assert!(st.active && st.paused);
+        assert_eq!(st.title, "Title s2");
+        assert_eq!(st.item_id, "s2");
+        assert_eq!(st.volume, 40.0);
+        assert_eq!(playback_status(h), "Paused");
+        assert!(!next_available(h), "the music queue says there is no next");
+        let (ids, current) = track_ids(h);
+        assert_eq!(ids.len(), 2);
+        assert_eq!(current, queue_path(1, "s2"));
+        let m = metadata(h);
+        assert_eq!(text(&m, "mpris:trackid").as_deref(), Some(&*queue_path(1, "s2")));
+        assert_eq!(text(&m, "xesam:album").as_deref(), Some("Album"));
+        assert_eq!(int(&m, "mpris:length"), Some(200_000_000));
+        // An index past the queue falls back to the track's own path.
+        audio.set_queue(vec![song("s1")], 5, true, false);
+        assert_eq!(track_ids(h).1, dbus::Path::from("/org/mpris/MediaPlayer2/TrackList/NoTrack"));
+        assert_eq!(text(&metadata(h), "mpris:trackid").as_deref(), Some(&*track_path("s2")));
+        assert!(next_available(h));
+    }
+
+    /// Video and music never play at once, but should both report active the
+    /// shell's controls belong to the video.
+    #[test]
+    fn video_wins_over_music() {
+        let app = mock();
+        let h = app.handle();
+        app.state::<AudioPlayer>().set_for_tests(AudioStatus { active: true, ..Default::default() }, Some(song("s1")));
+        app.state::<Player>().set_status_for_tests(Status { active: true, title: "Film".into(), ..Default::default() });
+        assert!(music(h).is_none());
+        assert_eq!(status_of(h).title, "Film");
+    }
+
+    /// `notify` is a no-op until the bus is up, and afterwards a non-blocking
+    /// poke that `park` wakes on and drains.
+    #[test]
+    fn notify_wakes_park_and_park_drains_it() {
+        notify();
+        let wake = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
+        let quiet = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
+        assert!(wake >= 0 && quiet >= 0);
+        WAKE.store(wake, Ordering::Relaxed);
+        notify();
+        notify();
+        WAKE.store(-1, Ordering::Relaxed);
+        let started = std::time::Instant::now();
+        park(quiet, wake);
+        assert!(started.elapsed() < std::time::Duration::from_secs(30), "park ignored the wakeup");
+        let mut sink: u64 = 0;
+        let n = unsafe { libc::read(wake, &mut sink as *mut u64 as *mut libc::c_void, 8) };
+        assert!(n < 0, "park left the counter set");
+        unsafe {
+            libc::close(wake);
+            libc::close(quiet);
+        }
     }
 }

@@ -1,6 +1,49 @@
 // Helpers shared by the small-modules tests (iptv, lineup, channels panel,
 // cache, blurhash, theme, scroll, spatial).
+import { vi } from "vitest";
 import { onInvoke } from "./tauri";
+
+const B83 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#$%*+,-.:;=?@[]^_{|}~";
+
+/** `value` in BlurHash's base 83, `length` digits wide. */
+export function base83(value: number, length: number): string {
+  let out = "";
+  for (let i = 1; i <= length; i++) {
+    const digit = Math.floor(value / Math.pow(83, length - i)) % 83;
+    out += B83[digit];
+  }
+  return out;
+}
+
+/**
+ * jsdom has no canvas. Install a 2D context that keeps what is drawn: `last`
+ * is the pixel data of the latest `putImageData`, `renders` counts them and
+ * `size` is the canvas width. `toDataURL` answers `data:image/png;fake-<n>`.
+ * Restore with `vi.restoreAllMocks()`.
+ */
+export function fakeCanvas(opts: { toDataURLThrows?: boolean } = {}): {
+  renders: number;
+  last: Uint8ClampedArray | null;
+  size: number;
+} {
+  const state = { renders: 0, last: null as Uint8ClampedArray | null, size: 0 };
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
+    const canvas = this;
+    return {
+      createImageData: (w: number, h: number) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
+      putImageData: (img: { data: Uint8ClampedArray }) => {
+        state.renders++;
+        state.last = img.data;
+        state.size = canvas.width;
+      },
+    } as any;
+  } as any);
+  vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockImplementation(() => {
+    if (opts.toDataURLThrows) throw new Error("tainted");
+    return `data:image/png;fake-${state.renders}`;
+  });
+  return state;
+}
 
 /** A promise settled from outside, for holding a request open. */
 export function deferred<T>(): {

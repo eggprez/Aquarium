@@ -366,4 +366,30 @@ mod tests {
         assert!(wl_egl_api().is_some(), "libwayland-egl.so.1");
         assert!(available());
     }
+
+    #[test]
+    fn a_null_display_is_refused() {
+        let err = EglDisplay::new(std::ptr::null_mut()).err().expect("no EGL display without a wl_display");
+        assert!(err == "no wl_display" || err == "libEGL is not available", "{err}");
+    }
+
+    /// The attribute names are EGL's own numbers; a typo here gets a
+    /// different config or an EGL_BAD_ATTRIBUTE at startup.
+    #[test]
+    fn egl_constants_match_the_headers() {
+        assert_eq!(EGL_PLATFORM_WAYLAND_KHR, 0x31D8);
+        assert_eq!(EGL_OPENGL_API, 0x30A2);
+        assert_eq!(EGL_NONE, 0x3038);
+        assert_eq!((EGL_RED_SIZE, EGL_GREEN_SIZE, EGL_BLUE_SIZE, EGL_ALPHA_SIZE), (0x3024, 0x3023, 0x3022, 0x3021));
+        assert_eq!((EGL_CONTEXT_MAJOR_VERSION, EGL_CONTEXT_MINOR_VERSION), (0x3098, 0x30FB));
+        assert_eq!((EGL_VENDOR, EGL_VERSION), (0x3053, 0x3054));
+    }
+
+    #[test]
+    fn an_unknown_symbol_resolves_to_null() {
+        if let Some(lib) = load_lib(&EGL_LIB, "libEGL.so.1") {
+            assert!(sym(lib, "eglNoSuchFunctionAnywhere").is_null());
+            assert!(!sym(lib, "eglGetError").is_null());
+        }
+    }
 }
