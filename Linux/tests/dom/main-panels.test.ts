@@ -347,21 +347,14 @@ describe("stream info", () => {
     expect(cells().Engine).toBe("mpv");
   });
 
-  // BUG: playItem (src/playback.ts:716) replaces `nowPlaying` with a copy
-  // when it settles the bitrate, so the identity check at playback.ts:726
-  // never matches and the resolved source is never recorded. getStreamSource()
-  // is therefore always null for a server stream: the info panel's Delivery
-  // reads "–" and "On the server" and the Container fallback are blank.
-  it.fails("names direct play and the source's own bitrate", async () => {
+  it("names direct play and the source's own bitrate", async () => {
     const c = await infoFor({});
     expect(c.Delivery).toBe("Direct play");
     expect(c["On the server"]).toBe("8.0 Mbps source");
     expect(c.Container).toBe("mkv");
   });
 
-  // BUG: as above (src/playback.ts:716/726) — the transcode's reasons and cap
-  // never reach the panel.
-  it.fails("names a transcode, its cap and the server's reasons, and a remux", async () => {
+  it("names a transcode, its cap and the server's reasons, and a remux", async () => {
     const tx = (reasons: string) => ({
       PlaySessionId: "ps",
       MediaSources: [

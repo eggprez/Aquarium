@@ -713,7 +713,9 @@ export async function playItem(
     opts.maxBitrate === undefined && !meta.inherited && !meta.stream && !opts.live
       ? await pickStartingBitrate(item)
       : opts.maxBitrate;
-  if (nowPlaying === startedPlaying) nowPlaying = { ...nowPlaying, opts: { ...opts, maxBitrate } };
+  // Set on the same object, not a copy: the identity checks below (recording
+  // the source, the "This didn't play" card) compare against startedPlaying.
+  if (nowPlaying === startedPlaying) nowPlaying.opts = { ...opts, maxBitrate };
   try {
     const src =
       (!opts.live && takePrefetched(item.Id, maxBitrate, startTicks)) ||

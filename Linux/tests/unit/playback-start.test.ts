@@ -66,10 +66,7 @@ describe("playItem", () => {
     expect(pb.getNowPlaying()).toEqual({ item: movie("m1"), isLocal: false });
   });
 
-  // BUG: same cause as the missing "This didn't play" card below — the copy
-  // made at src/playback.ts:716 means `nowPlaying.source` is never set (line
-  // 726), so the stream info panel's Delivery always reads "–" for a stream.
-  it.fails("remembers how the server is sending it, for the stream info panel", async () => {
+  it("remembers how the server is sending it, for the stream info panel", async () => {
     const { pb } = await boot();
     mockServer();
     await pb.playItem(movie("m1"), { maxBitrate: 5_000_000 });
@@ -309,12 +306,7 @@ describe("playItem", () => {
   });
 
   describe("when it fails", () => {
-    // BUG: playItem replaces `nowPlaying` with a copy once the starting bitrate
-    // is known (src/playback.ts:716), so the later `nowPlaying ===
-    // startedPlaying` checks (lines 726 and 754) are always false: a stream
-    // that fails to start only ever gets a "Playback failed" toast, never the
-    // "This didn't play" card with Try Again / Try a Smaller Stream.
-    it.fails("offers Try Again, a smaller stream and Close, and rethrows", async () => {
+    it("offers Try Again, a smaller stream and Close, and rethrows", async () => {
       const { pb } = await boot();
       mockServer({ playbackInfoStatus: 500 });
       await expect(pb.playItem(movie("m1"))).rejects.toThrow("Server error 500");
