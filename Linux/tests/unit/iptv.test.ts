@@ -209,13 +209,11 @@ describe("parseM3u", () => {
     expect(ch.GuideId).toBe("a");
   });
 
-  // BUG: parseM3u (src/iptv.ts:111) takes the display name from the FIRST comma
-  // on the #EXTINF line. When a quoted attribute value has a comma in it
-  // (group-title="News, Sport", tvg-name="Movie, The") the name comes out as
-  // the tail of that attribute plus everything after it.
-  it.fails("takes the display name from after the attributes when an attribute value has a comma", () => {
+  it("takes the display name from after the attributes when an attribute value has a comma", () => {
     const [ch] = iptv.parseM3u('#EXTINF:-1 tvg-id="a" group-title="News, Sport",BBC One\nhttp://a/1');
     expect(ch.Name).toBe("BBC One");
+    // A quote left open: the first comma, as before.
+    expect(iptv.parseM3u('#EXTINF:-1 tvg-name="Open,Name\nhttp://a/1')[0].Name).toBe("Name");
   });
 
   it("keeps duplicate channels as separate entries with their own ids", () => {
