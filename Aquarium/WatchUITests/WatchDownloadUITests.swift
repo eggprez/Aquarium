@@ -73,9 +73,9 @@ final class WatchDownloadUITests: WatchUITestCase {
         open(TestID.Watch.rootDoor("onWatch"))
         app.element(TestID.Watch.onWatchRoot).waitToExist()
         XCTAssertTrue(reach(app.element(TestID.Watch.onWatchGroup("album", album.id))), "the song's album is listed")
-        let byId = app.element(TestID.Watch.onWatchRemoveEverything)
-        let byLabel = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Remove Everything")).firstMatch
-        let remove = byId.waitForExistence(timeout: 3) ? byId : byLabel
+        let removeById = app.element(TestID.Watch.onWatchRemoveEverything)
+        let removeByLabel = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Remove Everything")).firstMatch
+        let remove = removeById.waitForExistence(timeout: 3) ? removeById : removeByLabel
         XCTAssertTrue(reach(remove), "Remove Everything at the foot of the page")
         remove.tap()
         // The dialog's button doesn't carry its identifier on watchOS (a
