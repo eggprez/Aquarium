@@ -441,14 +441,15 @@ struct SettingsView: View {
             PictureAdjustRows()
                 .note(Copy.pictureControls)
 
-            Toggle(isOn: $prefs.nightMode) { MacSettingLabel(Copy.nightMode) }
-                .accessibilityIdentifier(TestID.Settings.videoNightMode)
-                .note(Copy.nightMode)
-                .onChange(of: prefs.nightMode) { _, _ in player.applyNightMode() }
+            // No Night mode row on a Mac: AVPlayer has no audio compressor,
+            // and neither has MPVKit's FFmpeg (no dynaudnorm, acompressor,
+            // compand or loudnorm in its libavfilter — see MPVEngine
+            // `nightModeFilter`), so the switch could only say On and leave
+            // the sound alone.
         } header: {
             Text("Picture")
         } footer: {
-            MacSettingFooter(Copy.framing, Copy.pictureControls, Copy.pictureZoom, Copy.aspectOverride, Copy.nightMode)
+            MacSettingFooter(Copy.framing, Copy.pictureControls, Copy.pictureZoom, Copy.aspectOverride)
         }
     }
 

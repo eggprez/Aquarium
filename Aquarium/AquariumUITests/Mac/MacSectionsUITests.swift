@@ -220,15 +220,16 @@ final class MacSectionsUITests: MacUITestCase {
         app.button(TestID.Login.cancel).tapWhenReady()
     }
 
-    /// Open: NightModeToggleDoesNothing — Settings ▸ Video still offers Night
-    /// mode, which the Mac's mpv build can't act on (no dynaudnorm). The fix
-    /// (c13b11a) is on an unmerged branch. Source: master fix list.
+    /// Regression: NightModeToggleDoesNothing — Settings ▸ Video offered Night
+    /// mode, which neither engine on a Mac can act on (AVPlayer has no
+    /// compressor; MPVKit's FFmpeg has no dynaudnorm). Source: master fix
+    /// list; Views/SettingsView.swift `pictureSection`.
     func testBugNightModeToggleDoesNothing() {
         launchToHome()
         app.typeKey(",", modifierFlags: .command)
         settingsWindow.waitToExist(20)
         settingsWindow.toolbars.buttons["Video"].tapWhenReady()
-        XCTExpectFailure("bug: Settings ▸ Video offers Night mode, which mpv on the Mac cannot apply (Views/SettingsView.swift:444-447)")
+        XCTAssertTrue(app.element(TestID.Settings.videoFraming).waitForExistence(timeout: 10), "the Video pane is showing")
         XCTAssertFalse(app.element(TestID.Settings.videoNightMode).waitForExistence(timeout: 5))
     }
 }
