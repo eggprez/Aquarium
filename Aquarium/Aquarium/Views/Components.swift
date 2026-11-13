@@ -849,6 +849,7 @@ struct MediaShelf: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PosterButtonStyle())
+        .arrivalFocusCard(isFirst: item.Id == items.first?.Id)
         .accessibilityIdentifier(TestID.Item.card(item.Id))
         .posterZoomSource("\(title)/\(item.Id)", in: zoomNamespace)
         .itemContextMenu(item, allowsOpen: menuOpensDetails, removesFromNextUp: menuRemovesFromNextUp)
@@ -2028,6 +2029,7 @@ struct MediaGrid: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(PosterButtonStyle())
+        .arrivalFocusCard(isFirst: item.Id == items.first?.Id)
         .accessibilityIdentifier(TestID.Item.card(item.Id))
         .posterZoomSource("grid/\(item.Id)", in: zoomNamespace)
         .itemContextMenu(item)

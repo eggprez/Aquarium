@@ -213,7 +213,7 @@ struct SettingsView: View {
         .fixedSize(horizontal: false, vertical: pane != nil)
         .screenTitle(pane?.title ?? "Settings")
         .paletteBar()
-        .confirmationDialog("Sign out of \(client.session?.server ?? "this server")?",
+        .confirmationDialog(client.session?.signOutQuestion ?? "Sign out?",
                             isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) {
                 Task {
@@ -1302,7 +1302,7 @@ private struct AccountSettingsPage: View {
             }
         }
         .formStyle(.grouped)
-        .confirmationDialog("Sign out of \(client.session?.server ?? "this server")?",
+        .confirmationDialog(client.session?.signOutQuestion ?? "Sign out?",
                             isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) {
                 Task {

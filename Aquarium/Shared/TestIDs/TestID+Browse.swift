@@ -65,6 +65,13 @@ extension TestID {
         }
         /// Apple TV's quality dialog only.
         static let qualityCancel = "detail.action.quality.cancel"
+        /// The version choice, on a title with several (a dialog on Apple TV;
+        /// a section of the quality menu elsewhere).
+        static let version = "detail.action.version"
+        /// One version, keyed by its media source id.
+        static func versionOption(_ mediaSourceId: String) -> String { "detail.action.version.\(mediaSourceId)" }
+        /// Apple TV's version dialog only.
+        static let versionCancel = "detail.action.version.cancel"
         static let favorite = "detail.action.favorite"
         static let watched = "detail.action.watched"
         static let addToNextUp = "detail.action.addToNextUp"

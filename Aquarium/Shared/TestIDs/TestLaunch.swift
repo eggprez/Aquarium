@@ -51,6 +51,12 @@ enum TestLaunch {
     /// The engine policy still has the last word where it pins one (iPad).
     static let engine = "AquariumTestEngine"
 
+    /// Environment: an `aquarium://item/<id>` or `aquarium://play/<id>` link
+    /// to open once the launch sign-in is done, through the app's own
+    /// `AppModel.handle` (what a Top Shelf cell or a Siri request does). For
+    /// the Apple TV, where `XCUIApplication.open` doesn't reach the app.
+    static let linkEnv = "AQUARIUM_TEST_LINK"
+
     /// `-AquariumTestAnimations NO`: UIKit animations off (iOS, tvOS). On by
     /// default even in test mode; the launcher turns them off.
     static let animations = "AquariumTestAnimations"

@@ -29,8 +29,35 @@ enum APIError: LocalizedError, Sendable {
         case .identity(let m): m
         case .auth(let m): m
         case .notConfigured: "Not signed in"
-        case .server(let status, let path): "Server error \(status) on \(path)"
+        case .server(let status, let path): Self.plainWords(status: status, path: path)
         case .message(let m): m
+        }
+    }
+
+    /// The status and endpoint, for the log. What a viewer reads is
+    /// `errorDescription`: a status code and an API path mean nothing to
+    /// someone with a remote in their hand.
+    var technicalDescription: String {
+        if case .server(let status, let path) = self { return "Server error \(status) on \(path)" }
+        return errorDescription ?? "Unknown error"
+    }
+
+    /// A refused request in words a viewer can act on.
+    static func plainWords(status: Int, path: String) -> String {
+        let signingIn = path.hasSuffix("/AuthenticateByName")
+        switch status {
+        case 401 where signingIn:
+            return "That user name or password isn't right."
+        case 403 where signingIn:
+            return "This account can't sign in. It's turned off on the server, or not allowed in at this time. Ask the server's administrator."
+        case 401, 403:
+            return "This account isn't allowed to do that."
+        case 404:
+            return "This isn't available to this account, or it's no longer on the server."
+        case 500...:
+            return "The server ran into a problem. Try again in a moment."
+        default:
+            return "The server turned that request down."
         }
     }
 }
@@ -620,16 +647,22 @@ final class JellyfinClient {
             // too little to hang that on: a reverse proxy having a bad moment
             // sends them, and over plain http so can anyone on the path.
             guard await tokenIsRefused(sentToken, server: base) else {
-                throw APIError.server(status: 401, path: path.components(separatedBy: "?")[0])
+                let refused = APIError.server(status: 401, path: path.components(separatedBy: "?")[0])
+                Self.requestLog.notice("\(refused.technicalDescription, privacy: .public)")
+                throw refused
             }
             expireSession()
             throw APIError.auth("Your session has expired — please sign in again")
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw APIError.server(status: http.statusCode, path: path.components(separatedBy: "?")[0])
+            let refused = APIError.server(status: http.statusCode, path: path.components(separatedBy: "?")[0])
+            Self.requestLog.notice("\(refused.technicalDescription, privacy: .public)")
+            throw refused
         }
         return data
     }
+
+    nonisolated static let requestLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Aquarium", category: "api")
 
     /// Whether the server, asked who this token belongs to, says nobody. Any
     /// other outcome — an answer, an error, no reply — is not a refusal.
@@ -1689,6 +1722,22 @@ final class JellyfinClient {
 
     /// "More like this" — the server's own recommendation. Purely additive to
     /// the detail page, so callers treat a failure as an empty list.
+    /// What is directly inside a folder or a photo album, sub-albums first:
+    /// its videos, photos and albums, not the audio or books a mixed folder
+    /// can also hold.
+    func children(of parentId: String, limit: Int = 500) async throws -> [BaseItem] {
+        guard let s = prefs.session else { throw APIError.notConfigured }
+        let q = [
+            URLQueryItem(name: "ParentId", value: parentId),
+            URLQueryItem(name: "SortBy", value: "IsFolder,SortName"),
+            URLQueryItem(name: "SortOrder", value: "Ascending"),
+            URLQueryItem(name: "ExcludeItemTypes", value: "Audio,AudioBook,Book,MusicAlbum,MusicArtist"),
+            URLQueryItem(name: "Fields", value: Self.listFields),
+            URLQueryItem(name: "Limit", value: String(limit)),
+        ]
+        return try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))").items
+    }
+
     func similar(to itemId: String, limit: Int = 12) async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
         return try await get(
@@ -2007,7 +2056,8 @@ final class JellyfinClient {
             countsForOffline: !live, patient: live
         )
         let info = try await Self.decode(PlaybackInfoResponse.self, from: data)
-        guard let ms = info.MediaSources?.first else {
+        // The version asked for, where the server lists more than that one.
+        guard let ms = mediaSourceId.flatMap({ id in info.MediaSources?.first { $0.Id == id } }) ?? info.MediaSources?.first else {
             throw APIError.message("No playable media source returned by the server")
         }
         let playSessionId = info.PlaySessionId ?? UUID().uuidString

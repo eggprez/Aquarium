@@ -125,6 +125,12 @@ extension PlayerModel {
         }
 
         var opts = options
+        // A version belongs to its title: one carried over from another (the
+        // episode before, by way of `options`) is not this one's.
+        if let wanted = opts.mediaSourceId, opts.live
+            || (self.item?.Id != item.Id && !(item.MediaSources?.contains { $0.Id == wanted } ?? false)) {
+            opts.mediaSourceId = nil
+        }
         if opts.maxBitrate == nil, !opts.bitrateIsChosen, !opts.live, let opening = prefs.openingBitrate,
            !meta.inherited {
             opts.maxBitrate = opening
@@ -134,7 +140,7 @@ extension PlayerModel {
             opts.maxBitrate = cap
         }
 
-        if !opts.live, let source = item.MediaSources?.first, !source.streams.isEmpty,
+        if !opts.live, let source = Self.version(of: item, opts.mediaSourceId), !source.streams.isEmpty,
            (self.item?.Id != item.Id && !meta.leavingDownloadForTrack)
             || (opts.audioStreamIndex == nil && opts.subtitleStreamIndex == nil) {
             let wanted = preferredStreams(in: source, seriesId: item.SeriesId)
@@ -172,6 +178,11 @@ extension PlayerModel {
             && (outgoingQuiesced ? reopensPaused : isPaused)
         let keepsStopAfter = sameSitting && autoplayCancelled
         reopensPaused = staysPaused
+        // The same viewing, already counted by the server: the reopen must
+        // not be reported as another start, or every quality, track or
+        // recovery adds a play.
+        let continuesViewing = sameSitting && !opts.live && startReportedItemId == item.Id
+        if !continuesViewing { startReportedItemId = nil }
 
         MusicPlayer.shared.yield()
         shuffleSeries = nil
@@ -211,8 +222,10 @@ extension PlayerModel {
         // has to be told or it ignores them: the item's own where it lists
         // one, else the one already playing when this is the same title.
         // Not for a channel, whose source is opened by the asking.
+        // A version picked is the one asked for, and so played.
         let trackSourceId: String? = opts.live ? nil
-            : item.MediaSources?.first?.Id
+            : opts.mediaSourceId
+                ?? item.MediaSources?.first?.Id
                 ?? (self.item?.Id == item.Id && !isLocal && !isExternal ? source?.mediaSourceId : nil)
 
         self.item = item
@@ -328,7 +341,7 @@ extension PlayerModel {
                     }
                     await loadExtras(for: item)
                     guard generation == mine else { return }
-                    await client.reportPlaybackStart(report(paused: false))
+                    await reportStreamOpened(item, paused: false, continuesViewing: continuesViewing)
                     adaptive.begin(
                         inherited: meta.inherited, ceiling: requestedBitrate, powerCap: powerCapBitrate,
                         untouched: Quality.untouchedRung(for: src.mediaSource))
@@ -379,7 +392,7 @@ extension PlayerModel {
             }
             await loadExtras(for: item)
             guard generation == mine else { return }
-            await client.reportPlaybackStart(report(paused: staysPaused))
+            await reportStreamOpened(item, paused: staysPaused, continuesViewing: continuesViewing)
             adaptive.begin(
                 inherited: meta.inherited, ceiling: requestedBitrate, powerCap: powerCapBitrate,
                 untouched: Quality.untouchedRung(for: src.mediaSource))
@@ -407,6 +420,23 @@ extension PlayerModel {
         }
     }
 
+    /// The version of `item` asked for, else its first: the one whose tracks
+    /// the track choice is made among.
+    static func version(of item: BaseItem, _ mediaSourceId: String?) -> MediaSource? {
+        mediaSourceId.flatMap { id in item.MediaSources?.first { $0.Id == id } } ?? item.MediaSources?.first
+    }
+
+    /// A start report is what adds to the server's PlayCount, so a stream
+    /// reopened in the middle of a viewing only says where it is.
+    private func reportStreamOpened(_ item: BaseItem, paused: Bool, continuesViewing: Bool) async {
+        if continuesViewing {
+            await client.reportPlaybackProgress(report(paused: paused))
+        } else {
+            await client.reportPlaybackStart(report(paused: paused))
+            if !isLive { startReportedItemId = item.Id }
+        }
+    }
+
     // MARK: - Downloads
 
     #if !os(tvOS)
@@ -414,7 +444,7 @@ extension PlayerModel {
         guard !options.live, !meta.recovering, !meta.reopening, !meta.leavingDownloadForTrack else { return nil }
         if isActive, !isLocal, self.item?.Id == item.Id { return nil }
         let askedForAStream = options.maxBitrate != nil || options.bitrateIsChosen
-            || options.forceTranscode || options.forceFullEncode
+            || options.forceTranscode || options.forceFullEncode || options.mediaSourceId != nil
         if askedForAStream, !meta.inherited { return nil }
         guard let found = DownloadManager.shared.completeRecord(matching: item), !found.isAudio,
               DownloadManager.shared.mediaURL(for: found) != nil else { return nil }
