@@ -61,7 +61,6 @@ final class MacPlayerUITests: MacUITestCase {
         // Once more with the keyboard in the picture (a click there).
         playerWindow.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
         playerWindow.typeKey(.escape, modifierFlags: [])
-        XCTExpectFailure("bug: Escape in the player window (not full screen) doesn't stop playback; PlayerWindow.swift:52 .onExitCommand { leave() } never fires")
         XCTAssertTrue(playerWindow.waitToVanish(10), "Escape in a window that isn't full screen stops")
     }
 

@@ -49,7 +49,12 @@ struct PlayerWindow: View {
         // and to whatever is being typed into anywhere else — see
         // `PlaybackCommands`.
         .focusedSceneValue(\.playerWindowFocused, true)
-        .onExitCommand { leave() }
+        // Escape is taken by a key monitor rather than `onExitCommand`, which
+        // only hears it from a SwiftUI view that has the keyboard: in this
+        // window nothing does (the picture and the chrome don't take focus),
+        // so the window itself was first responder and Escape never reached
+        // the handler — playback went on.
+        .background(EscapeKeyMonitor(window: window, leave: leave))
         .onChange(of: player.isActive) { _, active in
             if !active { dismissWindow(id: Self.id) }
         }
@@ -141,6 +146,64 @@ struct PlayerWindow: View {
             width: width,
             height: height
         )
+    }
+}
+
+/// Escape in the player window, while nothing in it that types or has a
+/// use for Escape of its own has the keyboard: a text field (its editor), or
+/// a sheet on the window. Popovers and menus are windows and event loops of
+/// their own, so their Escape never comes past here.
+private struct EscapeKeyMonitor: NSViewRepresentable {
+    let window: NSWindow?
+    let leave: () -> Void
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.window = window
+        context.coordinator.leave = leave
+        context.coordinator.install()
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        coordinator.remove()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    @MainActor
+    final class Coordinator {
+        weak var window: NSWindow?
+        var leave: (() -> Void)?
+        private var monitor: Any?
+
+        func install() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+                nonisolated(unsafe) var result: NSEvent? = event
+                MainActor.assumeIsolated { result = self?.handle(event) ?? event }
+                return result
+            }
+        }
+
+        func remove() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        private func handle(_ event: NSEvent) -> NSEvent? {
+            guard let window, event.window === window,
+                  Self.isPlainEscape(keyCode: event.keyCode, modifiers: event.modifierFlags),
+                  window.attachedSheet == nil,
+                  !(window.firstResponder is NSText) else { return event }
+            leave?()
+            return nil
+        }
+
+        /// Escape with no ⌘, ⌥, ⌃ or ⇧.
+        nonisolated static func isPlainEscape(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+            keyCode == 53 && modifiers.intersection([.command, .option, .control, .shift]).isEmpty
+        }
     }
 }
 
