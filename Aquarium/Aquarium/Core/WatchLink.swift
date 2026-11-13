@@ -605,7 +605,7 @@ final class WatchLink: NSObject {
     private(set) var logsRequestedAt: Date?
 
     nonisolated static var logsFolder: URL {
-        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = AppDirectory.url(.documentDirectory)
             .appendingPathComponent("WatchLogs", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url

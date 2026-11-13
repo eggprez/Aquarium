@@ -1,0 +1,32 @@
+{
+  "configurations": [
+    {
+      "id": "CDD0CA5E-2131-56D7-AC4B-BEA842E27B97",
+      "name": "Default",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "defaultTestExecutionTimeAllowance": 600,
+    "environmentVariableEntries": [
+      {
+        "key": "AQUARIUM_SUITE",
+        "value": "watch"
+      }
+    ],
+    "maximumTestExecutionTimeAllowance": 1800,
+    "testTimeoutsEnabled": true,
+    "uiTestingScreenshotsLifetime": "deleteOnSuccess"
+  },
+  "testTargets": [
+    {
+      "parallelizable": false,
+      "target": {
+        "containerPath": "container:Aquarium.xcodeproj",
+        "identifier": "FE11A5D00000000000000940",
+        "name": "AquariumWatchUITests"
+      }
+    }
+  ],
+  "version": 1
+}

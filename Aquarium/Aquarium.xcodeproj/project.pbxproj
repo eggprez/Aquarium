@@ -68,6 +68,27 @@
 			remoteGlobalIDString = D296FAB6302815340097E3E7;
 			remoteInfo = Aquarium;
 		};
+		FE11A5D00000000000000845 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D296FAAF302815340097E3E7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D296FAB6302815340097E3E7;
+			remoteInfo = Aquarium;
+		};
+		FE11A5D00000000000000945 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D296FAAF302815340097E3E7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FE11A5D00000000000000240;
+			remoteInfo = AquariumWatch;
+		};
+		FE11A5D00000000000000955 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D296FAAF302815340097E3E7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FE11A5D00000000000000240;
+			remoteInfo = AquariumWatch;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -134,6 +155,9 @@
 		FE11A5D00000000000000601 /* FollowTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowTypes.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000602 /* FollowWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowWidget.swift; sourceTree = "<group>"; };
 		FE11A5D00000000000000701 /* AquariumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AquariumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FE11A5D00000000000000801 /* AquariumUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AquariumUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FE11A5D00000000000000901 /* AquariumWatchUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AquariumWatchUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FE11A5D00000000000000902 /* AquariumWatchTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AquariumWatchTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -151,6 +175,13 @@
 				Info.plist,
 			);
 			target = FE11A5D00000000000000240 /* AquariumWatch */;
+		};
+		FE11A5D00000000000000960 /* Exceptions for "AquariumTests" folder in "AquariumWatchTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Shared/Support/StubURLProtocol.swift,
+			);
+			target = FE11A5D00000000000000950 /* AquariumWatchTests */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -178,7 +209,45 @@
 		};
 		FE11A5D00000000000000710 /* AquariumTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				FE11A5D00000000000000960 /* Exceptions for "AquariumTests" folder in "AquariumWatchTests" target */,
+			);
 			path = AquariumTests;
+			sourceTree = "<group>";
+		};
+		FE11A5D00000000000000812 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		FE11A5D00000000000000813 /* iPhone */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = iPhone;
+			sourceTree = "<group>";
+		};
+		FE11A5D00000000000000814 /* iPad */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = iPad;
+			sourceTree = "<group>";
+		};
+		FE11A5D00000000000000815 /* Mac */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Mac;
+			sourceTree = "<group>";
+		};
+		FE11A5D00000000000000816 /* TV */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TV;
+			sourceTree = "<group>";
+		};
+		FE11A5D00000000000000910 /* WatchUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = WatchUITests;
+			sourceTree = "<group>";
+		};
+		FE11A5D00000000000000911 /* WatchTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = WatchTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -227,6 +296,27 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FE11A5D00000000000000831 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FE11A5D00000000000000931 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FE11A5D00000000000000934 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -239,6 +329,9 @@
 				FE11A5D00000000000000110 /* LiveActivities */,
 				FE11A5D00000000000000210 /* Watch */,
 				FE11A5D00000000000000710 /* AquariumTests */,
+				FE11A5D00000000000000811 /* AquariumUITests */,
+				FE11A5D00000000000000910 /* WatchUITests */,
+				FE11A5D00000000000000911 /* WatchTests */,
 				FE11A5D00000000000000310 /* WatchWidgets */,
 				FE11A5D00000000000000006 /* Aquarium-tvOS.entitlements */,
 				FE11A5D00000000000000007 /* Aquarium-iOS.entitlements */,
@@ -255,6 +348,9 @@
 				FE11A5D00000000000000201 /* AquariumWatch.app */,
 				FE11A5D00000000000000701 /* AquariumTests.xctest */,
 				FE11A5D00000000000000301 /* WatchWidgets.appex */,
+				FE11A5D00000000000000801 /* AquariumUITests.xctest */,
+				FE11A5D00000000000000901 /* AquariumWatchUITests.xctest */,
+				FE11A5D00000000000000902 /* AquariumWatchTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -304,6 +400,18 @@
 				FE11A5D00000000000000304 /* WatchWidgets.entitlements */,
 			);
 			path = WatchWidgets;
+			sourceTree = "<group>";
+		};
+		FE11A5D00000000000000811 /* AquariumUITests */ = {
+			isa = PBXGroup;
+			children = (
+				FE11A5D00000000000000812 /* Shared */,
+				FE11A5D00000000000000813 /* iPhone */,
+				FE11A5D00000000000000814 /* iPad */,
+				FE11A5D00000000000000815 /* Mac */,
+				FE11A5D00000000000000816 /* TV */,
+			);
+			path = AquariumUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -444,6 +552,82 @@
 			productReference = FE11A5D00000000000000701 /* AquariumTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		FE11A5D00000000000000840 /* AquariumUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FE11A5D00000000000000841 /* Build configuration list for PBXNativeTarget "AquariumUITests" */;
+			buildPhases = (
+				FE11A5D00000000000000830 /* Sources */,
+				FE11A5D00000000000000831 /* Frameworks */,
+				FE11A5D00000000000000832 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FE11A5D00000000000000844 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				FE11A5D00000000000000812 /* Shared */,
+				FE11A5D00000000000000813 /* iPhone */,
+				FE11A5D00000000000000814 /* iPad */,
+				FE11A5D00000000000000815 /* Mac */,
+				FE11A5D00000000000000816 /* TV */,
+				FE11A5D00000000000000810 /* TestIDs */,
+			);
+			name = AquariumUITests;
+			packageProductDependencies = (
+			);
+			productName = AquariumUITests;
+			productReference = FE11A5D00000000000000801 /* AquariumUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		FE11A5D00000000000000940 /* AquariumWatchUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FE11A5D00000000000000941 /* Build configuration list for PBXNativeTarget "AquariumWatchUITests" */;
+			buildPhases = (
+				FE11A5D00000000000000930 /* Sources */,
+				FE11A5D00000000000000931 /* Frameworks */,
+				FE11A5D00000000000000932 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FE11A5D00000000000000944 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				FE11A5D00000000000000910 /* WatchUITests */,
+				FE11A5D00000000000000812 /* Shared */,
+				FE11A5D00000000000000810 /* TestIDs */,
+			);
+			name = AquariumWatchUITests;
+			packageProductDependencies = (
+			);
+			productName = AquariumWatchUITests;
+			productReference = FE11A5D00000000000000901 /* AquariumWatchUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		FE11A5D00000000000000950 /* AquariumWatchTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FE11A5D00000000000000951 /* Build configuration list for PBXNativeTarget "AquariumWatchTests" */;
+			buildPhases = (
+				FE11A5D00000000000000933 /* Sources */,
+				FE11A5D00000000000000934 /* Frameworks */,
+				FE11A5D00000000000000935 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FE11A5D00000000000000954 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				FE11A5D00000000000000911 /* WatchTests */,
+			);
+			name = AquariumWatchTests;
+			packageProductDependencies = (
+			);
+			productName = AquariumWatchTests;
+			productReference = FE11A5D00000000000000902 /* AquariumWatchTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -473,6 +657,18 @@
 						CreatedOnToolsVersion = 27.0;
 						TestTargetID = D296FAB6302815340097E3E7;
 					};
+					FE11A5D00000000000000840 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = D296FAB6302815340097E3E7;
+					};
+					FE11A5D00000000000000940 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = FE11A5D00000000000000240;
+					};
+					FE11A5D00000000000000950 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = FE11A5D00000000000000240;
+					};
 				};
 			};
 			buildConfigurationList = D296FAB2302815340097E3E7 /* Build configuration list for PBXProject "Aquarium" */;
@@ -498,6 +694,9 @@
 				FE11A5D00000000000000240 /* AquariumWatch */,
 				FE11A5D00000000000000740 /* AquariumTests */,
 				FE11A5D00000000000000340 /* WatchWidgets */,
+				FE11A5D00000000000000840 /* AquariumUITests */,
+				FE11A5D00000000000000940 /* AquariumWatchUITests */,
+				FE11A5D00000000000000950 /* AquariumWatchTests */,
 			);
 		};
 /* End PBXProject section */
@@ -539,6 +738,27 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		FE11A5D00000000000000732 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FE11A5D00000000000000832 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FE11A5D00000000000000932 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FE11A5D00000000000000935 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -630,6 +850,27 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FE11A5D00000000000000830 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FE11A5D00000000000000930 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FE11A5D00000000000000933 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -662,6 +903,21 @@
 			isa = PBXTargetDependency;
 			target = D296FAB6302815340097E3E7 /* Aquarium */;
 			targetProxy = FE11A5D00000000000000745 /* PBXContainerItemProxy */;
+		};
+		FE11A5D00000000000000844 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D296FAB6302815340097E3E7 /* Aquarium */;
+			targetProxy = FE11A5D00000000000000845 /* PBXContainerItemProxy */;
+		};
+		FE11A5D00000000000000944 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FE11A5D00000000000000240 /* AquariumWatch */;
+			targetProxy = FE11A5D00000000000000945 /* PBXContainerItemProxy */;
+		};
+		FE11A5D00000000000000954 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FE11A5D00000000000000240 /* AquariumWatch */;
+			targetProxy = FE11A5D00000000000000955 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -1232,6 +1488,147 @@
 			};
 			name = Release;
 		};
+		FE11A5D00000000000000842 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 96;
+					DEVELOPMENT_TEAM = 6S26L64S3C;
+					GENERATE_INFOPLIST_FILE = YES;
+					IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+					MACOSX_DEPLOYMENT_TARGET = 14.0;
+					MARKETING_VERSION = 1.5;
+					PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.AquariumUITests;
+					PRODUCT_NAME = "$(TARGET_NAME)";
+					SDKROOT = auto;
+					SUPPORTED_PLATFORMS = "iphoneos iphonesimulator appletvos appletvsimulator macosx";
+					SWIFT_APPROACHABLE_CONCURRENCY = YES;
+					SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+					SWIFT_EMIT_LOC_STRINGS = NO;
+					SWIFT_VERSION = 5.0;
+					TARGETED_DEVICE_FAMILY = "1,2,3";
+					TEST_TARGET_NAME = Aquarium;
+					TVOS_DEPLOYMENT_TARGET = 17.0;
+			};
+			name = Debug;
+		};
+		FE11A5D00000000000000843 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 96;
+					DEVELOPMENT_TEAM = 6S26L64S3C;
+					GENERATE_INFOPLIST_FILE = YES;
+					IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+					MACOSX_DEPLOYMENT_TARGET = 14.0;
+					MARKETING_VERSION = 1.5;
+					PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.AquariumUITests;
+					PRODUCT_NAME = "$(TARGET_NAME)";
+					SDKROOT = auto;
+					SUPPORTED_PLATFORMS = "iphoneos iphonesimulator appletvos appletvsimulator macosx";
+					SWIFT_APPROACHABLE_CONCURRENCY = YES;
+					SWIFT_COMPILATION_MODE = wholemodule;
+					SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+					SWIFT_EMIT_LOC_STRINGS = NO;
+					SWIFT_VERSION = 5.0;
+					TARGETED_DEVICE_FAMILY = "1,2,3";
+					TEST_TARGET_NAME = Aquarium;
+					TVOS_DEPLOYMENT_TARGET = 17.0;
+			};
+			name = Release;
+		};
+		FE11A5D00000000000000942 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 96;
+					DEVELOPMENT_TEAM = 6S26L64S3C;
+					GENERATE_INFOPLIST_FILE = YES;
+					MARKETING_VERSION = 1.5;
+					PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.UITests;
+					PRODUCT_NAME = "$(TARGET_NAME)";
+					SDKROOT = watchos;
+					SUPPORTED_PLATFORMS = "watchos watchsimulator";
+					SWIFT_APPROACHABLE_CONCURRENCY = YES;
+					SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+					SWIFT_EMIT_LOC_STRINGS = NO;
+					SWIFT_VERSION = 5.0;
+					TARGETED_DEVICE_FAMILY = 4;
+					TEST_TARGET_NAME = AquariumWatch;
+					WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		FE11A5D00000000000000943 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 96;
+					DEVELOPMENT_TEAM = 6S26L64S3C;
+					GENERATE_INFOPLIST_FILE = YES;
+					MARKETING_VERSION = 1.5;
+					PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.UITests;
+					PRODUCT_NAME = "$(TARGET_NAME)";
+					SDKROOT = watchos;
+					SUPPORTED_PLATFORMS = "watchos watchsimulator";
+					SWIFT_APPROACHABLE_CONCURRENCY = YES;
+					SWIFT_COMPILATION_MODE = wholemodule;
+					SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+					SWIFT_EMIT_LOC_STRINGS = NO;
+					SWIFT_VERSION = 5.0;
+					TARGETED_DEVICE_FAMILY = 4;
+					TEST_TARGET_NAME = AquariumWatch;
+					WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+		FE11A5D00000000000000952 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+					BUNDLE_LOADER = "$(TEST_HOST)";
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 96;
+					DEVELOPMENT_TEAM = 6S26L64S3C;
+					GENERATE_INFOPLIST_FILE = YES;
+					MARKETING_VERSION = 1.5;
+					PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.Tests;
+					PRODUCT_NAME = "$(TARGET_NAME)";
+					SDKROOT = watchos;
+					SUPPORTED_PLATFORMS = "watchos watchsimulator";
+					SWIFT_APPROACHABLE_CONCURRENCY = YES;
+					SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+					SWIFT_EMIT_LOC_STRINGS = NO;
+					SWIFT_VERSION = 5.0;
+					TARGETED_DEVICE_FAMILY = 4;
+					TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AquariumWatch.app/AquariumWatch";
+					WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		FE11A5D00000000000000953 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+					BUNDLE_LOADER = "$(TEST_HOST)";
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 96;
+					DEVELOPMENT_TEAM = 6S26L64S3C;
+					GENERATE_INFOPLIST_FILE = YES;
+					MARKETING_VERSION = 1.5;
+					PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.Tests;
+					PRODUCT_NAME = "$(TARGET_NAME)";
+					SDKROOT = watchos;
+					SUPPORTED_PLATFORMS = "watchos watchsimulator";
+					SWIFT_APPROACHABLE_CONCURRENCY = YES;
+					SWIFT_COMPILATION_MODE = wholemodule;
+					SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+					SWIFT_EMIT_LOC_STRINGS = NO;
+					SWIFT_VERSION = 5.0;
+					TARGETED_DEVICE_FAMILY = 4;
+					TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AquariumWatch.app/AquariumWatch";
+					WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1294,6 +1691,33 @@
 			buildConfigurations = (
 				FE11A5D00000000000000742 /* Debug */,
 				FE11A5D00000000000000743 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FE11A5D00000000000000841 /* Build configuration list for PBXNativeTarget "AquariumUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FE11A5D00000000000000842 /* Debug */,
+				FE11A5D00000000000000843 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FE11A5D00000000000000941 /* Build configuration list for PBXNativeTarget "AquariumWatchUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FE11A5D00000000000000942 /* Debug */,
+				FE11A5D00000000000000943 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FE11A5D00000000000000951 /* Build configuration list for PBXNativeTarget "AquariumWatchTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FE11A5D00000000000000952 /* Debug */,
+				FE11A5D00000000000000953 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

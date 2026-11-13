@@ -205,8 +205,20 @@ final class JellyfinClient {
         cfg.timeoutIntervalForRequest = timeout
         cfg.waitsForConnectivity = false
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+        #if DEBUG
+        if let stubs = testProtocolClasses { cfg.protocolClasses = stubs + (cfg.protocolClasses ?? []) }
+        #endif
         return URLSession(configuration: cfg)
     }
+
+    #if DEBUG
+    /// Unit tests only: `URLProtocol` classes put in front of the system's in
+    /// the sessions made from now on, so requests can be answered with canned
+    /// JSON. Set it, then `resetConnections()` to rebuild the sessions; nil
+    /// again and reset to undo. Nothing else sets it. See
+    /// AquariumTests/Shared/Support.
+    nonisolated(unsafe) static var testProtocolClasses: [AnyClass]?
+    #endif
 
     private let decoder = JSONDecoder()
 

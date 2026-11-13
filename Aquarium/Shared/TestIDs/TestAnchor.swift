@@ -13,17 +13,7 @@
 
 import SwiftUI
 
-enum TestRuntime {
-    /// A debug build, launched by a UI test. Read once.
-    static let isUITest: Bool = {
-        #if DEBUG
-        return UserDefaults.standard.bool(forKey: "AquariumUITest")
-            || ProcessInfo.processInfo.environment["AQUARIUM_UITEST"] == "1"
-        #else
-        return false
-        #endif
-    }()
-}
+// `TestRuntime.isUITest` is in TestLaunch.swift.
 
 extension View {
     /// Mark this screen or region for UI tests. See the top of this file.

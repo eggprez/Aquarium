@@ -336,7 +336,7 @@ final class WatchDownloads: NSObject {
     // MARK: - Storage layout
 
     nonisolated static var root: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let base = AppDirectory.url(.applicationSupportDirectory)
             .appendingPathComponent("Aquarium/Watch", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base

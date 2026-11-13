@@ -2,6 +2,8 @@
 xcuserdata/
 *.xcarchive
 DerivedData/
+# Results of Aquarium/Tools/run-tests.sh
+Aquarium/TestResults/
 .DS_Store
 .claude/
 

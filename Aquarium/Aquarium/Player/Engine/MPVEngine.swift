@@ -501,7 +501,7 @@ final class MPVEngine: @unchecked Sendable {
         \(qualityProfile.map { "\($0.0)=\($0.1)" }.joined(separator: "\n"))
 
         """
-        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        guard let caches = Optional(AppDirectory.url(.cachesDirectory)) else { return nil }
         let folder = caches.appendingPathComponent("mpv", isDirectory: true)
         let file = folder.appendingPathComponent("aquarium-profiles.conf")
         do {

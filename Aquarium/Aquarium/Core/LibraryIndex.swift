@@ -96,9 +96,9 @@ final class LibraryIndex {
     /// next sync.
     nonisolated static var directory: URL {
         #if os(tvOS)
-        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let base = AppDirectory.url(.cachesDirectory)
         #else
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let base = AppDirectory.url(.applicationSupportDirectory)
         #endif
         return base.appending(path: "LibraryCopy", directoryHint: .isDirectory)
     }

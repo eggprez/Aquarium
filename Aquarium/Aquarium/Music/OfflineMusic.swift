@@ -97,7 +97,7 @@ final class OfflineMusicIndex {
     }
 
     private nonisolated static var file: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = AppDirectory.url(.applicationSupportDirectory)
             // the pre-Aquarium name, kept so what is already on disk is found
             .appendingPathComponent("FellyJin", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

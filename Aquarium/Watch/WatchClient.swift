@@ -84,12 +84,24 @@ final class JellyfinClient {
 
     private let defaults = UserDefaults.standard
     private var tokenCache: String?
-    private let session: URLSession = {
+    private var session: URLSession = JellyfinClient.makeSession()
+
+    private static func makeSession(protocols: [AnyClass]? = nil) -> URLSession {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 20
         config.waitsForConnectivity = false
+        if let protocols { config.protocolClasses = protocols + (config.protocolClasses ?? []) }
         return URLSession(configuration: config)
-    }()
+    }
+
+    #if DEBUG
+    /// Unit tests only: answer requests through these `URLProtocol` classes
+    /// (canned JSON) from now on; nil puts the plain session back. See
+    /// WatchTests and AquariumTests/Shared/Support.
+    func useTestProtocols(_ protocols: [AnyClass]?) {
+        session = Self.makeSession(protocols: protocols)
+    }
+    #endif
 
     private init() {
         if let id = defaults.string(forKey: "watch_device_id") {
@@ -739,6 +751,10 @@ enum WatchKeychain {
     }
 
     static func store(token: String, account: String) {
+        #if DEBUG
+        // UI test mode: no keychain — see Shared/TestIDs/TestLaunch.swift.
+        if TestRuntime.isUITest { TestKeychain.store(token, account: account); return }
+        #endif
         var q = query(account)
         SecItemDelete(q as CFDictionary)
         q[kSecValueData as String] = Data(token.utf8)
@@ -747,6 +763,9 @@ enum WatchKeychain {
     }
 
     static func token(account: String) -> String? {
+        #if DEBUG
+        if TestRuntime.isUITest { return TestKeychain.token(account: account) }
+        #endif
         var q = query(account)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -758,6 +777,9 @@ enum WatchKeychain {
     }
 
     static func delete(account: String) {
+        #if DEBUG
+        if TestRuntime.isUITest { TestKeychain.delete(account: account); return }
+        #endif
         SecItemDelete(query(account) as CFDictionary)
     }
 }

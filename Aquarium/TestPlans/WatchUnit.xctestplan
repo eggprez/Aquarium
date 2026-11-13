@@ -1,0 +1,45 @@
+{
+  "configurations": [
+    {
+      "id": "C993FE28-4FBF-5935-9D17-25CF232118ED",
+      "name": "Default",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "commandLineArgumentEntries": [
+      {
+        "argument": "-AquariumUITest"
+      },
+      {
+        "argument": "YES"
+      },
+      {
+        "argument": "-AquariumTestReset"
+      },
+      {
+        "argument": "YES"
+      }
+    ],
+    "defaultTestExecutionTimeAllowance": 600,
+    "environmentVariableEntries": [
+      {
+        "key": "AQUARIUM_UITEST",
+        "value": "1"
+      }
+    ],
+    "maximumTestExecutionTimeAllowance": 1800,
+    "testTimeoutsEnabled": true
+  },
+  "testTargets": [
+    {
+      "parallelizable": false,
+      "target": {
+        "containerPath": "container:Aquarium.xcodeproj",
+        "identifier": "FE11A5D00000000000000950",
+        "name": "AquariumWatchTests"
+      }
+    }
+  ],
+  "version": 1
+}

@@ -558,7 +558,7 @@ struct StationSession: Sendable {
     /// reaction for good, in a file of their own. They learn only while they
     /// play now, so what that file kept is let go.
     nonisolated static func forgetOldTaste() {
-        let file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let file = AppDirectory.url(.applicationSupportDirectory)
             .appendingPathComponent("FellyJin", isDirectory: true)
             .appendingPathComponent("MusicTaste.json")
         guard FileManager.default.fileExists(atPath: file.path) else { return }

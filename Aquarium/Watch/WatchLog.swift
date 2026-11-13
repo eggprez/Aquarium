@@ -29,7 +29,7 @@ enum WatchLog {
     }()
 
     nonisolated static var folder: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let base = AppDirectory.url(.applicationSupportDirectory)
             .appendingPathComponent("Aquarium/Logs", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base

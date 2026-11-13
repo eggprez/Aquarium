@@ -111,7 +111,7 @@ enum StreamSeams {
     }
 
     private static func cacheFile(for package: URL) -> URL {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+        let caches = Optional(AppDirectory.url(.cachesDirectory))
             ?? FileManager.default.temporaryDirectory
         return caches.appendingPathComponent("StreamSeams", isDirectory: true)
             .appendingPathComponent(package.deletingPathExtension().lastPathComponent + ".json")

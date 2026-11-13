@@ -474,6 +474,16 @@ final class DownloadManager: NSObject {
 
     nonisolated static let log = Logger(subsystem: bundleID, category: "downloads")
 
+    /// What the background sessions are named after: the bundle identifier,
+    /// and in UI test mode a name of their own, so a test run never picks up
+    /// the transfers of the copy in real use (the Mac shares one container).
+    nonisolated static var sessionPrefix: String {
+        #if DEBUG
+        if TestRuntime.isUITest { return bundleID + ".uitest" }
+        #endif
+        return bundleID
+    }
+
     private(set) var records: [DownloadRecord] = []
     private(set) var queue: [QueuedDownload] = [] {
         didSet { queuedIds = nil }
@@ -689,7 +699,7 @@ final class DownloadManager: NSObject {
 
     @ObservationIgnored
     private lazy var session: URLSession = {
-        let cfg = URLSessionConfiguration.background(withIdentifier: "\(Self.bundleID).downloads")
+        let cfg = URLSessionConfiguration.background(withIdentifier: "\(Self.sessionPrefix).downloads")
         cfg.isDiscretionary = false
         cfg.sessionSendsLaunchEvents = true
         // Left open here and decided per transfer instead: a session's
@@ -734,12 +744,12 @@ final class DownloadManager: NSObject {
     /// system hands back any transfer that was running under it.
     @ObservationIgnored
     private lazy var assetSession: AVAssetDownloadURLSession = makeAssetSession(
-        identifier: "\(Self.bundleID).streamdownloads", allowsCellular: true
+        identifier: "\(Self.sessionPrefix).streamdownloads", allowsCellular: true
     )
 
     @ObservationIgnored
     private lazy var wifiAssetSession: AVAssetDownloadURLSession = makeAssetSession(
-        identifier: "\(Self.bundleID).streamdownloads.wifi", allowsCellular: false
+        identifier: "\(Self.sessionPrefix).streamdownloads.wifi", allowsCellular: false
     )
 
     private var assetSessions: [AVAssetDownloadURLSession] { [assetSession, wifiAssetSession] }
@@ -991,7 +1001,7 @@ final class DownloadManager: NSObject {
     /// read from inside view bodies, several times per row, and a path helper
     /// that touches the disk on every draw is not one.
     nonisolated static var rootPath: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        AppDirectory.url(.applicationSupportDirectory)
             // "FellyJin" is the pre-Aquarium name, kept so existing downloads are found
             .appendingPathComponent("FellyJin/Downloads", isDirectory: true)
     }
