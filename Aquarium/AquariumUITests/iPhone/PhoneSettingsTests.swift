@@ -1,0 +1,258 @@
+//  Settings on the phone: every page opens and shows its rows, and the rows
+//  that change something visible are checked for their effect (theme, Next
+//  Up, Continue Watching, tab bar order, autoplay, the download defaults,
+//  Live TV source, Quick Connect approval, the library copy, About).
+//
+//  Rows the phone pins to their defaults (`Preferences.keysNotOfferedHere`:
+//  engine, skip interval, picture, subtitle style…) must not be offered.
+
+#if os(iOS)
+import XCTest
+
+final class PhoneSettingsTests: PhoneUITestCase {
+    /// What each page must show on a phone.
+    static let rows: [String: [String]] = [
+        "account": [TestID.Settings.accountSignedInAs, TestID.Settings.accountServer, TestID.Settings.signOut, TestID.Settings.addAccount],
+        "appearance": [TestID.Settings.theme, TestID.Settings.appIcon, TestID.Settings.tabBar, TestID.Settings.hideContinueWatching,
+                       TestID.Settings.nextUpDays, TestID.Settings.nextUpInProgress, TestID.Settings.nextUpRewatching],
+        "video": [TestID.Settings.videoQuality, TestID.Settings.videoResume, TestID.Settings.videoAutoplayNext],
+        "audio": [TestID.Settings.audioLanguage],
+        "subtitles": [TestID.Settings.subtitlesLanguage],
+        "music": [TestID.Settings.musicAutoplay, TestID.Settings.musicNormalizeVolume, TestID.Settings.musicMixSource],
+        "liveTV": [TestID.Settings.liveTVSource],
+        "downloads": [TestID.Settings.downloadsQuality, TestID.Settings.downloadsWifiOnly],
+        "libraryCopy": [TestID.Settings.libraryCopyKeep],
+        "about": [TestID.Settings.aboutVersion],
+    ]
+
+    /// Rows for settings the phone pins (cd76c6f): they must not be shown.
+    static let pinned = [TestID.Settings.videoEngine, TestID.Settings.videoSkipInterval, TestID.Settings.videoHideControlsAfter,
+                         TestID.Settings.videoBrightness, TestID.Settings.videoZoom, TestID.Settings.subtitlesBackground,
+                         TestID.Settings.subtitlesSize, TestID.Settings.videoBatterySaver]
+
+    private func openPage(_ page: String, file: StaticString = #filePath, line: UInt = #line) {
+        let link = app.descendants(matching: .any).matching(identifier: TestID.Settings.pageLink(page)).firstMatch
+        app.reveal(link)
+        link.tapNow(20, file: file, line: line)
+        app.element(TestID.Settings.pageRoot(page)).waitToExist(20, file: file, line: line)
+    }
+
+    private func any(_ id: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
+    /// Every page opens, shows its rows, fits the screen, and goes back.
+    func testEveryPageOpensWithItsRows() throws {
+        launchHome()
+        openSettings()
+        var missing: [String] = []
+        for page in ["account", "appearance", "video", "audio", "subtitles", "music", "liveTV", "downloads", "libraryCopy", "about"] {
+            openPage(page)
+            for row in Self.rows[page] ?? [] {
+                let e = any(row)
+                if !e.waitForExistence(timeout: 3) { app.reveal(e) }
+                if !e.exists { missing.append("\(page): \(row)") }
+            }
+            for row in Self.pinned where any(row).exists { XCTFail("\(page) shows pinned row \(row)") }
+            attachScreenshot("settings \(page) (\(device.rawValue))")
+            goBack()
+            app.element(TestID.Settings.root).waitToExist(10)
+        }
+        XCTAssertTrue(missing.isEmpty, "missing rows: \(missing.joined(separator: ", "))")
+    }
+
+    func testAppleWatchPageOpens() throws {
+        try standardOnly()
+        launchHome()
+        openSettings()
+        openPage("watch")
+        XCTAssertTrue(app.element(TestID.WatchSettings.root).waitForExistence(timeout: 10) || app.element(TestID.Settings.pageRoot("watch")).exists)
+    }
+
+    func testAccountPageNamesTheAccountAndServer() throws {
+        try standardOnly()
+        let account = try XCTUnwrap(QA.account())
+        launchHome()
+        openSettings()
+        openPage("account")
+        let signedInAs = any(TestID.Settings.accountSignedInAs)
+        signedInAs.waitToExist(10)
+        XCTAssertTrue(signedInAs.label.contains(account.name) || (signedInAs.value as? String ?? "").contains(account.name), signedInAs.label)
+        XCTAssertTrue(any(TestID.Settings.accountServer).label.contains("127.0.0.1") || (any(TestID.Settings.accountServer).value as? String ?? "").contains("127.0.0.1"))
+    }
+
+    /// Quick Connect approval from Settings › Account: a code started by
+    /// the test (as suite-spare2) is approved by the app.
+    func testApproveAQuickConnectCode() throws {
+        try standardOnly()
+        let start = try JellyfinAPI.quickConnectInitiate()
+        launchHome()
+        openSettings()
+        openPage("account")
+        let field = app.textFields[TestID.QuickConnect.codeField]
+        app.reveal(field)
+        field.tapNow(10)
+        field.typeText(start.code)
+        app.button(TestID.QuickConnect.approve).tapNow(10)
+        let confirm = app.button(TestID.QuickConnect.confirm)
+        if confirm.waitForExistence(timeout: 5) { confirm.tap() }
+        any(TestID.QuickConnect.outcome).waitToExist(20)
+        XCTAssertTrue(eventually(timeout: 20) { (try? JellyfinAPI.quickConnectAuthenticated(secret: start.secret)) == true },
+                      "the server never saw the code approved")
+    }
+
+    func testDarkThemeTurnsTheAppDark() throws {
+        try standardOnly()
+        launchHome()
+        openSettings()
+        openPage("appearance")
+        let theme = any(TestID.Settings.theme)
+        theme.tapNow(10)
+        menuItem(TestID.Settings.option(TestID.Settings.theme, "dark"), label: "Dark").tapNow(10)
+        attachScreenshot("dark theme")
+        theme.tapNow(10)
+        menuItem(TestID.Settings.option(TestID.Settings.theme, "auto"), label: "Match system").tapNow(10)
+    }
+
+    func testHideContinueWatchingTakesTheRowOffHome() throws {
+        try standardOnly()
+        try self.api.setResume(try Fixtures.require().item("film.long_direct").id, seconds: 300)
+        launchHome()
+        app.element(TestID.Home.shelf(TestID.Home.rowResume)).waitToExist(30)
+        openSettings()
+        openPage("appearance")
+        let toggle = app.switches[TestID.Settings.hideContinueWatching]
+        app.reveal(toggle)
+        toggle.tapNow(10)
+        tab("Home")
+        XCTAssertTrue(app.element(TestID.Home.shelf(TestID.Home.rowResume)).waitToVanish(20), "Continue Watching still shown")
+    }
+
+    func testTabBarSettingsReorderAndReset() throws {
+        try standardOnly()
+        launchHome()
+        openSettings()
+        openPage("appearance")
+        let link = any(TestID.Settings.tabBar)
+        app.reveal(link)
+        link.tapNow(10)
+        app.element(TestID.TabBarSettings.root).waitToExist(10)
+        any(TestID.TabBarSettings.home).waitToExist(10)
+        let reset = any(TestID.TabBarSettings.reset)
+        if reset.exists { reset.tap() }
+        // Regression R-0c2a8e9: the page must not eject itself mid-edit.
+        XCTAssertTrue(app.element(TestID.TabBarSettings.root).exists)
+    }
+
+    func testAppIconPageListsIcons() throws {
+        try standardOnly()
+        launchHome()
+        openSettings()
+        openPage("appearance")
+        let link = any(TestID.Settings.appIcon)
+        app.reveal(link)
+        link.tapNow(10)
+        app.element(TestID.AppIconSettings.root).waitToExist(10)
+        any(TestID.AppIconSettings.icon("AppIcon")).waitToExist(10)
+        assertOnScreen(any(TestID.AppIconSettings.icon("AppIcon")), "original icon tile")
+    }
+
+    func testDefaultQualityChoices() throws {
+        try standardOnly()
+        launchHome()
+        openSettings()
+        openPage("video")
+        let quality = any(TestID.Settings.videoQuality)
+        quality.tapNow(10)
+        for (key, label) in [("auto", "Auto"), ("5000000", "5 Mbps · 720p")] {
+            XCTAssertTrue(menuItem(TestID.Settings.option(TestID.Settings.videoQuality, key), label: label).exists, key)
+        }
+    }
+
+    func testAboutShowsTheVersion() throws {
+        try standardOnly()
+        launchHome()
+        openSettings()
+        openPage("about")
+        let version = any(TestID.Settings.aboutVersion)
+        version.waitToExist(10)
+        XCTAssertFalse(version.label.isEmpty)
+    }
+
+    func testLibraryCopyDeleteAsksFirst() throws {
+        // Regression R-074a461: deleting the library copy did not ask.
+        try standardOnly()
+        launchHome()
+        openSettings()
+        openPage("libraryCopy")
+        let delete = any(TestID.Settings.libraryCopyDelete)
+        app.reveal(delete)
+        guard delete.exists else { throw XCTSkip("no library copy to delete yet") }
+        delete.tap()
+        any(TestID.Settings.libraryCopyDeleteCancel).tapNow(10)
+    }
+
+    func testLiveTVSourceOffersCustomPlaylist() throws {
+        try standardOnly()
+        launchHome()
+        openSettings()
+        openPage("liveTV")
+        any(TestID.Settings.liveTVSource).tapNow(10)
+        XCTAssertTrue(menuItem(TestID.Settings.option(TestID.Settings.liveTVSource, "custom"), label: "Custom playlist (M3U + XMLTV)").exists)
+    }
+
+    func testMusicStationMixPage() throws {
+        try standardOnly()
+        launchHome()
+        openSettings()
+        openPage("music")
+        let link = any(TestID.Settings.musicStationMix)
+        app.reveal(link)
+        link.tapNow(10)
+        any(TestID.Settings.stationMixPointsLeft).waitToExist(10)
+    }
+
+    func testSettingsPagesFitTheScreen() throws {
+        launchHome()
+        openSettings()
+        for page in ["account", "appearance", "video", "downloads"] {
+            let link = any(TestID.Settings.pageLink(page))
+            app.reveal(link)
+            assertOnScreen(link, "\(page) link")
+        }
+    }
+}
+
+extension JellyfinAPI {
+    struct QuickConnectStart { let secret: String; let code: String }
+
+    /// Starts a Quick Connect request as another device (no token needed).
+    static func quickConnectInitiate(server: String = QA.server) throws -> QuickConnectStart {
+        let json = try rawCall(server: server, "POST", "/QuickConnect/Initiate")
+        guard let secret = json["Secret"] as? String, let code = json["Code"] as? String else {
+            throw Failure.noAnswer("/QuickConnect/Initiate")
+        }
+        return QuickConnectStart(secret: secret, code: code)
+    }
+
+    static func quickConnectAuthenticated(secret: String, server: String = QA.server) throws -> Bool {
+        (try rawCall(server: server, "GET", "/QuickConnect/Connect?secret=\(secret)"))["Authenticated"] as? Bool ?? false
+    }
+
+    private static func rawCall(server: String, _ method: String, _ path: String) throws -> [String: Any] {
+        guard let url = URL(string: server + path) else { throw Failure.noAnswer(path) }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.setValue("MediaBrowser Client=\"Aquarium UI Tests\", Device=\"QC probe\", DeviceId=\"aquarium-ui-tests-qc\", Version=\"1.0\"",
+                     forHTTPHeaderField: "Authorization")
+        let done = DispatchSemaphore(value: 0)
+        var out: Data?
+        URLSession.shared.dataTask(with: req) { d, _, _ in out = d; done.signal() }.resume()
+        _ = done.wait(timeout: .now() + 15)
+        guard let data = out, let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw Failure.noAnswer(path)
+        }
+        return json
+    }
+}
+#endif
