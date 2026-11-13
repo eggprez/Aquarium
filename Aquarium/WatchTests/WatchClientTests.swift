@@ -118,12 +118,10 @@ final class WatchClientTests: WatchUnitTestCase {
     }
 
     /// Regression, master-fix-list "From Apple Watch": "Settings says Server:
-    /// Connected while every request gets 401 (1/1)". Fixed on
-    /// claude/qa-fix-list-cb0b58 (352c592), not on this branch.
+    /// Connected while every request gets 401 (1/1)".
     func testSettingsDoesNotSayConnectedWhileTheSignInIsRefused() async {
         WatchStub.on("/Items", status: 401, json: "")
         _ = try? await client.items(JellyfinClient.Query(types: "Audio"))
-        XCTExpectFailure("bug: Settings shows Server: Connected while every request is refused with 401 (OnWatchViews.swift WatchSettingsView.serverStatus)")
         XCTAssertNotEqual(WatchSettingsView.serverStatus(client), "Connected")
     }
 

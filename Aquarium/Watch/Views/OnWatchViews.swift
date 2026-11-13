@@ -451,9 +451,12 @@ struct WatchSettingsView: View {
     @Environment(WatchSyncQueue.self) private var sync
     @State private var syncing = false
 
-    /// What the Server row says.
+    /// What the Server row says: out of reach, answering but refusing the
+    /// watch's sign-in, or connected.
     static func serverStatus(_ client: JellyfinClient) -> String {
-        client.isOffline ? "Out of reach" : "Connected"
+        if client.isOffline { return "Out of reach" }
+        if client.signInRefused { return "Sign-in expired" }
+        return "Connected"
     }
 
     var body: some View {

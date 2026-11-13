@@ -74,6 +74,10 @@ final class JellyfinClient {
     private(set) var account: WatchAccount?
     /// The saved server did not answer the last time it was asked.
     private(set) var isOffline = false
+    /// The server answered the last signed-in request with 401: it refuses
+    /// this watch's token. Cleared by a new sign-in from the phone or the
+    /// next signed-in request it takes.
+    private(set) var signInRefused = false
     private(set) var lastCheckedAt: Date?
 
     var isSignedIn: Bool { account != nil }
@@ -142,6 +146,7 @@ final class JellyfinClient {
         )
         WatchKeychain.store(token: credentials.token, account: Self.keychainAccount(next))
         tokenCache = nil
+        signInRefused = false
         if account != next {
             account = next
             defaults.set(try? JSONEncoder().encode(next), forKey: "watch_account")
@@ -153,6 +158,7 @@ final class JellyfinClient {
         if let account { WatchKeychain.delete(account: Self.keychainAccount(account)) }
         account = nil
         tokenCache = nil
+        signInRefused = false
         defaults.removeObject(forKey: "watch_account")
     }
 
@@ -250,8 +256,12 @@ final class JellyfinClient {
         if http.statusCode == 401 {
             WatchLog.error("client", "\(method) \(path.components(separatedBy: "?")[0]): 401, sign-in refused")
             tokenCache = nil
+            signInRefused = true
             throw APIError.auth("The watch's sign-in has expired. Open Aquarium on your iPhone to send it again.")
         }
+        // The public probe answers without looking at the token, so only
+        // another path's answer shows the sign-in is taken again.
+        if !path.hasPrefix("/System/Info/Public") { signInRefused = false }
         guard (200..<300).contains(http.statusCode) else {
             WatchLog.error("client", "\(method) \(path.components(separatedBy: "?")[0]): HTTP \(http.statusCode)")
             throw APIError.server(status: http.statusCode, path: path.components(separatedBy: "?")[0])

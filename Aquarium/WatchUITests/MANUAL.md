@@ -58,9 +58,9 @@ up through the Mac. The unit tests pin the path monitor's word
    watch. After 20 minutes, expect the watch to take items back and fetch them
    itself ("the phone has been away N min; fetching it here").
 4. Settings › Server on the watch: note what it says while the watch's own
-   requests are failing. It should say "Out of reach", not "Connected". (Fixed on
-   `claude/qa-fix-list-cb0b58`; on this branch it can say Connected while
-   every request gets 401: `WatchClientTests.testSettingsDoesNotSayConnectedWhileTheSignInIsRefused`.)
+   requests are failing. It should say "Out of reach" when they time out or fail
+   TLS, "Sign-in expired" when the server answers 401, never "Connected"
+   (`WatchClientTests.testSettingsDoesNotSayConnectedWhileTheSignInIsRefused`).
 5. Server recovery: with the watch app open on "Server out of reach", bring the
    server back. On this branch the home page stays "out of reach" until the app
    returns to the foreground or Sync Now (master fix list); the fix branch asks
