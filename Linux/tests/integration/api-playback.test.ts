@@ -131,6 +131,13 @@ describe.skipIf(!qa)("QA server: resolvePlayback", () => {
     expect(await ask({ AudioStreamIndex: 3, MediaSourceId: f.mediaSources[0].id })).toBe("3");
   });
 
+  it("transcodes with the audio track it is asked for, named with its source (a smaller stream keeps mpv's pick)", async () => {
+    const api = await qaApiFull();
+    const f = fx("film.long_multitrack");
+    const src = await resolve(api, f.id, { forceTranscode: true, audio: { mediaSourceId: f.mediaSources[0].id, index: 3 } });
+    expect(query(src.url).get("AudioStreamIndex")).toBe("3");
+  });
+
   it("transcodes to HLS in TS segments when told to (regression: fMP4 HLS put WebVTT cues 10 s late)", async () => {
     const api = await qaApiFull();
     const f = fx("film.long_multitrack");

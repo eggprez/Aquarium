@@ -48,6 +48,10 @@ export interface StreamOptions {
   live?: boolean;
   /** explicit start position, overrides resume */
   startSeconds?: number;
+  /** The audio track to transcode with, as the server numbers it: the one mpv
+   *  was playing when a smaller stream was asked for. Only ever for the same
+   *  item (next episodes start from fresh options). */
+  audio?: { mediaSourceId: string; index: number };
 }
 
 /**
@@ -718,12 +722,13 @@ export async function playItem(
   if (nowPlaying === startedPlaying) nowPlaying.opts = { ...opts, maxBitrate };
   try {
     const src =
-      (!opts.live && takePrefetched(item.Id, maxBitrate, startTicks)) ||
+      (!opts.live && !opts.audio && takePrefetched(item.Id, maxBitrate, startTicks)) ||
       (await api.resolvePlayback(item.Id, {
         maxBitrate,
         forceTranscode: maxBitrate !== undefined,
         live: opts.live,
         startTicks,
+        audio: opts.audio,
       }));
     if (nowPlaying === startedPlaying) nowPlaying.source = src;
     invoke("ui_log", { msg: `playItem ${item.Id} method=${src.playMethod} startTicks=${startTicks} maxBitrate=${maxBitrate}` }).catch(() => {});
@@ -1974,9 +1979,30 @@ export async function switchQuality(maxBitrate?: number, meta: StartMeta = {}): 
       ...np.opts,
       maxBitrate,
       startSeconds: np.opts.live ? undefined : pos,
+      audio: playingAudio(np),
     },
     { ...meta, stream: true, continuation: true }
   );
+}
+
+/**
+ * The audio track mpv is playing, as the server numbers it, so a transcode
+ * asked for from here keeps it rather than the file's default. Read off a
+ * direct stream, where mpv has every track (mpv's `ff-index` is the file's
+ * stream index, which is the server's `Index`, checked against the source's
+ * own stream list); a transcode holds only the track it was asked for, so on
+ * one the earlier choice stands.
+ */
+function playingAudio(np: NonNullable<typeof nowPlaying>): StreamOptions["audio"] {
+  const src = np.source;
+  if (src?.playMethod !== "DirectStream") return np.opts.audio;
+  const t = lastTracks.find((t) => t?.type === "audio" && t.selected && !t.external);
+  const index = t?.["ff-index"];
+  if (typeof index !== "number" || !src.mediaSourceId) return undefined;
+  const stream = (src.mediaSource?.MediaStreams ?? []).find((st: any) => st?.Index === index);
+  if (stream?.Type !== "Audio") return undefined;
+  if (t.lang && stream.Language && t.lang !== stream.Language) return undefined;
+  return { mediaSourceId: src.mediaSourceId, index };
 }
 
 /**

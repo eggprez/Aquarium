@@ -1417,7 +1417,14 @@ function sourceWithoutApiKey(ms: any): any {
 
 export async function resolvePlayback(
   itemId: string,
-  opts: { maxBitrate?: number; forceTranscode?: boolean; live?: boolean; startTicks?: number } = {}
+  opts: {
+    maxBitrate?: number;
+    forceTranscode?: boolean;
+    live?: boolean;
+    startTicks?: number;
+    /** The audio track a transcode carries (it holds only the one). */
+    audio?: { mediaSourceId: string; index: number };
+  } = {}
 ): Promise<PlaybackSource> {
   const s = session!;
   const force = !!opts.forceTranscode;
@@ -1432,6 +1439,12 @@ export async function resolvePlayback(
     EnableTranscoding: true,
   };
   if (opts.maxBitrate) body.MaxStreamingBitrate = opts.maxBitrate;
+  // Only for a transcode: direct play delivers every track and mpv picks. The
+  // server ignores the index without the source it belongs to.
+  if (force && opts.audio) {
+    body.MediaSourceId = opts.audio.mediaSourceId;
+    body.AudioStreamIndex = opts.audio.index;
+  }
 
   const info = await api(`/Items/${itemId}/PlaybackInfo`, { method: "POST", body });
   if (!info.MediaSources?.[0]) throw new Error("No playable media source returned by the server");

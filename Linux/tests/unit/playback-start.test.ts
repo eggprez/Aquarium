@@ -3,7 +3,7 @@
 // stream for the next title, the "This didn't play" card, quality switches
 // and what the player reports about what is on screen.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { invokeCalls, jfPaths, onInvoke } from "../helpers/tauri";
+import { emitEvent, invokeCalls, jfPaths, onInvoke } from "../helpers/tauri";
 import {
   SERVER,
   boot,
@@ -623,6 +623,61 @@ describe("quality switches", () => {
     expect(lastPlay().start_seconds).toBe(120.5);
     expect(seen[0]!.detail).toEqual({ inherited: false, continuation: true });
     expect(invokeCalls("jf_bitrate_test")).toHaveLength(probes);
+  });
+
+  it("a smaller stream keeps the audio track mpv was playing (regression: the transcode carried the file's default)", async () => {
+    const { pb } = await boot();
+    const streams = [
+      { Index: 0, Type: "Video" },
+      { Index: 1, Type: "Audio", Language: "eng" },
+      { Index: 3, Type: "Audio", Language: "fra" },
+    ];
+    mockServer({
+      mediaSource: (id, body) => ({
+        Id: `ms-${id}`,
+        Container: "mkv",
+        SupportsDirectPlay: true,
+        SupportsDirectStream: true,
+        MediaStreams: streams,
+        ...(body.EnableDirectPlay === false ? { TranscodingUrl: transcodeUrl(id, body.MaxStreamingBitrate) } : {}),
+      }),
+    });
+    await pb.playItem(movie("m1"), {}, { stream: true });
+    expect(playbackInfos()[0]!.body).not.toHaveProperty("AudioStreamIndex");
+    emitEvent("player-tracks", [
+      { id: 1, type: "audio", lang: "eng", "ff-index": 1, selected: false },
+      { id: 2, type: "audio", lang: "fra", "ff-index": 3, selected: true },
+    ]);
+    await pb.switchQuality(5_000_000);
+    expect(playbackInfos().at(-1)!.body).toMatchObject({ MediaSourceId: "ms-m1", AudioStreamIndex: 3 });
+    // On the transcode mpv sees one track; the choice made before it stands.
+    emitEvent("player-tracks", [{ id: 1, type: "audio", lang: "fra", "ff-index": 1, selected: true }]);
+    await pb.switchQuality(2_000_000);
+    expect(playbackInfos().at(-1)!.body).toMatchObject({ MediaSourceId: "ms-m1", AudioStreamIndex: 3 });
+    // Direct play gets every track; nothing is asked for.
+    await pb.switchQuality(undefined);
+    expect(playbackInfos().at(-1)!.body).not.toHaveProperty("AudioStreamIndex");
+  });
+
+  it("asks for no audio track when mpv's pick does not match the source's streams", async () => {
+    const { pb } = await boot();
+    mockServer({
+      mediaSource: (id, body) => ({
+        Id: `ms-${id}`,
+        SupportsDirectPlay: true,
+        SupportsDirectStream: true,
+        MediaStreams: [{ Index: 1, Type: "Audio", Language: "eng" }, { Index: 2, Type: "Subtitle" }],
+        ...(body.EnableDirectPlay === false ? { TranscodingUrl: transcodeUrl(id, body.MaxStreamingBitrate) } : {}),
+      }),
+    });
+    await pb.playItem(movie("m1"), {}, { stream: true });
+    emitEvent("player-tracks", [{ id: 1, type: "audio", lang: "fra", "ff-index": 1, selected: true }]);
+    await pb.switchQuality(5_000_000);
+    expect(playbackInfos().at(-1)!.body).not.toHaveProperty("AudioStreamIndex");
+    emitEvent("player-tracks", [{ id: 1, type: "audio", "ff-index": 2, selected: true }]);
+    await pb.switchQuality(undefined);
+    await pb.switchQuality(5_000_000);
+    expect(playbackInfos().at(-1)!.body).not.toHaveProperty("AudioStreamIndex");
   });
 
   it("switching to Direct Play passes no bitrate", async () => {
