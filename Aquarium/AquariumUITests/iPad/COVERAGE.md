@@ -35,9 +35,9 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 | Footer status (Synced / downloads running / Offline) | PadSidebarTests.testFooterSaysSynced; PadDownloadsTests.testDownloadPlayAndDeleteAFilm | UI | pass |
 | Downloads badge on the row | PadDownloadsTests.testDownloadPlayAndDeleteAFilm (transient) | UI | partial: the badge is up only while a transfer runs, too brief on the local server to assert |
 | Collapse the sidebar; bring it back from Home's bar | PadSidebarTests.testCollapseAndBringBackTheSidebarInLandscape | UI | pass |
-| Bring it back from a title page's bar | PadSidebarTests.testCollapsedSidebarComesBackFromATitlePage | UI | xfail |
+| Bring it back from a title page's bar | PadSidebarTests.testCollapsedSidebarComesBackFromATitlePage | UI | pass (fixed 2026-11-13) |
 | Sidebar in portrait and landscape | PadSidebarTests.testSidebarInPortraitAndLandscape | UI | pass |
-| Long library name not cut in the sidebar ("Home Videos & Phot…") | PadRegressionTests.testLongLibraryNameIsNotCutInTheSidebar | UI | xfail |
+| Long library name not cut in the sidebar ("Home Videos & Phot…"): wraps to two lines | PadRegressionTests.testLongLibraryNameIsNotCutInTheSidebar | UI | pass (fixed 2026-11-13) |
 | Sidebar width 190–280 (narrower sidebar, 6344432) | PadSidebarTests.testSidebarIsNarrow | UI | pass |
 | Now Playing card at the foot of the sidebar | PadMusicTests.testPlayingASongPutsTheNowPlayingCardInTheSidebar, …SidebarCardPlayPauseAndOpensNowPlaying; PadBooksTests | UI | pass |
 | No card when idle | PadSidebarTests.testDownloadsBadgeAndNowPlayingAbsentWhenIdle | UI | pass |
@@ -83,8 +83,8 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 | Card → title → Back to the grid | PadLibraryTests.testCardOpensTitleAndBackReturnsToTheGrid | UI | pass |
 | Shows library → series | PadLibraryTests.testShowsLibraryOpensASeries | UI | pass |
 | Collections section (56a1825) and a collection's titles | PadLibraryTests.testCollectionsSectionListsFXCollection | UI | pass |
-| Photo album opens as a grid of photos | PadPhotosTests.testPhotoAlbumOpensAsAGridOfPhotos | UI | xfail |
-| Photo folder named properly, not by its folder on disk | PadPhotosTests.testPhotoFolderIsNotShownByItsRawFolderName | UI | xfail |
+| Photo album opens as a grid of photos | PadPhotosTests.testPhotoAlbumOpensAsAGridOfPhotos | UI | pass (claude/fix-tv) |
+| Photo folder named properly, not by its folder on disk | PadPhotosTests.testPhotoFolderIsNotShownByItsRawFolderName | UI | pass (claude/fix-tv) |
 | Favourites: baseline, kind chips | PadFavoritesTests.testFavoritesShowsTheBaselineAndFiltersByKind | UI | pass |
 | Favourite added elsewhere appears (ItemMutations) | PadFavoritesTests.testFavoriteAddedOnATitleAppearsHere | UI | pass |
 
@@ -98,9 +98,9 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 | Resume label and time left | PadDetailTests.testResumeLabelAndRemainingOnAFilmInProgress | UI | pass |
 | Favourite disc → server | PadDetailTests.testFavoriteDiscReachesTheServer | UI | pass |
 | Watched disc → server | PadDetailTests.testWatchedDiscReachesTheServer | UI | pass |
-| Quality menu (ladder) and play at a rung | PadDetailTests.testQualityMenuListsTheLadder, testQualityMenuPlaysAtTheRungChosen | UI | xfail (xfail, pass) |
+| Quality menu (ladder) and play at a rung, held for the sitting | PadDetailTests.testQualityMenuListsTheLadder, testQualityMenuPlaysAtTheRungChosen; PadQualityPinTests (3) | UI + unit | pass (rung fixed 2026-11-13) |
 | Download menu | PadDetailTests.testDownloadMenuOffersQualities | UI | pass |
-| Versions (three media sources) | PadDetailTests.testVersionsAreOfferedOnATitleWithThreeFiles | UI | xfail |
+| Versions (three media sources), in the quality menu's Version section | PadDetailTests.testVersionsAreOfferedOnATitleWithThreeFiles | UI | pass (claude/fix-tv) |
 | Season switch, episodes two across, switching seasons | PadDetailTests.testSeriesPageHasSeasonSwitchAndEpisodesTwoAcrossInLandscape | UI | pass |
 | Episode summary, play glyph | PadDetailTests.testEpisodeSummaryAndPlayGlyph | UI | pass |
 | Episode page and its Show › Season trail | PadDetailTests.testEpisodeRowOpensTheEpisodesPageWithItsTrail | UI | pass |
@@ -110,7 +110,7 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 | Back from the page's own bar | PadDetailTests.testBackReturnsToTheSectionsPage | UI | pass |
 | Trailer disc (local trailers) | PadDetailTests.testTrailerOnATitleWithLocalTrailers | UI | pass |
 | Quality not alone on its row upright | PadRegressionTests.testQualityDoesNotWrapAloneBesideThePosterInPortrait | UI | pass |
-| Blocked title's error (fx-kid) | PadRegressionTests.testBlockedTitleSaysSoInPlainWords | UI | xfail |
+| Blocked title's error (fx-kid): plain words, no Try again | PadRegressionTests.testBlockedTitleSaysSoInPlainWords | UI | pass (words: claude/fix-tv; no Try again: 2026-11-13) |
 | Header switches to the compact stack under 720 pt of column | — | manual | manual (needs a window narrower than the simulator allows) |
 
 ## Search and context menus
@@ -129,7 +129,7 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 | Episode menu: Go to Show / Season, Next Up | PadContextMenuTests.testEpisodeMenuGoesToShowAndSeason | UI | pass |
 | Season chip menu → season page | PadContextMenuTests.testSeasonChipMenuOpensTheSeasonsPage | UI | pass |
 | Download submenu | PadContextMenuTests.testDownloadSubmenuListsQualities | UI | pass |
-| Grid card menu | PadContextMenuTests.testLibraryGridCardHasTheMenuToo | UI | xfail |
+| Grid card menu | PadContextMenuTests.testLibraryGridCardHasTheMenuToo; MANUAL.md | UI + manual | xfail (XCUITest only: a real long press gives the menu) |
 | Secondary click with a pointer | — | manual | manual |
 
 ## Player
@@ -151,7 +151,7 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 | Chapters (Info's chapter row follows the position) | PadPlayerInfoTests.testChapterNameFollowsThePosition | UI | pass |
 | Speed and sleep timer (More card) | PadPlayerInfoTests.testSpeedAndSleepFromTheMoreCardShowInInfo | UI | pass |
 | "Normal" speed chip whole | PadPlayerInfoTests.testNormalSpeedChipIsWhole | UI | pass |
-| Audio card, switch track (6 tracks) | PadPlayerTracksTests.testAudioCardListsEveryTrackAndSwitches | UI | skip (the QA server's encoder failed for this file; card listing passed in earlier runs) |
+| Audio card, switch track (6 tracks) | PadPlayerTracksTests.testAudioCardListsEveryTrackAndSwitches | UI | skip (the QA server's encoder fails for this file; the player ends on its error card after three tries, about 1 min 45 s, checked by hand 2026-11-13) |
 | Forced subtitles offered and chosen; Off | PadPlayerTracksTests.testForcedSubtitleTrackIsOfferedAndCanBeChosen | UI | pass |
 | Sidecar subtitles listed / chosen | PadPlayerTracksTests.testSidecarSubtitleIsOffered; PadRegressionTests.testChosenSidecarSubtitleStaysChosen | UI | pass |
 | Quality card: rung chosen, transcoding | PadPlayerTracksTests.testQualityCardChoosesARung | UI | pass |
@@ -162,7 +162,7 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 | Up Next card at the end, Play now | PadPlayerMomentsTests.testUpNextCardAtTheEndPlaysTheNextEpisode | UI | pass |
 | Close with the Up Next card up: no crash | PadPlayerMomentsTests.testClosingWithTheUpNextCardUpDoesNotCrash | UI | pass |
 | Stop after this (episode only) | PadPlayerMomentsTests.testStopAfterThisEpisodeIsOfferedOnAnEpisodeNotAFilm; PadRegressionTests.testStopAfterThisSurvivesAQualityChange | UI | pass |
-| Picture in Picture from the button | PadPictureInPictureTests.testPictureInPictureStartsAndStops | UI | xfail |
+| Picture in Picture from the button | PadPictureInPictureTests.testPictureInPictureStartsAndStops | UI | xfail (system: iPadOS places the PiP window over the player's Leave PiP button; MANUAL.md) |
 | Background → PiP, playback continues, player kept | PadPictureInPictureTests.testBackgroundingStartsPictureInPictureAndPlaybackContinues | UI | pass |
 | Resume point and pause reported to the server | PadPlaybackReportingTests (2) | UI | pass |
 | Player messages (toasts) over the player (B4) | PadRegressionTests.testPlayerMessagesShowOverThePlayer | UI | pass |
@@ -218,7 +218,7 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 | "Sidebar" order page (not "Tab Bar") | PadSettingsTests.testAppearanceNamesTheSidebarNotTheTabBar | UI | pass |
 | Theme | PadSettingsTests.testThemeChoice | UI | pass |
 | Sub-page leaves with Settings (346bc31) | PadSettingsTests.testLeavingASettingsSubPageByTheSidebarLeavesIt | UI | pass |
-| Sub-pages (Sidebar, App Icon, Station mix, …) open in the one-column layout | PadSettingsTests.testSubPagesOpenInTheOneColumnLayout | UI | xfail |
+| Sub-pages (Sidebar, App Icon, Station mix, …) open in the one-column layout | PadSettingsTests.testSubPagesOpenInTheOneColumnLayout | UI | pass (fixed 2026-11-13) |
 | Account facts; Quick Connect approval field | PadSettingsTests.testAccountPageAndQuickConnectApproval | UI | pass |
 | About | PadSettingsTests.testAboutNamesTheVersionAndEngine | UI | pass |
 | No engine choice on iPad | PadSettingsTests.testVideoPageHasNoEngineChoiceOnIPad | UI | pass |
@@ -242,16 +242,32 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 
 ## Results
 
-Final state, 2026-11-13, "Aquarium Test iPad Air 11" (iOS 27.0), QA server 8196,
-`suite-ipad` reset before each run: the full plan (run r9) plus reruns of the
-tests changed after it (r10–r13), and the unit tests on the same simulator.
+Final state, 2026-11-13 (fix pass on `claude/fix-ipad`, with `claude/fix-tv`
+merged), "Aquarium Test iPad Air 11" (iOS 27.0), QA server 8196, `suite-ipad`
+reset before each run: the full iPad plan once, then the two failures rerun
+alone. The unit plan ran on a private iPhone 17 Pro simulator (iOS 27.0),
+where the iPad-only unit tests skip; their last iPad run is the 33 below.
 
 | | Count |
 |---|---|
-| Unit tests (AquariumTests/iPad) | 33, all pass |
-| UI tests (AquariumUITests/iPad) | 164: 148 pass, 10 expected failures (open bugs), 6 skipped |
-| Total | 197: 181 pass, 10 xfail, 6 skip, 0 fail |
+| Unit tests (AquariumTests/iPad) | 36: the earlier 33 (iPad only, last run on the iPad, all pass) and PadQualityPinTests (3, pass on iOS) |
+| Unit plan, whole (iPhone simulator) | 155: 122 pass, 33 skip (iPad and TV only), 0 fail |
+| UI tests (AquariumUITests/iPad), full plan | 165: 154 pass, 2 expected failures, 7 skipped, 2 failed |
 
-Every xfail is an app bug listed in the report, each wrapped in
-`XCTExpectFailure("bug: …", strict: false)` so the suite turns its
-expected failure into an unexpected pass the day it is fixed.
+The two failures:
+
+- `PadRegressionTests.testHeroFirstPageSitsWhereTheOthersDo`: failed once in
+  the full plan (first hero page measured 182 pt off in landscape) and passed
+  rerun alone.
+- `PadPlayerChromeTests.testIPadChromeHasEveryControl`: the pill row is not
+  found within 10 s after turning to landscape. Flaky before these fixes as
+  well: on the commit before them it failed 2 of 3 runs, on the fixed branch
+  2 of 4. The controls are timing out between `showControls()` and the
+  check; a test fix, not an app one.
+
+The two expected failures are no longer app bugs: the PiP window's position
+is iPadOS's (MANUAL.md), and the grid card's missing menu is XCUITest's (a
+real long press gives it; MANUAL.md). Skips are the simulator's limits
+(hardware keys, Tab, full-screen windows), the hero under a pushed page, the
+smoke test of the iPhone's that the plan carries (it skips on an iPad), and the multitrack film
+whose encode the QA server can't open.
