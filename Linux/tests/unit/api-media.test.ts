@@ -420,6 +420,7 @@ describe("mediaSummary", () => {
     const api = await signIn();
     const ch = (a: any): string[] => api.mediaSummary(item([{ Type: "Audio", ...a }]));
     expect(ch({ ChannelLayout: "mono" })).toEqual(["Mono"]);
+    expect(ch({ ChannelLayout: "stereo", Channels: 2 })).toEqual(["Stereo"]);
     expect(ch({ ChannelLayout: "5.1(side)", Channels: 6 })).toEqual(["5.1(side)"]);
     expect(ch({ Channels: 8 })).toEqual(["7.1"]);
     expect(ch({ Channels: 6 })).toEqual(["5.1"]);

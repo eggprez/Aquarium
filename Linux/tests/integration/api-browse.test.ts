@@ -155,11 +155,7 @@ describe.skipIf(!qa)("QA server: api.ts browsing", () => {
     expect(summary).toContain("9 subtitle tracks");
   });
 
-  // BUG: mediaSummary (src/api.ts:1456 channelLabel) capitalises only the
-  // layout "mono". Jellyfin reports a stereo track's ChannelLayout as
-  // "stereo", so the detail line reads "720p · H264 · AAC · stereo" while a
-  // track with no layout reads "Stereo".
-  it.fails("names a stereo track 'Stereo', as the server's own layout name comes lower-case", async () => {
+  it("names a stereo track 'Stereo', as the server's own layout name comes lower-case", async () => {
     const api = await qaApiFull();
     const item = await api.getItem(fx("film.long_multitrack").id);
     expect(item.MediaSources[0].MediaStreams.find((s: any) => s.Type === "Audio").ChannelLayout).toBe("stereo");

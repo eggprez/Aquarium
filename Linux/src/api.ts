@@ -1453,7 +1453,8 @@ function resolutionLabel(stream: any): string | null {
 
 function channelLabel(stream: any): string | null {
   const layout = stream?.ChannelLayout;
-  if (typeof layout === "string" && layout) return layout === "mono" ? "Mono" : layout;
+  // Jellyfin names the plain layouts in lower case ("mono", "stereo").
+  if (typeof layout === "string" && layout) return layout.charAt(0).toUpperCase() + layout.slice(1);
   switch (stream?.Channels) {
     case 8: return "7.1";
     case 6: return "5.1";
