@@ -16,5 +16,15 @@ class TVUITestCase: AquariumUITestCase {
         // Apple TV only by compilation.
         try super.setUpWithError()
     }
+
+    override func tearDownWithError() throws {
+        // `XCUIApplication.terminate()` on the Apple TV simulator takes about
+        // two minutes every time (every teardown of the first runs, sent to
+        // the background first or not), while the next test's `launch()` ends
+        // the old process in a second or two. So the app is left for the next
+        // launch, and the run script's `simctl terminate` ends the last one.
+        app = nil
+        try super.tearDownWithError()
+    }
 }
 #endif

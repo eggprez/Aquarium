@@ -90,6 +90,7 @@ final class TVTopShelfTests: TVUnitTestCase {
         XCTAssertEqual(snapshot.entries.map(\.id), ["ep1", "ep2"], "the episode id, which the link carries back")
         XCTAssertEqual(snapshot.entries.map(\.title), ["Show 1", "Show 2"], "the series name under a series poster")
         XCTAssertEqual(snapshot.entries.map(\.image), ["series1-tag1.jpg", "series2-tag2.jpg"])
+        guard snapshot.entries.count == 2 else { return }
         XCTAssertEqual(snapshot.entries[0].progress, 0.25, accuracy: 0.001)
         XCTAssertEqual(snapshot.entries[1].progress, 0, "not started")
         XCTAssertLessThan(abs(snapshot.generated.timeIntervalSinceNow), 60)
