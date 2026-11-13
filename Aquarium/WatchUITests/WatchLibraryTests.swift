@@ -102,19 +102,17 @@ final class WatchLibraryTests: WatchUITestCase {
 
     /// Regression, master-fix-list "Layout, all watches" (low): "Music >
     /// Artists lists the audiobook author Mary Shelley". On the QA server the
-    /// audiobooks' author is FX Author. Fixed on claude/qa-fix-list-cb0b58
-    /// (352c592: Artists is the music library's), not on this branch.
+    /// audiobooks' author is FX Author.
     func testArtistsAreTheMusicLibrarysNotTheAudiobooksAuthors() throws {
         launchHome()
         open(TestID.Watch.rootDoor("music"))
         open(TestID.Watch.musicDoor("artists"))
         app.element(TestID.Watch.artistsRoot).waitToExist()
         XCTAssertTrue(app.elements(prefix: "watch.library.artist.").firstMatch.waitForExistence(timeout: 30))
-        // The server's AlbumArtists, as the watch asks for them, includes
+        // The server's AlbumArtists, unfiltered, includes
         // FX Author and Mary Shelley (checked 2026-11-13).
         let author = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "FX Author")).firstMatch
         reach(author, tries: 40)
-        XCTExpectFailure("bug: Music > Artists lists the audiobook author (JellyfinClient.albumArtists has no music-library ParentId)")
         XCTAssertFalse(author.exists, "an audiobook's author is not a music artist")
     }
 

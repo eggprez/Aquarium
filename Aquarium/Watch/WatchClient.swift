@@ -388,10 +388,15 @@ final class JellyfinClient {
         try await items(Query(types: "Audio", parentId: albumId, limit: 500)).items.sortedByTrack()
     }
 
+    /// Artists with an album to their name, counted from songs only: an
+    /// audiobook's author is an album artist too, and Music › Artists is
+    /// about the music. (A music library's ParentId would do it only where
+    /// there is one music library.)
     func albumArtists(startIndex: Int = 0, limit: Int = 300) async throws -> ItemsResponse {
         guard let account else { throw APIError.notConfigured }
         let q: [URLQueryItem] = [
             .init(name: "userId", value: account.userId),
+            .init(name: "IncludeItemTypes", value: "Audio"),
             .init(name: "SortBy", value: "SortName"),
             .init(name: "SortOrder", value: "Ascending"),
             .init(name: "Fields", value: Self.listFields),

@@ -272,6 +272,7 @@ final class WatchClientTests: WatchUnitTestCase {
         XCTAssertEqual(q["StartIndex"], "10")
         let artists = try await client.albumArtists()
         XCTAssertEqual(artists.items.map(\.Id), ["ar"])
+        XCTAssertEqual(WatchStub.query(WatchStub.requests.last!)["IncludeItemTypes"], "Audio", "songs' artists, not books' authors")
         _ = try await client.albums(artistId: "ar")
         q = WatchStub.query(WatchStub.requests.last!)
         XCTAssertEqual(q["AlbumArtistIds"], "ar")
