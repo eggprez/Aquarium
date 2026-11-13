@@ -31,7 +31,7 @@ final class PadSignInTests: PadUITestCase {
         launch(signIn: false)
         let form = app.element(TestID.Login.form)
         XCTAssertTrue(form.waitForExistence(timeout: 30))
-        let window = app.windows.firstMatch.frame
+        let window = app.frame
         XCTAssertLessThan(form.frame.width, window.width * 0.9, "a card, not edge to edge: \(form.frame)")
         XCTAssertEqual(form.frame.midX, window.midX, accuracy: 30)
         attachScreenshot("sign-in")
@@ -81,7 +81,12 @@ final class PadSignInTests: PadUITestCase {
 
     func testQuickConnectShowsACodeTheServerCanApprove() throws {
         connectToQAServer()
-        app.button(TestID.Login.modeSwitch).padTap()
+        // The username field takes focus and the keyboard covers the switch.
+        let mode = app.button(TestID.Login.modeSwitch)
+        mode.waitToExist(10)
+        dismissKeyboard()
+        if !mode.isHittable { reveal(mode) }
+        mode.padTap()
         let code = app.element(TestID.Login.quickConnectCode)
         XCTAssertTrue(code.waitForExistence(timeout: 20), "a six-digit code")
         let digits = text(code).filter(\.isNumber)

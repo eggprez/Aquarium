@@ -64,7 +64,7 @@ final class PadLiveTVTests: PadUITestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 15), "the line-up lists \(channels[1].name)")
         let panel = app.element(TestID.Player.panel)
         if panel.exists {
-            XCTAssertLessThan(panel.frame.width, app.windows.firstMatch.frame.width * 0.8, "a popover on an iPad")
+            XCTAssertLessThan(panel.frame.width, app.frame.width * 0.8, "a popover on an iPad")
         }
         attachScreenshot("channels popover")
         row.padTap()

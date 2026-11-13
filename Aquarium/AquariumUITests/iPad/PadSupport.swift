@@ -134,7 +134,7 @@ extension PadUITestCase {
         if element.isHittable { return true }
         // Not hittable can mean "under its own anchor" (see `padTap`), so
         // the frame decides.
-        let window = app.windows.firstMatch.frame.insetBy(dx: 0, dy: 60)
+        let window = app.frame.insetBy(dx: 0, dy: 60)
         let f = element.frame
         return !f.isEmpty && window.contains(CGPoint(x: f.midX, y: min(f.midY, f.minY + 40)))
     }
@@ -173,12 +173,12 @@ extension PadUITestCase {
 
     // MARK: Orientation
 
-    var isLandscape: Bool { app.windows.firstMatch.frame.width > app.windows.firstMatch.frame.height }
+    var isLandscape: Bool { app.frame.width > app.frame.height }
 
     func turn(_ orientation: UIDeviceOrientation, file: StaticString = #filePath, line: UInt = #line) {
         XCUIDevice.shared.orientation = orientation
         let wantWide = orientation.isLandscape
-        let window = app.windows.firstMatch
+        let window: XCUIElement = app
         let turned = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
                 let f = window.frame
@@ -235,13 +235,21 @@ extension PadUITestCase {
         controls.waitToExist(10, file: file, line: line)
     }
 
-    /// Taps a control over the picture, bringing the controls up first.
+    /// Taps a control over the picture, bringing the controls up first. The
+    /// controls hide on their own 4 s after a touch and a tap on the picture
+    /// toggles them, so this tries a few times rather than trusting one look.
     func tapControl(_ id: String, file: StaticString = #filePath, line: UInt = #line) {
-        showControls(file: file, line: line)
         let control = app.button(id)
-        control.waitToExist(10, file: file, line: line)
-        if !control.isHittable { showControls(file: file, line: line) }
-        control.padTap()
+        let video = app.element(TestID.Player.video)
+        for _ in 0..<4 {
+            if control.exists && control.isHittable {
+                control.tap()
+                return
+            }
+            if !app.element(TestID.Player.controls).exists, video.exists { video.tap() }
+            _ = control.waitForExistence(timeout: 3)
+        }
+        XCTFail("\(id) was not there to tap", file: file, line: line)
     }
 
     /// Whether play/pause says it is playing (its label reads "Pause").
@@ -259,6 +267,10 @@ extension PadUITestCase {
     /// The position the scrubber reports, in seconds, read from the elapsed time.
     func elapsedSeconds() -> Double? {
         let elapsed = app.element(TestID.Player.elapsed)
+        if !elapsed.exists, app.element(TestID.Player.video).exists, !app.element(TestID.Player.controls).exists {
+            app.element(TestID.Player.video).tap()
+            _ = elapsed.waitForExistence(timeout: 3)
+        }
         guard elapsed.exists else { return nil }
         return Self.seconds(in: text(elapsed))
     }
@@ -273,7 +285,18 @@ extension PadUITestCase {
     /// Closes the player with its own Back and waits for it to go.
     func closePlayer(file: StaticString = #filePath, line: UInt = #line) {
         guard player.exists else { return }
-        tapControl(TestID.Player.back, file: file, line: line)
+        // A short title may have ended and closed the player by itself.
+        let video = app.element(TestID.Player.video)
+        if !video.waitForExistence(timeout: 3) {
+            if player.waitToVanish(10) { return }
+        }
+        let back = app.button(TestID.Player.back)
+        for _ in 0..<4 {
+            if back.exists && back.isHittable { back.tap(); break }
+            if !player.exists { return }
+            if !app.element(TestID.Player.controls).exists, video.exists { video.tap() }
+            _ = back.waitForExistence(timeout: 3)
+        }
         if !player.waitToVanish(20) { XCTFail("the player did not close", file: file, line: line) }
     }
 
@@ -296,7 +319,9 @@ extension PadUITestCase {
     func contextMenu(on element: XCUIElement, waitingFor item: String,
                      file: StaticString = #filePath, line: UInt = #line) {
         element.waitToExist(20, file: file, line: line)
-        element.press(forDuration: 1.2)
+        // At its middle: a card's own anchor makes `press` refuse it as
+        // not hittable (see `padTap`).
+        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 1.2)
         app.button(item).waitToExist(10, file: file, line: line)
     }
 }
@@ -317,6 +342,30 @@ extension XCUIElement {
         } else {
             coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         }
+    }
+}
+#endif
+
+#if os(iOS)
+extension PadUITestCase {
+    /// A row of a SwiftUI `Menu` as the system draws it: on an iPad the
+    /// identifier set on the row does not reach the menu's own button, so
+    /// this falls back to the row's words.
+    /// Puts the on-screen keyboard away with its own key (bottom right on an
+    /// iPad), so whatever it covered can be reached.
+    func dismissKeyboard() {
+        let keyboard = app.keyboards.firstMatch
+        guard keyboard.exists else { return }
+        let hide = keyboard.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'keyboard'")).allElementsBoundByIndex
+            .max { $0.frame.maxX + $0.frame.maxY < $1.frame.maxX + $1.frame.maxY }
+        hide?.tap()
+        _ = keyboard.waitToVanish(5)
+    }
+
+    func menuItem(_ id: String, label: String) -> XCUIElement {
+        let byId = app.buttons.matching(identifier: id).firstMatch
+        if byId.waitForExistence(timeout: 3) { return byId }
+        return app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
     }
 }
 #endif

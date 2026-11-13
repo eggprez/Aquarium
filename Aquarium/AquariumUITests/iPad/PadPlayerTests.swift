@@ -181,7 +181,7 @@ final class PadPlayerInfoTests: PadPlayerTestCase {
         let engine = infoFact("engine")
         XCTAssertFalse(engine.isEmpty, "an Engine row")
         let panel = app.element(TestID.Player.panel)
-        let window = app.windows.firstMatch.frame
+        let window = app.frame
         XCTAssertLessThan(panel.frame.width, window.width * 0.8, "a popover, not a full-width sheet: \(panel.frame)")
         XCTAssertFalse(infoFact("position").isEmpty)
         XCTAssertTrue(infoFact("delivery").contains("Direct"), "FX Long Direct Play direct-plays: \(infoFact("delivery"))")

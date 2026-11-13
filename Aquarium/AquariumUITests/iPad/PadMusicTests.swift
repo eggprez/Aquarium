@@ -101,7 +101,7 @@ final class PadMusicTests: PadUITestCase {
         // At regular width the player keeps to a centred column (1a32226).
         let playPause = app.button(TestID.NowPlaying.playPause)
         playPause.waitToExist(10)
-        let window = app.windows.firstMatch.frame
+        let window = app.frame
         XCTAssertEqual(playPause.frame.midX, window.midX, accuracy: 40, "transport centred")
         attachScreenshot("now playing")
         app.button(TestID.NowPlaying.close).padTap()
@@ -203,7 +203,9 @@ final class PadBooksTests: PadUITestCase {
         let card2 = app.element(TestID.Sidebar.nowPlaying)
         XCTAssertTrue(card2.waitForExistence(timeout: 30), "the sidebar card for the book")
         XCTAssertTrue(waitUntil(20, "the card's second line to name the chapter") {
-            card2.staticTexts.allElementsBoundByIndex.contains { $0.label.contains("Chapter 3") }
+            // The card's second line, beside its title in the sidebar column.
+            self.app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Chapter 3'"))
+                .allElementsBoundByIndex.contains { $0.frame.maxX <= card2.frame.maxX + 1 && $0.frame.minY >= card2.frame.minY - 1 }
         })
         app.button(TestID.Sidebar.nowPlayingPlayPause).padTap()
     }

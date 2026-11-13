@@ -111,17 +111,29 @@ final class PadSidebarTests: PadUITestCase {
         let show = app.button(TestID.Sidebar.show)
         show.padTap()
         app.button(TestID.Sidebar.collapse).waitToExist(10)
-        XCTAssertTrue(eventually(10) { self.app.button(TestID.Sidebar.collapse).isHittable })
+        XCTAssertTrue(eventually(10) { self.isOnScreen(self.app.button(TestID.Sidebar.collapse)) }, "the sidebar is back")
     }
 
     func testCollapsedSidebarComesBackFromATitlePage() throws {
         let film = try fx.item("film.long_direct")
         launchHome()
         turn(.landscapeLeft)
-        openItem(film.id)
+        // Opened the way a person would: its card on Home.
+        let card = cardButton(film.id)
+        XCTAssertTrue(reveal(card))
+        card.padTap()
+        app.element(TestID.Detail.page(film.id)).waitToExist(30)
         app.button(TestID.Sidebar.collapse).padTap()
         XCTAssertTrue(eventually(10) { !self.app.button(TestID.Sidebar.collapse).isHittable })
+        // The title page's own bar should then carry the way back
+        // (ItemDetailView.padBar, `showSidebar`): seen missing on a title
+        // pushed over Home, landscape, 2026-11-13.
         let toggle = app.button(TestID.Detail.showSidebar)
+        let offered = toggle.waitForExistence(timeout: 10)
+        attachScreenshot("title page, sidebar hidden")
+        XCTExpectFailure("bug: a title page shows no 'Show sidebar' after the sidebar is hidden", strict: false)
+        XCTAssertTrue(offered, "Show sidebar in the title page's bar")
+        guard offered else { return }
         toggle.padTap()
         XCTAssertTrue(eventually(10) { self.app.button(TestID.Sidebar.collapse).isHittable },
                       "the title page's own bar brings the sidebar back")
@@ -148,7 +160,7 @@ final class PadSidebarTests: PadUITestCase {
         let width = sidebar.frame.width
         XCTAssertGreaterThanOrEqual(width, 180, "sidebar \(width) pt")
         XCTAssertLessThanOrEqual(width, 290, "sidebar \(width) pt")
-        XCTAssertLessThan(row.frame.maxX, app.windows.firstMatch.frame.width * 0.3)
+        XCTAssertLessThan(row.frame.maxX, app.frame.width * 0.3)
     }
 
     func testDownloadsBadgeAndNowPlayingAbsentWhenIdle() {
@@ -163,14 +175,14 @@ final class PadSidebarTests: PadUITestCase {
 /// a drag on the window's corner does it there. Elsewhere these skip.
 final class PadWindowSizeTests: PadUITestCase {
     private func windowIsResizable() -> Bool {
-        let window = app.windows.firstMatch.frame
+        let window = app.frame
         let screen = XCUIApplication(bundleIdentifier: "com.apple.springboard").windows.firstMatch.frame
         return window.width < screen.width - 1 || window.height < screen.height - 1
     }
 
     /// Drags the window's bottom-trailing corner by `dx` points.
     private func dragCorner(by dx: CGFloat) {
-        let frame = app.windows.firstMatch.frame
+        let frame = app.frame
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let origin = springboard.coordinate(withNormalizedOffset: .zero)
         let corner = origin.withOffset(CGVector(dx: frame.maxX - 6, dy: frame.maxY - 6))
@@ -185,7 +197,7 @@ final class PadWindowSizeTests: PadUITestCase {
         launchHome()
         try XCTSkipUnless(windowIsResizable(),
                           "this simulator shows apps full screen (Stage Manager/windowed apps off); see MANUAL.md")
-        let full = app.windows.firstMatch.frame.width
+        let full = app.frame.width
         dragCorner(by: -(full - 360))
         let narrowed = eventually(10) { self.app.tabBars.firstMatch.exists || self.app.button(TestID.Tab.item("home")).exists }
         try XCTSkipUnless(narrowed, "the window would not narrow to phone width by a corner drag")

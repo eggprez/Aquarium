@@ -13,22 +13,25 @@ final class PadContextMenuTests: PadUITestCase {
         let target = cardButton(film.id)
         XCTAssertTrue(reveal(target))
         contextMenu(on: target, waitingFor: TestID.Item.menuPlay)
-        for id in [TestID.Item.menuDetails, TestID.Item.menuFavorite, TestID.Item.menuWatched,
+        for id in [TestID.Item.menuFavorite, TestID.Item.menuWatched,
                    TestID.Item.menuPlayFromBeginning, TestID.Item.menuDownload] {
             XCTAssertTrue(app.element(id).exists, "\(id) in the menu")
         }
         XCTAssertFalse(app.element(TestID.Item.menuOpenInNewWindow).exists, "a Mac's command, not an iPad's")
+        // A card opens its title with a tap, so its menu has no Details.
+        XCTAssertFalse(app.element(TestID.Item.menuDetails).exists)
         attachScreenshot("film menu")
     }
 
-    func testDetailsFromTheMenuOpensTheTitle() throws {
+    func testPlayFromTheMenuStartsThePlayer() throws {
         let film = try fx.item("film.long_direct")
         launchHome()
         let target = cardButton(film.id)
         XCTAssertTrue(reveal(target))
-        contextMenu(on: target, waitingFor: TestID.Item.menuDetails)
-        app.button(TestID.Item.menuDetails).padTap()
-        app.element(TestID.Detail.page(film.id)).waitToExist(30)
+        contextMenu(on: target, waitingFor: TestID.Item.menuPlay)
+        app.button(TestID.Item.menuPlay).padTap()
+        player.waitToExist(40)
+        closePlayer()
     }
 
     func testFavoriteFromTheMenuReachesTheServer() throws {
@@ -52,7 +55,7 @@ final class PadContextMenuTests: PadUITestCase {
         contextMenu(on: target, waitingFor: TestID.Item.menuPlayFromBeginning)
         app.button(TestID.Item.menuPlayFromBeginning).padTap()
         player.waitToExist(40)
-        showControls()
+        waitForPlaying()
         let start = elapsedSeconds() ?? 999
         XCTAssertLessThan(start, 60, "from the beginning, not the 5:00 resume point (read \(start) s)")
         closePlayer()
@@ -90,7 +93,11 @@ final class PadContextMenuTests: PadUITestCase {
         XCTAssertTrue(reveal(target))
         contextMenu(on: target, waitingFor: TestID.Item.menuDownload)
         app.button(TestID.Item.menuDownload).padTap()
-        XCTAssertTrue(app.button(TestID.Item.menuDownloadQuality("original-quality")).waitForExistence(timeout: 10))
+        // The system draws a submenu's rows; by identifier, or by the words.
+        let original = app.button(TestID.Item.menuDownloadQuality("original-quality"))
+        XCTAssertTrue(original.waitForExistence(timeout: 10)
+                      || app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Original'")).firstMatch.exists,
+                      "Original among the download qualities")
         attachScreenshot("download submenu")
     }
 

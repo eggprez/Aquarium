@@ -53,7 +53,7 @@ final class PadRegressionTests: PadUITestCase {
         hero.waitToExist(30)
         let pages = app.elements(prefix: "home.hero.page.").allElementsBoundByIndex
         try XCTSkipIf(pages.isEmpty, "no hero")
-        let window = app.windows.firstMatch.frame
+        let window = app.frame
         for page in pages {
             XCTAssertEqual(page.frame.width, window.width, accuracy: 2,
                            "\(page.identifier) is \(page.frame.width) wide in a \(window.width) window")

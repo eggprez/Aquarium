@@ -11,9 +11,13 @@ final class PadLibraryTests: PadUITestCase {
         try super.tearDownWithError()
     }
 
-    private func openFilms() throws -> String {
+    /// Fixture Films. `wide` turns the iPad on its side first: upright, the
+    /// 610-point column puts the name field over the end of the chip strip
+    /// (Favorites and Genre sit under it until the strip is swiped).
+    private func openFilms(wide: Bool = false) throws -> String {
         let id = try fx.libraryId("Fixture Films")
         launchHome()
+        if wide { turn(.landscapeLeft) }
         app.button(TestID.Sidebar.row("lib-\(id)")).waitToExist(30)
         showSection("lib-\(id)")
         app.element(TestID.Library.grid).waitToExist(30)
@@ -65,7 +69,7 @@ final class PadLibraryTests: PadUITestCase {
 
     func testUnwatchedFilterHidesPlayedFilms() throws {
         let played = try fx.item("film.rated_g")      // played in the baseline
-        _ = try openFilms()
+        _ = try openFilms(wide: true)
         let field = app.textFields[TestID.Library.searchField]
         field.padTap()
         field.typeText("Rated G")
@@ -79,7 +83,7 @@ final class PadLibraryTests: PadUITestCase {
     func testFavoritesFilter() throws {
         let fav = try fx.item("film.hevc_mp4")        // a favourite in the baseline
         let other = try fx.item("film.pcm_mov")
-        _ = try openFilms()
+        _ = try openFilms(wide: true)
         app.button(TestID.Library.filterFavorites).padTap()
         XCTAssertTrue(cardButton(fav.id).waitForExistence(timeout: 20))
         XCTAssertTrue(cardButton(other.id).waitToVanish(20))
@@ -88,32 +92,43 @@ final class PadLibraryTests: PadUITestCase {
     func testGenreMenuFilters() throws {
         let subs = try fx.item("film.sidecar_subs")   // genre Subtitles
         let direct = try fx.item("film.long_direct")  // genre Long Form
-        _ = try openFilms()
+        _ = try openFilms(wide: true)
         app.button(TestID.Library.genreMenu).padTap()
-        let option = app.button(TestID.Library.genre("Subtitles"))
-        option.padTap()
+        menuItem(TestID.Library.genre("Subtitles"), label: "Subtitles").padTap()
         XCTAssertTrue(cardButton(subs.id).waitForExistence(timeout: 20))
         XCTAssertTrue(cardButton(direct.id).waitToVanish(20))
         app.button(TestID.Library.genreMenu).padTap()
-        app.button(TestID.Library.genreAll).padTap()
+        menuItem(TestID.Library.genreAll, label: "All genres").padTap()
         XCTAssertTrue(cardButton(direct.id).waitForExistence(timeout: 20))
     }
 
-    func testSortMenuAndReverse() throws {
+    /// The sort chip's menu. Reverse Order is the Mac's alone.
+    func testSortMenu() throws {
+        _ = try openFilms(wide: true)
+        let chip = app.button(TestID.Library.sortMenu)
+        chip.padTap()
+        let release = menuItem(TestID.Library.sortOption("releaseDate"), label: "Release Date")
+        XCTAssertTrue(release.waitForExistence(timeout: 10), "sort options")
+        XCTAssertTrue(menuItem(TestID.Library.sortOption("name"), label: "Name").exists)
+        release.padTap()
+        XCTAssertTrue(waitUntil(10, "the chip to name the sort") { chip.label.contains("Release Date") })
+        XCTAssertFalse(app.button(TestID.Library.sortReverse).exists, "no Reverse Order on an iPad")
+    }
+
+    /// Upright the chip strip runs under the name field; every chip can
+    /// still be reached by swiping the strip.
+    func testEveryFilterChipCanBeReachedUpright() throws {
         _ = try openFilms()
-        app.button(TestID.Library.sortMenu).padTap()
-        let options = app.elements(prefix: "library.sort.option.")
-        XCTAssertTrue(options.firstMatch.waitForExistence(timeout: 10), "sort options")
-        let names = options.allElementsBoundByIndex.map(\.identifier)
-        XCTAssertTrue(names.contains(where: { $0.hasSuffix(".name") || $0.contains("name") }), "\(names)")
-        let reverse = app.button(TestID.Library.sortReverse)
-        if reverse.exists {
-            let before = cards().first?.identifier
-            reverse.padTap()
-            XCTAssertTrue(eventually(15) { self.cards().first?.identifier != before }, "the order turned round")
-        } else {
-            options.firstMatch.padTap()
+        let favorites = app.button(TestID.Library.filterFavorites)
+        let field = app.textFields[TestID.Library.searchField]
+        favorites.waitToExist(20)
+        if favorites.frame.maxX > field.frame.minX {
+            app.button(TestID.Library.filterUnwatched).swipeLeft()
         }
+        XCTAssertTrue(waitUntil(5, "Favorites clear of the name field") {
+            favorites.frame.maxX <= field.frame.minX + 1 && favorites.frame.minX >= self.sidebar.frame.maxX
+        }, "Favorites \(favorites.frame) under the field \(field.frame)")
+        attachScreenshot("chips upright")
     }
 
     func testCardOpensTitleAndBackReturnsToTheGrid() throws {
@@ -164,6 +179,22 @@ final class PadLibraryTests: PadUITestCase {
 /// unreachable" (master-fix-list.md iPad #8, TV, Pro Max #4); fixed on
 /// claude/qa-fix-list-cb0b58 as 5209e95, not on main.
 final class PadPhotosTests: PadUITestCase {
+    /// ipad-qa-findings.md "raw folder names 'home', 'photos' with a film
+    /// icon" (fixed on claude/qa-fix-list-cb0b58, not on main): Fixture
+    /// Photos lists its folder by the folder's name on disk.
+    func testPhotoFolderIsNotShownByItsRawFolderName() throws {
+        let photos = try fx.libraryId("Fixture Photos")
+        launchHome()
+        app.button(TestID.Sidebar.row("lib-\(photos)")).waitToExist(30)
+        showSection("lib-\(photos)")
+        app.element(TestID.Library.grid).waitToExist(30)
+        let raw = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'item.card.' AND label BEGINSWITH 'photos'")).firstMatch
+        _ = raw.waitForExistence(timeout: 15)
+        attachScreenshot("fixture photos")
+        XCTExpectFailure("bug: a photo folder is listed by its raw folder name 'photos'", strict: false)
+        XCTAssertFalse(raw.exists, "card reads \(raw.label)")
+    }
+
     func testPhotoAlbumOpensAsAGridOfPhotos() throws {
         let photos = try fx.libraryId("Fixture Photos")
         guard let list = try fx.raw["fixtures"] as? [String: Any],
@@ -174,7 +205,15 @@ final class PadPhotosTests: PadUITestCase {
         launchHome()
         app.button(TestID.Sidebar.row("lib-\(photos)")).waitToExist(30)
         showSection("lib-\(photos)")
-        let albumCard = cardButton(album)
+        // The library's top level is FX Home Clip and the folder FX Album
+        // lives in (shown by its folder name), then the album.
+        var albumCard = cardButton(album)
+        if !albumCard.waitForExistence(timeout: 15) {
+            let folder = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'item.card.' AND label BEGINSWITH[c] 'photos'")).firstMatch
+            XCTAssertTrue(folder.waitForExistence(timeout: 10), "the folder holding FX Album")
+            folder.padTap()
+            albumCard = cardButton(album)
+        }
         XCTAssertTrue(albumCard.waitForExistence(timeout: 30), "FX Album in Fixture Photos")
         albumCard.padTap()
         let opened = cardButton(photo).waitForExistence(timeout: 30)

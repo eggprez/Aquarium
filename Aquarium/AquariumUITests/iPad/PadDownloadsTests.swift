@@ -43,7 +43,8 @@ final class PadDownloadsTests: PadUITestCase {
         if pill.waitForExistence(timeout: 10) {
             XCTAssertTrue(pill.label.contains("Downloaded") || pill.label.contains("downloaded"), "pill: \(pill.label)")
         }
-        closePlayer()
+        // Twenty seconds long: it ends and closes by itself.
+        if !player.waitToVanish(60) { closePlayer() }
         // Delete, with the confirmation.
         contextMenu(on: card, waitingFor: TestID.Downloads.filmCardDelete(film.id))
         app.button(TestID.Downloads.filmCardDelete(film.id)).padTap()

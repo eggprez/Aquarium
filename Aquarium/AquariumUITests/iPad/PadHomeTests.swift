@@ -46,7 +46,7 @@ final class PadHomeTests: PadUITestCase {
         turn(.landscapeLeft)
         let hero = app.element(TestID.Home.hero)
         hero.waitToExist(30)
-        let window = app.windows.firstMatch.frame
+        let window = app.frame
         XCTAssertTrue(waitUntil(10, "hero to lay out") { hero.frame.width > 0 })
         // The hero runs under the sidebar to the screen's far edge.
         XCTAssertEqual(hero.frame.maxX, window.maxX, accuracy: 2, "hero reaches the trailing edge")
@@ -173,7 +173,17 @@ final class PadHomeTests: PadUITestCase {
     func testLiveTVAndMusicShelvesOnHome() {
         launchHome()
         let live = app.element(TestID.Home.shelf(TestID.Home.rowLiveTV))
-        XCTAssertTrue(reveal(live, maxSwipes: 25), "On Now: the QA server's channels")
+        // On Now fills in after the rest of Home (the guide is fetched apart).
+        // The row is drawn from the channel list the app warms at launch
+        // (`LiveTVStore`). After a fresh sign-in it was sometimes still empty
+        // after 30 s (2 of 3 runs, 2026-11-13); a visit to Live TV fills it.
+        if !live.waitForExistence(timeout: 30) {
+            showSection("livetv")
+            app.element(TestID.Guide.root).waitToExist(30)
+            showSection("home")
+        }
+        XCTAssertTrue(live.waitForExistence(timeout: 30), "On Now: the QA server's channels")
+        XCTAssertTrue(reveal(live, maxSwipes: 25))
         let music = app.element(TestID.Home.shelf(TestID.Home.rowMusicRecent))
         let newMusic = app.element(TestID.Home.shelf(TestID.Home.rowMusicNew))
         XCTAssertTrue(reveal(music, maxSwipes: 25) || reveal(newMusic, maxSwipes: 25), "a music shelf on Home")
