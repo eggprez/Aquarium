@@ -1322,12 +1322,7 @@ describe("events from the backend", () => {
     expect(audio.queueState().index).toBe(2);
   });
 
-  // BUG: src/audio.ts:583. The backend sends `audio-track` both when `play`
-  // starts a song and when mpv moves on to the queued one, and the handler
-  // drops any event whose id is the current song's. With Repeat All on a
-  // one-song queue the "next" song is the same song, so the move is taken for
-  // the echo, nothing is handed down, and playback ends after the second pass.
-  it.fails("Repeat All on a single song keeps it going round (BUG: stops after the second pass)", async () => {
+  it("Repeat All on a single song keeps it going round (regression: the move was taken for the echo of play)", async () => {
     localStorage.setItem("aquarium.music-repeat", "all");
     await load();
     await audio.wireAudio(() => {});
@@ -1341,10 +1336,7 @@ describe("events from the backend", () => {
     expect(handedDown()).toEqual(["a"]);
   });
 
-  // BUG: src/audio.ts:583, the same early return. A playlist can hold a song
-  // twice running; when mpv moves from the first copy to the second the queue
-  // does not advance and the song after them is never handed down.
-  it.fails("moves on through the same song queued twice running (BUG: the queue stays on the first copy)", async () => {
+  it("moves on through the same song queued twice running (regression: the queue stayed on the first copy)", async () => {
     await load();
     await audio.wireAudio(() => {});
     await audio.play([song("a"), song("a"), song("b")]);
