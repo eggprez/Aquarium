@@ -101,10 +101,19 @@ extension MacUITestCase {
         app.element(TestID.Sidebar.row(sectionId))
     }
 
-    /// Click a sidebar row and wait for its page.
+    /// Click a sidebar row and wait for the top of its section. A section
+    /// keeps the pages left open in it, and the click that selects it comes
+    /// back to them; a second click on the selected row goes to the top.
     func openSection(_ sectionId: String, file: StaticString = #filePath, line: UInt = #line) {
-        sidebarRow(sectionId).tapWhenReady(20, file: file, line: line)
-        app.element(TestID.Shell.section(sectionId)).waitToExist(20, file: file, line: line)
+        let row = sidebarRow(sectionId)
+        row.tapWhenReady(20, file: file, line: line)
+        let root = app.element(TestID.Shell.section(sectionId))
+        if !root.waitForExistence(timeout: 5) {
+            // Not a double-click: well apart.
+            Thread.sleep(forTimeInterval: 1)
+            row.click()
+        }
+        root.waitToExist(20, file: file, line: line)
     }
 
     /// Type into the sidebar's search field and press Return.
