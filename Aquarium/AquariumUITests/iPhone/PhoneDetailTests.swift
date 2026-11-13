@@ -234,7 +234,8 @@ final class PhoneDetailTests: PhoneUITestCase {
         season1.tapNow(20)
         let e3 = try XCTUnwrap(PhoneFixtures.episode("show.long", season: 1, number: 3))
         let row = any(TestID.Detail.episode(e3))
-        row.waitToExist(20)
+        for _ in 0..<8 where !row.exists { app.swipeUp() }
+        row.waitToExist(10)
         app.reveal(row)
         assertOnScreen(row, "episode row")
         attachScreenshot("episode rows (\(device.rawValue))")

@@ -64,10 +64,27 @@ extension PhoneUITestCase {
     /// The tab with this label ("Home", "Music", "Audiobooks", "Library",
     /// "More"), tapped by the middle of its frame.
     func tab(_ label: String, file: StaticString = #filePath, line: UInt = #line) {
-        let button = app.tabBars.buttons[label]
-        button.waitToExist(20, file: file, line: line)
-        button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        tabButton(label, file: file, line: line).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
+
+    /// A tab's button: the system tab bar's, or on the Duo's front screen
+    /// the vertical pill in the trailing column (not a UITabBar).
+    func tabButton(_ label: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        let system = app.tabBars.buttons[label]
+        let pill = app.buttons.matching(NSPredicate(format: "label == %@ OR identifier == %@", label, TestID.Tab.item(Self.tabSection[label] ?? "")))
+        var found: XCUIElement?
+        _ = eventually(timeout: 20) {
+            if system.exists { found = system; return true }
+            // The pill's buttons sit at the trailing edge, one above another.
+            found = pill.allElementsBoundByIndex.filter { $0.frame.width < 80 && $0.frame.height < 80 }
+                .max { $0.frame.minX < $1.frame.minX }
+            return found != nil
+        }
+        if found == nil { XCTFail("no \(label) tab", file: file, line: line) }
+        return found ?? system
+    }
+
+    static let tabSection = ["Home": "home", "Music": "music", "Audiobooks": "books", "Library": "libraries", "More": "more"]
 
     /// A section reached through the More tab (Favorites, Collections,
     /// Live TV, Downloads, Settings…), by `AppSection.id`.

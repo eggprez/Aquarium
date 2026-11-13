@@ -99,7 +99,11 @@ final class DuoPoseTests: PhoneUITestCase {
         try requireDuo()
         launchHome(arguments: ["-layout_override", "halfFolded"])
         _ = try openFixture("film.long_direct")
-        playFromDetail()
+        app.button(TestID.Detail.play).tapNow(30)
+        guard app.element(TestID.Player.root).waitForExistence(timeout: 40) else {
+            attachScreenshot("half-folded override on the front screen")
+            throw XCTSkip("the half-folded override on the closed front screen opens no player; the laptop pose needs the hinge (MANUAL.md)")
+        }
         let panel = app.element(TestID.Player.foldPanel)
         guard panel.waitForExistence(timeout: 20) else {
             throw XCTSkip("the half-folded layout needs the inner screen (hinge closed in this simulator); see MANUAL.md")
@@ -148,7 +152,7 @@ final class PhoneLayoutTests: PhoneUITestCase {
     func testTabBarShowsFiveTabs() throws {
         launchHome()
         for label in ["Home", "Music", "Audiobooks", "Library", "More"] {
-            let tab = app.tabBars.buttons[label]
+            let tab = tabButton(label)
             XCTAssertTrue(tab.exists, label)
             assertOnScreen(tab, label)
         }

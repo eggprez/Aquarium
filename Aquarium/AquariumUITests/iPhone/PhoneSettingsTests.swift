@@ -35,6 +35,10 @@ final class PhoneSettingsTests: PhoneUITestCase {
         app.reveal(link)
         link.tapNow(20, file: file, line: line)
         if page == "watch" { return }   // the Apple Watch page has its own anchor (and none without a paired watch)
+        if !app.element(TestID.Settings.pageRoot(page)).waitForExistence(timeout: 6) {
+            app.reveal(link)
+            link.tapNow(10, file: file, line: line)
+        }
         app.element(TestID.Settings.pageRoot(page)).waitToExist(20, file: file, line: line)
     }
 
