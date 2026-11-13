@@ -294,7 +294,7 @@ describe.skipIf(!qa || !qaWritable)("QA server: api.ts writing state (restored a
     const eps = regular(await episodesOf(firefly.Id));
     const before = await saveUserData(eps.map((e) => e.Id));
     try {
-      // Episode by episode: the series-level call does not reach them (see the BUG above).
+      // Episode by episode: DELETE /UserPlayedItems/<series> changes nothing on 12.2.
       for (const e of eps) await api.markPlayed(e.Id, true);
       const dates = (await saveUserData(eps.map((e) => e.Id))).map((u) => u.LastPlayedDate);
       expect(await api.addToNextUp(firefly.Id, "last")).toBeNull();

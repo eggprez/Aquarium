@@ -50,25 +50,9 @@ Each is a test asserting the correct behaviour, marked `it.fails` or `#[ignore =
 `BUG:` comment. When a bug is fixed the test starts failing as "expected to fail but passed":
 remove the marker then.
 
-| Bug | App code | Test |
-|---|---|---|
-| A failed stream start shows only a toast, never the Try Again / smaller stream card: `nowPlaying` is replaced by a copy, so `nowPlaying === startedPlaying` is never true | `src/playback.ts:716`, `:754` | `tests/unit/playback-start.test.ts` "offers Try Again, a smaller stream and Close, and rethrows" |
-| Same cause: `getStreamSource()` is always null, so stream info shows Delivery "–" and loses its server fallbacks | `src/playback.ts:726` | `tests/unit/playback-start.test.ts` "remembers how the server is sending it...", `tests/dom/main-panels.test.ts` (2 tests) |
-| `pickStartingBitrate` transcodes an item with no bitrate of its own, against its doc comment | `src/playback.ts:651-656` | `tests/unit/playback-start.test.ts` "direct-plays an item that carries no bitrate of its own..." |
-| The access token reaches the webview and mpv: the server's `TranscodingUrl` (with `ApiKey=<token>`) is used unchanged | `src/api.ts:1362-1370` | `tests/integration/api-playback.test.ts` "hands the webview no access token in a transcode address" |
-| Credits markers never arrive: `includeSegmentTypes=Intro,Outro` is read as Intro only by Jellyfin 12.2 | `src/api.ts:1057` | `tests/integration/api-browse.test.ts` "reads intro and credits markers, and only those" |
-| Subtitles are burnt in on every forced transcode (device profile offers only `Embed`) | `src/api.ts:1327-1335` | `tests/integration/api-playback.test.ts` "leaves a text subtitle switchable on a transcode..." |
-| Files with sidecar subtitles are transcoded (no `External` subtitle profile) | `src/api.ts:1327-1335` | `tests/integration/api-playback.test.ts` "direct-plays a file with sidecar subtitle files" |
-| "Start from the first episode" leaves earlier episodes watched: `DELETE /UserPlayedItems/<series>` changes nothing on 12.2 | `src/api.ts:723` | `tests/integration/api-state.test.ts` "starts a show over from its first episode..." |
-| "stereo" is lower-case on the detail line | `src/api.ts:1456` | `tests/integration/api-browse.test.ts` "names a stereo track 'Stereo'..." |
-| The shortcut sheet needs two presses of `?` after its Close button | `src/main.ts:2661-2689` | `tests/dom/main-shell.test.ts` "opens again on the first ? after being closed with its Close button" |
-| Music: a filter/sort/Favorites change made while a page is loading is dropped | `src/views/music.ts:384`, `:390` | `tests/dom/views-music.test.ts` "shows the new list when a filter changes while a page is still loading" |
-| Music › Genres spins forever when there are no genres | `src/views/music.ts:474` | `tests/dom/views-music.test.ts` "says so when there are no genres" |
-| Repeat All on a one-song queue stops after the second pass | `src/audio.ts:583` | `tests/unit/audio.test.ts` "Repeat All on a single song keeps it going round" |
-| The same song queued twice running: the queue stays on the first copy | `src/audio.ts:583` | `tests/unit/audio.test.ts` "moves on through the same song queued twice running" |
-| M3U display name taken from the first comma, inside a quoted attribute | `src/iptv.ts:111` | `tests/unit/iptv.test.ts` "takes the display name from after the attributes..." |
-| Per-icon stroke widths are dropped (duplicate `stroke-width` attribute; the first wins) | `src/icons.ts:16` | `tests/unit/icons.test.ts` "%s draws at its own stroke width %s" (5 cases) |
-| `probe("file:///...")` reports offline instead of a config error | `src-tauri/src/server.rs:121-131` | `server::tests::probe_refuses_a_typed_non_http_scheme_as_a_config_error` |
+None at the moment. The 17 the suite found when it was written were fixed on 2026-11-13 and their
+tests now pass as normal ones; `git log --grep "Linux:"` has one commit per fix. Two of them changed
+behaviour that only the manual checklist can confirm (items 23 and 24).
 
 ## TypeScript coverage
 
@@ -120,7 +104,7 @@ Test functions per module (`#[test]`/`#[tokio::test]`). "Portable" modules run o
 
 | Module | Tests | Runs |
 |---|---|---|
-| config, discovery, download_extras, downloads, jellyfin, prefs, progress, server, test_support | 221 (2 ignored) | portable and CI |
+| config, discovery, download_extras, downloads, jellyfin, prefs, progress, server, test_support | 226 (1 ignored) | portable and CI |
 | secret, idle | 18 (the real-keyring ones opt-in) | CI only |
 | mpv, audio, player, surface, video_thread, render, gl, egl, wl, mpris, power, network, theme, lib, main | 167 | CI only |
 
@@ -191,6 +175,14 @@ alone; end it with `kill <pid>`, never MPRIS Quit. Look in `~/.local/share/aquar
     header reaches the provider host.
 22. **Power use.** On a screen that stays visible (Home, Music, the player bar), `top` shows the
     WebKit web process near idle: no infinite CSS animation repaints the window.
+23. **Server subtitle files.** A file with sidecar subtitles (the QA server's FX Sidecar Subs)
+    direct-plays and its subtitles are in mpv's list, the default one showing; a forced transcode of
+    FX Long Remux Multitrack ("Try a smaller stream", the quality menu) has no subtitle burnt in and
+    its text subtitles can be switched and turned off. debug.log has no "player: sub-add failed",
+    and playback does not stall while they load.
+24. **Smaller stream keeps the audio track.** On FX Long Remux Multitrack pick the French track,
+    then a lower quality: the transcode plays French (the stream address says
+    `AudioStreamIndex=3`).
 
 ## Function inventory
 
@@ -254,7 +246,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | walked | src/api.ts:662 | tests/unit/api-browse.test.ts | unit | tested via nextUpTarget, addToNextUp |
 | nextUpTarget | src/api.ts:669 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
 | removeFromNextUp | src/api.ts:685 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
-| addToNextUp | src/api.ts:711 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested ("last"); expected failure (bug) for "first" on the QA server |
+| addToNextUp | src/api.ts:711 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested ("last" and "first") |
 | homeSectionFor | src/api.ts:744 | tests/unit/api-browse.test.ts | unit | tested via getHomeSections |
 | jellyfinDefaultSection | src/api.ts:767 | tests/unit/api-browse.test.ts | unit | tested via HOME_FALLBACK, getHomeSections |
 | HOME_FALLBACK | src/api.ts:771 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
@@ -271,7 +263,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | getEpisodes | src/api.ts:956 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
 | getTrickplay | src/api.ts:994 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
 | trickplayTile | src/api.ts:1032 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested (jf_image forwarded by tests/helpers/api-qa.ts) |
-| getMediaSegments | src/api.ts:1056 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested (Intro); expected failure (bug) for Outro |
+| getMediaSegments | src/api.ts:1056 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested (Intro and Outro) |
 | search | src/api.ts:1068 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
 | getChannels | src/api.ts:1086 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
 | getPrograms | src/api.ts:1103 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
@@ -286,12 +278,15 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | seriesPosterUrl | src/api.ts:1247 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
 | seasonPosterUrl | src/api.ts:1258 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
 | probeBandwidth | src/api.ts:1278 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested (jf_bitrate_test forwarded by tests/helpers/api-qa.ts) |
-| deviceProfile | src/api.ts:1298 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested via resolvePlayback; expected failure (bug): no External subtitle method, Embed-only subtitles burnt in on HLS |
-| resolvePlayback | src/api.ts:1339 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested; expected failure (bug): transcode URL carries the access token |
+| deviceProfile | src/api.ts:1298 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested via resolvePlayback (Embed, and External for text formats) |
+| resolvePlayback | src/api.ts:1339 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested (no access token in any address; External subtitles listed; audio track on a transcode) |
+| externalSubtitles | src/api.ts:1325 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested via resolvePlayback |
+| withoutApiKey | src/api.ts:1396 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested |
+| sourceWithoutApiKey | src/api.ts:1407 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested via resolvePlayback |
 | DOWNLOAD_QUALITIES | src/api.ts:1424 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested |
 | audioRate | src/api.ts:1435 | tests/unit/api-media.test.ts | unit | tested via estimateDownloadSize, buildDownload |
 | resolutionLabel | src/api.ts:1442 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via mediaSummary |
-| channelLabel | src/api.ts:1454 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via mediaSummary; expected failure (bug): server layout "stereo" not capitalised |
+| channelLabel | src/api.ts:1454 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via mediaSummary |
 | mediaSummary | src/api.ts:1474 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
 | estimateDownloadSize | src/api.ts:1497 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested |
 | effectiveDownloadQuality | src/api.ts:1526 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested |
@@ -333,7 +328,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | startQueueIfIdle | src/playback.ts:242 | tests/unit/playback-next.test.ts | unit | tested via queueNext |
 | maybePrefetch | src/playback.ts:271 | tests/unit/playback-start.test.ts | unit | tested via registerPlayerBridge (player-status) |
 | takePrefetched | src/playback.ts:304 | tests/unit/playback-start.test.ts | unit | tested via playItem |
-| showPlaybackError | src/playback.ts:317 | tests/unit/playback-start.test.ts | unit | tested via registerPlayerBridge (player-status); playItem path is expected failure (bug) |
+| showPlaybackError | src/playback.ts:317 | tests/unit/playback-start.test.ts | unit | tested via registerPlayerBridge (player-status) and playItem |
 | smallerStream | src/playback.ts:351 | tests/unit/playback-start.test.ts | unit | tested via showPlaybackError |
 | PICTURE_CONTROLS | src/playback.ts:373 | tests/unit/playback-prefs.test.ts | unit | tested |
 | saveConfigSoon | src/playback.ts:388 | tests/unit/playback-prefs.test.ts | unit | tested |
@@ -351,8 +346,8 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | playNextNow | src/playback.ts:596 | tests/unit/playback-next.test.ts | unit | tested |
 | itemTitle | src/playback.ts:607 | tests/unit/playback-prefs.test.ts | unit | tested |
 | findDownload | src/playback.ts:617 | tests/unit/playback-start.test.ts | unit | tested via playItem, switchToDownload |
-| pickStartingBitrate | src/playback.ts:647 | tests/unit/playback-start.test.ts | unit | expected failure (bug) |
-| playItem | src/playback.ts:659 | tests/unit/playback-start.test.ts | unit | expected failure (bug) |
+| pickStartingBitrate | src/playback.ts:647 | tests/unit/playback-start.test.ts | unit | tested |
+| playItem | src/playback.ts:659 | tests/unit/playback-start.test.ts | unit | tested |
 | playChannelUrl | src/playback.ts:769 | tests/unit/playback-start.test.ts | unit | tested |
 | playLocal | src/playback.ts:824 | tests/unit/playback-start.test.ts | unit | tested |
 | isLocalEpisode | src/playback.ts:891 | tests/unit/playback-next.test.ts | unit | tested via peekNextEpisode, maybeAutoplay |
@@ -409,6 +404,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | getQualityState | src/playback.ts:1921 | tests/unit/playback-start.test.ts | unit | tested |
 | downloadedLabel | src/playback.ts:1947 | tests/unit/playback-prefs.test.ts | unit | tested |
 | switchQuality | src/playback.ts:1956 | tests/unit/playback-start.test.ts | unit | tested |
+| playingAudio | src/playback.ts:1996 | tests/unit/playback-start.test.ts | unit | tested via switchQuality |
 | switchToDownload | src/playback.ts:1984 | tests/unit/playback-start.test.ts | unit | tested |
 | isAdaptiveEnabled | src/playback.ts:2016 | tests/unit/playback-prefs.test.ts | unit | tested |
 | setAdaptiveEnabled | src/playback.ts:2020 | tests/unit/playback-prefs.test.ts | unit | tested |
@@ -433,7 +429,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | playerCtl.setSubDelay | src/playback.ts:2274 | tests/unit/playback-prefs.test.ts | unit | tested |
 | playerCtl.setAudioDelay | src/playback.ts:2279 | tests/unit/playback-prefs.test.ts | unit | tested |
 | AUDIO_DELAY_STEP | src/playback.ts:2288 | tests/unit/playback-prefs.test.ts | unit | tested |
-| getStreamSource | src/playback.ts:2291 | tests/unit/playback-start.test.ts | unit | expected failure (bug) |
+| getStreamSource | src/playback.ts:2291 | tests/unit/playback-start.test.ts; tests/dom/main-panels.test.ts | unit, dom | tested |
 | getNowPlayingFull | src/playback.ts:2295 | tests/unit/playback-start.test.ts | unit | tested |
 | syncOfflineProgress | src/playback.ts:2300 | tests/unit/playback-prefs.test.ts | unit | tested |
 | now | src/adaptive.ts:78 | tests/unit/adaptive.test.ts | unit | tested via onStall, onStatus |
@@ -604,7 +600,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | clock | src/musicApi.ts:373 | tests/unit/musicApi.test.ts | unit | tested |
 | longDuration | src/musicApi.ts:382 | tests/unit/musicApi.test.ts | unit | tested |
 | iconSvg | src/icons.ts:55 | tests/unit/icons.test.ts | unit | tested |
-| iconSvg per-icon stroke widths | src/icons.ts:16 | tests/unit/icons.test.ts | unit | expected failure (bug) |
+| iconSvg per-icon stroke widths | src/icons.ts:16 | tests/unit/icons.test.ts | unit | tested |
 | icon | src/icons.ts:64 | tests/unit/icons.test.ts | unit | tested |
 | readNumber | src/audio.ts:67 | tests/unit/audio.test.ts | unit | tested via bookSpeed |
 | writeValue | src/audio.ts:75 | tests/unit/audio.test.ts | unit | tested via setSpeed |
@@ -662,6 +658,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | refreshMinutes | src/iptv.ts:68 | tests/unit/iptv.test.ts | unit | tested |
 | attrs | src/iptv.ts:78 | tests/unit/iptv.test.ts | unit | tested via parseM3u |
 | parseM3u | src/iptv.ts:100 | tests/unit/iptv.test.ts | unit | tested |
+| nameComma | src/iptv.ts:103 | tests/unit/iptv.test.ts | unit | tested via parseM3u |
 | xmltvTime | src/iptv.ts:152 | tests/unit/iptv.test.ts | unit | tested |
 | textOf | src/iptv.ts:166 | tests/unit/iptv.test.ts | unit | tested via parseXmltv |
 | parseXmltv | src/iptv.ts:175 | tests/unit/iptv.test.ts | unit | tested |
@@ -733,7 +730,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | toggleSleepPanel | src/main.ts:1343 | tests/dom/main-panels.test.ts | dom | tested |
 | toggleChapterPanel | src/main.ts:1403 | tests/dom/main-panels.test.ts | dom | tested |
 | mbps | src/main.ts:1445 | tests/dom/main-panels.test.ts | dom | tested via stream info Bitrate |
-| deliveryLabel | src/main.ts:1451 | tests/dom/main-panels.test.ts | dom | expected failure (bug) — server-stream branches unreachable while playback.ts drops the source; local and live branches tested |
+| deliveryLabel | src/main.ts:1451 | tests/dom/main-panels.test.ts | dom | tested (server-stream, local and live branches) |
 | toggleInfoPanel | src/main.ts:1469 | tests/dom/main-panels.test.ts | dom | tested |
 | queueTiles | src/main.ts:1525 | tests/dom/main-panels.test.ts | dom | tested (play, right-click remove) |
 | VOLUME_THROTTLE_MS | src/main.ts:1561 | tests/dom/main-controls.test.ts | dom | tested via buildVolume throttle |
@@ -775,7 +772,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | isTyping | src/main.ts:2576 | tests/dom/main-shell.test.ts | dom | tested via /, ? and spatial nav |
 | wireGlobalKeys | src/main.ts:2583 | tests/dom/main-shell.test.ts | dom | tested (? sheet; Alt+Left in main-boot.test.ts) |
 | SHORTCUTS | src/main.ts:2607 | tests/dom/main-shell.test.ts | dom | tested via toggleShortcuts |
-| toggleShortcuts | src/main.ts:2661 | tests/dom/main-shell.test.ts | dom | expected failure (bug) — reopening after its Close button; open/close/Escape tested |
+| toggleShortcuts | src/main.ts:2661 | tests/dom/main-shell.test.ts | dom | tested (open/close/Escape, reopening after its Close button) |
 | askBeforeQuit | src/main.ts:2707 | tests/dom/main-fullscreen.test.ts | dom | tested |
 | LAST_ROUTE_KEY / RESUMABLE | src/main.ts:2748 | tests/dom/main-boot.test.ts | dom | tested via rememberRoute/lastRoute |
 | rememberRoute | src/main.ts:2753 | tests/dom/main-boot.test.ts | dom | tested |
@@ -988,9 +985,9 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | fromParam (inner) | src/views/music.ts:331 | tests/dom/views-music.test.ts | dom | tested via renderMusic |
 | fetchPage (inner) | src/views/music.ts:353 | tests/dom/views-music.test.ts | dom | tested via renderMusic |
 | append (inner) | src/views/music.ts:366 | tests/dom/views-music.test.ts | dom | tested via renderMusic |
-| more (inner) | src/views/music.ts:383 | tests/dom/views-music.test.ts | dom | expected failure (bug) |
+| more (inner) | src/views/music.ts:383 | tests/dom/views-music.test.ts | dom | tested |
 | reset (inner) | src/views/music.ts:404 | tests/dom/views-music.test.ts | dom | tested via renderMusic |
-| renderGenresTab | src/views/music.ts:457 | tests/dom/views-music.test.ts | dom | expected failure (bug) |
+| renderGenresTab | src/views/music.ts:457 | tests/dom/views-music.test.ts | dom | tested |
 | paint (inner) | src/views/music.ts:461 | tests/dom/views-music.test.ts | dom | tested via renderMusic |
 | renderPlaylistsTab | src/views/music.ts:481 | tests/dom/views-music.test.ts | dom | tested via renderMusic |
 | paint (inner) | src/views/music.ts:489 | tests/dom/views-music.test.ts | dom | tested via renderMusic |
@@ -1235,6 +1232,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | `download_extras::fetch_subtitles` against Jellyfin 12 | src-tauri/src/download_extras.rs:55 | src-tauri/src/download_extras.rs (qa_server_sidecar_subtitles_are_saved) | integration (QA server) | tested |
 | `download_extras::local_subtitles` | src-tauri/src/download_extras.rs:134 | src-tauri/src/download_extras.rs (mod tests) | unit | tested |
 | `download_extras::subtitles_for` | src-tauri/src/download_extras.rs:152 | src-tauri/src/download_extras.rs (mod tests) | unit | tested |
+| `download_extras::stream_subtitles` | src-tauri/src/download_extras.rs:166 | src-tauri/src/download_extras.rs (mod tests) | unit | tested (the player.rs call that uses it is CI only) |
 | `download_extras::sub_add_commands` | src-tauri/src/download_extras.rs:168 | src-tauri/src/download_extras.rs (mod tests) | unit | tested |
 | `download_extras::subtitles_settled` | src-tauri/src/download_extras.rs:194 | src-tauri/src/download_extras.rs (mod tests) | unit | tested |
 | `download_extras::DETAIL_KEYS` | src-tauri/src/download_extras.rs:202 | src-tauri/src/download_extras.rs (mod tests) | unit | tested |
@@ -1312,7 +1310,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | `is_secure` | src-tauri/src/server.rs:81 | src-tauri/src/server.rs `tests` | unit | tested |
 | `public_info` | src-tauri/src/server.rs:87 | src-tauri/src/server.rs `tests` | unit | tested via probe / verify |
 | `str_field` | src-tauri/src/server.rs:108 | src-tauri/src/server.rs `tests` | unit | tested |
-| `probe` | src-tauri/src/server.rs:121 | src-tauri/src/server.rs `tests`, `qa_tests` | unit | tested; one case expected failure (bug): probe_refuses_a_typed_non_http_scheme_as_a_config_error |
+| `probe` | src-tauri/src/server.rs:121 | src-tauri/src/server.rs `tests`, `qa_tests` | unit | tested |
 | `probe` (live server) | src-tauri/src/server.rs:121 | src-tauri/src/server.rs `qa_tests` | integration (QA server) | tested |
 | `VERIFIED` (static) | src-tauri/src/server.rs:154 | src-tauri/src/server.rs `tests` | unit | tested via the_identity_is_checked_once_per_session |
 | `reset_for_tests` | src-tauri/src/server.rs:158 | src-tauri/src/test_support.rs | unit | tested via sandbox() in every test |
@@ -1325,6 +1323,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | `is_session_origin` | src-tauri/src/server.rs:249 | src-tauri/src/server.rs `tests`; src-tauri/src/downloads.rs `tests` | unit | tested |
 | `request` | src-tauri/src/server.rs:256 | src-tauri/src/server.rs `tests` | unit | tested |
 | `request` (live server) | src-tauri/src/server.rs:256 | src-tauri/src/server.rs `qa_tests` | integration (QA server) | tested |
+| `without_token` | src-tauri/src/server.rs:296 | src-tauri/src/server.rs `tests` | unit | tested, and via request |
 | `get_bytes` | src-tauri/src/server.rs:289 | src-tauri/src/server.rs `tests`, `qa_tests` | unit | tested |
 | `base64` | src-tauri/src/server.rs:311 | src-tauri/src/server.rs `tests` | unit | tested |
 | `image` | src-tauri/src/server.rs:333 | src-tauri/src/server.rs `tests` | unit | tested |
