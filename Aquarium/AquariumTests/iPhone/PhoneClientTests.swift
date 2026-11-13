@@ -297,3 +297,77 @@ final class PhoneClientStubTests: PhoneUnitTestCase {
     }
 }
 #endif
+
+#if os(iOS)
+// MARK: - Sign-in requests (canned answers)
+
+@MainActor
+final class PhoneSignInClientTests: PhoneUnitTestCase {
+    override func setUp() async throws {
+        try await super.setUp()
+        ClientStub.install()
+    }
+
+    override func tearDown() async throws {
+        ClientStub.remove()
+        try await super.tearDown()
+    }
+
+    func testProbeReadsTheServersName() async throws {
+        StubURLProtocol.stub("/System/Info/Public", json: #"{"Id":"qa","ServerName":"Mac-mini","Version":"12.2.0"}"#)
+        let probe = try await JellyfinClient.shared.probe(server: "http://stub.invalid/")
+        XCTAssertEqual(probe.serverName, "Mac-mini")
+        XCTAssertEqual(probe.server, "http://stub.invalid", "the trailing slash is dropped")
+        XCTAssertFalse(probe.secure)
+    }
+
+    func testProbeOfANonJellyfinAddressSaysSo() async {
+        StubURLProtocol.stub("/System/Info/Public", status: 404)
+        do {
+            _ = try await JellyfinClient.shared.probe(server: "http://stub.invalid")
+            XCTFail("a 404 is not a server")
+        } catch {
+            XCTAssertFalse(error.localizedDescription.isEmpty)
+        }
+    }
+
+    func testEmptyAddressIsRefused() async {
+        do { _ = try await JellyfinClient.shared.probe(server: "  "); XCTFail("no address") } catch {
+            XCTAssertEqual(error.localizedDescription, "Enter a server address")
+        }
+    }
+
+    /// The password sign-in the UI form sends (the form's typing can't be
+    /// driven: see PhoneSignInTests).
+    func testPasswordSignInSendsTheNameAndPassword() async throws {
+        StubURLProtocol.stub("/Users/AuthenticateByName", method: "POST", json: """
+        {"AccessToken":"t","ServerId":"qa","User":{"Id":"u1","Name":"suite-iphone"}}
+        """)
+        let session = try await JellyfinClient.shared.login(server: ClientStub.server, username: "suite-iphone", password: "pw")
+        XCTAssertEqual(session.userName, "suite-iphone")
+        let body = StubURLProtocol.requests.last { $0.url?.path == "/Users/AuthenticateByName" }.flatMap(StubURLProtocol.jsonBody(of:))
+        XCTAssertEqual(body?["Username"] as? String, "suite-iphone")
+        XCTAssertEqual(body?["Pw"] as? String, "pw")
+    }
+
+    /// Wrong password (401) and a disabled account (403): an error, no session.
+    func testRefusedSignInsThrow() async {
+        for status in [401, 403] {
+            StubURLProtocol.stub("/Users/AuthenticateByName", method: "POST", status: status)
+            do {
+                _ = try await JellyfinClient.shared.login(server: ClientStub.server, username: "x", password: "y")
+                XCTFail("\(status) signed in")
+            } catch {
+                XCTAssertFalse(error.localizedDescription.isEmpty, "\(status)")
+            }
+        }
+    }
+
+    func testAnswerWithoutATokenIsNoSession() async {
+        StubURLProtocol.stub("/Users/AuthenticateByName", method: "POST", json: #"{"User":{"Id":"u1"}}"#)
+        do { _ = try await JellyfinClient.shared.login(server: ClientStub.server, username: "x", password: "y"); XCTFail("no token") } catch {
+            XCTAssertEqual(error.localizedDescription, "The server accepted the request but returned no session")
+        }
+    }
+}
+#endif

@@ -137,3 +137,16 @@ The suite unit-tests the snapshot and state the extensions read
 - mpv on a private-CA HTTPS server fails (by design, memory
   `mpv-tls-verification`); on a public certificate it plays.
 - SharePlay "Watch Together" with a FaceTime call.
+
+## Typing a password on the sign-in form
+
+On the iOS 27.0 simulator XCUITest cannot type into the password field
+(neither a tap on it nor the form's own move to it from Sign In gives it the
+keyboard), so `PhoneSignInTests` skips the password, wrong-password,
+disabled-account and add-account cases there; the app's own sign-in path is
+exercised by every test's launch, and the requests by
+`PhoneSignInClientTests`. By hand: type a name and password and Sign in
+(Home appears); a wrong password and `fx-disabled` show an error and stay;
+Settings › Account › Add Account adds `suite-spare1` and the accounts list
+switches back. Check also that tapping the password field gives it the
+keyboard (if it does not on hardware either, that is a bug).

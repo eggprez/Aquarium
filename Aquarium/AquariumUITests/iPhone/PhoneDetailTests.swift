@@ -344,7 +344,9 @@ final class PhoneContextMenuTests: PhoneUITestCase {
         let e3 = String(card.identifier.dropFirst("item.card.".count))
         card.press(forDuration: 1.2)
         any(TestID.Item.menuRemoveFromNextUp).tapNow(10)
-        XCTAssertTrue(card.waitToVanish(20), "still on Next Up")
+        XCTAssertTrue(eventually(timeout: 20) {
+            !candidates.allElementsBoundByIndex.contains { $0.frame.midY > shelf.frame.minY && $0.frame.midY < shelf.frame.maxY }
+        }, "still on Next Up")
         let ids = (try api.json("/Shows/NextUp?userId=\(api.userId)&Limit=50") as? [String: Any])?["Items"] as? [[String: Any]] ?? []
         XCTAssertFalse(ids.contains { ($0["Id"] as? String) == e3 || ($0["SeriesId"] as? String) == show.id }, "the server still offers it")
     }

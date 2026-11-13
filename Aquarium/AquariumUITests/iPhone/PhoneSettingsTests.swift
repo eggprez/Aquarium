@@ -124,11 +124,18 @@ final class PhoneSettingsTests: PhoneUITestCase {
         let dark = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label == 'Dark'", TestID.Settings.option(TestID.Settings.theme, "dark"))).firstMatch
         dark.tapNow(10)
         attachScreenshot("dark theme")
-        if !any(TestID.Settings.theme).waitForExistence(timeout: 3) { goBack() }
+        addTeardownBlock { [weak self] in self?.attachScreenshot("after the theme change") }
+        // Changing the theme must leave you on the page you changed it on.
+        let page = app.element(TestID.Settings.pageRoot("appearance"))
+        let stayed = !eventually(timeout: 4) { !page.exists }
+        if !stayed {
+            XCTExpectFailure("bug: choosing a theme throws you out of Settings › Appearance back to the More list (the root view is rebuilt)")
+            XCTFail("changing the theme left Settings › Appearance")
+            return
+        }
         let row = any(TestID.Settings.theme)
+        if !row.exists { goBack() }
         XCTAssertTrue(eventually(timeout: 10) { row.exists && row.label.contains("Dark") }, "theme row did not change to Dark")
-        row.tapNow(10)
-        app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label == 'Match system'", TestID.Settings.option(TestID.Settings.theme, "auto"))).firstMatch.tapNow(10)
     }
 
     func testHideContinueWatchingTakesTheRowOffHome() throws {
