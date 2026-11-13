@@ -216,6 +216,19 @@ final class TVTopShelfTests: TVUnitTestCase {
         await waitForHomesPublish()
     }
 
+    func testAFailedNextUpLoadKeepsTheShelfItHad() async throws {
+        // Home hands over nil when its Next Up request failed (HomeView.load);
+        // the shelf must not be replaced by the empty list the page had then.
+        stubPoster(seriesId: "series1")
+        await TopShelf.publishHomeNextUp([episode(1)])
+        XCTAssertEqual(try readSnapshot().entries.map(\.id), ["ep1"])
+        await TopShelf.publishHomeNextUp(nil)
+        XCTAssertEqual(try readSnapshot().entries.map(\.id), ["ep1"], "a failed load emptied the shelf")
+        // A load that came back empty is an answer: nothing is next.
+        await TopShelf.publishHomeNextUp([])
+        XCTAssertEqual(try readSnapshot().entries.map(\.id), [])
+    }
+
     func testClearTakesTheShelfAway() async throws {
         stubPoster(seriesId: "series1")
         await TopShelf.publish([episode(1)])

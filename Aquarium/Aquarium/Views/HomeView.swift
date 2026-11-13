@@ -889,9 +889,13 @@ struct HomeView: View {
         // screen was doing. The error state is kept for the case it was meant
         // for: nothing came back at all.
         var failure: (any Error)?
+        var nextUpFailed = false
         sections = await sectionsTask
         do { resume = try await resumeTask } catch { failure = error }
-        do { nextUp = try await nextUpTask } catch { failure = failure ?? error }
+        do { nextUp = try await nextUpTask } catch {
+            failure = failure ?? error
+            nextUpFailed = true
+        }
 
         // Both lists fresh is the moment to tidy the episodes Next Up has left
         // behind. Not awaited: it is a write per episode, and the page is not
@@ -916,9 +920,11 @@ struct HomeView: View {
         // moment the app has it. Detached because it fetches a poster per
         // title: the rest of Home must not wait on artwork for a shelf that is
         // somewhere else entirely.
+        // Not after a failed load: that would replace the shelf with whatever
+        // the page had on hand, which can be nothing at all.
         #if os(tvOS)
-        let published = shownNextUp
-        Task.detached { await TopShelf.publish(published) }
+        let published = nextUpFailed ? nil : shownNextUp
+        Task.detached { await TopShelf.publishHomeNextUp(published) }
         #endif
 
         // The bar is settled here rather than at the end: it has everything
