@@ -19,6 +19,18 @@
 //  server setting that avoids it, and an HLS item has no audio offset to
 //  correct it with (see `AVEngine.audioDelay`).
 //
+//  A restart can also leave the opposite. A download waiting on the segment
+//  being written when the encode is killed is handed that segment as far as
+//  it had got — four frames of a three-second segment, in one measured case
+//  — and the copy on this device then has a hole: picture and sound both
+//  missing up to the next segment. AVPlayer closes the hole in the sound the
+//  same way it ignores an overlap, so everything after is heard *early* by
+//  the length of the hole, seconds rather than milliseconds, until a seek.
+//  Killing the encode once every few seconds through the server's own API
+//  left a download with as many holes as overlaps. The usual cause in the
+//  field is a download carrying on in the background, where nothing pings
+//  the server and it reaps the encode a minute later.
+//
 //  So the seams are found here, from the timestamps in the package itself,
 //  and `AVEngine` re-anchors as playback crosses them. Reading the package
 //  rather than remembering the restarts as they happen is what reaches a
@@ -28,14 +40,23 @@
 import Foundation
 import os
 
-/// One place where a segment's audio starts before the previous one's ends.
+/// One place where a segment's audio does not start where the previous
+/// one's ended.
 struct StreamSeam: Codable, Equatable, Sendable {
-    /// Where the earlier segment's audio ends, in the stream's own time:
-    /// within a frame or two of the boundary between the two segments.
+    /// Where the earlier segment's audio ends, in the stream's own time.
     var time: Double
     /// How much sound is there twice, in seconds: how much later everything
-    /// after this point is heard once playback has run across it.
+    /// after this point is heard once playback has run across it. Negative
+    /// for a hole — sound that is missing — after which it is heard early.
     var overlap: Double
+
+    /// Where the later segment's audio starts.
+    var resume: Double { time - overlap }
+    /// The later of the two edges: past this, playback is inside the later
+    /// segment whichever kind of seam it is.
+    var farEdge: Double { max(time, resume) }
+    /// A hole long enough to step over rather than play across.
+    var isGap: Bool { overlap <= -SeamSlip.gap }
 }
 
 enum StreamSeams {
@@ -43,9 +64,17 @@ enum StreamSeams {
 
     /// Smaller than this is rounding between two timescales, not a restart.
     static let smallestSeam = 0.005
-    /// Larger than this is a hole in the package rather than a restart, and
-    /// nothing measured says what the player does with one.
-    static let largestSeam = 0.5
+    /// An overlap is an encoder's priming and can only be so long. The one
+    /// thing seen past this is the stream's last sliver of a segment, which
+    /// a restarted encode writes seconds out of place, at the very end.
+    static let largestOverlap = 0.5
+    /// A hole is at most the segment that was cut short. Longer than any
+    /// segment the server writes, and it is a segment missing from the
+    /// package altogether, which is not this problem.
+    static let largestHole = 10.0
+    /// Bumped when what `scan` finds changes, so a list kept by an older
+    /// build is read again: the first one knew nothing of holes.
+    static let version = 2
 
     /// The seams in a downloaded `.movpkg`, in order. Empty for anything
     /// else, and for a package that can't be read.
@@ -59,13 +88,14 @@ enum StreamSeams {
             guard fragments.count > 1 else { return [] }
             let cache = cacheFile(for: package)
             if let data = try? Data(contentsOf: cache),
-               let kept = try? JSONDecoder().decode(Kept.self, from: data), kept.fragments == fragments.count {
+               let kept = try? JSONDecoder().decode(Kept.self, from: data), kept.fragments == fragments.count,
+               kept.version == version {
                 return kept.seams
             }
             let started = Date()
             guard let found = scan(fragments) else { return [] }
-            log.notice("seams: \(found.count, privacy: .public) in \(fragments.count, privacy: .public) segments, read in \(Date().timeIntervalSince(started), format: .fixed(precision: 2), privacy: .public) s")
-            if let data = try? JSONEncoder().encode(Kept(fragments: fragments.count, seams: found)) {
+            log.notice("seams: \(found.count, privacy: .public) (\(found.filter { $0.overlap < 0 }.count, privacy: .public) holes) in \(fragments.count, privacy: .public) segments, read in \(Date().timeIntervalSince(started), format: .fixed(precision: 2), privacy: .public) s")
+            if let data = try? JSONEncoder().encode(Kept(version: version, fragments: fragments.count, seams: found)) {
                 try? FileManager.default.createDirectory(
                     at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try? data.write(to: cache, options: .atomic)
@@ -75,6 +105,7 @@ enum StreamSeams {
     }
 
     private struct Kept: Codable {
+        var version: Int?
         var fragments: Int
         var seams: [StreamSeam]
     }
@@ -130,27 +161,42 @@ enum StreamSeams {
     /// The seams between consecutive segments, or nil if the stream isn't
     /// fragmented MP4 with an audio track this can read.
     static func scan(_ fragments: Fragments) -> [StreamSeam]? {
+        audioSpans(fragments).map { seams(between: $0.map(\.span)) }
+    }
+
+    /// Where each segment's audio starts and ends, in playing order; nil for
+    /// a segment that is unreadable or has no sound in it.
+    static func audioSpans(_ fragments: Fragments) -> [(file: URL, span: (start: Double, end: Double)?)]? {
         guard let initData = try? Data(contentsOf: fragments.initSegment),
               let audio = audioTrack(inInitSegment: initData)
         else { return nil }
+        return fragments.segments.map { ($0, audioSpan(ofSegment: $0, track: audio)) }
+    }
+
+    static func seams(between spans: [(start: Double, end: Double)?]) -> [StreamSeam] {
         var seams: [StreamSeam] = []
         var previousEnd: Double?
-        for file in fragments.segments {
-            guard let span = audioSpan(ofSegment: file, track: audio) else {
-                // Unreadable, or a segment with no sound in it: whatever
-                // comes next is not measured against what came before.
+        for span in spans {
+            guard let span else {
+                // Whatever comes next is not measured against what came before.
                 previousEnd = nil
                 continue
             }
             if let previousEnd {
                 let overlap = previousEnd - span.start
-                if overlap >= smallestSeam, overlap <= largestSeam {
+                if (smallestSeam...largestOverlap).contains(overlap)
+                    || (smallestSeam...largestHole).contains(-overlap) {
                     seams.append(StreamSeam(time: previousEnd, overlap: overlap))
                 }
             }
             previousEnd = span.end
         }
         return seams
+    }
+
+    /// Forget what was read from a package: its segments have changed.
+    static func forget(package: URL) {
+        try? FileManager.default.removeItem(at: cacheFile(for: package))
     }
 
     struct AudioTrack: Equatable {
@@ -332,20 +378,26 @@ enum StreamSeams {
     }
 }
 
-/// How late the sound has become since playback last started reading from a
-/// timestamp, and when that is enough to do something about.
+/// How far the sound has moved off the picture since playback last started
+/// reading from a timestamp, and when that is enough to do something about.
 ///
 /// Fed the playhead as it moves. A step forward of about a tick is playback
-/// running on, and takes on the overlap of every seam it passed; anything
-/// else — backwards, or a jump — is a seek, after which the player is exact
-/// again whatever it had run across before.
+/// running on, and takes on every seam it passed; anything else — backwards,
+/// or a jump — is a seek, after which the player is exact again whatever it
+/// had run across before.
 struct SeamSlip {
     var seams: [StreamSeam] = []
+    /// Seconds the sound is behind the picture; negative when it is ahead.
     private(set) var slip = 0.0
     private var last: Double?
 
-    /// Sound this late is past what reads as in sync; one seam is not.
-    static let tolerable = 0.1
+    /// Sound this late is past what reads as in sync; one overlap is not.
+    static let tolerableLate = 0.1
+    /// Sound ahead of the picture is noticed sooner than sound behind it.
+    static let tolerableEarly = 0.06
+    /// A hole this long is stepped over as playback reaches it, rather than
+    /// played across with the sound that far ahead and put right afterwards.
+    static let gap = 0.5
     /// Further than this between two looks at the playhead is not playing.
     static let longestStep = 1.5
     /// How far past a seam the playhead has to be before the seam counts.
@@ -353,7 +405,7 @@ struct SeamSlip {
     /// the instant a seam is passed lands a few milliseconds short of the
     /// segment boundary — the audio's edge and the picture's are not the
     /// same instant — so the player crosses the seam a second time and is
-    /// late again by exactly as much. Measured: re-anchored on the seam, the
+    /// off again by exactly as much. Measured: re-anchored on the seam, the
     /// slip was back within a second; a quarter of a second in, it stays gone.
     static let settle = 0.25
 
@@ -363,17 +415,28 @@ struct SeamSlip {
         last = nil
     }
 
-    /// Note where the playhead is. True when the sound is late enough that
-    /// the player should be re-anchored — after which, call `reset`.
+    /// Note where the playhead is. True when the sound is far enough off
+    /// that the player should be re-anchored — after which, call `reset`.
     mutating func advance(to time: Double) -> Bool {
         defer { last = time }
         guard let last, time >= last, time - last <= Self.longestStep else {
             slip = 0
             return false
         }
-        for seam in seams where seam.time + Self.settle > last && seam.time + Self.settle <= time {
+        for seam in seams where seam.farEdge + Self.settle > last && seam.farEdge + Self.settle <= time {
             slip += seam.overlap
         }
-        return slip >= Self.tolerable
+        return slip >= Self.tolerableLate || slip <= -Self.tolerableEarly
+    }
+
+    /// Where the holes worth stepping over begin.
+    var gapStarts: [Double] { seams.filter(\.isGap).map(\.time) }
+
+    /// Where to land to step over the hole the playhead has just reached, if
+    /// it has reached one: far enough into the segment after it that the
+    /// hole is not counted against the landing as well.
+    func landing(past time: Double) -> Double? {
+        seams.first { $0.isGap && time >= $0.time - 0.05 && time < $0.resume }
+            .map { $0.resume + Self.settle + 0.02 }
     }
 }

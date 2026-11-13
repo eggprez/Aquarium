@@ -111,11 +111,30 @@ final class StreamSeamsTests: XCTestCase {
         XCTAssertEqual(seams[0].overlap, Double(end - 285_888) / 48000, accuracy: 0.0001)
     }
 
-    func testAHoleIsNotASeam() throws {
+    func testASegmentCutShortLeavesAHole() throws {
+        // The second segment was handed over half-written: 20 frames of
+        // sound where 141 belong, and the third starts where it should.
+        let second = Int64(141 * 1024)
         let made = try package([
             segment(audioStart: 0, frames: 141),
-            segment(audioStart: 480_000, frames: 141),
+            segment(audioStart: second, frames: 20),
+            segment(audioStart: second * 2, frames: 141),
+        ])
+        let seams = try XCTUnwrap(StreamSeams.scan(StreamSeams.fragmentFiles(in: made)))
+        XCTAssertEqual(seams.count, 1)
+        XCTAssertEqual(seams[0].time, Double(second + 20 * 1024) / 48000, accuracy: 0.0001)
+        XCTAssertEqual(seams[0].overlap, -Double(121 * 1024) / 48000, accuracy: 0.0001)
+        XCTAssertEqual(seams[0].resume, Double(second * 2) / 48000, accuracy: 0.0001)
+        XCTAssertTrue(seams[0].isGap)
+    }
+
+    func testAMissingStretchOrAMisplacedEndIsNotASeam() throws {
+        // Twenty seconds of nothing is a segment that isn't there, and five
+        // seconds of sound twice is the sliver a restart leaves at the end.
+        let made = try package([
             segment(audioStart: 0, frames: 141),
+            segment(audioStart: 1_104_384, frames: 141),
+            segment(audioStart: 1_008_768, frames: 141),
         ])
         XCTAssertEqual(StreamSeams.scan(StreamSeams.fragmentFiles(in: made)), [])
     }
@@ -148,5 +167,93 @@ final class StreamSeamsTests: XCTestCase {
         XCTAssertFalse(slip.advance(to: 19.9))
         XCTAssertFalse(slip.advance(to: 20.4))
         XCTAssertEqual(slip.slip, 0.07, accuracy: 0.0001)
+    }
+
+    func testSoundAheadIsPutRightSoonerThanSoundBehind() {
+        // 70 ms late is left alone; 70 ms early is not.
+        var slip = SeamSlip(seams: [StreamSeam(time: 10, overlap: -0.07)])
+        var asked: [Double] = []
+        for t in stride(from: 0.0, through: 15, by: 0.5) where slip.advance(to: t) { asked.append(t) }
+        // The far edge of a hole is where the sound resumes, 10.07.
+        XCTAssertEqual(asked.first, 10.5)
+    }
+
+    func testOverlapsAndHolesCancel() {
+        var slip = SeamSlip(seams: [StreamSeam(time: 10, overlap: 0.09), StreamSeam(time: 13, overlap: -0.05)])
+        for t in stride(from: 9.0, through: 15, by: 0.5) { XCTAssertFalse(slip.advance(to: t)) }
+        XCTAssertEqual(slip.slip, 0.04, accuracy: 0.0001)
+    }
+
+    func testALongHoleIsSteppedOver() {
+        let slip = SeamSlip(seams: [StreamSeam(time: 102.14, overlap: -2.9), StreamSeam(time: 60, overlap: -0.03)])
+        XCTAssertEqual(slip.gapStarts, [102.14])
+        XCTAssertNil(slip.landing(past: 60.0), "a short hole is played across and re-anchored after")
+        XCTAssertNil(slip.landing(past: 101.0))
+        let landing = try? XCTUnwrap(slip.landing(past: 102.14))
+        XCTAssertEqual(landing ?? 0, 105.04 + 0.27, accuracy: 0.0001)
+        XCTAssertNil(slip.landing(past: 105.1))
+        // Landed there, the hole is behind the playhead and is not counted.
+        var after = slip
+        XCTAssertFalse(after.advance(to: 105.31))
+        XCTAssertFalse(after.advance(to: 105.81))
+        XCTAssertEqual(after.slip, 0)
+    }
+
+    // MARK: Mending
+
+    private let index = """
+    <StreamInfo>
+      <MediaInitializationSegments>
+        <ISEG Len="1331" Off="0" PATH="(ABC)_(0).initfrag" SeqNum="0" URL="http://host/hls1/main/-1.mp4?a=1&amp;b=2"></ISEG>
+      </MediaInitializationSegments>
+      <MediaSegments>
+        <SEG Dur="3.000011" Len="834017" Off="0" PATH="(0)_(0)_(3.003).frag" SeqNum="0" Tim="0.000000" URL="http://host/hls1/main/0.mp4?a=1&amp;b=2"></SEG>
+        <SEG Dur="3.000011" Len="58909" Off="0" PATH="(3)_(0)_(3.003).frag" SeqNum="1" Tim="3.000000" URL="http://host/hls1/main/1.mp4?a=1&amp;b=2"></SEG>
+      </MediaSegments>
+    </StreamInfo>
+    """
+
+    func testIndexNamesWhereASegmentCameFrom() {
+        let entry = PackageIndex.entry(for: "(3)_(0)_(3.003).frag", in: index)
+        XCTAssertEqual(entry?.url.absoluteString, "http://host/hls1/main/1.mp4?a=1&b=2")
+        XCTAssertEqual(entry?.length, 58909)
+        XCTAssertNil(PackageIndex.entry(for: "(6)_(0)_(3.003).frag", in: index))
+    }
+
+    func testIndexTakesANewLengthForOneSegmentOnly() throws {
+        let changed = try XCTUnwrap(PackageIndex.index(index, settingLengthOf: "(3)_(0)_(3.003).frag", to: 827598))
+        XCTAssertEqual(PackageIndex.entry(for: "(3)_(0)_(3.003).frag", in: changed)?.length, 827598)
+        XCTAssertEqual(PackageIndex.entry(for: "(0)_(0)_(3.003).frag", in: changed)?.length, 834017)
+        XCTAssertTrue(changed.contains("Len=\"1331\""))
+        XCTAssertNil(PackageIndex.index(index, settingLengthOf: "(9)_(0)_(3.003).frag", to: 1))
+    }
+
+    func testAShortSegmentIsReplacedByAWholeOne() throws {
+        let second = Int64(141 * 1024)
+        let made = try package([
+            segment(audioStart: 0, frames: 141),
+            segment(audioStart: second, frames: 20),
+            segment(audioStart: second * 2, frames: 141),
+        ])
+        let stream = made.appendingPathComponent("0-4000000-ABC")
+        try index.write(to: stream.appendingPathComponent(PackageIndex.fileName), atomically: true, encoding: .utf8)
+
+        let short = StreamSeams.cutShort(in: made)
+        XCTAssertEqual(short.map(\.file.lastPathComponent), ["(3)_(0)_(3.003).frag"])
+        XCTAssertEqual(short.first?.missing ?? 0, Double(121 * 1024) / 48000, accuracy: 0.0001)
+
+        // A copy no longer than the one there is turned down, and nothing moves.
+        XCTAssertFalse(StreamSeams.replace(short[0], with: Data(segment(audioStart: second, frames: 20))))
+        XCTAssertEqual(StreamSeams.cutShort(in: made).count, 1)
+
+        let whole = Data(segment(audioStart: second, frames: 141))
+        XCTAssertTrue(StreamSeams.replace(short[0], with: whole))
+        XCTAssertEqual(StreamSeams.cutShort(in: made), [])
+        XCTAssertEqual(StreamSeams.scan(StreamSeams.fragmentFiles(in: made)), [])
+        let after = try String(contentsOf: stream.appendingPathComponent(PackageIndex.fileName), encoding: .utf8)
+        XCTAssertEqual(PackageIndex.entry(for: "(3)_(0)_(3.003).frag", in: after)?.length, whole.count)
+        // Nothing left lying in the package for the player to trip on.
+        let names = try FileManager.default.contentsOfDirectory(atPath: stream.path)
+        XCTAssertEqual(names.filter { $0.hasPrefix(".mending") }, [])
     }
 }

@@ -2513,6 +2513,9 @@ final class DownloadManager: NSObject {
                 await DownloadItemInfo.fetch(itemId: itemId, into: Self.folder(for: itemId))
             }
         }
+        // Whatever the server cut short on the way down is fetched again
+        // now, while it is certainly in reach. See `DownloadRepair`.
+        Task { await DownloadRepair.mend(itemId) }
     }
 
     /// Marks a downloaded stream as one to keep. AVFoundation's packages sit
@@ -3422,6 +3425,8 @@ final class DownloadManager: NSObject {
         persistQueue()
         pump()
         Task { await refreshDescriptions() }
+        // And the downloads made before holes were looked for.
+        DownloadRepair.sweep()
     }
 
     // MARK: - Keeping up with the server

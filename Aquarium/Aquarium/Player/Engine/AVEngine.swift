@@ -76,6 +76,8 @@ final class AVEngine: PlaybackEngine {
     /// The restarts in a downloaded stream and how late the sound has run
     /// since the last seek; see `StreamSeams`.
     private var seamSlip = SeamSlip()
+    /// Fires as playback reaches a hole in a downloaded stream.
+    private var gapObserver: Any?
 
     private var timeObserver: Any?
     private var statusObservers: Set<AnyCancellable> = []
@@ -277,6 +279,7 @@ final class AVEngine: PlaybackEngine {
         currentURL = nil
         composed = nil
         teardownObservers()
+        removeGapObserver()
         pendingSeek = nil
         seekWatchdog?.cancel()
         seekWatchdog = nil
@@ -1044,31 +1047,65 @@ final class AVEngine: PlaybackEngine {
     /// to find in anything but a package on this device.
     private func findSeams(in url: URL) {
         seamSlip = SeamSlip()
+        removeGapObserver()
         guard url.isFileURL, url.pathExtension.lowercased() == "movpkg" else { return }
         let mine = loadGeneration
         Task {
             let seams = await StreamSeams.seams(inPackage: url)
             guard loadGeneration == mine, !seams.isEmpty else { return }
             seamSlip.seams = seams
+            watchForGaps()
         }
+    }
+
+    private func removeGapObserver() {
+        if let gapObserver { player.removeTimeObserver(gapObserver) }
+        gapObserver = nil
+    }
+
+    /// Step over the holes in a downloaded stream as playback reaches them.
+    ///
+    /// A hole is a segment the server handed over half-written: neither its
+    /// picture nor its sound is on this device past the point it was cut.
+    /// Left to play, the sound of the next segment starts at once and runs
+    /// that far ahead of a picture that has nothing to show. There is nothing
+    /// there to wait for, so the playhead goes straight to where the stream
+    /// picks up — a jump cut, which is what the hole honestly is.
+    private func watchForGaps() {
+        let starts = seamSlip.gapStarts
+        guard !starts.isEmpty else { return }
+        let times = starts.map { NSValue(time: CMTime(seconds: $0, preferredTimescale: 600)) }
+        gapObserver = player.addBoundaryTimeObserver(forTimes: times, queue: .main) { [weak self] in
+            MainActor.assumeIsolated { self?.stepOverGap() }
+        }
+    }
+
+    private func stepOverGap() {
+        guard !holding, player.timeControlStatus == .playing else { return }
+        let now = player.currentTime().seconds
+        guard now.isFinite, let landing = seamSlip.landing(past: now) else { return }
+        Self.log.notice("hole in the download at \(now, format: .fixed(precision: 1), privacy: .public); stepping to \(landing, format: .fixed(precision: 1), privacy: .public)")
+        seamSlip.reset()
+        player.seek(to: CMTime(seconds: landing, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
     /// Put the sound back on the picture once a downloaded stream's seams
     /// have carried it far enough off.
     ///
-    /// AVPlayer plays the overlapping audio either side of an encoder restart
-    /// end to end, so each one crossed leaves the sound later than the
-    /// picture (see `StreamSeams`). A seek makes it read the timestamps again,
-    /// which is all skipping forward and back ever did to cure it; this is
-    /// that seek, to the frame already showing. It costs a blink — about
-    /// 70 ms on a package — so it waits until the slip is past what reads as
-    /// in sync rather than spending one on every seam.
+    /// AVPlayer plays the audio either side of an encoder restart end to end,
+    /// whether the two overlap or leave a hole, so each one crossed leaves
+    /// the sound behind the picture or ahead of it (see `StreamSeams`). A
+    /// seek makes it read the timestamps again, which is all skipping forward
+    /// and back ever did to cure it; this is that seek, to the frame already
+    /// showing. It costs a blink — about 70 ms on a package — so it waits
+    /// until the slip is past what reads as in sync rather than spending one
+    /// on every seam.
     private func reanchorIfSoundHasSlipped(at time: CMTime) {
         guard time.seconds.isFinite, seamSlip.advance(to: time.seconds) else { return }
         let slip = seamSlip.slip
         seamSlip.reset()
         guard player.timeControlStatus == .playing else { return }
-        Self.log.notice("sound \(Int((slip * 1000).rounded()), privacy: .public) ms late after seams; re-anchoring at \(time.seconds, format: .fixed(precision: 1), privacy: .public)")
+        Self.log.notice("sound \(Int((abs(slip) * 1000).rounded()), privacy: .public) ms \(slip > 0 ? "late" : "early", privacy: .public) after seams; re-anchoring at \(time.seconds, format: .fixed(precision: 1), privacy: .public)")
         player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
