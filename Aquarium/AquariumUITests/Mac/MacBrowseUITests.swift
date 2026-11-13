@@ -410,7 +410,17 @@ final class MacBrowseUITests: MacUITestCase {
         XCTAssertTrue(routeWindows.firstMatch.waitForExistence(timeout: 20))
         // Home, Live TV and Downloads have no window of their own.
         sidebarRow("home").rightClick()
-        XCTAssertFalse(app.menuItems["Open in New Window"].waitForExistence(timeout: 2))
+        // The row menu's item, not Item ▸ Open in New Window in the menu
+        // bar, which is in the tree all along (with an empty frame while its
+        // menu is closed) — matching that one failed this test whenever
+        // XCUITest had the menu bar's items to hand.
+        func open(_ title: String) -> [XCUIElement] {
+            app.menuItems.matching(NSPredicate(format: "title == %@", title))
+                .allElementsBoundByIndex.filter { !$0.frame.isEmpty }
+        }
+        XCTAssertTrue(eventually(5) { !open("Refresh").isEmpty }, "Home's row menu is open")
+        let shown = open("Open in New Window")
+        XCTAssertTrue(shown.isEmpty, "Home has no Open in New Window")
         dismissMenus()
     }
 }
