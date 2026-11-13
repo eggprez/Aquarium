@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Runs the Apple app's tests headlessly.
 #
-#   Tools/run-tests.sh <unit|iphone|ipad|mac|tv|watch|all> [options] [-- extra xcodebuild args]
+#   Tools/run-tests.sh <unit|iphone|ipad|mac|tv|watch|watchunit|all> [options] [-- extra xcodebuild args]
 #
 #   unit     AquariumTests (TestPlans/Unit) on the test iPhone, Apple TV and
 #            (unless --no-mac) the Mac, then AquariumWatchTests (WatchUnit)
@@ -13,7 +13,9 @@
 #            Aquarium is running (the test build would quit it).
 #   tv       AquariumUITests (TestPlans/TV) on the test Apple TV.
 #   watch    AquariumWatchUITests (TestPlans/Watch) on the test watch,
-#            paired with the test iPhone 17.
+#            paired with the test iPhone 17 (or the pair named by
+#            AQUARIUM_TEST_WATCH / AQUARIUM_TEST_WATCH_PHONE).
+#   watchunit  AquariumWatchTests (WatchUnit) on the test watch only.
 #   all      every one of the above, in that order.
 #
 # Options:
@@ -150,7 +152,12 @@ do_unit() {
       run Aquarium Unit Mac "platform=macOS" "${MAC_SIGN[@]}"
     fi
   fi
-  watch=$(watch_pair) || return
+  do_watchunit
+}
+
+do_watchunit() {
+  local watch
+  watch=$(watch_pair) || { echo "WatchUnit: no test watch" | tee -a "$summary"; failures=$((failures + 1)); return; }
   run AquariumWatch WatchUnit Watch "id=$watch" "${SIM_SIGN[@]}"
 }
 
@@ -203,10 +210,13 @@ do_tv() {
 }
 
 # The test watch, paired with the test iPhone 17; prints the watch's udid.
+# AQUARIUM_TEST_WATCH and AQUARIUM_TEST_WATCH_PHONE name another pair (made
+# the same way if missing), so a second run can have a watch of its own:
+#   AQUARIUM_TEST_WATCH="Aquarium Test Watch B" AQUARIUM_TEST_WATCH_PHONE="Aquarium Test iPhone B" Tools/run-tests.sh watch
 watch_pair() {
   local phone watch
-  phone=$(sim "Aquarium Test iPhone 17" iPhone-17 $IOS_RT) || return 1
-  watch=$(sim "Aquarium Test Watch 46mm" Apple-Watch-Series-12-46mm $WATCH_RT) || return 1
+  phone=$(sim "${AQUARIUM_TEST_WATCH_PHONE:-Aquarium Test iPhone 17}" iPhone-17 $IOS_RT) || return 1
+  watch=$(sim "${AQUARIUM_TEST_WATCH:-Aquarium Test Watch 46mm}" Apple-Watch-Series-12-46mm $WATCH_RT) || return 1
   if ! xcrun simctl list pairs | grep -q "$watch"; then
     xcrun simctl pair "$watch" "$phone" > /dev/null 2>&1 || echo "warning: could not pair the test watch" >&2
   fi
@@ -229,6 +239,7 @@ case $suite in
   mac) do_mac;;
   tv) do_tv;;
   watch) do_watch;;
+  watchunit) do_watchunit;;
   all) do_unit; do_iphone; do_ipad; do_tv; do_watch; do_mac;;
   *) echo "unknown suite $suite"; exit 2;;
 esac
