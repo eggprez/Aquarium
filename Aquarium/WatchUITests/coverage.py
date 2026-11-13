@@ -82,10 +82,15 @@ def status_of(t):
 
 GENERIC = {"body", "init"}
 
-def tests_for(name, owner):
+def tests_for(name, owner, path=""):
     pats = [re.compile(r'\.' + re.escape(name) + r'\b'), re.compile(r'\b' + re.escape(name) + r'\(')]
+    phone_side = path.startswith("Aquarium/Core/")
+    shared = path.startswith("Shared/")
     hits = []
     for t in tests:
+        on_phone = t["file"].startswith("AquariumTests/")
+        if not shared and on_phone != phone_side:
+            continue
         if any(p.search(t["body"]) for p in pats):
             hits.append(t)
     return hits
@@ -93,6 +98,8 @@ def tests_for(name, owner):
 # Hand-written notes for what nothing automated reaches, by "file:function"
 # or by file. Read top to bottom: the first match wins.
 MANUAL = [
+    ("Watch/WatchApp.swift:WatchDelegate.handle", "manual", "WKRefreshBackgroundTask can't be made in a test; MANUAL.md §7 (background wakes)"),
+    ("Watch/WatchApp.swift:WatchDelegate.scheduleRefresh", "manual", "WKApplication.scheduleBackgroundRefresh has no observable result in a test; MANUAL.md §6, §7"),
     ("Watch/WatchApp.swift:init", "unit", "runs at every host launch (unit and UI)"),
     ("Watch/WatchClient.swift:init", "unit", "the singleton, made at host launch; its device id: WatchClientTests.testTheWatchIsItsOwnDeviceToTheServer"),
     ("Watch/WatchClient.swift:AnyEncodable.init", "unit", "every POST body (WatchClientTests reports, PlaybackInfo)"),
@@ -162,6 +169,10 @@ MANUAL = [
     ("Aquarium/Core/WatchLink.swift:", "manual", "the phone's relay (fetch, hand over, send in pieces, Transfers): needs WatchConnectivity with a watch app installed and a background URLSession, MANUAL.md §1"),
 ]
 
+def forced(r):
+    """An owner-qualified MANUAL entry wins over a match by name alone."""
+    return any(prefix == f"{r['file']}:{r['owner']}.{r['name']}" for prefix, _, _ in MANUAL)
+
 def manual_for(path, name, owner=None):
     if owner:
         for prefix, kind, note in MANUAL:
@@ -216,7 +227,9 @@ for rel in SOURCES:
 def direct(r):
     if r["name"] in GENERIC:
         return []
-    return tests_for(r["name"], r["owner"])
+    if forced(r):
+        return []
+    return tests_for(r["name"], r["owner"], r["file"])
 
 def callers(r, seen=None):
     """Names of directly tested functions in the same file that call r."""
@@ -236,7 +249,7 @@ def callers(r, seen=None):
     return out
 
 def indirect_status(r):
-    return "pass (through its callers)"
+    return "caller tested (this line may sit behind a guard the test does not open)"
 
 # Views' ids → UI tests that use any of them
 def ui_tests_for_ids(ids):
@@ -303,7 +316,7 @@ for rel in SOURCES:
     w("|---|---|---|---|---|")
     for r in rs:
         label = f"{r['owner']}.{r['name']}" if r["owner"] else r["name"]
-        hits = [] if r["name"] in GENERIC else tests_for(r["name"], r["owner"])
+        hits = [] if r["name"] in GENERIC or forced(r) else tests_for(r["name"], r["owner"], rel)
         if r["name"] == "init" and r["owner"] in ("WatchRecord",):
             hits = [t for t in tests if "testARecordFromAnOlderBuildStillReads" == t["name"] or "testEnqueueKeepsAudioOnceWithItsReason" == t["name"]]
         if r["name"] == "init" and r["owner"] in ("PhoneContext", "WatchMirrorPlan", "WatchInventory", "WatchContext", "PhonePlaybackState"):

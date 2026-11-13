@@ -94,15 +94,24 @@ final class WatchPlaybackTests: WatchUITestCase {
     }
 
     func testTheHomeRowLeadsBackToThePlayer() throws {
-        let album = try WatchFixtures.require().album("FX Compilation")
+        // A twelve-minute song: still playing however slow the way back is.
+        let album = try WatchFixtures.require().album("FX Long Tracks")
+        let song = album.tracks[0]
         launchHome()
         openAlbum(album)
-        open(TestID.Watch.song(album.tracks[2].id))
+        open(TestID.Watch.song(song.id))
         app.element(TestID.Watch.nowPlayingRoot).waitToExist(30)
+        let row = app.element(TestID.Watch.rootNowPlaying)
         back(); back(); back(); back()
-        let row = app.button(TestID.Watch.rootNowPlaying)
-        XCTAssertTrue(row.waitForExistence(timeout: 20))
-        XCTAssertTrue(text(TestID.Watch.rootNowPlayingTitle).contains(album.tracks[2].name))
+        // Home keeps its scroll: the row is at the top, above the doors.
+        let window = app.windows.firstMatch
+        for _ in 0..<5 where !row.exists {
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+                .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)),
+                       withVelocity: .slow, thenHoldForDuration: 0.1)
+        }
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "the Now Playing row on home")
+        XCTAssertTrue(text(TestID.Watch.rootNowPlayingTitle).contains(song.name))
         row.tap()
         app.element(TestID.Watch.nowPlayingRoot).waitToExist()
     }
