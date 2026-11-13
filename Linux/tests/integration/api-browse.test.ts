@@ -355,12 +355,7 @@ describe.skipIf(!qa)("QA server: api.ts browsing", () => {
     expect(segs.map((s) => s.type).filter((t) => t !== "Intro" && t !== "Outro")).toEqual([]);
   });
 
-  // BUG: getMediaSegments (src/api.ts:1057) sends
-  // `includeSegmentTypes=Intro,Outro`. Jellyfin 12.2 reads that as the single
-  // type "Intro" (it wants the parameter repeated:
-  // `includeSegmentTypes=Intro&includeSegmentTypes=Outro`), so Outro segments
-  // never arrive and "Skip credits" (main.ts:1769) never appears.
-  it.fails("reads intro and credits markers, and only those", async () => {
+  it("reads intro and credits markers, and only those", async () => {
     const api = await qaApiFull();
     const f = fx("film.long_direct");
     const segs = await api.getMediaSegments(f.id);

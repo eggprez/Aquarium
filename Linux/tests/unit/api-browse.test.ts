@@ -1120,7 +1120,7 @@ describe("getMediaSegments", () => {
       { type: "Intro", start: 5, end: 95 },
       { type: "Outro", start: 1200, end: 1260 },
     ]);
-    expect(jfCalls()).toEqual([{ path: "/MediaSegments/m1?includeSegmentTypes=Intro,Outro", method: "GET", body: null }]);
+    expect(jfCalls()).toEqual([{ path: "/MediaSegments/m1?includeSegmentTypes=Intro&includeSegmentTypes=Outro", method: "GET", body: null }]);
   });
 
   it("drops segments with no length and fills in missing values", async () => {

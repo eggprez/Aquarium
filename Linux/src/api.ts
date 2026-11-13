@@ -1054,7 +1054,10 @@ export interface MediaSegment {
  * appears.
  */
 export async function getMediaSegments(itemId: string): Promise<MediaSegment[]> {
-  const r = await api(`/MediaSegments/${itemId}?includeSegmentTypes=Intro,Outro`).catch(() => null);
+  // Two values, not "Intro,Outro": Jellyfin reads a comma list as its first type only.
+  const r = await api(`/MediaSegments/${itemId}?includeSegmentTypes=Intro&includeSegmentTypes=Outro`).catch(
+    () => null
+  );
   const items: any[] = r?.Items ?? [];
   return items
     .map((s) => ({
