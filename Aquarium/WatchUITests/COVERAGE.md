@@ -30,160 +30,160 @@ python3 -I Aquarium/WatchUITests/coverage.py Aquarium Aquarium/WatchUITests/COVE
 | `WatchActions.resumeBook` | 155 | `WatchActionsTests.testResumeCarriesOnAPausedBook`, `WatchActionsTests.testResumeTakesTheServersBookInProgress`, `WatchActionsTests.testResumeOfflineTakesTheWatchsBook`, `WatchActionsTests.testResumeWithNoBookSaysThereIsNone` | unit | pass |
 | `WatchActions.play` | 175 | `WatchActionsTests.testPlayingAnAlbumOrPlaylistById`, `WatchActionsTests.testPlayingAnUnknownIdDoesNothing`, `WatchLinkTests.testWhatOnlyThePhoneHearsIsIgnoredHere`, `WatchLinkTests.testTheRemoteSaysWhenThePhoneIsOutOfReach` (+3 more) | unit | pass |
 | `WatchActions.songs` | 194 | `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch`, `WatchClientTests.testAlbumsArtistsGenresAndSongs`, `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered`, `WatchDownloadsTests.testAWholeFileIsBelieved` (+6 more) | unit | pass |
-| `WatchActions.refreshBookPositions` | 224 | `WatchBookPlaceTests.testRefreshAsksForTheBooksOnTheWatchAndAppliesThem`, `WatchBookPlaceTests.testRefreshAsksNothingOfflineSignedOutOrWithNoBooks`, `WatchBookPlaceTests.testRefreshWithATimeoutReturnsWhatCameInTime`, `WatchBookPlaceTests.testRefreshKeepsAnEarlyPlace` | unit | expected failure / pass |
+| `WatchActions.refreshBookPositions` | 224 | `WatchBookPlaceTests.testRefreshAsksForTheBooksOnTheWatchAndAppliesThem`, `WatchBookPlaceTests.testRefreshAsksNothingOfflineSignedOutOrWithNoBooks`, `WatchBookPlaceTests.testRefreshWithATimeoutReturnsWhatCameInTime`, `WatchBookPlaceTests.testRefreshKeepsAnEarlyPlace` | unit | pass |
 
 ## Watch/WatchClient.swift
 
 | Function | Line | Test(s) | Kind | Status |
 |---|---|---|---|---|
-| `JellyfinClient.makeSession` | 89 | through `JellyfinClient.useTestProtocols` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `JellyfinClient.useTestProtocols` | 105 | `WatchClientTests.testAPositionInTheLastFiveMinutesOfAFinishedBookLeavesItFinished` | unit | pass |
-| `JellyfinClient.load` | 114 | `WatchImagesTests.testAFileCoverLoadsAndIsCached` | unit | pass |
-| `JellyfinClient.init` | 121 | the singleton, made at host launch; its device id: WatchClientTests.testTheWatchIsItsOwnDeviceToTheServer | unit | covered |
-| `JellyfinClient.install` | 138 | `WatchClientTests.testTheSameAccountAgainOnlyRefreshesTheToken`, `WatchLinkTests.testDeleteMessagesGoByGroup`, `WatchLinkTests.testPhoneProgressAndFailureReachTheRecord`, `WatchLinkTests.testACancelOnThePhoneIsACancelHere` | unit | pass |
-| `JellyfinClient.signOut` | 152 | `WatchBookPlaceTests.testRefreshAsksNothingOfflineSignedOutOrWithNoBooks`, `WatchClientTests.testSignOutForgetsAccountAndToken`, `WatchClientTests.testNothingIsAskedSignedOut`, `WatchClientTests.testTheTokenRidesInATranscodeAddressOnce` (+1 more) | unit | pass |
-| `JellyfinClient.keychainAccount` | 159 | through `JellyfinClient.install`, `JellyfinClient.signOut` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `JellyfinClient.pathId` | 170 | `WatchClientTests.testPathIdsAreEscapedOnlyWhenTheyNeedIt` | unit | pass |
-| `JellyfinClient.encode` | 176 | `WatchWidgetSnapshotTests.testTheSnapshotRoundTrips`, `WatchClientTests.testQueriesEscapeThePlusSign`, `WatchDownloadsTests.testTheInventoryIsCutToFitAMessage`, `WatchSyncTypesTests.testFileContentsRoundTrip` | unit | pass |
-| `JellyfinClient.authorizationHeader` | 182 | through `JellyfinClient.authHeaders`, `JellyfinClient.request` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `JellyfinClient.authHeaders` | 194 | through `JellyfinClient.stream`, `JellyfinClient.downloadRequest` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `JellyfinClient.authorized` | 211 | `WatchClientTests.testTheTokenRidesInATranscodeAddressOnce` | unit | pass |
-| `JellyfinClient.request` | 223 | `WatchClientTests.testNothingIsAskedSignedOut`, `WatchSyncTypesTests.testFileContentsRoundTrip` | unit | pass |
-| `JellyfinClient.get` | 262 | through `JellyfinClient.items`, `JellyfinClient.item`, `JellyfinClient.resumeAudio` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `JellyfinClient.decode` | 273 | `WatchWidgetSnapshotTests.testTheSnapshotRoundTrips`, `WatchDownloadsTests.testTheRecordIsWrittenBesideItsFile`, `WatchDownloadsTests.testARecordFromAnOlderBuildStillReads`, `WatchLinkTests.testTheContextCarriesThePlanToTheDownloads` (+10 more) | unit | pass |
-| `JellyfinClient.checkOnline` | 279 | `WatchActionsTests.testTheWidgetsResumeLinkResumesTheBook`, `WatchActionsTests.testResumeOfflineTakesTheWatchsBook`, `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch`, `WatchIntentsTests.testShuffleMusicIntentUsesTheServerThenTheWatch` (+10 more) | unit | pass |
-| `JellyfinClient.items` | 311 | `WatchClientTests.testATransportFailureIsOfflineAndAnAnswerIsBackOnline`, `WatchClientTests.testA401IsAnExpiredSignInNotAnOutage`, `WatchClientTests.testSettingsDoesNotSayConnectedWhileTheSignInIsRefused`, `WatchClientTests.testOtherErrorsCarryTheirStatus` (+9 more) | unit | expected failure / pass |
-| `JellyfinClient.item` | 336 | `WatchActionsTests.testPlayingAnAlbumOrPlaylistById`, `WatchIntentsTests.testShuffleMusicIntentUsesTheServerThenTheWatch`, `WatchClientTests.testUnreadableAnswersSaySo`, `WatchClientTests.testOneItemWithEverythingAPageNeeds` (+2 more) | unit | pass |
-| `JellyfinClient.items` | 342 | `WatchClientTests.testATransportFailureIsOfflineAndAnAnswerIsBackOnline`, `WatchClientTests.testA401IsAnExpiredSignInNotAnOutage`, `WatchClientTests.testSettingsDoesNotSayConnectedWhileTheSignInIsRefused`, `WatchClientTests.testOtherErrorsCarryTheirStatus` (+9 more) | unit | expected failure / pass |
-| `JellyfinClient.resumeAudio` | 354 | `WatchClientTests.testResumeAudioAsksForAudioInProgress` | unit | pass |
-| `JellyfinClient.recentlyPlayedSongs` | 367 | `WatchClientTests.testRecentlyPlayedSongs` | unit | pass |
-| `JellyfinClient.albums` | 373 | `WatchClientTests.testAlbumsArtistsGenresAndSongs`, `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered`, `WatchDownloadsTests.testListsThePagesRead`, `WatchNavigatorTests.testRoutesCompareByWhatTheyShow` | unit | pass |
-| `JellyfinClient.albumTracks` | 377 | `WatchClientTests.testAlbumTracksComeInSleeveOrder`, `WatchDownloadsTests.testListsThePagesRead` | unit | pass |
-| `JellyfinClient.albumArtists` | 381 | `WatchClientTests.testAlbumsArtistsGenresAndSongs`, `WatchLibraryTests.testArtistsAreTheMusicLibrarysNotTheAudiobooksAuthors` | UI + unit | expected failure / pass |
-| `JellyfinClient.albums` | 396 | `WatchClientTests.testAlbumsArtistsGenresAndSongs`, `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered`, `WatchDownloadsTests.testListsThePagesRead`, `WatchNavigatorTests.testRoutesCompareByWhatTheyShow` | unit | pass |
-| `JellyfinClient.songs` | 402 | `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch`, `WatchClientTests.testAlbumsArtistsGenresAndSongs`, `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered`, `WatchDownloadsTests.testAWholeFileIsBelieved` (+6 more) | unit | pass |
-| `JellyfinClient.genres` | 408 | `WatchClientTests.testAlbumsArtistsGenresAndSongs` | unit | pass |
-| `JellyfinClient.songs` | 421 | `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch`, `WatchClientTests.testAlbumsArtistsGenresAndSongs`, `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered`, `WatchDownloadsTests.testAWholeFileIsBelieved` (+6 more) | unit | pass |
-| `JellyfinClient.songs` | 427 | `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch`, `WatchClientTests.testAlbumsArtistsGenresAndSongs`, `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered`, `WatchDownloadsTests.testAWholeFileIsBelieved` (+6 more) | unit | pass |
-| `JellyfinClient.randomSongs` | 433 | `WatchClientTests.testAlbumsArtistsGenresAndSongs` | unit | pass |
-| `JellyfinClient.playlists` | 437 | `WatchClientTests.testPlaylistsLeaveOutOnlyWhatPlainlyIsntMusic`, `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered`, `WatchDownloadsTests.testDeleteRemovesTheFileAndItsPlaceInPlaylists`, `WatchDownloadsTests.testRemovingAPlaylistTellsThePhoneUnlessThePhoneAsked` (+8 more) | UI + unit | pass |
-| `JellyfinClient.playlistItems` | 446 | `WatchClientTests.testPlaylistItemsInTheirOwnOrderWithTheWebFallback`, `WatchClientStubURLProtocolTests.testAPlaylistsSongsDecode` | unit | pass |
-| `JellyfinClient.audiobooks` | 472 | `WatchClientTests.testAlbumsArtistsGenresAndSongs` | unit | pass |
-| `JellyfinClient.search` | 486 | `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered` | unit | pass |
-| `JellyfinClient.query` | 487 | `WatchClientTests.testTheTokenRidesInATranscodeAddressOnce`, `WatchClientTests.testItemsQueryCarriesEverythingAsked`, `WatchClientTests.testOneItemWithEverythingAPageNeeds`, `WatchClientTests.testItemsByIdGoFiftyAtATime` (+10 more) | unit | pass |
-| `JellyfinClient.imageURL` | 508 | `WatchClientTests.testNothingIsAskedSignedOut`, `WatchClientTests.testImageAddressesFallBackFromItemToAlbum` | unit | pass |
-| `JellyfinClient.ladder` | 523 | through `JellyfinClient.imageURL` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `JellyfinClient.stream` | 563 | `WatchClientTests.testADirectStreamIsLetInByItsHeader`, `WatchClientTests.testATranscodeCarriesTheTokenInItsAddress`, `WatchClientTests.testAStreamTheClientCantUseIsAnError` | unit | pass |
-| `JellyfinClient.stopTranscode` | 605 | `WatchClientTests.testStoppingATranscodeNamesThisDeviceAndSession` | unit | pass |
-| `JellyfinClient.downloadRequest` | 621 | `WatchClientTests.testNothingIsAskedSignedOut`, `WatchClientTests.testADownloadIsAnAACEncodeWithTheTokenInAHeader`, `WatchClientTests.testADownloadTheWatchCanPlayIsTheServersOwnFile` | unit | pass |
-| `JellyfinClient.estimatedBytes` | 648 | `WatchClientTests.testTheSizeOfADownloadComesFromItsLength`, `WatchDownloadsTests.testPhoneProgressMovesTheBarAndStartsItsPatienceAgain`, `WatchLinkTests.testPhoneProgressAndFailureReachTheRecord`, `WatchOnWatchGroupsTests.testTheQueueShowsWhatMovesThenWhatWaitsInTheOrderItWillStart` (+1 more) | unit | pass |
-| `JellyfinClient.reportStopped` | 669 | `WatchClientTests.testAPositionIsAStoppedReport` | unit | pass |
-| `JellyfinClient.reportPlaying` | 690 | `WatchClientTests.testBestEffortRequestsDontChangeTheState`, `WatchClientTests.testLiveReportsNameStartAndProgress` | unit | pass |
-| `JellyfinClient.markPlayed` | 701 | `WatchClientTests.testAPlayIsCountedWithItsDate` | unit | pass |
-| `JellyfinClient.markUnplayed` | 707 | `WatchClientTests.testAPlayIsCountedWithItsDate` | unit | pass |
-| `JellyfinClient.send` | 721 | `WatchClientTests.testAPlayIsCountedWithItsDate`, `WatchClientTests.testASongHeardOffTheWatchIsCountedAsAPlay`, `WatchClientTests.testAStreamedPlayIsAStoppedReportNotASecondPlay`, `WatchClientTests.testABookPositionOlderThanTheServersLastPlayIsDropped` (+3 more) | unit | pass |
-| `AnyEncodable.init` | 749 | every POST body (WatchClientTests reports, PlaybackInfo) | unit | covered |
-| `AnyEncodable.encode` | 750 | `WatchWidgetSnapshotTests.testTheSnapshotRoundTrips`, `WatchClientTests.testQueriesEscapeThePlusSign`, `WatchDownloadsTests.testTheInventoryIsCutToFitAMessage`, `WatchSyncTypesTests.testFileContentsRoundTrip` | unit | pass |
-| `WatchKeychain.query` | 760 | `WatchClientTests.testTheTokenRidesInATranscodeAddressOnce`, `WatchClientTests.testItemsQueryCarriesEverythingAsked`, `WatchClientTests.testOneItemWithEverythingAPageNeeds`, `WatchClientTests.testItemsByIdGoFiftyAtATime` (+10 more) | unit | pass |
-| `WatchKeychain.store` | 768 | `WatchTestModeTests.testTokensStayOutOfTheKeychainInTestMode` | unit | pass |
-| `WatchKeychain.token` | 780 | `WatchClientTests.testInstallSignsInAndKeepsTheTokenOutOfTheAccount`, `WatchClientTests.testTheSameAccountAgainOnlyRefreshesTheToken`, `WatchClientTests.testSignOutForgetsAccountAndToken`, `WatchClientTests.testTheTokenRidesInATranscodeAddressOnce` (+5 more) | unit | pass |
-| `WatchKeychain.delete` | 794 | `WatchDownloadsTests.testDeleteRemovesTheFileAndItsPlaceInPlaylists`, `WatchDownloadsTests.testAPlaylistThePhoneSwitchedOffIsNotToldBack`, `WatchDownloadsTests.testADeleteFromThePhoneGoesByGroup`, `WatchTestModeTests.testTokensStayOutOfTheKeychainInTestMode` (+1 more) | unit | pass |
+| `JellyfinClient.makeSession` | 93 | through `JellyfinClient.useTestProtocols` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `JellyfinClient.useTestProtocols` | 109 | `WatchClientTests.testAPositionInTheLastFiveMinutesOfAFinishedBookLeavesItFinished` | unit | pass |
+| `JellyfinClient.load` | 118 | `WatchImagesTests.testAFileCoverLoadsAndIsCached` | unit | pass |
+| `JellyfinClient.init` | 125 | the singleton, made at host launch; its device id: WatchClientTests.testTheWatchIsItsOwnDeviceToTheServer | unit | covered |
+| `JellyfinClient.install` | 142 | `WatchClientTests.testTheSameAccountAgainOnlyRefreshesTheToken`, `WatchLinkTests.testDeleteMessagesGoByGroup`, `WatchLinkTests.testPhoneProgressAndFailureReachTheRecord`, `WatchLinkTests.testACancelOnThePhoneIsACancelHere` | unit | pass |
+| `JellyfinClient.signOut` | 157 | `WatchBookPlaceTests.testRefreshAsksNothingOfflineSignedOutOrWithNoBooks`, `WatchClientTests.testSignOutForgetsAccountAndToken`, `WatchClientTests.testNothingIsAskedSignedOut`, `WatchClientTests.testTheTokenRidesInATranscodeAddressOnce` (+1 more) | unit | pass |
+| `JellyfinClient.keychainAccount` | 165 | through `JellyfinClient.install`, `JellyfinClient.signOut` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `JellyfinClient.pathId` | 176 | `WatchClientTests.testPathIdsAreEscapedOnlyWhenTheyNeedIt` | unit | pass |
+| `JellyfinClient.encode` | 182 | `WatchWidgetSnapshotTests.testTheSnapshotRoundTrips`, `WatchClientTests.testQueriesEscapeThePlusSign`, `WatchDownloadsTests.testTheInventoryIsCutToFitAMessage`, `WatchSyncTypesTests.testFileContentsRoundTrip` | unit | pass |
+| `JellyfinClient.authorizationHeader` | 188 | through `JellyfinClient.authHeaders`, `JellyfinClient.request` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `JellyfinClient.authHeaders` | 200 | through `JellyfinClient.stream`, `JellyfinClient.downloadRequest` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `JellyfinClient.authorized` | 217 | `WatchClientTests.testTheTokenRidesInATranscodeAddressOnce` | unit | pass |
+| `JellyfinClient.request` | 229 | `WatchClientTests.testNothingIsAskedSignedOut`, `WatchSyncTypesTests.testFileContentsRoundTrip` | unit | pass |
+| `JellyfinClient.get` | 272 | through `JellyfinClient.items`, `JellyfinClient.item`, `JellyfinClient.resumeAudio` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `JellyfinClient.decode` | 283 | `WatchWidgetSnapshotTests.testTheSnapshotRoundTrips`, `WatchDownloadsTests.testTheRecordIsWrittenBesideItsFile`, `WatchDownloadsTests.testARecordFromAnOlderBuildStillReads`, `WatchLinkTests.testTheContextCarriesThePlanToTheDownloads` (+10 more) | unit | pass |
+| `JellyfinClient.checkOnline` | 289 | `WatchActionsTests.testTheWidgetsResumeLinkResumesTheBook`, `WatchActionsTests.testResumeOfflineTakesTheWatchsBook`, `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch`, `WatchIntentsTests.testShuffleMusicIntentUsesTheServerThenTheWatch` (+10 more) | unit | pass |
+| `JellyfinClient.items` | 321 | `WatchClientTests.testATransportFailureIsOfflineAndAnAnswerIsBackOnline`, `WatchClientTests.testA401IsAnExpiredSignInNotAnOutage`, `WatchClientTests.testSettingsDoesNotSayConnectedWhileTheSignInIsRefused`, `WatchClientTests.testOtherErrorsCarryTheirStatus` (+9 more) | unit | pass |
+| `JellyfinClient.item` | 346 | `WatchActionsTests.testPlayingAnAlbumOrPlaylistById`, `WatchIntentsTests.testShuffleMusicIntentUsesTheServerThenTheWatch`, `WatchClientTests.testUnreadableAnswersSaySo`, `WatchClientTests.testOneItemWithEverythingAPageNeeds` (+2 more) | unit | pass |
+| `JellyfinClient.items` | 352 | `WatchClientTests.testATransportFailureIsOfflineAndAnAnswerIsBackOnline`, `WatchClientTests.testA401IsAnExpiredSignInNotAnOutage`, `WatchClientTests.testSettingsDoesNotSayConnectedWhileTheSignInIsRefused`, `WatchClientTests.testOtherErrorsCarryTheirStatus` (+9 more) | unit | pass |
+| `JellyfinClient.resumeAudio` | 364 | `WatchClientTests.testResumeAudioAsksForAudioInProgress` | unit | pass |
+| `JellyfinClient.recentlyPlayedSongs` | 377 | `WatchClientTests.testRecentlyPlayedSongs` | unit | pass |
+| `JellyfinClient.albums` | 383 | `WatchClientTests.testAlbumsArtistsGenresAndSongs`, `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered`, `WatchDownloadsTests.testListsThePagesRead`, `WatchNavigatorTests.testRoutesCompareByWhatTheyShow` | unit | pass |
+| `JellyfinClient.albumTracks` | 387 | `WatchClientTests.testAlbumTracksComeInSleeveOrder`, `WatchDownloadsTests.testListsThePagesRead` | unit | pass |
+| `JellyfinClient.albumArtists` | 395 | `WatchClientTests.testAlbumsArtistsGenresAndSongs` | unit | pass |
+| `JellyfinClient.albums` | 411 | `WatchClientTests.testAlbumsArtistsGenresAndSongs`, `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered`, `WatchDownloadsTests.testListsThePagesRead`, `WatchNavigatorTests.testRoutesCompareByWhatTheyShow` | unit | pass |
+| `JellyfinClient.songs` | 417 | `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch`, `WatchClientTests.testAlbumsArtistsGenresAndSongs`, `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered`, `WatchDownloadsTests.testAWholeFileIsBelieved` (+6 more) | unit | pass |
+| `JellyfinClient.genres` | 423 | `WatchClientTests.testAlbumsArtistsGenresAndSongs` | unit | pass |
+| `JellyfinClient.songs` | 436 | `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch`, `WatchClientTests.testAlbumsArtistsGenresAndSongs`, `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered`, `WatchDownloadsTests.testAWholeFileIsBelieved` (+6 more) | unit | pass |
+| `JellyfinClient.songs` | 442 | `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch`, `WatchClientTests.testAlbumsArtistsGenresAndSongs`, `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered`, `WatchDownloadsTests.testAWholeFileIsBelieved` (+6 more) | unit | pass |
+| `JellyfinClient.randomSongs` | 448 | `WatchClientTests.testAlbumsArtistsGenresAndSongs` | unit | pass |
+| `JellyfinClient.playlists` | 452 | `WatchClientTests.testPlaylistsLeaveOutOnlyWhatPlainlyIsntMusic`, `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered`, `WatchDownloadsTests.testDeleteRemovesTheFileAndItsPlaceInPlaylists`, `WatchDownloadsTests.testRemovingAPlaylistTellsThePhoneUnlessThePhoneAsked` (+8 more) | UI + unit | pass |
+| `JellyfinClient.playlistItems` | 461 | `WatchClientTests.testPlaylistItemsInTheirOwnOrderWithTheWebFallback`, `WatchClientStubURLProtocolTests.testAPlaylistsSongsDecode` | unit | pass |
+| `JellyfinClient.audiobooks` | 487 | `WatchClientTests.testAlbumsArtistsGenresAndSongs` | unit | pass |
+| `JellyfinClient.search` | 501 | `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered` | unit | pass |
+| `JellyfinClient.query` | 502 | `WatchClientTests.testTheTokenRidesInATranscodeAddressOnce`, `WatchClientTests.testItemsQueryCarriesEverythingAsked`, `WatchClientTests.testOneItemWithEverythingAPageNeeds`, `WatchClientTests.testItemsByIdGoFiftyAtATime` (+10 more) | unit | pass |
+| `JellyfinClient.imageURL` | 523 | `WatchClientTests.testNothingIsAskedSignedOut`, `WatchClientTests.testImageAddressesFallBackFromItemToAlbum` | unit | pass |
+| `JellyfinClient.ladder` | 538 | through `JellyfinClient.imageURL` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `JellyfinClient.stream` | 578 | `WatchClientTests.testADirectStreamIsLetInByItsHeader`, `WatchClientTests.testATranscodeCarriesTheTokenInItsAddress`, `WatchClientTests.testAStreamTheClientCantUseIsAnError` | unit | pass |
+| `JellyfinClient.stopTranscode` | 620 | `WatchClientTests.testStoppingATranscodeNamesThisDeviceAndSession` | unit | pass |
+| `JellyfinClient.downloadRequest` | 636 | `WatchClientTests.testNothingIsAskedSignedOut`, `WatchClientTests.testADownloadIsAnAACEncodeWithTheTokenInAHeader`, `WatchClientTests.testADownloadTheWatchCanPlayIsTheServersOwnFile` | unit | pass |
+| `JellyfinClient.estimatedBytes` | 663 | `WatchClientTests.testTheSizeOfADownloadComesFromItsLength`, `WatchDownloadsTests.testPhoneProgressMovesTheBarAndStartsItsPatienceAgain`, `WatchLinkTests.testPhoneProgressAndFailureReachTheRecord`, `WatchOnWatchGroupsTests.testTheQueueShowsWhatMovesThenWhatWaitsInTheOrderItWillStart` (+1 more) | unit | pass |
+| `JellyfinClient.reportStopped` | 684 | `WatchClientTests.testAPositionIsAStoppedReport` | unit | pass |
+| `JellyfinClient.reportPlaying` | 705 | `WatchClientTests.testBestEffortRequestsDontChangeTheState`, `WatchClientTests.testLiveReportsNameStartAndProgress` | unit | pass |
+| `JellyfinClient.markPlayed` | 716 | `WatchClientTests.testAPlayIsCountedWithItsDate` | unit | pass |
+| `JellyfinClient.markUnplayed` | 722 | `WatchClientTests.testAPlayIsCountedWithItsDate` | unit | pass |
+| `JellyfinClient.send` | 736 | `WatchClientTests.testAPlayIsCountedWithItsDate`, `WatchClientTests.testASongHeardOffTheWatchIsCountedAsAPlay`, `WatchClientTests.testAStreamedPlayIsAStoppedReportNotASecondPlay`, `WatchClientTests.testABookPositionOlderThanTheServersLastPlayIsDropped` (+3 more) | unit | pass |
+| `AnyEncodable.init` | 764 | every POST body (WatchClientTests reports, PlaybackInfo) | unit | covered |
+| `AnyEncodable.encode` | 765 | `WatchWidgetSnapshotTests.testTheSnapshotRoundTrips`, `WatchClientTests.testQueriesEscapeThePlusSign`, `WatchDownloadsTests.testTheInventoryIsCutToFitAMessage`, `WatchSyncTypesTests.testFileContentsRoundTrip` | unit | pass |
+| `WatchKeychain.query` | 775 | `WatchClientTests.testTheTokenRidesInATranscodeAddressOnce`, `WatchClientTests.testItemsQueryCarriesEverythingAsked`, `WatchClientTests.testOneItemWithEverythingAPageNeeds`, `WatchClientTests.testItemsByIdGoFiftyAtATime` (+10 more) | unit | pass |
+| `WatchKeychain.store` | 783 | `WatchTestModeTests.testTokensStayOutOfTheKeychainInTestMode` | unit | pass |
+| `WatchKeychain.token` | 795 | `WatchClientTests.testInstallSignsInAndKeepsTheTokenOutOfTheAccount`, `WatchClientTests.testTheSameAccountAgainOnlyRefreshesTheToken`, `WatchClientTests.testSignOutForgetsAccountAndToken`, `WatchClientTests.testTheTokenRidesInATranscodeAddressOnce` (+5 more) | unit | pass |
+| `WatchKeychain.delete` | 809 | `WatchDownloadsTests.testDeleteRemovesTheFileAndItsPlaceInPlaylists`, `WatchDownloadsTests.testAPlaylistThePhoneSwitchedOffIsNotToldBack`, `WatchDownloadsTests.testADeleteFromThePhoneGoesByGroup`, `WatchTestModeTests.testTokensStayOutOfTheKeychainInTestMode` (+1 more) | unit | pass |
 
 ## Watch/WatchDownloads.swift
 
 | Function | Line | Test(s) | Kind | Status |
 |---|---|---|---|---|
-| `WatchRecord.init` | 82 | `WatchDownloadsTests.testEnqueueKeepsAudioOnceWithItsReason`, `WatchDownloadsTests.testARecordFromAnOlderBuildStillReads` | unit | pass |
-| `WatchRecord.init` | 106 | `WatchDownloadsTests.testEnqueueKeepsAudioOnceWithItsReason`, `WatchDownloadsTests.testARecordFromAnOlderBuildStillReads` | unit | pass |
-| `WatchDownloads.init` | 289 | the singleton, made at host launch (loads records, plan, wants) | unit | covered |
-| `WatchDownloads.folder` | 355 | `WatchDownloadsTests.testTheRecordIsWrittenBesideItsFile`, `WatchDownloadsTests.testWhatIsAlreadyComingTakesItsRoomFirst`, `WatchDownloadsTests.testAWholeFileIsBelieved`, `WatchDownloadsTests.testAFileWithinThreePercentIsWhole` (+21 more) | unit | pass |
-| `WatchDownloads.artFile` | 359 | `WatchImagesTests.testTheCoverBesideADownloadIsUsedFirst`, `WatchImagesTests.testAFileCoverLoadsAndIsCached`, `WatchImagesTests.testARecordWithACoverOnDiskSaysSo` | unit | pass |
-| `WatchDownloads.loadRecords` | 363 | read once in init; a relaunch keeping state is WatchPlaybackTests.testPausingABookKeepsItsPlaceOnTheServer | manual | manual |
-| `WatchDownloads.loadWants` | 386 | read once in init (wants.json is checked written: WatchWantsTests.testTheWantsListSurvivesOnDisk) | manual | manual |
-| `WatchDownloads.saveWants` | 393 | through `WatchDownloads.dropWant`, `WatchDownloads.checkWants`, `WatchDownloads.keep` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.loadPlaylists` | 399 | read once in init | manual | manual |
-| `WatchDownloads.reindex` | 404 | through `WatchDownloads.save`, `WatchDownloads.enqueue`, `WatchDownloads.deleteEverything` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.save` | 409 | through `WatchDownloads.retry`, `WatchDownloads.withdraw`, `WatchDownloads.deleteAlbum` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.savePlaylists` | 424 | through `WatchDownloads.delete`, `WatchDownloads.deletePlaylist`, `WatchDownloads.deleteEverything` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.persistTasks` | 429 | through `WatchDownloads.deleteEverything`, `WatchDownloads.finishActive` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.changed` | 433 | through `WatchDownloads.save`, `WatchDownloads.savePlaylists`, `WatchDownloads.enqueue` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.record` | 440 | `WatchBookPlaceTests.testNotingAPlaceMarksItForTheServer`, `WatchBookPlaceTests.testUnderFiveMinutesLeftIsFinished`, `WatchBookPlaceTests.testStartingAFinishedBookAgainIsNotFinished`, `WatchBookPlaceTests.testASongPast98PercentIsHeard` (+67 more) | unit | expected failure / pass |
-| `WatchDownloads.isComplete` | 444 | `WatchDownloadsTests.testEnqueueKeepsAudioOnceWithItsReason` | unit | pass |
-| `WatchDownloads.isStarting` | 447 | through WatchDownloads.queue (WatchOnWatchGroupsTests) | unit | covered |
-| `WatchDownloads.isQueuedOrRunning` | 449 | `WatchDownloadsTests.testEnqueueKeepsAudioOnceWithItsReason` | unit | pass |
-| `WatchDownloads.mediaURL` | 454 | `WatchDownloadsTests.testAWholeFileIsBelieved`, `WatchDownloadsTests.testAMissingFileIsNoMediaURL` | unit | pass |
-| `WatchDownloads.fraction` | 461 | `WatchWidgetSnapshotTests.testHowFarIn`, `WatchDownloadsTests.testPhoneProgressMovesTheBarAndStartsItsPatienceAgain`, `WatchLinkTests.testPhoneProgressAndFailureReachTheRecord` | unit | pass |
-| `WatchDownloads.albumTracks` | 488 | `WatchClientTests.testAlbumTracksComeInSleeveOrder`, `WatchDownloadsTests.testListsThePagesRead` | unit | pass |
-| `WatchDownloads.playlistSongs` | 492 | WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch | unit | covered |
-| `WatchDownloads.freeBytes` | 496 | `WatchSyncTypesTests.testWatchContextFromAnOlderWatchDecodes` | unit | pass |
-| `WatchDownloads.enqueue` | 509 | `WatchActionsTests.testTheWidgetsPlayLinkPlaysThatItem`, `WatchActionsTests.testTheWidgetsResumeLinkResumesTheBook`, `WatchActionsTests.testResumeOfflineTakesTheWatchsBook`, `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch` (+91 more) | unit | expected failure / pass |
-| `WatchDownloads.writeMeta` | 548 | `WatchDownloadsTests.testACancelRightAfterQueueingLeavesNothingForTheNextLaunch` | unit | pass |
-| `WatchDownloads.retry` | 559 | `WatchDownloadsTests.testRetryQueuesAFailureAgainFromNothing`, `WatchOnWatchGroupsTests.testRemoveCancelAndRetryByGroup` | unit | pass |
-| `WatchDownloads.retryAllFailed` | 569 | `WatchDownloadsTests.testRetryQueuesAFailureAgainFromNothing` | unit | pass |
-| `WatchDownloads.cancel` | 574 | `WatchDownloadsTests.testCancelForgetsAQueuedItem`, `WatchDownloadsTests.testACancelRightAfterQueueingLeavesNothingForTheNextLaunch`, `WatchDownloadsTests.testCancellingWhatThePhoneIsFetchingTellsThePhone`, `WatchOnWatchGroupsTests.testRemoveCancelAndRetryByGroup` (+4 more) | unit | pass |
-| `WatchDownloads.persistDeclined` | 589 | through `WatchDownloads.cancel`, `WatchDownloads.dropWant`, `WatchDownloads.deleteEverything` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.delete` | 595 | `WatchDownloadsTests.testDeleteRemovesTheFileAndItsPlaceInPlaylists`, `WatchDownloadsTests.testAPlaylistThePhoneSwitchedOffIsNotToldBack`, `WatchDownloadsTests.testADeleteFromThePhoneGoesByGroup`, `WatchTestModeTests.testTokensStayOutOfTheKeychainInTestMode` (+1 more) | unit | pass |
-| `WatchDownloads.withdraw` | 607 | through `WatchDownloads.deletePlaylist`, `WatchDownloads.syncPlaylist` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.deleteBook` | 621 | through `WatchDownloads.delete` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.deleteAlbum` | 626 | `WatchDownloadsTests.testRemovingAnAlbumLeavesTheSongsAKeptPlaylistAlsoHolds`, `WatchWantsTests.testRemovingAnAlbumOfAnArtistLetsTheArtistWantGoButKeepsItsOtherAlbums`, `WatchWantsTests.testAWantTakenOffHereIsntPutBackByAPlanThatStillNamesIt`, `WatchWantsTests.testAPlanThatNoLongerNamesADroppedWantEndsTheGrace` | unit | pass |
-| `WatchDownloads.deletePlaylist` | 652 | `WatchDownloadsTests.testRemovingAPlaylistTellsThePhoneUnlessThePhoneAsked`, `WatchDownloadsTests.testAPlaylistTakenOffHereIsntPutBackByAnOldPlan` | unit | pass |
-| `WatchDownloads.dropped` | 665 | through `WatchDownloads.deletePlaylist`, `WatchDownloads.deleteEverything` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.persistDropped` | 675 | through `WatchDownloads.dropped`, `WatchDownloads.dropWant`, `WatchDownloads.deleteEverything` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.dropWant` | 689 | through `WatchDownloads.cancel`, `WatchDownloads.deleteBook`, `WatchDownloads.deleteAlbum` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.forgetWants` | 724 | `WatchWantsTests.testAGroupCancelledByHandForgetsItsWantButKeepsWhatArrived` | unit | pass |
-| `WatchDownloads.forgetWants` | 736 | `WatchWantsTests.testAGroupCancelledByHandForgetsItsWantButKeepsWhatArrived` | unit | pass |
-| `WatchDownloads.deleteWant` | 747 | `WatchSyncTypesTests.testEveryMessageRoundTrips`, `WatchWantsTests.testAWantTakenOffOnThePhoneLetsGoWithoutAWordBack`, `WatchWantsTests.testAWantsItemsKeptForSomethingElseStay` | unit | pass |
-| `WatchDownloads.isDroppedWant` | 752 | through `WatchDownloads.checkWants` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.lookUp` | 757 | through `WatchDownloads.checkWants`, `WatchDownloads.download` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.checkWants` | 780 | through `WatchDownloads.mirror` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.wantStates` | 818 | `WatchWantsTests.testAWantWithNoContentsIsLookedUpOnTheServer`, `WatchWantsTests.testAWantThatCantBeLookedUpAsksThePhoneToSendItAgain`, `WatchWantsTests.testOfflineTheServerIsNotAsked`, `WatchWantsTests.testWantStatesReportHowFarEachHasGot` | unit | pass |
-| `WatchDownloads.deleteLooseSongs` | 842 | `WatchDownloadsTests.testRemovingLooseSongsLeavesAlbums` | unit | pass |
-| `WatchDownloads.deleteEverything` | 851 | `WatchDownloadsTests.testRemovingEverythingLetsTheWantsAndPlaylistsGoOnBothSides` | unit | pass |
-| `WatchDownloads.removeFolder` | 873 | through `WatchDownloads.cancel`, `WatchDownloads.delete`, `WatchDownloads.withdraw` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.noteProgress` | 891 | `WatchBookPlaceTests.testNotingAPlaceMarksItForTheServer`, `WatchBookPlaceTests.testUnderFiveMinutesLeftIsFinished`, `WatchBookPlaceTests.testStartingAFinishedBookAgainIsNotFinished`, `WatchBookPlaceTests.testASongPast98PercentIsHeard` (+15 more) | unit | expected failure / pass |
-| `WatchDownloads.markSynced` | 913 | `WatchBookPlaceTests.testMarkSyncedOnlyCoversWhatTheServerHeard` | unit | pass |
-| `WatchDownloads.unsentBookEvents` | 923 | `WatchBookPlaceTests.testABookNotedButNeverQueuedGoesFromItsRecord`, `WatchBookPlaceTests.testTheBookPlayingNowIsLeftToThePlayer` | unit | pass |
-| `WatchDownloads.applyServerState` | 938 | `WatchBookPlaceTests.testASyncedBookTakesTheServersPlace`, `WatchBookPlaceTests.testListeningNotYetToldWinsOverAnOlderServer`, `WatchBookPlaceTests.testANewerPlayElsewhereWinsOverListeningNotYetTold`, `WatchBookPlaceTests.testAnEventStillQueuedKeepsTheWatchsPlace` (+6 more) | unit | expected failure / pass |
-| `WatchDownloads.pump` | 983 | `WatchDownloadsTests.testAskedForThingsGoBeforeTheMirrors`, `WatchDownloadsTests.testAQuietPhoneInReachIsAskedAgainLessOftenEachTime`, `WatchDownloadsTests.testAPhoneAwayIsAskedAgainOnlyOnceItsPatienceRunsOut`, `WatchDownloadsTests.testWithThePathMonitorDownTheWatchNeverTakesItBack` (+3 more) | unit | pass |
-| `WatchDownloads.phoneGaveUpOn` | 1007 | local to pump: testThePhoneGivingUpWithANetworkLetsTheWatchTry | unit | covered |
-| `WatchDownloads.syncNow` | 1055 | `WatchDownloadsTests.testSyncNowAsksThePhoneAgainForEverythingAwaiting` | unit | pass |
-| `WatchDownloads.reaskPhone` | 1075 | `WatchDownloadsTests.testAPhoneAwayIsAskedAgainOnlyOnceItsPatienceRunsOut` | unit | pass |
-| `WatchDownloads.handOffToPhone` | 1104 | on the way to the background (scene phase); it is one call to pump, which is unit-tested | manual | manual |
-| `WatchDownloads.makeRoom` | 1116 | through `WatchDownloads.pump` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.notePhoneProgress` | 1151 | `WatchDownloadsTests.testPhoneProgressMovesTheBarAndStartsItsPatienceAgain`, `WatchOnWatchGroupsTests.testTheQueueShowsWhatMovesThenWhatWaitsInTheOrderItWillStart` | unit | pass |
-| `WatchDownloads.phoneStillAtIt` | 1160 | through `WatchDownloads.notePhoneProgress` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.phoneFailed` | 1172 | `WatchDownloadsTests.testThePhoneGivingUpWithNoNetworkSaysWhy`, `WatchDownloadsTests.testThePhoneGivingUpWithANetworkLetsTheWatchTry`, `WatchDownloadsTests.testAPhoneFailureForSomethingNotAskedIsIgnored` | unit | pass |
-| `WatchDownloads.receivedFromPhone` | 1193 | `WatchDownloadsTests.testAFileFromThePhoneTakesTheAudioFilesPlace`, `WatchDownloadsTests.testASecondDeliveryLeavesTheFileThatIsThere`, `WatchDownloadsTests.testAFileFromThePhoneForNothingIsRemoved`, `WatchDownloadsTests.testAPlaylistFromThePhoneIsKeptAndFollowed` (+2 more) | unit | pass |
-| `WatchDownloads.start` | 1223 | the watch's own transfer: WatchDownloadUITests (straight from the server) | UI | via screen |
-| `WatchDownloads.cancelActiveTask` | 1260 | through `WatchDownloads.cancel`, `WatchDownloads.delete`, `WatchDownloads.withdraw` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.taskItem` | 1269 | through `WatchDownloads.cancelActiveTask` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.rejoin` | 1275 | runs once at launch against the background session; relaunch mid-download, MANUAL.md §1.5 | manual | manual |
-| `WatchDownloads.handleBackgroundEvents` | 1301 | background session wake; MANUAL.md §7 | manual | manual |
-| `WatchDownloads.releaseBackgroundWake` | 1306 | background session wake; MANUAL.md §7 | manual | manual |
-| `WatchDownloads.landed` | 1323 | `WatchDownloadsTests.testWhatIsAlreadyComingTakesItsRoomFirst`, `WatchDownloadsTests.testAWholeFileIsBelieved`, `WatchDownloadsTests.testAFileWithinThreePercentIsWhole`, `WatchDownloadsTests.testAShortFileIsThrownAwayAndAskedForAgainThreeTimes` (+6 more) | unit | pass |
-| `WatchDownloads.failed` | 1369 | `WatchDownloadsTests.testThePhoneGivingUpWithNoNetworkSaysWhy`, `WatchDownloadsTests.testAFailedTransferIsTriedThreeTimes`, `WatchDownloadsTests.testAFailureWithNoWayToTryAgainIsFailedAtOnce`, `WatchDownloadsTests.testAFailureHereGoesToThePhoneNext` (+1 more) | unit | pass |
-| `WatchDownloads.finishActive` | 1388 | through `WatchDownloads.landed`, `WatchDownloads.failed` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.cacheArt` | 1398 | through `WatchDownloads.landed` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.apply` | 1415 | `WatchDownloadsTests.testAPlaylistTakenOffHereIsntPutBackByAnOldPlan`, `WatchDownloadsTests.testAPlaylistFromThePhoneIsKeptAndFollowed`, `WatchDownloadsTests.testAPlaylistIsAskedOfTheServerWhenThePhoneSentNone`, `WatchDownloadsTests.testBooksInProgressFromThePhoneAreQueuedForTheWatch` (+17 more) | unit | pass |
-| `WatchDownloads.mirror` | 1453 | `WatchSyncTypesTests.testRepliesRoundTrip`, `WatchSyncTypesTests.testPhoneContextFromAnOlderPhoneStillDecodes`, `WatchWantsTests.testAnItemHereForSomethingElseIsClaimedForTheWantToo`, `WatchWantsTests.testAFailedItemIsRetriedOnceAnHourNotOnEveryPass` (+3 more) | unit | pass |
-| `WatchDownloads.mirrorSettled` | 1489 | `WatchDownloadsTests.testAPlaylistTakenOffHereIsntPutBackByAnOldPlan`, `WatchDownloadsTests.testAPlaylistFromThePhoneIsKeptAndFollowed`, `WatchDownloadsTests.testAPlaylistIsAskedOfTheServerWhenThePhoneSentNone`, `WatchDownloadsTests.testBooksInProgressFromThePhoneAreQueuedForTheWatch` (+13 more) | unit | pass |
-| `WatchDownloads.syncPlaylist` | 1502 | through `WatchDownloads.mirror` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchDownloads.receivedFromPhone` | 1552 | `WatchDownloadsTests.testAFileFromThePhoneTakesTheAudioFilesPlace`, `WatchDownloadsTests.testASecondDeliveryLeavesTheFileThatIsThere`, `WatchDownloadsTests.testAFileFromThePhoneForNothingIsRemoved`, `WatchDownloadsTests.testAPlaylistFromThePhoneIsKeptAndFollowed` (+2 more) | unit | pass |
-| `WatchDownloads.receivedFromPhone` | 1563 | `WatchDownloadsTests.testAFileFromThePhoneTakesTheAudioFilesPlace`, `WatchDownloadsTests.testASecondDeliveryLeavesTheFileThatIsThere`, `WatchDownloadsTests.testAFileFromThePhoneForNothingIsRemoved`, `WatchDownloadsTests.testAPlaylistFromThePhoneIsKeptAndFollowed` (+2 more) | unit | pass |
-| `WatchDownloads.keep` | 1572 | `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch`, `WatchIntentsTests.testAlbumsAndPlaylistsAreFoundOnTheWatchThenTheServer`, `WatchDownloadsTests.testDeleteRemovesTheFileAndItsPlaceInPlaylists`, `WatchDownloadsTests.testRemovingAnAlbumLeavesTheSongsAKeptPlaylistAlsoHolds` (+26 more) | unit | pass |
-| `WatchDownloads.inventory` | 1591 | `WatchDownloadsTests.testTheInventoryCountsEachByteOnce`, `WatchDownloadsTests.testTheInventoryIsCutToFitAMessage`, `WatchSyncTypesTests.testWatchContextFromAnOlderWatchDecodes` | unit | pass |
-| `WatchDownloads.delete` | 1645 | `WatchDownloadsTests.testDeleteRemovesTheFileAndItsPlaceInPlaylists`, `WatchDownloadsTests.testAPlaylistThePhoneSwitchedOffIsNotToldBack`, `WatchDownloadsTests.testADeleteFromThePhoneGoesByGroup`, `WatchTestModeTests.testTokensStayOutOfTheKeychainInTestMode` (+1 more) | unit | pass |
-| `WatchDownloads.download` | 1655 | `WatchSyncTypesTests.testEveryMessageRoundTrips`, `WatchWantsTests.testADownloadMessageLooksItUpAndKeepsIt`, `WatchWantsTests.testADownloadThatCantBeLookedUpIsLeft` | unit | pass |
-| `WatchDownloads.keep` | 1664 | `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch`, `WatchIntentsTests.testAlbumsAndPlaylistsAreFoundOnTheWatchThenTheServer`, `WatchDownloadsTests.testDeleteRemovesTheFileAndItsPlaceInPlaylists`, `WatchDownloadsTests.testRemovingAnAlbumLeavesTheSongsAKeptPlaylistAlsoHolds` (+26 more) | unit | pass |
-| `WatchDownloads.testSetNetwork` | 1697 | `WatchDownloadsTests.testAPhoneAwayPastItsPatienceHandsTheItemToTheWatch`, `WatchDownloadsTests.testThePathMonitorsWordAloneNeverTakesBackFromThePhone`, `WatchDownloadsTests.testThePhoneGivingUpWithANetworkLetsTheWatchTry`, `WatchDownloadsTests.testAFailedTransferIsTriedThreeTimes` (+7 more) | unit | pass |
-| `WatchDownloads.testUpdate` | 1706 | `WatchActionsTests.testTheWidgetsPlayLinkPlaysThatItem`, `WatchActionsTests.testTheWidgetsResumeLinkResumesTheBook`, `WatchActionsTests.testResumeOfflineTakesTheWatchsBook`, `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch` (+55 more) | unit | expected failure / pass |
-| `WatchDownloads.testSetWantRetried` | 1713 | `WatchWantsTests.testAFailedItemIsRetriedOnceAnHourNotOnEveryPass`, `WatchWantsTests.testAnItemTurnedAwayForRoomIsLeftToThePump` | unit | pass |
-| `WatchDownloads.testSetDroppedWant` | 1716 | `WatchWantsTests.testAWantTakenOffHereIsntPutBackByAPlanThatStillNamesIt` | unit | pass |
-| `WatchDownloads.testReset` | 1727 | `WatchActionsTests.testPlayingAnAlbumOrPlaylistById`, `WatchIntentsTests.testShuffleMusicIntentUsesTheServerThenTheWatch`, `WatchWidgetSnapshotTests.testIdleTheCardShowsTheBookMostRecentlyLeft`, `WatchPlayerTests.testPlayLeavesOutWhatIsntAudioAndShuffleKeepsTheChosenFirst` (+1 more) | unit | pass |
-| `WatchDownloads.urlSession` | 1767 | background URLSession delegate: the watch's own transfers, exercised by WatchDownloadUITests on the simulator; real wakes MANUAL.md §7 | manual | manual |
-| `WatchDownloads.urlSession` | 1795 | background URLSession delegate: the watch's own transfers, exercised by WatchDownloadUITests on the simulator; real wakes MANUAL.md §7 | manual | manual |
-| `WatchDownloads.urlSession` | 1822 | background URLSession delegate: the watch's own transfers, exercised by WatchDownloadUITests on the simulator; real wakes MANUAL.md §7 | manual | manual |
-| `WatchDownloads.urlSessionDidFinishEvents` | 1833 | background session wake; MANUAL.md §7 | manual | manual |
+| `WatchRecord.init` | 86 | `WatchDownloadsTests.testEnqueueKeepsAudioOnceWithItsReason`, `WatchDownloadsTests.testARecordFromAnOlderBuildStillReads` | unit | pass |
+| `WatchRecord.init` | 111 | `WatchDownloadsTests.testEnqueueKeepsAudioOnceWithItsReason`, `WatchDownloadsTests.testARecordFromAnOlderBuildStillReads` | unit | pass |
+| `WatchDownloads.init` | 302 | the singleton, made at host launch (loads records, plan, wants) | unit | covered |
+| `WatchDownloads.folder` | 368 | `WatchDownloadsTests.testTheRecordIsWrittenBesideItsFile`, `WatchDownloadsTests.testWhatIsAlreadyComingTakesItsRoomFirst`, `WatchDownloadsTests.testAWholeFileIsBelieved`, `WatchDownloadsTests.testAFileWithinThreePercentIsWhole` (+21 more) | unit | pass |
+| `WatchDownloads.artFile` | 372 | `WatchImagesTests.testTheCoverBesideADownloadIsUsedFirst`, `WatchImagesTests.testAFileCoverLoadsAndIsCached`, `WatchImagesTests.testARecordWithACoverOnDiskSaysSo` | unit | pass |
+| `WatchDownloads.loadRecords` | 376 | read once in init; a relaunch keeping state is WatchPlaybackTests.testPausingABookKeepsItsPlaceOnTheServer | manual | manual |
+| `WatchDownloads.loadWants` | 399 | read once in init (wants.json is checked written: WatchWantsTests.testTheWantsListSurvivesOnDisk) | manual | manual |
+| `WatchDownloads.saveWants` | 406 | through `WatchDownloads.dropWant`, `WatchDownloads.checkWants`, `WatchDownloads.keep` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.loadPlaylists` | 412 | read once in init | manual | manual |
+| `WatchDownloads.reindex` | 417 | through `WatchDownloads.save`, `WatchDownloads.enqueue`, `WatchDownloads.deleteEverything` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.save` | 422 | through `WatchDownloads.retry`, `WatchDownloads.withdraw`, `WatchDownloads.deleteAlbum` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.savePlaylists` | 440 | through `WatchDownloads.delete`, `WatchDownloads.deletePlaylist`, `WatchDownloads.deleteEverything` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.persistTasks` | 445 | through `WatchDownloads.deleteEverything`, `WatchDownloads.finishActive` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.changed` | 449 | through `WatchDownloads.save`, `WatchDownloads.savePlaylists`, `WatchDownloads.enqueue` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.record` | 456 | `WatchBookPlaceTests.testNotingAPlaceMarksItForTheServer`, `WatchBookPlaceTests.testUnderFiveMinutesLeftIsFinished`, `WatchBookPlaceTests.testStartingAFinishedBookAgainIsNotFinished`, `WatchBookPlaceTests.testASongPast98PercentIsHeard` (+67 more) | unit | pass |
+| `WatchDownloads.isComplete` | 460 | `WatchDownloadsTests.testEnqueueKeepsAudioOnceWithItsReason` | unit | pass |
+| `WatchDownloads.isStarting` | 463 | through WatchDownloads.queue (WatchOnWatchGroupsTests) | unit | covered |
+| `WatchDownloads.isQueuedOrRunning` | 465 | `WatchDownloadsTests.testEnqueueKeepsAudioOnceWithItsReason` | unit | pass |
+| `WatchDownloads.mediaURL` | 470 | `WatchDownloadsTests.testAWholeFileIsBelieved`, `WatchDownloadsTests.testAMissingFileIsNoMediaURL` | unit | pass |
+| `WatchDownloads.fraction` | 477 | `WatchWidgetSnapshotTests.testHowFarIn`, `WatchDownloadsTests.testPhoneProgressMovesTheBarAndStartsItsPatienceAgain`, `WatchLinkTests.testPhoneProgressAndFailureReachTheRecord` | unit | pass |
+| `WatchDownloads.albumTracks` | 504 | `WatchClientTests.testAlbumTracksComeInSleeveOrder`, `WatchDownloadsTests.testListsThePagesRead` | unit | pass |
+| `WatchDownloads.playlistSongs` | 508 | WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch | unit | covered |
+| `WatchDownloads.freeBytes` | 512 | `WatchSyncTypesTests.testWatchContextFromAnOlderWatchDecodes` | unit | pass |
+| `WatchDownloads.enqueue` | 525 | `WatchActionsTests.testTheWidgetsPlayLinkPlaysThatItem`, `WatchActionsTests.testTheWidgetsResumeLinkResumesTheBook`, `WatchActionsTests.testResumeOfflineTakesTheWatchsBook`, `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch` (+91 more) | unit | pass |
+| `WatchDownloads.writeMeta` | 566 | through `WatchDownloads.enqueue` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.retry` | 586 | `WatchDownloadsTests.testRetryQueuesAFailureAgainFromNothing`, `WatchOnWatchGroupsTests.testRemoveCancelAndRetryByGroup` | unit | pass |
+| `WatchDownloads.retryAllFailed` | 596 | `WatchDownloadsTests.testRetryQueuesAFailureAgainFromNothing` | unit | pass |
+| `WatchDownloads.cancel` | 601 | `WatchDownloadsTests.testCancelForgetsAQueuedItem`, `WatchDownloadsTests.testACancelRightAfterQueueingLeavesNothingForTheNextLaunch`, `WatchDownloadsTests.testCancellingWhatThePhoneIsFetchingTellsThePhone`, `WatchOnWatchGroupsTests.testRemoveCancelAndRetryByGroup` (+4 more) | unit | pass |
+| `WatchDownloads.persistDeclined` | 616 | through `WatchDownloads.cancel`, `WatchDownloads.dropWant`, `WatchDownloads.deleteEverything` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.delete` | 622 | `WatchDownloadsTests.testDeleteRemovesTheFileAndItsPlaceInPlaylists`, `WatchDownloadsTests.testAPlaylistThePhoneSwitchedOffIsNotToldBack`, `WatchDownloadsTests.testADeleteFromThePhoneGoesByGroup`, `WatchTestModeTests.testTokensStayOutOfTheKeychainInTestMode` (+1 more) | unit | pass |
+| `WatchDownloads.withdraw` | 634 | through `WatchDownloads.deletePlaylist`, `WatchDownloads.syncPlaylist` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.deleteBook` | 648 | through `WatchDownloads.delete` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.deleteAlbum` | 653 | `WatchDownloadsTests.testRemovingAnAlbumLeavesTheSongsAKeptPlaylistAlsoHolds`, `WatchWantsTests.testRemovingAnAlbumOfAnArtistLetsTheArtistWantGoButKeepsItsOtherAlbums`, `WatchWantsTests.testAWantTakenOffHereIsntPutBackByAPlanThatStillNamesIt`, `WatchWantsTests.testAPlanThatNoLongerNamesADroppedWantEndsTheGrace` | unit | pass |
+| `WatchDownloads.deletePlaylist` | 679 | `WatchDownloadsTests.testRemovingAPlaylistTellsThePhoneUnlessThePhoneAsked`, `WatchDownloadsTests.testAPlaylistTakenOffHereIsntPutBackByAnOldPlan` | unit | pass |
+| `WatchDownloads.dropped` | 692 | through `WatchDownloads.deletePlaylist`, `WatchDownloads.deleteEverything` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.persistDropped` | 702 | through `WatchDownloads.dropped`, `WatchDownloads.dropWant`, `WatchDownloads.deleteEverything` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.dropWant` | 716 | through `WatchDownloads.cancel`, `WatchDownloads.deleteBook`, `WatchDownloads.deleteAlbum` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.forgetWants` | 751 | `WatchWantsTests.testAGroupCancelledByHandForgetsItsWantButKeepsWhatArrived` | unit | pass |
+| `WatchDownloads.forgetWants` | 763 | `WatchWantsTests.testAGroupCancelledByHandForgetsItsWantButKeepsWhatArrived` | unit | pass |
+| `WatchDownloads.deleteWant` | 774 | `WatchSyncTypesTests.testEveryMessageRoundTrips`, `WatchWantsTests.testAWantTakenOffOnThePhoneLetsGoWithoutAWordBack`, `WatchWantsTests.testAWantsItemsKeptForSomethingElseStay` | unit | pass |
+| `WatchDownloads.isDroppedWant` | 779 | through `WatchDownloads.checkWants` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.lookUp` | 784 | through `WatchDownloads.checkWants`, `WatchDownloads.download` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.checkWants` | 807 | through `WatchDownloads.mirror` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.wantStates` | 845 | `WatchWantsTests.testAWantWithNoContentsIsLookedUpOnTheServer`, `WatchWantsTests.testAWantThatCantBeLookedUpAsksThePhoneToSendItAgain`, `WatchWantsTests.testOfflineTheServerIsNotAsked`, `WatchWantsTests.testWantStatesReportHowFarEachHasGot` | unit | pass |
+| `WatchDownloads.deleteLooseSongs` | 869 | `WatchDownloadsTests.testRemovingLooseSongsLeavesAlbums` | unit | pass |
+| `WatchDownloads.deleteEverything` | 878 | `WatchDownloadsTests.testRemovingEverythingLetsTheWantsAndPlaylistsGoOnBothSides` | unit | pass |
+| `WatchDownloads.removeFolder` | 900 | through `WatchDownloads.cancel`, `WatchDownloads.delete`, `WatchDownloads.withdraw` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.noteProgress` | 922 | `WatchBookPlaceTests.testNotingAPlaceMarksItForTheServer`, `WatchBookPlaceTests.testUnderFiveMinutesLeftIsFinished`, `WatchBookPlaceTests.testStartingAFinishedBookAgainIsNotFinished`, `WatchBookPlaceTests.testASongPast98PercentIsHeard` (+15 more) | unit | pass |
+| `WatchDownloads.markSynced` | 944 | `WatchBookPlaceTests.testMarkSyncedOnlyCoversWhatTheServerHeard` | unit | pass |
+| `WatchDownloads.unsentBookEvents` | 954 | `WatchBookPlaceTests.testABookNotedButNeverQueuedGoesFromItsRecord`, `WatchBookPlaceTests.testTheBookPlayingNowIsLeftToThePlayer` | unit | pass |
+| `WatchDownloads.applyServerState` | 972 | `WatchBookPlaceTests.testASyncedBookTakesTheServersPlace`, `WatchBookPlaceTests.testListeningNotYetToldWinsOverAnOlderServer`, `WatchBookPlaceTests.testANewerPlayElsewhereWinsOverListeningNotYetTold`, `WatchBookPlaceTests.testAnEventStillQueuedKeepsTheWatchsPlace` (+5 more) | unit | pass |
+| `WatchDownloads.pump` | 1035 | `WatchDownloadsTests.testAskedForThingsGoBeforeTheMirrors`, `WatchDownloadsTests.testAQuietPhoneInReachIsAskedAgainLessOftenEachTime`, `WatchDownloadsTests.testAPhoneAwayIsAskedAgainOnlyOnceItsPatienceRunsOut`, `WatchDownloadsTests.testWithThePathMonitorDownTheWatchNeverTakesItBack` (+3 more) | unit | pass |
+| `WatchDownloads.phoneGaveUpOn` | 1059 | local to pump: testThePhoneGivingUpWithANetworkLetsTheWatchTry | unit | covered |
+| `WatchDownloads.syncNow` | 1107 | `WatchDownloadsTests.testSyncNowAsksThePhoneAgainForEverythingAwaiting` | unit | pass |
+| `WatchDownloads.reaskPhone` | 1127 | `WatchDownloadsTests.testAPhoneAwayIsAskedAgainOnlyOnceItsPatienceRunsOut` | unit | pass |
+| `WatchDownloads.handOffToPhone` | 1156 | on the way to the background (scene phase); it is one call to pump, which is unit-tested | manual | manual |
+| `WatchDownloads.makeRoom` | 1168 | through `WatchDownloads.pump` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.notePhoneProgress` | 1203 | `WatchDownloadsTests.testPhoneProgressMovesTheBarAndStartsItsPatienceAgain`, `WatchOnWatchGroupsTests.testTheQueueShowsWhatMovesThenWhatWaitsInTheOrderItWillStart` | unit | pass |
+| `WatchDownloads.phoneStillAtIt` | 1212 | through `WatchDownloads.notePhoneProgress` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.phoneFailed` | 1224 | `WatchDownloadsTests.testThePhoneGivingUpWithNoNetworkSaysWhy`, `WatchDownloadsTests.testThePhoneGivingUpWithANetworkLetsTheWatchTry`, `WatchDownloadsTests.testAPhoneFailureForSomethingNotAskedIsIgnored` | unit | pass |
+| `WatchDownloads.receivedFromPhone` | 1245 | `WatchDownloadsTests.testAFileFromThePhoneTakesTheAudioFilesPlace`, `WatchDownloadsTests.testASecondDeliveryLeavesTheFileThatIsThere`, `WatchDownloadsTests.testAFileFromThePhoneForNothingIsRemoved`, `WatchDownloadsTests.testAPlaylistFromThePhoneIsKeptAndFollowed` (+2 more) | unit | pass |
+| `WatchDownloads.start` | 1275 | the watch's own transfer: WatchDownloadUITests (straight from the server) | UI | via screen |
+| `WatchDownloads.cancelActiveTask` | 1312 | through `WatchDownloads.cancel`, `WatchDownloads.delete`, `WatchDownloads.withdraw` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.taskItem` | 1321 | through `WatchDownloads.cancelActiveTask` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.rejoin` | 1327 | runs once at launch against the background session; relaunch mid-download, MANUAL.md §1.5 | manual | manual |
+| `WatchDownloads.handleBackgroundEvents` | 1353 | background session wake; MANUAL.md §7 | manual | manual |
+| `WatchDownloads.releaseBackgroundWake` | 1358 | background session wake; MANUAL.md §7 | manual | manual |
+| `WatchDownloads.landed` | 1375 | `WatchDownloadsTests.testWhatIsAlreadyComingTakesItsRoomFirst`, `WatchDownloadsTests.testAWholeFileIsBelieved`, `WatchDownloadsTests.testAFileWithinThreePercentIsWhole`, `WatchDownloadsTests.testAShortFileIsThrownAwayAndAskedForAgainThreeTimes` (+6 more) | unit | pass |
+| `WatchDownloads.failed` | 1421 | `WatchDownloadsTests.testThePhoneGivingUpWithNoNetworkSaysWhy`, `WatchDownloadsTests.testAFailedTransferIsTriedThreeTimes`, `WatchDownloadsTests.testAFailureWithNoWayToTryAgainIsFailedAtOnce`, `WatchDownloadsTests.testAFailureHereGoesToThePhoneNext` (+1 more) | unit | pass |
+| `WatchDownloads.finishActive` | 1440 | through `WatchDownloads.landed`, `WatchDownloads.failed` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.cacheArt` | 1450 | through `WatchDownloads.landed` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.apply` | 1467 | `WatchDownloadsTests.testAPlaylistTakenOffHereIsntPutBackByAnOldPlan`, `WatchDownloadsTests.testAPlaylistFromThePhoneIsKeptAndFollowed`, `WatchDownloadsTests.testAPlaylistIsAskedOfTheServerWhenThePhoneSentNone`, `WatchDownloadsTests.testBooksInProgressFromThePhoneAreQueuedForTheWatch` (+17 more) | unit | pass |
+| `WatchDownloads.mirror` | 1505 | `WatchSyncTypesTests.testRepliesRoundTrip`, `WatchSyncTypesTests.testPhoneContextFromAnOlderPhoneStillDecodes`, `WatchWantsTests.testAnItemHereForSomethingElseIsClaimedForTheWantToo`, `WatchWantsTests.testAFailedItemIsRetriedOnceAnHourNotOnEveryPass` (+3 more) | unit | pass |
+| `WatchDownloads.mirrorSettled` | 1541 | `WatchDownloadsTests.testAPlaylistTakenOffHereIsntPutBackByAnOldPlan`, `WatchDownloadsTests.testAPlaylistFromThePhoneIsKeptAndFollowed`, `WatchDownloadsTests.testAPlaylistIsAskedOfTheServerWhenThePhoneSentNone`, `WatchDownloadsTests.testBooksInProgressFromThePhoneAreQueuedForTheWatch` (+13 more) | unit | pass |
+| `WatchDownloads.syncPlaylist` | 1554 | through `WatchDownloads.mirror` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchDownloads.receivedFromPhone` | 1604 | `WatchDownloadsTests.testAFileFromThePhoneTakesTheAudioFilesPlace`, `WatchDownloadsTests.testASecondDeliveryLeavesTheFileThatIsThere`, `WatchDownloadsTests.testAFileFromThePhoneForNothingIsRemoved`, `WatchDownloadsTests.testAPlaylistFromThePhoneIsKeptAndFollowed` (+2 more) | unit | pass |
+| `WatchDownloads.receivedFromPhone` | 1615 | `WatchDownloadsTests.testAFileFromThePhoneTakesTheAudioFilesPlace`, `WatchDownloadsTests.testASecondDeliveryLeavesTheFileThatIsThere`, `WatchDownloadsTests.testAFileFromThePhoneForNothingIsRemoved`, `WatchDownloadsTests.testAPlaylistFromThePhoneIsKeptAndFollowed` (+2 more) | unit | pass |
+| `WatchDownloads.keep` | 1624 | `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch`, `WatchIntentsTests.testAlbumsAndPlaylistsAreFoundOnTheWatchThenTheServer`, `WatchDownloadsTests.testDeleteRemovesTheFileAndItsPlaceInPlaylists`, `WatchDownloadsTests.testRemovingAnAlbumLeavesTheSongsAKeptPlaylistAlsoHolds` (+26 more) | unit | pass |
+| `WatchDownloads.inventory` | 1643 | `WatchDownloadsTests.testTheInventoryCountsEachByteOnce`, `WatchDownloadsTests.testTheInventoryIsCutToFitAMessage`, `WatchSyncTypesTests.testWatchContextFromAnOlderWatchDecodes` | unit | pass |
+| `WatchDownloads.delete` | 1697 | `WatchDownloadsTests.testDeleteRemovesTheFileAndItsPlaceInPlaylists`, `WatchDownloadsTests.testAPlaylistThePhoneSwitchedOffIsNotToldBack`, `WatchDownloadsTests.testADeleteFromThePhoneGoesByGroup`, `WatchTestModeTests.testTokensStayOutOfTheKeychainInTestMode` (+1 more) | unit | pass |
+| `WatchDownloads.download` | 1707 | `WatchSyncTypesTests.testEveryMessageRoundTrips`, `WatchWantsTests.testADownloadMessageLooksItUpAndKeepsIt`, `WatchWantsTests.testADownloadThatCantBeLookedUpIsLeft` | unit | pass |
+| `WatchDownloads.keep` | 1716 | `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch`, `WatchIntentsTests.testAlbumsAndPlaylistsAreFoundOnTheWatchThenTheServer`, `WatchDownloadsTests.testDeleteRemovesTheFileAndItsPlaceInPlaylists`, `WatchDownloadsTests.testRemovingAnAlbumLeavesTheSongsAKeptPlaylistAlsoHolds` (+26 more) | unit | pass |
+| `WatchDownloads.testSetNetwork` | 1749 | `WatchDownloadsTests.testAPhoneAwayPastItsPatienceHandsTheItemToTheWatch`, `WatchDownloadsTests.testThePathMonitorsWordAloneNeverTakesBackFromThePhone`, `WatchDownloadsTests.testThePhoneGivingUpWithANetworkLetsTheWatchTry`, `WatchDownloadsTests.testAFailedTransferIsTriedThreeTimes` (+7 more) | unit | pass |
+| `WatchDownloads.testUpdate` | 1758 | `WatchActionsTests.testTheWidgetsPlayLinkPlaysThatItem`, `WatchActionsTests.testTheWidgetsResumeLinkResumesTheBook`, `WatchActionsTests.testResumeOfflineTakesTheWatchsBook`, `WatchActionsTests.testSongsOfAThingFromTheServerOrTheWatch` (+55 more) | unit | pass |
+| `WatchDownloads.testSetWantRetried` | 1765 | `WatchWantsTests.testAFailedItemIsRetriedOnceAnHourNotOnEveryPass`, `WatchWantsTests.testAnItemTurnedAwayForRoomIsLeftToThePump` | unit | pass |
+| `WatchDownloads.testSetDroppedWant` | 1768 | `WatchWantsTests.testAWantTakenOffHereIsntPutBackByAPlanThatStillNamesIt` | unit | pass |
+| `WatchDownloads.testReset` | 1779 | `WatchActionsTests.testPlayingAnAlbumOrPlaylistById`, `WatchIntentsTests.testShuffleMusicIntentUsesTheServerThenTheWatch`, `WatchWidgetSnapshotTests.testIdleTheCardShowsTheBookMostRecentlyLeft`, `WatchPlayerTests.testPlayLeavesOutWhatIsntAudioAndShuffleKeepsTheChosenFirst` (+1 more) | unit | pass |
+| `WatchDownloads.urlSession` | 1819 | background URLSession delegate: the watch's own transfers, exercised by WatchDownloadUITests on the simulator; real wakes MANUAL.md §7 | manual | manual |
+| `WatchDownloads.urlSession` | 1847 | background URLSession delegate: the watch's own transfers, exercised by WatchDownloadUITests on the simulator; real wakes MANUAL.md §7 | manual | manual |
+| `WatchDownloads.urlSession` | 1874 | background URLSession delegate: the watch's own transfers, exercised by WatchDownloadUITests on the simulator; real wakes MANUAL.md §7 | manual | manual |
+| `WatchDownloads.urlSessionDidFinishEvents` | 1885 | background session wake; MANUAL.md §7 | manual | manual |
 
 ## Watch/WatchLink.swift
 
@@ -244,34 +244,34 @@ python3 -I Aquarium/WatchUITests/coverage.py Aquarium Aquarium/WatchUITests/COVE
 | `WatchPlayer.skipNext` | 193 | `WatchPlayerTests.testNextOnTheLastSongStops` | unit | pass |
 | `WatchPlayer.skipPrevious` | 205 | `WatchPlayerTests.testPreviousPartWayInGoesToTheTop` | unit | pass |
 | `WatchPlayer.skipChapter` | 216 | `WatchPlayerTests.testChapterSkipsAndTheCurrentChapter`, `WatchPlayerTests.testWithNoChaptersTheSkipsAreThirtyAndFifteen` | unit | pass |
-| `WatchPlayer.stepSpeed` | 232 | `WatchPlayerTests.testTheSpeedStepsUpAndDown`, `WatchPlayerTests.testTheSpeedGoesRoundFromTheTop`, `WatchPlaybackTests.testTheSpeedButtonStepsThroughEverySpeed` | UI + unit | expected failure / pass |
-| `WatchPlayer.stop` | 238 | `WatchPlayerTests.testStopClearsEverything` | unit | pass |
-| `WatchPlayer.startCurrent` | 259 | through `WatchPlayer.play`, `WatchPlayer.skipNext`, `WatchPlayer.skipPrevious` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchPlayer.resumePoint` | 345 | `WatchPlayerTests.testWhereABookOpens` | unit | pass |
-| `WatchPlayer.install` | 357 | `WatchClientTests.testTheSameAccountAgainOnlyRefreshesTheToken`, `WatchLinkTests.testDeleteMessagesGoByGroup`, `WatchLinkTests.testPhoneProgressAndFailureReachTheRecord`, `WatchLinkTests.testACancelOnThePhoneIsACancelHere` | unit | pass |
-| `WatchPlayer.begin` | 378 | through `WatchPlayer.install` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchPlayer.failedToOpen` | 386 | through `WatchPlayer.startCurrent`, `WatchPlayer.installItemObservers` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchPlayer.installItemObservers` | 396 | through `WatchPlayer.install` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchPlayer.teardownItemObservers` | 420 | through `WatchPlayer.stop`, `WatchPlayer.startCurrent` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchPlayer.timeControlChanged` | 434 | WatchPlaybackTests (play/pause) | UI | via screen |
-| `WatchPlayer.tick` | 454 | `WatchPlayerTests.testTheClockNotesABooksPlaceAsItPlays`, `WatchPlayerTests.testTheClockIgnoresTicksBeforeTheSeekLands` | unit | pass |
-| `WatchPlayer.itemEnded` | 475 | not waited for (30 s songs); MANUAL.md | UI | via screen |
-| `WatchPlayer.closeCurrent` | 490 | through `WatchPlayer.play`, `WatchPlayer.skipNext`, `WatchPlayer.skipPrevious` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchPlayer.checkpoint` | 504 | `WatchPlayerTests.testCheckpointNotesAPlayingBookOnTheWayToTheBackground` | unit | pass |
-| `WatchPlayer.note` | 520 | `WatchPlayerTests.testTheMinuteNoteNearTheEndIsOnlyAPosition`, `WatchPlayerTests.testABookPausedInItsLastMinutesThenFinishedCountsOnce`, `WatchPlayerTests.testASongIsHeardPastNinetyPercentAndCountedOnce`, `WatchLogTests.testNotesGoToTheFileAndTheExportCarriesThem` (+1 more) | unit | pass |
-| `WatchPlayer.reportLive` | 552 | through `WatchPlayer.pause`, `WatchPlayer.begin`, `WatchPlayer.tick` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchPlayer.activateSession` | 565 | through `WatchPlayer.resume`, `WatchPlayer.startCurrent` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchPlayer.observeInterruptions` | 576 | calls and Siri: MANUAL.md §4 | manual | manual |
-| `WatchPlayer.wireRemoteCommands` | 600 | lock-screen and crown transport: MANUAL.md §4 | manual | manual |
-| `WatchPlayer.refreshCommands` | 627 | through `WatchPlayer.updateNowPlaying` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchPlayer.updateNowPlaying` | 637 | through `WatchPlayer.pause`, `WatchPlayer.resume`, `WatchPlayer.seek` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchPlayer.updateNowPlayingRate` | 673 | Now Playing card: MANUAL.md §4 | manual | manual |
-| `WatchPlayer.loadArtwork` | 684 | through `WatchPlayer.updateNowPlaying` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchPlayer.clearNowPlaying` | 696 | through `WatchPlayer.stop` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
-| `WatchPlayer.writeSnapshot` | 707 | `WatchWidgetSnapshotTests.testThePlayerWritesWhatIsPlaying`, `WatchWidgetSnapshotTests.testIdleTheCardShowsTheBookMostRecentlyLeft` | unit | pass |
-| `WatchPlayer.worthRedrawing` | 744 | `WatchPlayerTests.testTheCardRedrawsOnlyWhenItChanges` | unit | pass |
-| `WatchPlayer.testLoad` | 763 | `WatchActionsTests.testResumeCarriesOnAPausedBook`, `WatchWidgetSnapshotTests.testThePlayerWritesWhatIsPlaying`, `WatchBookPlaceTests.testTheBookPlayingNowIsLeftToThePlayer`, `WatchPlayerTests.testTheSpeedStepsUpAndDown` (+20 more) | unit | expected failure / pass |
-| `WatchPlayer.testReset` | 788 | `WatchActionsTests.testPlayingAnAlbumOrPlaylistById`, `WatchIntentsTests.testShuffleMusicIntentUsesTheServerThenTheWatch`, `WatchWidgetSnapshotTests.testIdleTheCardShowsTheBookMostRecentlyLeft`, `WatchPlayerTests.testPlayLeavesOutWhatIsntAudioAndShuffleKeepsTheChosenFirst` (+1 more) | unit | pass |
+| `WatchPlayer.stepSpeed` | 234 | `WatchPlayerTests.testTheSpeedStepsUpAndDown`, `WatchPlayerTests.testTheSpeedGoesRoundFromTheTop` | unit | pass |
+| `WatchPlayer.stop` | 241 | `WatchPlayerTests.testStopClearsEverything` | unit | pass |
+| `WatchPlayer.startCurrent` | 262 | through `WatchPlayer.play`, `WatchPlayer.skipNext`, `WatchPlayer.skipPrevious` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchPlayer.resumePoint` | 348 | `WatchPlayerTests.testWhereABookOpens` | unit | pass |
+| `WatchPlayer.install` | 360 | `WatchClientTests.testTheSameAccountAgainOnlyRefreshesTheToken`, `WatchLinkTests.testDeleteMessagesGoByGroup`, `WatchLinkTests.testPhoneProgressAndFailureReachTheRecord`, `WatchLinkTests.testACancelOnThePhoneIsACancelHere` | unit | pass |
+| `WatchPlayer.begin` | 381 | through `WatchPlayer.install` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchPlayer.failedToOpen` | 389 | through `WatchPlayer.startCurrent`, `WatchPlayer.installItemObservers` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchPlayer.installItemObservers` | 399 | through `WatchPlayer.install` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchPlayer.teardownItemObservers` | 423 | through `WatchPlayer.stop`, `WatchPlayer.startCurrent` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchPlayer.timeControlChanged` | 437 | WatchPlaybackTests (play/pause) | UI | via screen |
+| `WatchPlayer.tick` | 457 | `WatchPlayerTests.testTheClockNotesABooksPlaceAsItPlays`, `WatchPlayerTests.testTheClockIgnoresTicksBeforeTheSeekLands` | unit | pass |
+| `WatchPlayer.itemEnded` | 478 | not waited for (30 s songs); MANUAL.md | UI | via screen |
+| `WatchPlayer.closeCurrent` | 493 | through `WatchPlayer.play`, `WatchPlayer.skipNext`, `WatchPlayer.skipPrevious` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchPlayer.checkpoint` | 507 | `WatchPlayerTests.testCheckpointNotesAPlayingBookOnTheWayToTheBackground` | unit | pass |
+| `WatchPlayer.note` | 523 | `WatchPlayerTests.testTheMinuteNoteNearTheEndIsOnlyAPosition`, `WatchPlayerTests.testABookPausedInItsLastMinutesThenFinishedCountsOnce`, `WatchPlayerTests.testASongIsHeardPastNinetyPercentAndCountedOnce`, `WatchLogTests.testNotesGoToTheFileAndTheExportCarriesThem` (+1 more) | unit | pass |
+| `WatchPlayer.reportLive` | 555 | through `WatchPlayer.pause`, `WatchPlayer.begin`, `WatchPlayer.tick` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchPlayer.activateSession` | 568 | through `WatchPlayer.resume`, `WatchPlayer.startCurrent` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchPlayer.observeInterruptions` | 579 | calls and Siri: MANUAL.md §4 | manual | manual |
+| `WatchPlayer.wireRemoteCommands` | 603 | lock-screen and crown transport: MANUAL.md §4 | manual | manual |
+| `WatchPlayer.refreshCommands` | 630 | through `WatchPlayer.updateNowPlaying` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchPlayer.updateNowPlaying` | 640 | through `WatchPlayer.pause`, `WatchPlayer.resume`, `WatchPlayer.seek` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchPlayer.updateNowPlayingRate` | 676 | Now Playing card: MANUAL.md §4 | manual | manual |
+| `WatchPlayer.loadArtwork` | 687 | through `WatchPlayer.updateNowPlaying` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchPlayer.clearNowPlaying` | 699 | through `WatchPlayer.stop` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
+| `WatchPlayer.writeSnapshot` | 710 | `WatchWidgetSnapshotTests.testThePlayerWritesWhatIsPlaying`, `WatchWidgetSnapshotTests.testIdleTheCardShowsTheBookMostRecentlyLeft` | unit | pass |
+| `WatchPlayer.worthRedrawing` | 747 | `WatchPlayerTests.testTheCardRedrawsOnlyWhenItChanges` | unit | pass |
+| `WatchPlayer.testLoad` | 766 | `WatchActionsTests.testResumeCarriesOnAPausedBook`, `WatchWidgetSnapshotTests.testThePlayerWritesWhatIsPlaying`, `WatchBookPlaceTests.testTheBookPlayingNowIsLeftToThePlayer`, `WatchPlayerTests.testTheSpeedStepsUpAndDown` (+20 more) | unit | pass |
+| `WatchPlayer.testReset` | 791 | `WatchActionsTests.testPlayingAnAlbumOrPlaylistById`, `WatchIntentsTests.testShuffleMusicIntentUsesTheServerThenTheWatch`, `WatchWidgetSnapshotTests.testIdleTheCardShowsTheBookMostRecentlyLeft`, `WatchPlayerTests.testPlayLeavesOutWhatIsntAudioAndShuffleKeepsTheChosenFirst` (+1 more) | unit | pass |
 
 ## Watch/WatchIntents.swift
 
@@ -356,12 +356,12 @@ python3 -I Aquarium/WatchUITests/coverage.py Aquarium Aquarium/WatchUITests/COVE
 
 | Function | Line | Test(s) | Kind | Status |
 |---|---|---|---|---|
-| `BooksView.load` | 61 | `WatchImagesTests.testAFileCoverLoadsAndIsCached` | unit | pass |
-| `AlbumsView.load` | 323 | `WatchImagesTests.testAFileCoverLoadsAndIsCached` | unit | pass |
-| `Array.localArtists` | 380 | `WatchShimsTests.testArtistsOfSongsOnceEach` | unit | pass |
-| `ArtistDetail.play` | 441 | `WatchActionsTests.testPlayingAnAlbumOrPlaylistById`, `WatchActionsTests.testPlayingAnUnknownIdDoesNothing`, `WatchLinkTests.testWhatOnlyThePhoneHearsIsIgnoredHere`, `WatchLinkTests.testTheRemoteSaysWhenThePhoneIsOutOfReach` (+3 more) | unit | pass |
-| `SongsView.load` | 495 | `WatchImagesTests.testAFileCoverLoadsAndIsCached` | unit | pass |
-| `SearchView.search` | 683 | `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered` | unit | pass |
+| `BooksView.load` | 66 | `WatchImagesTests.testAFileCoverLoadsAndIsCached` | unit | pass |
+| `AlbumsView.load` | 328 | `WatchImagesTests.testAFileCoverLoadsAndIsCached` | unit | pass |
+| `Array.localArtists` | 385 | `WatchShimsTests.testArtistsOfSongsOnceEach` | unit | pass |
+| `ArtistDetail.play` | 446 | `WatchActionsTests.testPlayingAnAlbumOrPlaylistById`, `WatchActionsTests.testPlayingAnUnknownIdDoesNothing`, `WatchLinkTests.testWhatOnlyThePhoneHearsIsIgnoredHere`, `WatchLinkTests.testTheRemoteSaysWhenThePhoneIsOutOfReach` (+3 more) | unit | pass |
+| `SongsView.load` | 500 | `WatchImagesTests.testAFileCoverLoadsAndIsCached` | unit | pass |
+| `SearchView.search` | 688 | `WatchClientTests.testSearchAsksFourWaysAndKeepsWhatAnswered` | unit | pass |
 
 ## Watch/Views/NowPlayingScreen.swift
 
@@ -370,7 +370,7 @@ python3 -I Aquarium/WatchUITests/coverage.py Aquarium Aquarium/WatchUITests/COVE
 | `NowPlayingScreen.claimCrown` | 45 | drawn on its screen in the UI tests | UI | via screen |
 | `NowPlayingScreen.content` | 66 | drawn on its screen in the UI tests | UI | via screen |
 | `NowPlayingScreen.playing` | 87 | drawn on its screen in the UI tests | UI | via screen |
-| `NowPlayingScreen.speedLabel` | 204 | `WatchPlayerTests.testWholeSpeedsReadAsWholeNumbers`, `WatchPlayerTests.testOnePointTwoFiveAndOnePointSevenFiveReadRight`, `WatchPlaybackTests.testTheSpeedButtonStepsThroughEverySpeed` | UI + unit | expected failure / pass |
+| `NowPlayingScreen.speedLabel` | 204 | `WatchPlayerTests.testWholeSpeedsReadAsWholeNumbers`, `WatchPlayerTests.testOnePointTwoFiveAndOnePointSevenFiveReadRight` | unit | pass |
 | `NowPlayingScreen.subtitle` | 208 | `WatchWidgetSnapshotTests.testThePlayerWritesWhatIsPlaying`, `WatchPlayerTests.testTheCardRedrawsOnlyWhenItChanges`, `WatchOnWatchGroupsTests.testGroupsAreWhatWasAskedForEachSongOnce` | unit | pass |
 | `VolumePopup.show` | 285 | through `NowPlayingScreen.subtitle` | unit (indirect) | caller tested (this line may sit behind a guard the test does not open) |
 | `CrownVolume.makeWKInterfaceObject` | 303 | drawn on its screen in the UI tests | UI | via screen |
@@ -393,7 +393,7 @@ python3 -I Aquarium/WatchUITests/coverage.py Aquarium Aquarium/WatchUITests/COVE
 | `OnWatchView.hereNote` | 230 | drawn on its screen in the UI tests | UI | via screen |
 | `DownloadQueueView.cancelButton` | 351 | drawn on its screen in the UI tests | UI | via screen |
 | `DownloadQueueView.waitingNote` | 357 | drawn on its screen in the UI tests | UI | via screen |
-| `WatchSettingsView.serverStatus` | 455 | `WatchClientTests.testSettingsDoesNotSayConnectedWhileTheSignInIsRefused`, `WatchClientTests.testSettingsServerLine` | unit | expected failure / pass |
+| `WatchSettingsView.serverStatus` | 456 | `WatchClientTests.testSettingsDoesNotSayConnectedWhileTheSignInIsRefused`, `WatchClientTests.testSettingsServerLine` | unit | pass |
 
 ## Watch/Views/PhoneRemoteViews.swift
 
@@ -403,7 +403,7 @@ python3 -I Aquarium/WatchUITests/coverage.py Aquarium Aquarium/WatchUITests/COVE
 | `PhonePlayerScreen.content` | 222 | drawn on its screen in the UI tests | UI | via screen |
 | `PhonePlayerScreen.playing` | 241 | drawn on its screen in the UI tests | UI | via screen |
 | `PhonePlayerScreen.nextSpeed` | 357 | `WatchLinkTests.testTheRemotesSpeedGoesRound` | unit | pass |
-| `PhonePlayerScreen.speedLabel` | 363 | `WatchPlayerTests.testWholeSpeedsReadAsWholeNumbers`, `WatchPlayerTests.testOnePointTwoFiveAndOnePointSevenFiveReadRight`, `WatchPlaybackTests.testTheSpeedButtonStepsThroughEverySpeed` | UI + unit | expected failure / pass |
+| `PhonePlayerScreen.speedLabel` | 363 | `WatchPlayerTests.testWholeSpeedsReadAsWholeNumbers`, `WatchPlayerTests.testOnePointTwoFiveAndOnePointSevenFiveReadRight` | unit | pass |
 | `PhonePlayerScreen.subtitle` | 367 | `WatchWidgetSnapshotTests.testThePlayerWritesWhatIsPlaying`, `WatchPlayerTests.testTheCardRedrawsOnlyWhenItChanges`, `WatchOnWatchGroupsTests.testGroupsAreWhatWasAskedForEachSongOnce` | unit | pass |
 | `CompanionCrownVolume.makeWKInterfaceObject` | 423 | drawn on its screen in the UI tests | UI | via screen |
 | `CompanionCrownVolume.updateWKInterfaceObject` | 429 | drawn on its screen in the UI tests | UI | via screen |
@@ -576,7 +576,7 @@ python3 -I Aquarium/WatchUITests/coverage.py Aquarium Aquarium/WatchUITests/COVE
 | `AquariumWatchApp` | Watch/WatchApp.swift:14 | not reached by any test | via its parent screen |
 | `Artwork` | Watch/WatchImages.swift:64 | not reached by any test | via its parent screen |
 | `RootView` | Watch/Views/RootView.swift:69 | drawn on its screen in the UI tests | via its parent screen |
-| `LibraryHome` | Watch/Views/RootView.swift:86 | `WatchDownloadUITests.testASongDownloadsFromItsRowCorner`, `WatchDownloadUITests.testAnAlbumDownloadsWholeAndIsRemoved`, `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch` (+34 more) | expected failure / pass / skip |
+| `LibraryHome` | Watch/Views/RootView.swift:86 | `WatchDownloadUITests.testASongDownloadsFromItsRowCorner`, `WatchDownloadUITests.testAnAlbumDownloadsWholeAndIsRemoved`, `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch` (+34 more) | pass / skip |
 | `NowPlayingRow` | Watch/Views/RootView.swift:238 | `WatchPlaybackTests.testTheHomeRowLeadsBackToThePlayer` | pass |
 | `DownloadingRow` | Watch/Views/RootView.swift:262 | drawn on its screen in the UI tests | via its parent screen |
 | `Door` | Watch/Views/RootView.swift:281 | drawn on its screen in the UI tests | via its parent screen |
@@ -589,19 +589,19 @@ python3 -I Aquarium/WatchUITests/coverage.py Aquarium Aquarium/WatchUITests/COVE
 | `DownloadControl` | Watch/Views/RootView.swift:515 | `WatchDownloadUITests.testAnAlbumDownloadsWholeAndIsRemoved`, `WatchDownloadUITests.testABookDownloadsAndPlaysFromTheWatch`, `WatchDownloadUITests.testTheQueueOrOnWatchShowsWhatIsArriving` (+2 more) | pass |
 | `PlayShuffleBar` | Watch/Views/RootView.swift:671 | `WatchLibraryTests.testAnAlbumsPageListsItsSongsInOrder`, `WatchLibraryTests.testAnArtistsPageListsTheirAlbums`, `WatchPlaybackTests.testPlayPauseNextAndPrevious` | pass |
 | `StatusRow` | Watch/Views/RootView.swift:692 | `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch`, `WatchLibraryTests.testAGenresPage` | pass |
-| `BooksView` | Watch/Views/LibraryViews.swift:10 | `WatchDownloadUITests.testABookDownloadsAndPlaysFromTheWatch`, `WatchLibraryTests.testAudiobooksAndABooksPage`, `WatchLibraryTests.testTheAudiobooksSortStepsThroughItsOrders` (+8 more) | expected failure / pass |
-| `BookDetail` | Watch/Views/LibraryViews.swift:81 | `WatchDownloadUITests.testABookDownloadsAndPlaysFromTheWatch`, `WatchLibraryTests.testAudiobooksAndABooksPage`, `WatchPlaybackTests.testABookOpensWhereItWasLeftAndItsButtonsMoveIt` (+6 more) | expected failure / pass |
-| `MusicMenu` | Watch/Views/LibraryViews.swift:179 | `WatchDownloadUITests.testASongDownloadsFromItsRowCorner`, `WatchDownloadUITests.testAnAlbumDownloadsWholeAndIsRemoved`, `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch` (+12 more) | expected failure / pass |
-| `PlaylistsView` | Watch/Views/LibraryViews.swift:218 | `WatchLibraryTests.testAPlaylistsPage` | pass |
-| `AlbumsView` | Watch/Views/LibraryViews.swift:273 | `WatchDownloadUITests.testASongDownloadsFromItsRowCorner`, `WatchDownloadUITests.testAnAlbumDownloadsWholeAndIsRemoved`, `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch` (+8 more) | pass / skip |
-| `ArtistsView` | Watch/Views/LibraryViews.swift:340 | `WatchLibraryTests.testAnArtistsPageListsTheirAlbums`, `WatchLibraryTests.testArtistsAreTheMusicLibrarysNotTheAudiobooksAuthors` | expected failure / pass |
-| `ArtistDetail` | Watch/Views/LibraryViews.swift:396 | `WatchDownloadUITests.testASongDownloadsFromItsRowCorner`, `WatchDownloadUITests.testAnAlbumDownloadsWholeAndIsRemoved`, `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch` (+8 more) | pass / skip |
-| `SongsView` | Watch/Views/LibraryViews.swift:449 | `WatchLibraryTests.testAnAlbumsPageListsItsSongsInOrder`, `WatchLibraryTests.testSongsList`, `WatchLibraryTests.testAPlaylistsPage` (+2 more) | pass |
-| `SongSwipe` | Watch/Views/LibraryViews.swift:510 | drawn on its screen in the UI tests | via its parent screen |
-| `GenresView` | Watch/Views/LibraryViews.swift:529 | `WatchLibraryTests.testAGenresPage` | pass |
-| `CollectionDetail` | Watch/Views/LibraryViews.swift:554 | `WatchDownloadUITests.testASongDownloadsFromItsRowCorner`, `WatchDownloadUITests.testAnAlbumDownloadsWholeAndIsRemoved`, `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch` (+7 more) | pass |
-| `SearchView` | Watch/Views/LibraryViews.swift:627 | `WatchDownloadUITests.testASongDownloadsFromItsRowCorner`, `WatchDownloadUITests.testAnAlbumDownloadsWholeAndIsRemoved`, `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch` (+18 more) | expected failure / pass / skip |
-| `NowPlayingScreen` | Watch/Views/NowPlayingScreen.swift:15 | `WatchPlaybackTests.testASongPlaysAndTheServerSeesIt`, `WatchPlaybackTests.testPlayPauseNextAndPrevious`, `WatchPlaybackTests.testTheHomeRowLeadsBackToThePlayer` (+8 more) | expected failure / pass |
+| `BooksView` | Watch/Views/LibraryViews.swift:10 | `WatchDownloadUITests.testABookDownloadsAndPlaysFromTheWatch`, `WatchLibraryTests.testAudiobooksAndABooksPage`, `WatchLibraryTests.testTheAudiobooksSortStepsThroughItsOrders` (+8 more) | pass |
+| `BookDetail` | Watch/Views/LibraryViews.swift:86 | `WatchDownloadUITests.testABookDownloadsAndPlaysFromTheWatch`, `WatchLibraryTests.testAudiobooksAndABooksPage`, `WatchPlaybackTests.testABookOpensWhereItWasLeftAndItsButtonsMoveIt` (+6 more) | pass |
+| `MusicMenu` | Watch/Views/LibraryViews.swift:184 | `WatchDownloadUITests.testASongDownloadsFromItsRowCorner`, `WatchDownloadUITests.testAnAlbumDownloadsWholeAndIsRemoved`, `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch` (+12 more) | pass |
+| `PlaylistsView` | Watch/Views/LibraryViews.swift:223 | `WatchLibraryTests.testAPlaylistsPage` | pass |
+| `AlbumsView` | Watch/Views/LibraryViews.swift:278 | `WatchDownloadUITests.testASongDownloadsFromItsRowCorner`, `WatchDownloadUITests.testAnAlbumDownloadsWholeAndIsRemoved`, `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch` (+8 more) | pass / skip |
+| `ArtistsView` | Watch/Views/LibraryViews.swift:345 | `WatchLibraryTests.testAnArtistsPageListsTheirAlbums`, `WatchLibraryTests.testArtistsAreTheMusicLibrarysNotTheAudiobooksAuthors` | pass |
+| `ArtistDetail` | Watch/Views/LibraryViews.swift:401 | `WatchDownloadUITests.testASongDownloadsFromItsRowCorner`, `WatchDownloadUITests.testAnAlbumDownloadsWholeAndIsRemoved`, `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch` (+8 more) | pass / skip |
+| `SongsView` | Watch/Views/LibraryViews.swift:454 | `WatchLibraryTests.testAnAlbumsPageListsItsSongsInOrder`, `WatchLibraryTests.testSongsList`, `WatchLibraryTests.testAPlaylistsPage` (+2 more) | pass |
+| `SongSwipe` | Watch/Views/LibraryViews.swift:515 | drawn on its screen in the UI tests | via its parent screen |
+| `GenresView` | Watch/Views/LibraryViews.swift:534 | `WatchLibraryTests.testAGenresPage` | pass |
+| `CollectionDetail` | Watch/Views/LibraryViews.swift:559 | `WatchDownloadUITests.testASongDownloadsFromItsRowCorner`, `WatchDownloadUITests.testAnAlbumDownloadsWholeAndIsRemoved`, `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch` (+7 more) | pass |
+| `SearchView` | Watch/Views/LibraryViews.swift:632 | `WatchDownloadUITests.testASongDownloadsFromItsRowCorner`, `WatchDownloadUITests.testAnAlbumDownloadsWholeAndIsRemoved`, `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch` (+18 more) | pass / skip |
+| `NowPlayingScreen` | Watch/Views/NowPlayingScreen.swift:15 | `WatchPlaybackTests.testASongPlaysAndTheServerSeesIt`, `WatchPlaybackTests.testPlayPauseNextAndPrevious`, `WatchPlaybackTests.testTheHomeRowLeadsBackToThePlayer` (+8 more) | pass |
 | `VolumePopup` | Watch/Views/NowPlayingScreen.swift:243 | drawn on its screen in the UI tests | via its parent screen |
 | `CrownVolume` | Watch/Views/NowPlayingScreen.swift:300 | drawn on its screen in the UI tests | via its parent screen |
 | `OnWatchView` | Watch/Views/OnWatchViews.swift:121 | `WatchDownloadUITests.testASongDownloadsFromItsRowCorner`, `WatchDownloadUITests.testRemoveEverythingEmptiesTheWatch` | pass |
@@ -630,18 +630,19 @@ manual (real hardware or the system's UI): 88; reached by nothing: 0.
 
 ## Regression tests and known bugs
 
-Each regression test names its source in a comment. Bugs kept with `XCTExpectFailure`
-are fixed on `claude/qa-fix-list-cb0b58` (not merged into this branch) unless marked.
+Each regression test names its source in a comment. The seven bugs the suite found
+were fixed on `claude/fix-watch` (2026-11-13) and their `XCTExpectFailure` wrappers
+removed; none is kept as an expected failure now.
 
 | Test | Source | Result here |
 |---|---|---|
-| `WatchBookPlaceTests.testABooksEarlyPlaceSurvivesTheServersZero`, `…AnUndatedZero`, `testRefreshKeepsAnEarlyPlace` | master-fix-list top priority; f50fc11, dec4915 | expected failure (bug) |
+| `WatchBookPlaceTests.testABooksEarlyPlaceSurvivesTheServersZero`, `…AnUndatedZero`, `testRefreshKeepsAnEarlyPlace` | master-fix-list top priority; fixed in `WatchDownloads.applyServerState` (`serverHasHeldPlace`) | pass |
 | `WatchBookPlaceTests.testAZeroAfterTheServerHeldAPlaceIsAReset`, `testAZeroPastTheEarlyWindowIsAReset` | dec4915 (telling early 0 from a reset) | pass |
-| `WatchPlayerTests.testTheSpeedGoesRoundFromTheTop`, `testOnePointTwoFiveAndOnePointSevenFiveReadRight`; `WatchPlaybackTests.testTheSpeedButtonStepsThroughEverySpeed` | master-fix-list; 314251e | expected failure (bug) |
-| `WatchClientTests.testSettingsDoesNotSayConnectedWhileTheSignInIsRefused` | master-fix-list "Connected while 401"; 352c592 | expected failure (bug) |
-| `WatchLibraryTests.testArtistsAreTheMusicLibrarysNotTheAudiobooksAuthors` | master-fix-list (Mary Shelley); 352c592 | expected failure (bug) |
-| `WatchLibraryTests.testTheAudiobooksSortControlCoversNoRow` | master-fix-list sort button; 352c592 | expected failure (bug, non-strict) |
-| `WatchDownloadsTests.testACancelRightAfterQueueingLeavesNothingForTheNextLaunch` | found here: detached meta.json write vs cancel | expected failure when the race is lost (non-strict) |
+| `WatchPlayerTests.testTheSpeedGoesRoundFromTheTop`, `testOnePointTwoFiveAndOnePointSevenFiveReadRight`; `WatchPlaybackTests.testTheSpeedButtonStepsThroughEverySpeed` | master-fix-list; fixed in `WatchPlayer.stepSpeed` and the two `speedLabel`s (`%g`) | pass |
+| `WatchClientTests.testSettingsDoesNotSayConnectedWhileTheSignInIsRefused` | master-fix-list "Connected while 401"; fixed: `JellyfinClient.signInRefused`, row reads "Sign-in expired" | pass |
+| `WatchLibraryTests.testArtistsAreTheMusicLibrarysNotTheAudiobooksAuthors` | master-fix-list (Mary Shelley); fixed: `albumArtists` asks `IncludeItemTypes=Audio` | pass |
+| `WatchLibraryTests.testTheAudiobooksSortControlCoversNoRow` | master-fix-list sort button; fixed: the sort is a row at the head of the list (strict now) | pass |
+| `WatchDownloadsTests.testACancelRightAfterQueueingLeavesNothingForTheNextLaunch` | found here: detached meta.json write vs cancel; fixed: `metaGeneration` orders writes and removals (strict now; 20/20 runs) | pass |
 | `WatchDownloadsTests.testThePathMonitorsWordAloneNeverTakesBackFromThePhone`, `testWithThePathMonitorDownTheWatchNeverTakesItBack` | 05ce303 (1,418 cancels); watch-network-reality | pass |
 | `WatchDownloadsTests.testAShortFileIsThrownAwayAndAskedForAgainThreeTimes` | WatchDownloads header; duo-device-download-forensics | pass |
 | `WatchDownloadsTests.testAPlaylistThePhoneSwitchedOffIsNotToldBack` | c08deb9 | pass |
