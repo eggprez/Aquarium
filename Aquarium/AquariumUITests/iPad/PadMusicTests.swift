@@ -127,6 +127,8 @@ final class PadMusicTests: PadUITestCase {
     /// prefixes a song's SortName with disc/track numbers, so 'by name' was
     /// by track and the A–Z strip jumped to the wrong rows").
     func testSongsAToZJumpsToTheLetter() throws {
+        let formats = try album("FX Formats")
+        try XCTSkipUnless(formats.tracks.count > 1 && formats.tracks[1].name.hasPrefix("WAV"), "fixture changed")
         openLibraryPage()
         app.button(TestID.Music.libraryDoor("songs")).padTap()
         app.element(TestID.Music.songs).waitToExist(20)
@@ -140,13 +142,18 @@ final class PadMusicTests: PadUITestCase {
         let top = max(0, (h - (row * 27 + 8)) / 2) + 4
         index.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
             .withOffset(CGVector(dx: 0, dy: top + (i + 0.5) * row)).tap()
-        let landed = waitUntil(20, "a song starting with \(target) at the top") {
-            let rows = self.app.elements(prefix: "music.song.").allElementsBoundByIndex
-                .filter { $0.isHittable && !$0.identifier.hasPrefix("music.song.more.") }
-            guard let first = rows.min(by: { $0.frame.minY < $1.frame.minY }) else { return false }
-            return first.label.uppercased().hasPrefix(target)
-        }
-        if !landed { attachScreenshot("after A–Z tap") }
+        // "WAV 16-44" (FX Formats) is the library's only W title: the jump
+        // must bring its row on screen. Waited on as an element predicate:
+        // a closure walking every song row each poll stalled the runner.
+        let wav = app.buttons.matching(identifier: TestID.Music.song(formats.tracks[1].id)).firstMatch
+        // W is the last letter in this library, so the list ends on it: the
+        // row is on screen (by its frame: a row in the last screenful is
+        // not always "hittable" to XCUITest).
+        let exists = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: wav)
+        XCTAssertEqual(XCTWaiter().wait(for: [exists], timeout: 20), .completed, "WAV 16-44 loaded")
+        let window = app.frame
+        XCTAssertTrue(wav.frame.minY >= window.minY && wav.frame.maxY <= window.maxY + 1,
+                      "the A–Z strip's W brings WAV 16-44 on screen: \(wav.frame)")
     }
 
     func testArtistPageFromTheAlbum() throws {

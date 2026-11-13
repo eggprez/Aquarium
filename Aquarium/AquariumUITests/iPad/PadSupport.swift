@@ -410,6 +410,16 @@ extension JellyfinAPI {
         }
     }
 
+    /// A session playing `itemId` whose position is within `tolerance` of
+    /// `seconds` — the app's own, told apart from earlier test runs' devices
+    /// (each run is a new device, and their sessions linger, some still
+    /// listed as playing the same fixture) by where it is in the title.
+    func padSession(playing itemId: String, near seconds: Double, tolerance: Double = 20) -> Session? {
+        (try? padSessions())?.first {
+            $0.nowPlayingId == itemId && abs(($0.positionSeconds ?? -1000) - seconds) <= tolerance
+        }
+    }
+
     /// The most recent session playing `itemId` (or anything, with nil).
     func padPlaying(_ itemId: String? = nil) -> Session? {
         (try? padSessions())?.first { $0.nowPlayingId != nil && (itemId == nil || $0.nowPlayingId == itemId) }

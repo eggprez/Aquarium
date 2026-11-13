@@ -275,12 +275,17 @@ final class PadDetailTests: PadUITestCase {
         openItem(film.id)
         app.button(TestID.Detail.quality).padTap()
         app.button(TestID.Detail.qualityOption(nil)).waitToExist(10)
-        let versionWords = ["2160p", "1080p", "480p", "Version"]
-        let offered = versionWords.contains { word in
-            app.buttons.matching(NSPredicate(format: "label CONTAINS %@", word)).count > 0
-                && !app.buttons.matching(NSPredicate(format: "label CONTAINS %@", word))
-                    .allElementsBoundByIndex.allSatisfy { $0.identifier.hasPrefix("detail.action.quality.") }
+        // A version row names its file ("2160p HEVC", "1080p H.264", "480p
+        // MPEG-2") or says "Version"; the quality ladder's rows and the
+        // title's own card ("FX Versions") don't count.
+        let rows = app.buttons.allElementsBoundByIndex.filter { b in
+            let id = b.identifier
+            guard !id.hasPrefix("detail.action.quality."), !id.hasPrefix("item.card."), !id.hasPrefix("home."),
+                  !id.hasPrefix("sidebar."), !id.hasPrefix("library."), !id.hasPrefix("detail.header.") else { return false }
+            return ["2160p", "HEVC", "MPEG-2", "Version"].contains { b.label.contains($0) }
         }
+        let offered = !rows.isEmpty
+        attachScreenshot("quality menu on FX Versions")
         XCTExpectFailure("bug: no way to choose one of a title's versions (4775e86 not on main)", strict: false)
         XCTAssertTrue(offered, "a version choice beside the quality ladder")
     }

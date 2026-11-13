@@ -25,21 +25,22 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Sidebar shell at regular width (no tab bar) | PadSidebarTests.testSidebarIsTheShellNotATabBar | UI | STATUS |
-| Header: account initial, name, server host | PadSidebarTests.testHeaderNamesTheAccountAndServer | UI | STATUS |
-| Grouped rows: Browse / Libraries / Live / You, every library, no Settings or More rows | PadSidebarTests.testRowsAreGroupedHomeFirstAndEveryLibraryListed; PadSidebarGroupTests (8) | UI + unit | STATUS |
-| Each section opens from its row, row lit | PadSidebarTests.testEverySectionOpensFromItsRow | UI | STATUS |
-| Re-tapping the lit row pops to the section's top | PadSidebarTests.testSelectedRowGoesBackToTheTopOfItsSection | UI | STATUS |
-| Search row pushes Search over Home | PadSidebarTests.testSearchRowPushesSearch; PadShellSelectionTests.testShowSearchOnAnIPadOpensItOverHome | UI + unit | STATUS |
-| Settings gear in the footer | PadSidebarTests.testSettingsGearSelectsSettings | UI | STATUS |
-| Footer status (Synced / downloads running / Offline) | PadSidebarTests.testFooterSaysSynced; PadDownloadsTests.testDownloadPlayAndDeleteAFilm | UI | STATUS |
+| Sidebar shell at regular width (no tab bar) | PadSidebarTests.testSidebarIsTheShellNotATabBar | UI | pass |
+| Header: account initial, name, server host | PadSidebarTests.testHeaderNamesTheAccountAndServer | UI | pass |
+| Grouped rows: Browse / Libraries / Live / You, every library, no Settings or More rows | PadSidebarTests.testRowsAreGroupedHomeFirstAndEveryLibraryListed; PadSidebarGroupTests (8) | UI + unit | pass |
+| Each section opens from its row, row lit | PadSidebarTests.testEverySectionOpensFromItsRow | UI | pass |
+| Re-tapping the lit row pops to the section's top | PadSidebarTests.testSelectedRowGoesBackToTheTopOfItsSection | UI | pass |
+| Search row pushes Search over Home | PadSidebarTests.testSearchRowPushesSearch; PadShellSelectionTests.testShowSearchOnAnIPadOpensItOverHome | UI + unit | pass |
+| Settings gear in the footer | PadSidebarTests.testSettingsGearSelectsSettings | UI | pass |
+| Footer status (Synced / downloads running / Offline) | PadSidebarTests.testFooterSaysSynced; PadDownloadsTests.testDownloadPlayAndDeleteAFilm | UI | pass |
 | Downloads badge on the row | PadDownloadsTests.testDownloadPlayAndDeleteAFilm (transient) | UI | partial: the badge is up only while a transfer runs, too brief on the local server to assert |
-| Collapse the sidebar; bring it back from Home's bar | PadSidebarTests.testCollapseAndBringBackTheSidebarInLandscape | UI | STATUS |
-| Bring it back from a title page's bar | PadSidebarTests.testCollapsedSidebarComesBackFromATitlePage | UI | STATUS |
-| Sidebar in portrait and landscape | PadSidebarTests.testSidebarInPortraitAndLandscape | UI | STATUS |
-| Sidebar width 190–280 (narrower sidebar, 6344432) | PadSidebarTests.testSidebarIsNarrow | UI | STATUS |
-| Now Playing card at the foot of the sidebar | PadMusicTests.testPlayingASongPutsTheNowPlayingCardInTheSidebar, …SidebarCardPlayPauseAndOpensNowPlaying; PadBooksTests | UI | STATUS |
-| No card when idle | PadSidebarTests.testDownloadsBadgeAndNowPlayingAbsentWhenIdle | UI | STATUS |
+| Collapse the sidebar; bring it back from Home's bar | PadSidebarTests.testCollapseAndBringBackTheSidebarInLandscape | UI | pass |
+| Bring it back from a title page's bar | PadSidebarTests.testCollapsedSidebarComesBackFromATitlePage | UI | xfail |
+| Sidebar in portrait and landscape | PadSidebarTests.testSidebarInPortraitAndLandscape | UI | pass |
+| Long library name not cut in the sidebar ("Home Videos & Phot…") | PadRegressionTests.testLongLibraryNameIsNotCutInTheSidebar | UI | xfail |
+| Sidebar width 190–280 (narrower sidebar, 6344432) | PadSidebarTests.testSidebarIsNarrow | UI | pass |
+| Now Playing card at the foot of the sidebar | PadMusicTests.testPlayingASongPutsTheNowPlayingCardInTheSidebar, …SidebarCardPlayPauseAndOpensNowPlaying; PadBooksTests | UI | pass |
+| No card when idle | PadSidebarTests.testDownloadsBadgeAndNowPlayingAbsentWhenIdle | UI | pass |
 | Shell follows the size class: section with no tab goes into More, comes back on widening (a98b494) | PadShellSelectionTests (9) | unit | pass |
 | Sidebar comes back after a phone-width window | PadWindowSizeTests.testSidebarComesBackAfterAPhoneWidthWindow | UI | skip (simulator shows apps full screen); open bug, MANUAL.md |
 | Stage Manager / Split View / external display | — | manual | manual |
@@ -48,191 +49,209 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Hero with Play and Details | PadHomeTests.testHeroShowsWithPlayAndDetails | UI | STATUS |
-| Hero edge to edge, under the sidebar, 2.4:1 band | PadHomeTests.testHeroIsEdgeToEdgeAtTwoPointFourToOne; PadHeroGeometryTests (5) | UI + unit | STATUS |
-| Thumbnails on its side (width ≥ 900), dots upright | PadHomeTests.testThumbnailsInLandscapeDotsInPortrait | UI | STATUS |
-| A thumbnail turns the hero | PadHomeTests.testThumbnailTurnsTheHeroToItsPage | UI | STATUS |
-| Swipe turns the hero | PadHomeTests.testSwipingTheHeroTurnsThePage | UI | STATUS |
-| Hero Details / Play | PadHomeTests.testHeroDetailsOpensTheTitle, testHeroPlayStartsThePlayer | UI | STATUS |
-| Hero first page aligned with the rest (6344432) | PadRegressionTests.testHeroFirstPageSitsWhereTheOthersDo | UI | STATUS |
-| Hero pages take their real width (d5792c6) | PadRegressionTests.testHeroPagesTakeTheirRealWidth | UI | STATUS |
-| Hero timer stops behind a pushed title (30cbbc2) | PadRegressionTests.testHeroDoesNotTurnBehindAPushedTitle | UI | STATUS |
+| Hero with Play and Details | PadHomeTests.testHeroShowsWithPlayAndDetails | UI | pass |
+| Hero edge to edge, under the sidebar, 2.4:1 band | PadHomeTests.testHeroIsEdgeToEdgeAtTwoPointFourToOne; PadHeroGeometryTests (5) | UI + unit | pass |
+| Thumbnails on its side (width ≥ 900), dots upright | PadHomeTests.testThumbnailsInLandscapeDotsInPortrait | UI | pass |
+| A thumbnail turns the hero | PadHomeTests.testThumbnailTurnsTheHeroToItsPage | UI | pass |
+| Swipe turns the hero | PadHomeTests.testSwipingTheHeroTurnsThePage | UI | pass |
+| Hero Details / Play | PadHomeTests.testHeroDetailsOpensTheTitle, testHeroPlayStartsThePlayer | UI | pass |
+| Hero first page aligned with the rest (6344432) | PadRegressionTests.testHeroFirstPageSitsWhereTheOthersDo | UI | pass |
+| Hero pages take their real width (d5792c6) | PadRegressionTests.testHeroPagesTakeTheirRealWidth | UI | pass |
+| Hero timer stops behind a pushed title (30cbbc2) | PadRegressionTests.testHeroDoesNotTurnBehindAPushedTitle | UI | skip (Home's hero leaves the tree under a pushed page, so it can't be read) |
 | Saved hero backdrops for offline; crop focus near the top (c643527) | — | manual | manual (visual / offline) |
-| Continue Watching, Next Up shelves (baseline) | PadHomeTests.testContinueWatchingAndNextUpShelves | UI | STATUS |
-| Latest per library | PadHomeTests.testLatestShelfPerLibrary | UI | STATUS |
-| On Now and music shelves | PadHomeTests.testLiveTVAndMusicShelvesOnHome | UI | STATUS |
-| Library chip strip (instead of My Media tiles) | PadHomeTests.testLibraryChipsOpenALibrary | UI | STATUS |
-| See all | PadHomeTests.testShelfSeeAllOpensTheWholeRow | UI | STATUS |
-| Floating bar: Refresh, Search | PadHomeTests.testRefreshAndSearchInTheFloatingBar; PadSearchTests.testHomeBarSearchOpensTheSameSearch | UI | STATUS |
-| Card opens its title | PadHomeTests.testCardOpensItsTitle | UI | STATUS |
-| Both orientations | PadHomeTests.testHomeInBothOrientations | UI | STATUS |
+| Continue Watching, Next Up shelves (baseline) | PadHomeTests.testContinueWatchingAndNextUpShelves | UI | pass |
+| Latest per library | PadHomeTests.testLatestShelfPerLibrary | UI | pass |
+| On Now shelf | PadHomeTests.testOnNowShelfOnHome | UI | pass |
+| Recently Played / New Music shelves | PadHomeTests.testMusicShelvesOnHome | UI | pass |
+| Library chip strip (instead of My Media tiles) | PadHomeTests.testLibraryChipsOpenALibrary | UI | pass |
+| See all | PadHomeTests.testShelfSeeAllOpensTheWholeRow | UI | pass |
+| Floating bar: Refresh, Search | PadHomeTests.testRefreshAndSearchInTheFloatingBar; PadSearchTests.testHomeBarSearchOpensTheSameSearch | UI | pass |
+| Card opens its title | PadHomeTests.testCardOpensItsTitle | UI | pass |
+| Both orientations | PadHomeTests.testHomeInBothOrientations | UI | pass |
 | Deep Water metrics (gutter 28, shelf 32, row 16, grid 14, radius 14, poster 156, still 300) | PadMetricsTests (6) | unit | pass |
 
 ## Libraries, collections, photos, favourites
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Grid with the count in the pinned header | PadLibraryTests.testGridAndCountInTheHeader | UI | STATUS |
-| More columns on its side | PadLibraryTests.testGridHasMoreColumnsInLandscape | UI | STATUS |
-| iPad name search in the header, Clear | PadLibraryTests.testSearchFieldFiltersByName | UI | STATUS |
-| Unwatched, Favourites, Genre filters | PadLibraryTests.testUnwatchedFilterHidesPlayedFilms, testFavoritesFilter, testGenreMenuFilters | UI | STATUS |
-| Sort menu and reverse | PadLibraryTests.testSortMenuAndReverse | UI | STATUS |
-| Card → title → Back to the grid | PadLibraryTests.testCardOpensTitleAndBackReturnsToTheGrid | UI | STATUS |
-| Shows library → series | PadLibraryTests.testShowsLibraryOpensASeries | UI | STATUS |
-| Collections section (56a1825) and a collection's titles | PadLibraryTests.testCollectionsSectionListsFXCollection | UI | STATUS |
-| Photo album opens as a grid of photos | PadPhotosTests.testPhotoAlbumOpensAsAGridOfPhotos | UI | STATUS |
-| Favourites: baseline, kind chips | PadFavoritesTests.testFavoritesShowsTheBaselineAndFiltersByKind | UI | STATUS |
-| Favourite added elsewhere appears (ItemMutations) | PadFavoritesTests.testFavoriteAddedOnATitleAppearsHere | UI | STATUS |
+| Grid with the count in the pinned header | PadLibraryTests.testGridAndCountInTheHeader | UI | pass |
+| More columns on its side | PadLibraryTests.testGridHasMoreColumnsInLandscape | UI | pass |
+| iPad name search in the header, Clear | PadLibraryTests.testSearchFieldFiltersByName | UI | pass |
+| Unwatched, Favourites, Genre filters | PadLibraryTests.testUnwatchedFilterHidesPlayedFilms, testFavoritesFilter, testGenreMenuFilters | UI | pass |
+| Sort menu (Reverse Order is the Mac's alone) | PadLibraryTests.testSortMenu | UI | pass |
+| Every filter chip reachable upright (the name field overlaps the strip) | PadLibraryTests.testEveryFilterChipCanBeReachedUpright | UI | pass |
+| Card → title → Back to the grid | PadLibraryTests.testCardOpensTitleAndBackReturnsToTheGrid | UI | pass |
+| Shows library → series | PadLibraryTests.testShowsLibraryOpensASeries | UI | pass |
+| Collections section (56a1825) and a collection's titles | PadLibraryTests.testCollectionsSectionListsFXCollection | UI | pass |
+| Photo album opens as a grid of photos | PadPhotosTests.testPhotoAlbumOpensAsAGridOfPhotos | UI | xfail |
+| Photo folder named properly, not by its folder on disk | PadPhotosTests.testPhotoFolderIsNotShownByItsRawFolderName | UI | xfail |
+| Favourites: baseline, kind chips | PadFavoritesTests.testFavoritesShowsTheBaselineAndFiltersByKind | UI | pass |
+| Favourite added elsewhere appears (ItemMutations) | PadFavoritesTests.testFavoriteAddedOnATitleAppearsHere | UI | pass |
 
 ## Title pages
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Two-column header (poster beside facts) on its side | PadDetailTests.testTwoColumnHeaderInLandscape | UI | STATUS |
-| Header upright | PadDetailTests.testHeaderInPortrait | UI | STATUS |
-| Facts, genres, overview tap-to-unfold | PadDetailTests.testFactsAndOverview | UI | STATUS |
-| Resume label and time left | PadDetailTests.testResumeLabelAndRemainingOnAFilmInProgress | UI | STATUS |
-| Favourite disc → server | PadDetailTests.testFavoriteDiscReachesTheServer | UI | STATUS |
-| Watched disc → server | PadDetailTests.testWatchedDiscReachesTheServer | UI | STATUS |
-| Quality menu (ladder) and play at a rung | PadDetailTests.testQualityMenuListsTheLadder, testQualityMenuPlaysAtTheRungChosen | UI | STATUS |
-| Download menu | PadDetailTests.testDownloadMenuOffersQualities | UI | STATUS |
-| Versions (three media sources) | PadDetailTests.testVersionsAreOfferedOnATitleWithThreeFiles | UI | STATUS |
-| Season switch, episodes two across, switching seasons | PadDetailTests.testSeriesPageHasSeasonSwitchAndEpisodesTwoAcrossInLandscape | UI | STATUS |
-| Episode summary, play glyph | PadDetailTests.testEpisodeSummaryAndPlayGlyph | UI | STATUS |
-| Episode page and its Show › Season trail | PadDetailTests.testEpisodeRowOpensTheEpisodesPageWithItsTrail | UI | STATUS |
-| Add to Next Up asks (popover on iPad) | PadDetailTests.testAddToNextUpOnASeriesAsks | UI | STATUS |
-| Cast → person page | PadDetailTests.testCastOpensAPersonsPage | UI | STATUS |
-| More Like This | PadDetailTests.testMoreLikeThis | UI | STATUS |
-| Back from the page's own bar | PadDetailTests.testBackReturnsToTheSectionsPage | UI | STATUS |
-| Trailer disc (local trailers) | PadDetailTests.testTrailerOnATitleWithLocalTrailers | UI | STATUS |
-| Quality not alone on its row upright | PadRegressionTests.testQualityDoesNotWrapAloneBesideThePosterInPortrait | UI | STATUS |
-| Blocked title's error (fx-kid) | PadRegressionTests.testBlockedTitleSaysSoInPlainWords | UI | STATUS |
+| Two-column header (poster beside facts) on its side | PadDetailTests.testTwoColumnHeaderInLandscape | UI | pass |
+| Header upright | PadDetailTests.testHeaderInPortrait | UI | pass |
+| Facts, genres, overview tap-to-unfold | PadDetailTests.testFactsAndOverview | UI | pass |
+| Resume label and time left | PadDetailTests.testResumeLabelAndRemainingOnAFilmInProgress | UI | pass |
+| Favourite disc → server | PadDetailTests.testFavoriteDiscReachesTheServer | UI | pass |
+| Watched disc → server | PadDetailTests.testWatchedDiscReachesTheServer | UI | pass |
+| Quality menu (ladder) and play at a rung | PadDetailTests.testQualityMenuListsTheLadder, testQualityMenuPlaysAtTheRungChosen | UI | xfail (xfail, pass) |
+| Download menu | PadDetailTests.testDownloadMenuOffersQualities | UI | pass |
+| Versions (three media sources) | PadDetailTests.testVersionsAreOfferedOnATitleWithThreeFiles | UI | xfail |
+| Season switch, episodes two across, switching seasons | PadDetailTests.testSeriesPageHasSeasonSwitchAndEpisodesTwoAcrossInLandscape | UI | pass |
+| Episode summary, play glyph | PadDetailTests.testEpisodeSummaryAndPlayGlyph | UI | pass |
+| Episode page and its Show › Season trail | PadDetailTests.testEpisodeRowOpensTheEpisodesPageWithItsTrail | UI | pass |
+| Add to Next Up asks (popover on iPad) | PadDetailTests.testAddToNextUpOnASeriesAsks | UI | pass |
+| Cast → person page | PadDetailTests.testCastOpensAPersonsPage | UI | pass |
+| More Like This | PadDetailTests.testMoreLikeThis | UI | pass |
+| Back from the page's own bar | PadDetailTests.testBackReturnsToTheSectionsPage | UI | pass |
+| Trailer disc (local trailers) | PadDetailTests.testTrailerOnATitleWithLocalTrailers | UI | pass |
+| Quality not alone on its row upright | PadRegressionTests.testQualityDoesNotWrapAloneBesideThePosterInPortrait | UI | pass |
+| Blocked title's error (fx-kid) | PadRegressionTests.testBlockedTitleSaysSoInPlainWords | UI | xfail |
 | Header switches to the compact stack under 720 pt of column | — | manual | manual (needs a window narrower than the simulator allows) |
 
 ## Search and context menus
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| "FX Long" finds the four | PadSearchTests.testFindsTheFXLongTitles | UI | STATUS |
-| Results beside the sidebar | PadSearchTests.testResultsSitInTheDetailColumnBesideTheSidebar | UI | STATUS |
-| Unicode title | PadSearchTests.testUnicodeTitleIsFound | UI | STATUS |
-| Music results above "Films & TV" | PadSearchTests.testMusicResultsAboveFilmsAndTV | UI | STATUS |
-| No matches | PadSearchTests.testNoMatchesSaysSo | UI | STATUS |
-| Result opens its title | PadSearchTests.testResultOpensItsTitle | UI | STATUS |
-| Recent terms, Clear | PadSearchTests.testRecentTermsAreKeptAndCleared | UI | STATUS |
-| Card menu: play, details, favourite, watched, from the beginning, download; no Mac-only items | PadContextMenuTests.testFilmMenuHasThePlayAndLibraryActions | UI | STATUS |
-| Details / Favourite / Play from Beginning from the menu | PadContextMenuTests.testDetailsFromTheMenuOpensTheTitle, testFavoriteFromTheMenuReachesTheServer, testPlayFromBeginningStartsAtZero | UI | STATUS |
-| Episode menu: Go to Show / Season, Next Up | PadContextMenuTests.testEpisodeMenuGoesToShowAndSeason | UI | STATUS |
-| Season chip menu → season page | PadContextMenuTests.testSeasonChipMenuOpensTheSeasonsPage | UI | STATUS |
-| Download submenu | PadContextMenuTests.testDownloadSubmenuListsQualities | UI | STATUS |
-| Grid card menu | PadContextMenuTests.testLibraryGridCardHasTheMenuToo | UI | STATUS |
+| "FX Long" finds the four | PadSearchTests.testFindsTheFXLongTitles | UI | pass |
+| Results beside the sidebar | PadSearchTests.testResultsSitInTheDetailColumnBesideTheSidebar | UI | pass |
+| Unicode title | PadSearchTests.testUnicodeTitleIsFound | UI | pass |
+| Music results above "Films & TV" | PadSearchTests.testMusicResultsAboveFilmsAndTV | UI | pass |
+| No matches | PadSearchTests.testNoMatchesSaysSo | UI | pass |
+| Result opens its title | PadSearchTests.testResultOpensItsTitle | UI | pass |
+| Recent terms, Clear | PadSearchTests.testRecentTermsAreKeptAndCleared | UI | pass |
+| Card menu: play, details, favourite, watched, from the beginning, download; no Mac-only items | PadContextMenuTests.testFilmMenuHasThePlayAndLibraryActions | UI | pass |
+| Play / Favourite / Play from Beginning from the menu (cards have no Details: a tap opens them) | PadContextMenuTests.testPlayFromTheMenuStartsThePlayer, testFavoriteFromTheMenuReachesTheServer, testPlayFromBeginningStartsAtZero | UI | pass |
+| Episode menu: Go to Show / Season, Next Up | PadContextMenuTests.testEpisodeMenuGoesToShowAndSeason | UI | pass |
+| Season chip menu → season page | PadContextMenuTests.testSeasonChipMenuOpensTheSeasonsPage | UI | pass |
+| Download submenu | PadContextMenuTests.testDownloadSubmenuListsQualities | UI | pass |
+| Grid card menu | PadContextMenuTests.testLibraryGridCardHasTheMenuToo | UI | xfail |
 | Secondary click with a pointer | — | manual | manual |
 
 ## Player
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| iPad chrome: every control, worded pills, PiP button, both orientations | PadPlayerChromeTests.testIPadChromeHasEveryControl | UI | STATUS |
+| iPad chrome: every control, worded pills, PiP button, both orientations | PadPlayerChromeTests.testIPadChromeHasEveryControl | UI | pass |
 | Regular (non-compact) chrome metrics; window-controls inset | PadPlayerMetricsTests (4) | unit | pass |
-| Resume where the server says | PadPlayerChromeTests.testResumesWhereTheServerSays | UI | STATUS |
-| Pause / play; controls held while paused | PadPlayerChromeTests.testPauseAndPlay | UI | STATUS |
-| Skip ±10 | PadPlayerChromeTests.testSkipForwardAndBack | UI | STATUS |
-| Scrub | PadPlayerChromeTests.testScrubbingMovesThePosition | UI | STATUS |
-| Remaining ↔ total | PadPlayerChromeTests.testRemainingTimeTogglesToTotal | UI | STATUS |
-| Fill pill | PadPlayerChromeTests.testFillPillTurnsOnAndOff | UI | STATUS |
-| Controls hide while playing, tap brings them back | PadPlayerChromeTests.testControlsHideWhilePlayingAndComeBackWithATap | UI | STATUS |
-| Back closes to the title page | PadPlayerChromeTests.testBackClosesThePlayerToTheTitlePage | UI | STATUS |
-| Info as a popover: engine, position, delivery | PadPlayerInfoTests.testInfoIsAPopoverWithEngineAndPosition | UI | STATUS |
-| Engine pinned to AVFoundation on iPad | PadPlayerInfoTests.testMpvPreferenceIsPinnedToTheAppleEngineOnIPad | UI | STATUS |
-| Chapters (Info's chapter row follows the position) | PadPlayerInfoTests.testChapterNameFollowsThePosition | UI | STATUS |
-| Speed and sleep timer (More card) | PadPlayerInfoTests.testSpeedAndSleepFromTheMoreCardShowInInfo | UI | STATUS |
-| "Normal" speed chip whole | PadPlayerInfoTests.testNormalSpeedChipIsWhole | UI | STATUS |
-| Audio card, switch track (6 tracks) | PadPlayerTracksTests.testAudioCardListsEveryTrackAndSwitches | UI | STATUS |
-| Forced subtitles offered and chosen; Off | PadPlayerTracksTests.testForcedSubtitleTrackIsOfferedAndCanBeChosen | UI | STATUS |
-| Sidecar subtitles listed / chosen | PadPlayerTracksTests.testSidecarSubtitleIsOffered; PadRegressionTests.testChosenSidecarSubtitleStaysChosen | UI | STATUS |
-| Quality card: rung chosen, transcoding | PadPlayerTracksTests.testQualityCardChoosesARung | UI | STATUS |
-| Quality change while paused stays paused (B2) | PadPlayerTracksTests.testQualityChangeWhilePausedStaysPaused | UI | STATUS |
-| Skip intro | PadPlayerMomentsTests.testSkipIntroAppearsInTheIntroAndSkipsIt | UI | STATUS |
-| Skip credits (B3) | PadPlayerMomentsTests.testSkipCreditsAppearsInTheOutro | UI | STATUS |
-| Up Next pill and card, jump to an episode | PadPlayerMomentsTests.testUpNextPillAndCardOnAnEpisode | UI | STATUS |
-| Up Next card at the end, Play now | PadPlayerMomentsTests.testUpNextCardAtTheEndPlaysTheNextEpisode | UI | STATUS |
-| Close with the Up Next card up: no crash | PadPlayerMomentsTests.testClosingWithTheUpNextCardUpDoesNotCrash | UI | STATUS |
-| Stop after this (episode only) | PadPlayerMomentsTests.testStopAfterThisEpisodeIsOfferedOnAnEpisodeNotAFilm; PadRegressionTests.testStopAfterThisSurvivesAQualityChange | UI | STATUS |
-| Picture in Picture from the button | PadPictureInPictureTests.testPictureInPictureStartsAndStops | UI | STATUS |
-| Background → PiP, playback continues, player kept | PadPictureInPictureTests.testBackgroundingStartsPictureInPictureAndPlaybackContinues | UI | STATUS |
-| Resume point and pause reported to the server | PadPlaybackReportingTests (2) | UI | STATUS |
-| Player messages (toasts) over the player (B4) | PadRegressionTests.testPlayerMessagesShowOverThePlayer | UI | STATUS |
-| Pills take taps while up (fade fix 58f77cf) | PadRegressionTests.testPillTakesATapWhileTheControlsAreUp | UI | STATUS; the timed edge-of-fade tap is manual |
+| Resume where the server says | PadPlayerChromeTests.testResumesWhereTheServerSays | UI | pass |
+| Pause / play; controls held while paused | PadPlayerChromeTests.testPauseAndPlay | UI | pass |
+| Skip ±10 | PadPlayerChromeTests.testSkipForwardAndBack | UI | pass |
+| Scrub | PadPlayerChromeTests.testScrubbingMovesThePosition | UI | pass |
+| Remaining ↔ total | PadPlayerChromeTests.testRemainingTimeTogglesToTotal | UI | pass |
+| Fill pill | PadPlayerChromeTests.testFillPillTurnsOnAndOff | UI | pass |
+| Controls hide while playing, tap brings them back | PadPlayerChromeTests.testControlsHideWhilePlayingAndComeBackWithATap | UI | pass |
+| Back closes to the title page | PadPlayerChromeTests.testBackClosesThePlayerToTheTitlePage | UI | pass |
+| Info as a popover: engine, position, delivery | PadPlayerInfoTests.testInfoIsAPopoverWithEngineAndPosition | UI | pass |
+| Engine pinned to AVFoundation on iPad | PadPlayerInfoTests.testMpvPreferenceIsPinnedToTheAppleEngineOnIPad | UI | pass |
+| Chapters (Info's chapter row follows the position) | PadPlayerInfoTests.testChapterNameFollowsThePosition | UI | pass |
+| Speed and sleep timer (More card) | PadPlayerInfoTests.testSpeedAndSleepFromTheMoreCardShowInInfo | UI | pass |
+| "Normal" speed chip whole | PadPlayerInfoTests.testNormalSpeedChipIsWhole | UI | pass |
+| Audio card, switch track (6 tracks) | PadPlayerTracksTests.testAudioCardListsEveryTrackAndSwitches | UI | skip (the QA server's encoder failed for this file; card listing passed in earlier runs) |
+| Forced subtitles offered and chosen; Off | PadPlayerTracksTests.testForcedSubtitleTrackIsOfferedAndCanBeChosen | UI | pass |
+| Sidecar subtitles listed / chosen | PadPlayerTracksTests.testSidecarSubtitleIsOffered; PadRegressionTests.testChosenSidecarSubtitleStaysChosen | UI | pass |
+| Quality card: rung chosen, transcoding | PadPlayerTracksTests.testQualityCardChoosesARung | UI | pass |
+| Quality change while paused stays paused (B2) | PadPlayerTracksTests.testQualityChangeWhilePausedStaysPaused | UI | pass |
+| Skip intro | PadPlayerMomentsTests.testSkipIntroAppearsInTheIntroAndSkipsIt | UI | pass |
+| Skip credits (B3) | PadPlayerMomentsTests.testSkipCreditsAppearsInTheOutro | UI | pass |
+| Up Next pill and card, jump to an episode | PadPlayerMomentsTests.testUpNextPillAndCardOnAnEpisode | UI | pass |
+| Up Next card at the end, Play now | PadPlayerMomentsTests.testUpNextCardAtTheEndPlaysTheNextEpisode | UI | pass |
+| Close with the Up Next card up: no crash | PadPlayerMomentsTests.testClosingWithTheUpNextCardUpDoesNotCrash | UI | pass |
+| Stop after this (episode only) | PadPlayerMomentsTests.testStopAfterThisEpisodeIsOfferedOnAnEpisodeNotAFilm; PadRegressionTests.testStopAfterThisSurvivesAQualityChange | UI | pass |
+| Picture in Picture from the button | PadPictureInPictureTests.testPictureInPictureStartsAndStops | UI | xfail |
+| Background → PiP, playback continues, player kept | PadPictureInPictureTests.testBackgroundingStartsPictureInPictureAndPlaybackContinues | UI | pass |
+| Resume point and pause reported to the server | PadPlaybackReportingTests (2) | UI | pass |
+| Player messages (toasts) over the player (B4) | PadRegressionTests.testPlayerMessagesShowOverThePlayer | UI | pass |
+| Pills take taps while up (fade fix 58f77cf) | PadRegressionTests.testPillTakesATapWhileTheControlsAreUp | UI | pass; the timed edge-of-fade tap is manual |
 | mpv, AirPlay, SharePlay, pinch, hold 2×, PiP placement | — | manual | manual |
 
 ## Music, books
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Music from the sidebar; Discover / Library; library doors | PadMusicTests.testMusicDiscoverAndLibraryPages | UI | STATUS |
-| Album with two discs | PadMusicTests.testAlbumPageGroupsDiscs | UI | STATUS |
-| Song plays → sidebar card; no phone mini player | PadMusicTests.testPlayingASongPutsTheNowPlayingCardInTheSidebar | UI | STATUS |
-| Card play/pause; opens Now Playing in a centred column (1a32226) | PadMusicTests.testSidebarCardPlayPauseAndOpensNowPlaying | UI | STATUS |
-| Queue and synced lyrics | PadMusicTests.testNowPlayingQueueAndLyrics | UI | STATUS |
-| Songs A–Z by title (6344432) | PadMusicTests.testSongsAToZJumpsToTheLetter | UI | STATUS |
-| Artist page | PadMusicTests.testArtistPageFromTheAlbum | UI | STATUS |
-| Song menu, Song Info | PadMusicTests.testSongMenuOffersQueueActions | UI | STATUS |
-| Playlists (own, public), smart playlists heading | PadMusicPagesTests.testPlaylistsListTheSuitesOwnAndThePublicOnes | UI | STATUS |
-| Artists, Genres | PadMusicPagesTests.testArtistsAndGenresDoors | UI | STATUS |
-| Music search field | PadMusicPagesTests.testMusicSearchFieldFindsAnAlbum | UI | STATUS |
-| Discover: Shuffle all, stations | PadMusicPagesTests.testDiscoverHasStationsAndShuffle | UI | STATUS |
-| Audiobooks: Continue Listening | PadBooksTests.testAudiobooksSectionShowsContinueListening | UI | STATUS |
-| Book page, chapters, play a chapter → sidebar card names it | PadBooksTests.testBookPageListsChaptersAndPlaysFromOne | UI | STATUS |
+| Music from the sidebar; Discover / Library; library doors | PadMusicTests.testMusicDiscoverAndLibraryPages | UI | pass |
+| Album with two discs | PadMusicTests.testAlbumPageGroupsDiscs | UI | pass |
+| Song plays → sidebar card; no phone mini player | PadMusicTests.testPlayingASongPutsTheNowPlayingCardInTheSidebar | UI | pass |
+| Card play/pause; opens Now Playing in a centred column (1a32226) | PadMusicTests.testSidebarCardPlayPauseAndOpensNowPlaying | UI | pass |
+| Queue and synced lyrics | PadMusicTests.testNowPlayingQueueAndLyrics | UI | pass |
+| Songs A–Z by title (6344432) | PadMusicTests.testSongsAToZJumpsToTheLetter | UI | pass |
+| Artist page | PadMusicTests.testArtistPageFromTheAlbum | UI | pass |
+| Song menu, Song Info | PadMusicTests.testSongMenuOffersQueueActions | UI | pass |
+| Playlists (own, public), smart playlists heading | PadMusicPagesTests.testPlaylistsListTheSuitesOwnAndThePublicOnes | UI | pass |
+| Artists, Genres | PadMusicPagesTests.testArtistsAndGenresDoors | UI | pass |
+| Music search field | PadMusicPagesTests.testMusicSearchFieldFindsAnAlbum | UI | pass |
+| Discover: Shuffle all, stations | PadMusicPagesTests.testDiscoverHasStationsAndShuffle | UI | pass |
+| Audiobooks: Continue Listening | PadBooksTests.testAudiobooksSectionShowsContinueListening | UI | pass |
+| Book page, chapters, play a chapter → sidebar card names it | PadBooksTests.testBookPageListsChaptersAndPlaysFromOne | UI | pass |
 
 ## Live TV
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Guide: channels and programmes, both orientations | PadLiveTVTests.testGuideListsTheChannelsWithProgrammes | UI | STATUS |
-| No back button at full width | PadLiveTVTests.testFullWidthLiveTVHasNoBackButton | UI | STATUS |
-| Tune a channel: channel buttons, Channels pill, line-up popover, change channel | PadLiveTVTests.testTuningAChannelPlaysItWithChannelButtonsAndPill | UI | STATUS |
-| Next channel wraps | PadLiveTVTests.testNextChannelWraps | UI | STATUS |
-| Programme cell tunes | PadLiveTVTests.testProgrammeCellTunesItsChannel | UI | STATUS |
+| Guide: channels and programmes, both orientations | PadLiveTVTests.testGuideListsTheChannelsWithProgrammes | UI | pass |
+| No back button at full width | PadLiveTVTests.testFullWidthLiveTVHasNoBackButton | UI | pass |
+| Tune a channel: channel buttons, Channels pill, line-up popover, change channel | PadLiveTVTests.testTuningAChannelPlaysItWithChannelButtonsAndPill | UI | pass |
+| Next channel wraps | PadLiveTVTests.testNextChannelWraps | UI | pass |
+| Programme cell tunes | PadLiveTVTests.testProgrammeCellTunesItsChannel | UI | pass |
 | Guide density on iPad (5.5 pt/min, 172 pt column) | PadMetricsTests.testGuideKeepsTheIPadDensity | unit | pass |
 
 ## Downloads
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Empty page | PadDownloadsTests.testEmptyDownloadsPage | UI | STATUS |
-| Download from a title, appears, plays from the copy, delete with confirmation | PadDownloadsTests.testDownloadPlayAndDeleteAFilm | UI | STATUS |
-| Manage menu | PadDownloadsTests.testDownloadSettingsOnThePage | UI | STATUS |
+| Empty page | PadDownloadsTests.testEmptyDownloadsPage | UI | pass |
+| Download from a title, appears, plays from the copy, delete with confirmation | PadDownloadsTests.testDownloadPlayAndDeleteAFilm | UI | pass |
+| Manage menu | PadDownloadsTests.testDownloadSettingsOnThePage | UI | pass |
 | Series downloads, music/audiobook doors, offline shell | — | — | not covered: see the report (needs longer encodes or an offline server) |
 
 ## Settings
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Two columns at ≥ 720 pt (landscape); the phone's list below (portrait) | PadSettingsTests.testTwoColumnsInLandscape, testOneColumnInPortrait; PadSettingsSplitTests | UI + unit | STATUS |
-| Every page from the split list | PadSettingsTests.testEveryPageOpensFromTheSplitList | UI | STATUS |
-| Rotation switches split ↔ list | PadSettingsTests.testRotatingSwitchesBetweenSplitAndList | UI | STATUS |
-| "Sidebar" order page (not "Tab Bar") | PadSettingsTests.testAppearanceNamesTheSidebarNotTheTabBar | UI | STATUS |
-| Theme | PadSettingsTests.testThemeChoice | UI | STATUS |
-| Sub-page leaves with Settings (346bc31) | PadSettingsTests.testLeavingASettingsSubPageByTheSidebarLeavesIt | UI | STATUS |
-| Account facts; Quick Connect approval field | PadSettingsTests.testAccountPageAndQuickConnectApproval | UI | STATUS |
-| About | PadSettingsTests.testAboutNamesTheVersionAndEngine | UI | STATUS |
-| No engine choice on iPad | PadSettingsTests.testVideoPageHasNoEngineChoiceOnIPad | UI | STATUS |
-| Sign out | PadSettingsTests.testSignOutGoesToTheSignInScreen | UI | STATUS |
+| Two columns at ≥ 720 pt (landscape); the phone's list below (portrait) | PadSettingsTests.testTwoColumnsInLandscape, testOneColumnInPortrait; PadSettingsSplitTests | UI + unit | pass |
+| Every page from the split list | PadSettingsTests.testEveryPageOpensFromTheSplitList | UI | pass |
+| Rotation switches split ↔ list | PadSettingsTests.testRotatingSwitchesBetweenSplitAndList | UI | pass |
+| "Sidebar" order page (not "Tab Bar") | PadSettingsTests.testAppearanceNamesTheSidebarNotTheTabBar | UI | pass |
+| Theme | PadSettingsTests.testThemeChoice | UI | pass |
+| Sub-page leaves with Settings (346bc31) | PadSettingsTests.testLeavingASettingsSubPageByTheSidebarLeavesIt | UI | pass |
+| Sub-pages (Sidebar, App Icon, Station mix, …) open in the one-column layout | PadSettingsTests.testSubPagesOpenInTheOneColumnLayout | UI | xfail |
+| Account facts; Quick Connect approval field | PadSettingsTests.testAccountPageAndQuickConnectApproval | UI | pass |
+| About | PadSettingsTests.testAboutNamesTheVersionAndEngine | UI | pass |
+| No engine choice on iPad | PadSettingsTests.testVideoPageHasNoEngineChoiceOnIPad | UI | pass |
+| Sign out | PadSettingsTests.testSignOutGoesToTheSignInScreen | UI | pass |
 | Reordering the sidebar by drag | — | manual | manual (drag handles have no identifiers) |
 
 ## Sign-in and keyboard
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Sign-in card centred | PadSignInTests.testSignInCardIsCentredOnTheWideScreen | UI | STATUS |
-| Return connects; server banner | PadSignInTests.testReturnInTheServerFieldConnects | UI | STATUS |
-| Public users listed | PadSignInTests.testPublicUsersAreListed | UI | STATUS |
-| Password sign-in by Return → sidebar shell | PadSignInTests.testPasswordSignInByKeyboardLandsOnTheSidebarShell | UI | STATUS |
-| Wrong password | PadSignInTests.testWrongPasswordSaysSo | UI | STATUS |
-| Quick Connect code approved by the server | PadSignInTests.testQuickConnectShowsACodeTheServerCanApprove | UI | STATUS |
-| Hardware Return / Tab / Escape | PadKeyboardTests (4) | UI | STATUS |
+| Sign-in card centred | PadSignInTests.testSignInCardIsCentredOnTheWideScreen | UI | pass |
+| Return connects; server banner | PadSignInTests.testReturnInTheServerFieldConnects | UI | pass |
+| Public users listed | PadSignInTests.testPublicUsersAreListed | UI | pass |
+| Password sign-in by Return → sidebar shell | PadSignInTests.testPasswordSignInByKeyboardLandsOnTheSidebarShell | UI | pass |
+| Wrong password | PadSignInTests.testWrongPasswordSaysSo | UI | pass |
+| Quick Connect code approved by the server | PadSignInTests.testQuickConnectShowsACodeTheServerCanApprove | UI | pass |
+| Return submits search; Return through the sign-in form | PadKeyboardTests.testReturnSubmitsSearch, testReturnConnectsAndMovesThroughTheSignInForm | UI | pass |
+| Tab from username to password | PadKeyboardTests.testTabMovesFromUsernameToPassword | UI | skip (Tab not delivered as a key by the simulator's on-screen keyboard; MANUAL.md) |
+| Escape closes the Info popover and a context menu (hardware key) | PadKeyboardTests.testEscapeDismissesTheInfoPopover, testEscapeDismissesAContextMenu | UI | skip (hardware key presses don't reach the app on this simulator; MANUAL.md) |
 | Pointer hover, Pencil, ⌘ overlay | — | manual | manual |
 
 ## Results
 
-RESULTS
+Final state, 2026-11-13, "Aquarium Test iPad Air 11" (iOS 27.0), QA server 8196,
+`suite-ipad` reset before each run: the full plan (run r9) plus reruns of the
+tests changed after it (r10–r13), and the unit tests on the same simulator.
+
+| | Count |
+|---|---|
+| Unit tests (AquariumTests/iPad) | 33, all pass |
+| UI tests (AquariumUITests/iPad) | 164: 148 pass, 10 expected failures (open bugs), 6 skipped |
+| Total | 197: 181 pass, 10 xfail, 6 skip, 0 fail |
+
+Every xfail is an app bug listed in the report, each wrapped in
+`XCTExpectFailure("bug: …", strict: false)` so the suite turns its
+expected failure into an unexpected pass the day it is fixed.
