@@ -2678,7 +2678,17 @@ function toggleShortcuts(): void {
   const close = openDialog({
     title: "Keyboard shortcuts",
     body,
-    actions: [{ label: "Close", primary: true }],
+    // Close does not run onDismiss (that is Escape and the scrim), so it
+    // clears the closer itself, or the next "?" would only clear it.
+    actions: [
+      {
+        label: "Close",
+        primary: true,
+        run: () => {
+          shortcutsOpen = null;
+        },
+      },
+    ],
     onDismiss: () => {
       shortcutsOpen = null;
     },

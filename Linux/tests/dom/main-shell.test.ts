@@ -581,12 +581,7 @@ describe("the shortcut sheet", () => {
     expect(document.querySelector(".dialog")).toBeNull();
   });
 
-  // BUG: the sheet's Close button closes the dialog without running its
-  // onDismiss (src/ui.ts openDialog runs onDismiss only for Escape and the
-  // scrim), and toggleShortcuts (src/main.ts:2686) keeps `shortcutsOpen` set,
-  // so the next "?" only clears that stale closer and opens nothing: the
-  // sheet takes two presses to come back after Close.
-  it.fails("opens again on the first ? after being closed with its Close button", async () => {
+  it("opens again on the first ? after being closed with its Close button", async () => {
     await bootShell();
     key("?");
     click([...document.querySelectorAll<HTMLButtonElement>(".dialog button")].find((b) => b.textContent === "Close")!);
