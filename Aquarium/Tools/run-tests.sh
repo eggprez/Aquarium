@@ -13,7 +13,7 @@
 #            Aquarium is running (the test build would quit it).
 #   tv       AquariumUITests (TestPlans/TV) on the test Apple TV.
 #   watch    AquariumWatchUITests (TestPlans/Watch) on the test watch,
-#            paired with the test iPhone 17 (or the pair named by
+#            paired with its own "Aquarium Test iPhone B" (or the pair named by
 #            AQUARIUM_TEST_WATCH / AQUARIUM_TEST_WATCH_PHONE).
 #   watchunit  AquariumWatchTests (WatchUnit) on the test watch only.
 #   all      every one of the above, in that order.
@@ -120,8 +120,13 @@ run() {
   local scheme=$1 plan=$2 label=$3 dest=$4; shift 4
   local bundle="$out/$plan-$label.xcresult" log="$out/$plan-$label.log"
   echo "== $plan on $label"
+  # TEST_RUNNER_ hands the QA folder to the UI-test runner (the Mac runner is
+  # sandboxed, so its own home is not this one); no diagnostics after a failure,
+  # which otherwise costs up to 10 minutes of simctl diagnose.
+  TEST_RUNNER_AQUARIUM_QA_DIR="$QA_DIR" \
   xcodebuild test -scheme "$scheme" -testPlan "$plan" -destination "$dest" \
-    -resultBundlePath "$bundle" "${only[@]}" "$@" "${extra[@]}" > "$log" 2>&1
+    -resultBundlePath "$bundle" -collect-test-diagnostics never \
+    "${only[@]}" "$@" "${extra[@]}" > "$log" 2>&1
   local rc=$?
   local line
   line=$(grep -E "Executed [0-9]+ tests?|\*\* TEST (SUCCEEDED|FAILED) \*\*" "$log" | tail -2 | tr '\n' ' ')
@@ -146,7 +151,7 @@ do_unit() {
   tv=$(sim "Aquarium Test Apple TV" Apple-TV-4K-3rd-generation-4K $TV_RT) && boot "$tv"
   run Aquarium Unit AppleTV "id=$tv" "${SIM_SIGN[@]}"
   if (( do_mac )); then
-    if pgrep -x Aquarium > /dev/null; then
+    if pgrep -f "Aquarium.app/Contents/MacOS/Aquarium" > /dev/null; then
       echo "Unit Mac: skipped, Aquarium is running on this Mac" | tee -a "$summary"
     else
       run Aquarium Unit Mac "platform=macOS" "${MAC_SIGN[@]}"
@@ -192,7 +197,7 @@ do_ipad() {
 }
 
 do_mac() {
-  if pgrep -x Aquarium > /dev/null; then
+  if pgrep -f "Aquarium.app/Contents/MacOS/Aquarium" > /dev/null; then
     echo "Mac: refused, Aquarium is running on this Mac (the test build would quit it). Quit it and run again." | tee -a "$summary"
     failures=$((failures + 1))
     return
@@ -209,14 +214,16 @@ do_tv() {
   xcrun simctl terminate "$udid" scottai.FellyJin 2>/dev/null
 }
 
-# The test watch, paired with the test iPhone 17; prints the watch's udid.
+# The test watch, paired with its own test iPhone B; prints the watch's udid.
 # AQUARIUM_TEST_WATCH and AQUARIUM_TEST_WATCH_PHONE name another pair (made
 # the same way if missing), so a second run can have a watch of its own:
 #   AQUARIUM_TEST_WATCH="Aquarium Test Watch B" AQUARIUM_TEST_WATCH_PHONE="Aquarium Test iPhone B" Tools/run-tests.sh watch
 watch_pair() {
   local phone watch
-  phone=$(sim "${AQUARIUM_TEST_WATCH_PHONE:-Aquarium Test iPhone 17}" iPhone-17 $IOS_RT) || return 1
-  watch=$(sim "${AQUARIUM_TEST_WATCH:-Aquarium Test Watch 46mm}" Apple-Watch-Series-12-46mm $WATCH_RT) || return 1
+  # Its own iPhone: unit tests on a phone paired with the test watch install
+  # Aquarium there, and the phone's signed-out context then signs the watch out.
+  phone=$(sim "${AQUARIUM_TEST_WATCH_PHONE:-Aquarium Test iPhone B}" iPhone-17 $IOS_RT) || return 1
+  watch=$(sim "${AQUARIUM_TEST_WATCH:-Aquarium Test Watch B}" Apple-Watch-Series-12-46mm $WATCH_RT) || return 1
   if ! xcrun simctl list pairs | grep -q "$watch"; then
     xcrun simctl pair "$watch" "$phone" > /dev/null 2>&1 || echo "warning: could not pair the test watch" >&2
   fi

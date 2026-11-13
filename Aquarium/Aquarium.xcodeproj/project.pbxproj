@@ -199,6 +199,22 @@
 			);
 			target = FE11A5D00000000000000840 /* AquariumUITests */;
 		};
+		FE11A5D00000000000000963 /* Exceptions for "Mac" folder in "AquariumUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				COVERAGE.md,
+				MANUAL.md,
+			);
+			target = FE11A5D00000000000000840 /* AquariumUITests */;
+		};
+		FE11A5D00000000000000964 /* Exceptions for "iPhone" folder in "AquariumUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				COVERAGE.md,
+				MANUAL.md,
+			);
+			target = FE11A5D00000000000000840 /* AquariumUITests */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -238,6 +254,9 @@
 		};
 		FE11A5D00000000000000813 /* iPhone */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				FE11A5D00000000000000964 /* Exceptions for "iPhone" folder in "AquariumUITests" target */,
+			);
 			path = iPhone;
 			sourceTree = "<group>";
 		};
@@ -251,6 +270,9 @@
 		};
 		FE11A5D00000000000000815 /* Mac */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				FE11A5D00000000000000963 /* Exceptions for "Mac" folder in "AquariumUITests" target */,
+			);
 			path = Mac;
 			sourceTree = "<group>";
 		};

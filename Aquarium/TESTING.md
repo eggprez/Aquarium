@@ -256,14 +256,30 @@ exception; anything else watch tests need goes in `WatchTests/`.
   `~/Library/Preferences/scottai.FellyJin.uitest.plist` and
   `~/Library/{Application Support,Caches}/AquariumUITest`; the real app's
   container is never opened. Mac unit tests pass this way.
-- **Mac UI testing needs Automation Mode.** As of 2026-11-13 the Mac UI runner
-  stops with "Timed out while enabling automation mode": macOS asks for an
-  administrator's approval to let XCTest drive the UI, and a headless run can't
-  answer. The owner of the Mac has to allow it once, either by running a Mac UI
-  test from Xcode and approving the prompt, or with
-  `sudo automationmodetool enable-automationmode-without-authentication`
-  (a security setting: the person, not an agent, makes that change). Until
-  then the Mac UI tests build but don't run.
+- **Mac UI testing needs Automation Mode.** Without it the runner stops with
+  "Timed out while enabling automation mode". On 2026-11-13 the Mac's owner ran
+  `sudo automationmodetool enable-automationmode-without-authentication`, so
+  `/var/db/com.apple.dt.automationmode/no-auth-required` exists and runs need no
+  approval. That is a security setting: the person, not an agent, changes it.
+  The script refuses the Mac suite while the real app
+  (`Aquarium.app/Contents/MacOS/Aquarium`) is running; simulator copies don't count.
+- **QA folder in the Mac runner.** The Mac UI runner is sandboxed, so its home
+  isn't yours; the script passes `TEST_RUNNER_AQUARIUM_QA_DIR`. Without it every
+  Mac UI test skips. Pass it yourself when calling xcodebuild directly.
+- **No recordings, no diagnostics.** UI plans set `uiTestingScreenshotsLifetime`
+  to `keepNever` (otherwise each test is screen-recorded and fetching it costs
+  ~2 min per test), and the script passes `-collect-test-diagnostics never`
+  (otherwise a failure costs up to 10 min of `simctl diagnose`).
+- **Watch pair.** The watch suites use their own pair, "Aquarium Test Watch B" +
+  "Aquarium Test iPhone B". Never run phone unit tests on the watch's phone:
+  that installs Aquarium there, and its signed-out context signs the watch out;
+  only unpairing and erasing both clears it.
+- **Sessions.** Jellyfin 12.2 returns nothing for `/Sessions?ControllableByUserId`
+  for Aquarium; read `/Sessions` and pick the app's session yourself. Sessions
+  left by earlier tests stay "playing", so match by session id or position.
+- **Notes files.** Each platform folder's COVERAGE.md and MANUAL.md are excluded
+  from the UI-test target in project.pbxproj; a new notes file in a test folder
+  needs the same exception, or the build fails with "Multiple commands produce".
 - **Signing on simulators.** A build with `CODE_SIGNING_ALLOWED=NO` installed on
   a simulator that has a real sign-in wipes that sign-in (keychain access goes
   with the entitlements). The script only uses its own simulators, and test mode
