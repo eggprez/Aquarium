@@ -88,7 +88,7 @@ playback continues in the background. By hand:
 
 | Check | What should happen | Source |
 |---|---|---|
-| PiP window position | It does not land on the AirPlay / PiP / "…" buttons | QA 2026-11-11 smaller issues |
+| PiP window position | Start PiP from the player's button, then drag the window to each corner and back. Where it first lands is iPadOS's choice (the corner it was last left in; top trailing on a fresh device), and no API sets it: if it lands on the AirPlay / PiP / "…" buttons, record it, and check that "Leave Picture in Picture" can still be reached by moving the window. `PadPictureInPictureTests.testPictureInPictureStartsAndStops` keeps this as an expected failure | QA 2026-11-11 smaller issues; iPad suite 2026-11-13 |
 | Return to the app while PiP is up | The video comes back into the player (today it stays in PiP until "Leave Picture in Picture"; recorded as a design choice) | QA 2026-11-11 |
 | Close PiP with its own close button | Returns to the player paused, position saved | ipad-qa-findings.md |
 

@@ -513,7 +513,12 @@ final class PadPictureInPictureTests: PadPlayerTestCase {
             self.showControlsQuietly()
             return !pip.label.contains("Leave")
         }
-        XCTExpectFailure("bug: the PiP window covers the player's Leave Picture in Picture button", strict: false)
+        // Not the app's to fix (2026-11-13): iPadOS alone places the PiP
+        // window (AVPictureInPictureController has no position, and the
+        // window goes to the corner it was last left in, top trailing on a
+        // fresh simulator). The app could only move its own controls while
+        // PiP is up, a design choice; MANUAL.md has the check.
+        XCTExpectFailure("system: the PiP window, placed by iPadOS, covers the player's Leave Picture in Picture button", strict: false)
         XCTAssertTrue(stopped, "Leave Picture in Picture stops it")
     }
 
