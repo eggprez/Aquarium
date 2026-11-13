@@ -43,10 +43,26 @@ enum TestMode {
         if let server = TestLaunch.env(TestLaunch.serverEnv),
            let user = TestLaunch.env(TestLaunch.userEnv),
            let password = ProcessInfo.processInfo.environment[TestLaunch.passwordEnv] {
-            Task { @MainActor in await signIn(server: server, user: user, password: password) }
+            Task { @MainActor in
+                await signIn(server: server, user: user, password: password)
+                openLaunchLink()
+            }
+        } else {
+            Task { @MainActor in openLaunchLink() }
         }
         #endif
     }
+
+    #if DEBUG
+    /// `TestLaunch.linkEnv`: the link a test asked to open, handed to the app
+    /// the way a Top Shelf cell's link is, once signed in.
+    @MainActor
+    private static func openLaunchLink() {
+        guard let raw = TestLaunch.env(TestLaunch.linkEnv), let url = URL(string: raw) else { return }
+        log.notice("UI test mode: opening \(raw, privacy: .public)")
+        AppModel.shared.handle(url, fromApp: true)
+    }
+    #endif
 
     #if DEBUG
     /// The sign-in the sign-in screen would have made, with the same call.

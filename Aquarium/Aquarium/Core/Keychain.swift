@@ -189,7 +189,18 @@ enum Keychain {
             return query
         }
 
+        #if DEBUG
+        /// UI test mode keeps the household in the test defaults suite, like
+        /// the tokens (`TestKeychain`): the shared keychain outlives
+        /// `-AquariumTestReset`, and a test run's accounts would otherwise
+        /// greet every later sign-in screen on that simulator.
+        private static func testKey(_ acct: String) -> String { "uitest_household.\(acct)" }
+        #endif
+
         static func store(_ data: Data, _ acct: String) {
+            #if DEBUG
+            if TestRuntime.isUITest { UserDefaults.standard.set(data, forKey: testKey(acct)); return }
+            #endif
             var item = query(acct)
             SecItemDelete(item as CFDictionary)
             item[kSecValueData as String] = data
@@ -198,6 +209,9 @@ enum Keychain {
         }
 
         static func read(_ acct: String) -> Data? {
+            #if DEBUG
+            if TestRuntime.isUITest { return UserDefaults.standard.data(forKey: testKey(acct)) }
+            #endif
             var item = query(acct)
             item[kSecReturnData as String] = true
             item[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -207,6 +221,9 @@ enum Keychain {
         }
 
         static func delete(_ acct: String) {
+            #if DEBUG
+            if TestRuntime.isUITest { UserDefaults.standard.removeObject(forKey: testKey(acct)); return }
+            #endif
             SecItemDelete(query(acct) as CFDictionary)
         }
 
