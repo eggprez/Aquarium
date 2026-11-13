@@ -124,6 +124,13 @@ extension PlayerModel {
             returnsToMPV = false
         }
 
+        // A rung asked for by hand on the way in holds for the sitting; any
+        // other fresh start drops it. Reopens of the title (a quality, a
+        // track, a recovery) and the next episode keep what there was.
+        if !meta.inherited, self.item?.Id != item.Id || !isActive {
+            qualityPinned = options.bitrateIsChosen
+        }
+
         var opts = options
         // A version belongs to its title: one carried over from another (the
         // episode before, by way of `options`) is not this one's.
@@ -913,7 +920,7 @@ extension PlayerModel {
     }
 
     var qualitySelection: QualitySelection {
-        if prefs.adaptiveQuality { return .auto }
+        if prefs.adaptiveQuality, !qualityPinned { return .auto }
         return isLocal ? .downloaded : .stream(currentBitrate)
     }
 
@@ -939,6 +946,9 @@ extension PlayerModel {
     /// download is about this title only — Auto would have picked it anyway,
     /// and a pinned rung still gives way to a download when a title opens.
     func chooseQuality(_ selection: QualitySelection) async {
+        // A choice made here is the preference from now on, as it always
+        // was; whatever the title page pinned gives way to it.
+        qualityPinned = false
         switch selection {
         case .auto:
             prefs.adaptiveQuality = true

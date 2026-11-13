@@ -118,12 +118,9 @@ final class PadDetailTests: PadUITestCase {
         showControls()
         let pill = app.button(TestID.Player.pillQuality)
         pill.waitToExist(15)
-        // It does play at the rung (the pill reads "Auto, playing 2.5 Mbps"),
-        // but the player stays on Auto, which is free to climb away from it:
-        // `PlayerModel.qualitySelection` (PlayerModel+Playback.swift:885)
-        // reads only `prefs.adaptiveQuality`, and the title page's
-        // `play(options: StreamOptions(maxBitrate:))` leaves it on.
-        XCTExpectFailure("bug: 'Play at a set quality' from a title page plays the rung but stays on Auto", strict: false)
+        // Found 2026-11-13: it played at the rung (the pill read "Auto,
+        // playing 2.5 Mbps") but stayed on Auto, free to climb away from it.
+        // The rung is now pinned for the sitting (`PlayerModel.qualityPinned`).
         XCTAssertFalse(pill.label.contains("Auto"), "the pill holds the rung chosen: \(pill.label)")
         closePlayer()
     }

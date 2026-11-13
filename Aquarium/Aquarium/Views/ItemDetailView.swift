@@ -1489,7 +1489,7 @@ struct ItemDetailView: View {
                 Task {
                     await player.play(
                         item: playable,
-                        options: StreamOptions(maxBitrate: choice.maxBitrate)
+                        options: StreamOptions(maxBitrate: choice.maxBitrate, bitrateIsChosen: true)
                     )
                 }
             }

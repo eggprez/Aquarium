@@ -190,6 +190,12 @@ final class PlayerModel {
     /// that same title — quality, track, recovery — reports progress
     /// instead. See `reportStreamOpened`.
     var startReportedItemId: String?
+    /// A quality chosen on the way in — the title page's Play at a Set
+    /// Quality — held for this sitting: the player shows that rung rather
+    /// than Auto, and Auto doesn't climb away from it. The saved preference
+    /// is left as it was, so the next title opens the way it always would.
+    /// See `qualitySelection` and `adaptsQuality`.
+    var qualityPinned = false
     /// The title whose stream failed near its end and was reopened reading
     /// only a little way ahead. See `recoverFromMissingTail`.
     var tailRetryItemId: String?
