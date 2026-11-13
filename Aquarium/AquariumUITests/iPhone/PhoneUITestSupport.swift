@@ -161,9 +161,12 @@ extension PhoneUITestCase {
     }
 
     func openPlayerMore(file: StaticString = #filePath, line: UInt = #line) {
-        showControls(file: file, line: line)
-        app.button(TestID.Player.more).tapNow(10, file: file, line: line)
-        app.element(TestID.Player.cardMore).waitToExist(10, file: file, line: line)
+        for _ in 0..<3 {
+            showControls(file: file, line: line)
+            app.button(TestID.Player.more).tapNow(10, file: file, line: line)
+            if app.element(TestID.Player.cardMore).waitForExistence(timeout: 4) { return }
+        }
+        app.element(TestID.Player.cardMore).waitToExist(2, file: file, line: line)
     }
 
     /// Close the player with its back button and wait for it to go.
@@ -187,7 +190,7 @@ extension PhoneUITestCase {
         let end = Date().addingTimeInterval(timeout)
         var last: Double?
         while Date() < end {
-            if let s = try? api.sessions().first(where: { $0.nowPlayingId == itemId }), let p = s.positionSeconds {
+            if let s = PhoneSessions.current(api, itemId), let p = s.positionSeconds {
                 last = p
                 if p >= seconds { return p }
             }
@@ -310,6 +313,18 @@ extension PhoneUITestCase {
         let byLabel = app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
         _ = byLabel.waitForExistence(timeout: timeout)
         return byLabel
+    }
+}
+#endif
+
+#if os(iOS)
+enum PhoneSessions {
+    /// Of the sessions playing `itemId`, the one that checked in last.
+    static func current(_ api: JellyfinAPI, _ itemId: String) -> JellyfinAPI.Session? {
+        let playing = ((try? api.sessions()) ?? []).filter { $0.nowPlayingId == itemId }
+        return playing.max { a, b in
+            (a.raw["LastPlaybackCheckIn"] as? String ?? "") < (b.raw["LastPlaybackCheckIn"] as? String ?? "")
+        }
     }
 }
 #endif

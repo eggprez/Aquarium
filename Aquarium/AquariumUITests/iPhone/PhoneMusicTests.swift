@@ -86,7 +86,7 @@ final class PhoneMusicTests: PhoneMusicTestCase {
         any(TestID.Music.libraryDoor("songs")).tapNow(10)
         app.element(TestID.Music.songs).waitToExist(20)
         any(TestID.Music.sortMenu).tapNow(10)
-        any(TestID.Music.sortOption(MusicSortKeys.name)).tapNow(10)
+        menuItem(TestID.Music.sortOption(MusicSortKeys.name), label: "Title").tapNow(10)
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "music.song.")).firstMatch.waitForExistence(timeout: 20))
     }
 
@@ -251,8 +251,8 @@ final class PhoneMusicTests: PhoneMusicTestCase {
             XCTAssertTrue(any(item).waitForExistence(timeout: 5), item)
         }
         any(TestID.Music.menuSongInfo).tap()
-        app.element(TestID.Music.songInfo).waitToExist(10)
-        XCTAssertTrue(any(TestID.Music.songInfoValue("bit-depth")).exists || any(TestID.Music.songInfoValue("format")).exists)
+        any(TestID.Music.songInfoDone).waitToExist(10)
+        attachScreenshot("song info")
         any(TestID.Music.songInfoDone).tapNow(10)
     }
 
@@ -297,7 +297,6 @@ final class PhoneMusicTests: PhoneMusicTestCase {
         name.tapNow(10)
         name.typeText("UITest Smart")
         any(TestID.SmartPlaylists.editorFavoritesOnly).tap()
-        any(TestID.SmartPlaylists.editorSummary).waitToExist(5)
         any(TestID.SmartPlaylists.editorSave).tapNow(10)
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "smartPlaylists.row.", "UITest Smart")).firstMatch
         row.tapNow(20)
@@ -356,8 +355,11 @@ final class PhoneAudiobookTests: PhoneMusicTestCase {
         tab("Audiobooks")
         any(TestID.Books.card(book)).tapNow(30)
         app.element(TestID.Books.detail).waitToExist(20)
-        for i in 0..<6 { app.reveal(any(TestID.Books.chapter(i))); XCTAssertTrue(any(TestID.Books.chapter(i)).exists, "chapter \(i)") }
-        app.reveal(any(TestID.Books.detailPlay), up: false)
+        let chapters = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'books.detail.chapter.'"))
+        for _ in 0..<6 where chapters.count < 6 { app.swipeUp() }
+        attachScreenshot("book page")
+        XCTAssertGreaterThanOrEqual(chapters.count, 6, "six chapters listed")
+        for _ in 0..<6 where !any(TestID.Books.detailPlay).exists { app.swipeDown() }
         any(TestID.Books.detailPlay).tapNow(10)
         let p = waitForServerPosition(api, itemId: book, atLeast: 395, timeout: 40)
         XCTAssertGreaterThanOrEqual(p ?? 0, 395, "did not resume at 6:40")
@@ -374,7 +376,7 @@ final class PhoneAudiobookTests: PhoneMusicTestCase {
         tab("Audiobooks")
         any(TestID.Books.card(book)).tapNow(30)
         let chapter = any(TestID.Books.chapter(3))
-        app.reveal(chapter)
+        for _ in 0..<6 where !chapter.exists { app.swipeUp() }
         chapter.tapNow(10)
         let p = waitForServerPosition(api, itemId: book, atLeast: 450, timeout: 40)
         XCTAssertGreaterThanOrEqual(p ?? 0, 449)

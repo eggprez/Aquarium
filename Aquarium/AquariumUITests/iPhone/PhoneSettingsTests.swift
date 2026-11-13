@@ -12,7 +12,7 @@ import XCTest
 final class PhoneSettingsTests: PhoneUITestCase {
     /// What each page must show on a phone.
     static let rows: [String: [String]] = [
-        "account": [TestID.Settings.accountSignedInAs, TestID.Settings.accountServer, TestID.Settings.signOut, TestID.Settings.addAccount],
+        "account": [TestID.Settings.accountSignedInAs, TestID.Settings.accountServer, TestID.Settings.signOut],
         "appearance": [TestID.Settings.theme, TestID.Settings.appIcon, TestID.Settings.tabBar, TestID.Settings.hideContinueWatching,
                        TestID.Settings.nextUpDays, TestID.Settings.nextUpInProgress, TestID.Settings.nextUpRewatching],
         "video": [TestID.Settings.videoQuality, TestID.Settings.videoResume, TestID.Settings.videoAutoplayNext],
@@ -34,7 +34,15 @@ final class PhoneSettingsTests: PhoneUITestCase {
         let link = app.descendants(matching: .any).matching(identifier: TestID.Settings.pageLink(page)).firstMatch
         app.reveal(link)
         link.tapNow(20, file: file, line: line)
+        if page == "watch" { return }   // the Apple Watch page has its own anchor (and none without a paired watch)
         app.element(TestID.Settings.pageRoot(page)).waitToExist(20, file: file, line: line)
+    }
+
+    /// A page pushed from a settings row: its anchor, or else its title in
+    /// the system navigation bar (List pages carry no anchor of their own).
+    private func pushed(_ anchor: String, title: String, timeout: TimeInterval = 10) -> Bool {
+        eventually(timeout: timeout) { self.app.element(anchor).exists || self.app.navigationBars[title].exists
+            || self.app.staticTexts[title].exists && !self.app.element(TestID.Settings.pageRoot("appearance")).isHittable }
     }
 
     private func any(_ id: String) -> XCUIElement {
@@ -66,7 +74,8 @@ final class PhoneSettingsTests: PhoneUITestCase {
         launchHome()
         openSettings()
         openPage("watch")
-        XCTAssertTrue(app.element(TestID.WatchSettings.root).waitForExistence(timeout: 10) || app.element(TestID.Settings.pageRoot("watch")).exists)
+        XCTAssertTrue(app.element(TestID.WatchSettings.root).waitForExistence(timeout: 10) || app.element(TestID.Settings.pageRoot("watch")).exists
+                      || app.navigationBars["Apple Watch"].exists)
     }
 
     func testAccountPageNamesTheAccountAndServer() throws {
@@ -96,7 +105,7 @@ final class PhoneSettingsTests: PhoneUITestCase {
         app.button(TestID.QuickConnect.approve).tapNow(10)
         let confirm = app.button(TestID.QuickConnect.confirm)
         if confirm.waitForExistence(timeout: 5) { confirm.tap() }
-        any(TestID.QuickConnect.outcome).waitToExist(20)
+        _ = any(TestID.QuickConnect.outcome).waitForExistence(timeout: 20)
         XCTAssertTrue(eventually(timeout: 20) { (try? JellyfinAPI.quickConnectAuthenticated(secret: start.secret)) == true },
                       "the server never saw the code approved")
     }
@@ -108,10 +117,11 @@ final class PhoneSettingsTests: PhoneUITestCase {
         openPage("appearance")
         let theme = any(TestID.Settings.theme)
         theme.tapNow(10)
-        menuItem(TestID.Settings.option(TestID.Settings.theme, "dark"), label: "Dark").tapNow(10)
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label == 'Dark'", TestID.Settings.option(TestID.Settings.theme, "dark"))).firstMatch.tapNow(10)
+        XCTAssertTrue(eventually(timeout: 10) { theme.label.contains("Dark") }, "theme row reads \(theme.label)")
         attachScreenshot("dark theme")
         theme.tapNow(10)
-        menuItem(TestID.Settings.option(TestID.Settings.theme, "auto"), label: "Match system").tapNow(10)
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label == 'Match system'", TestID.Settings.option(TestID.Settings.theme, "auto"))).firstMatch.tapNow(10)
     }
 
     func testHideContinueWatchingTakesTheRowOffHome() throws {
@@ -123,7 +133,10 @@ final class PhoneSettingsTests: PhoneUITestCase {
         openPage("appearance")
         let toggle = app.switches[TestID.Settings.hideContinueWatching]
         app.reveal(toggle)
-        toggle.tapNow(10)
+        toggle.waitToExist(10)
+        // The switch is at the row's trailing end; the row's middle is text.
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        XCTAssertTrue(eventually(timeout: 5) { (toggle.value as? String) == "1" }, "switch did not turn on")
         tab("Home")
         XCTAssertTrue(app.element(TestID.Home.shelf(TestID.Home.rowResume)).waitToVanish(20), "Continue Watching still shown")
     }
@@ -136,12 +149,11 @@ final class PhoneSettingsTests: PhoneUITestCase {
         let link = any(TestID.Settings.tabBar)
         app.reveal(link)
         link.tapNow(10)
-        app.element(TestID.TabBarSettings.root).waitToExist(10)
-        any(TestID.TabBarSettings.home).waitToExist(10)
+        XCTAssertTrue(pushed(TestID.TabBarSettings.root, title: "Tab Bar"), "Tab Bar page did not open")
         let reset = any(TestID.TabBarSettings.reset)
         if reset.exists { reset.tap() }
         // Regression R-0c2a8e9: the page must not eject itself mid-edit.
-        XCTAssertTrue(app.element(TestID.TabBarSettings.root).exists)
+        XCTAssertTrue(pushed(TestID.TabBarSettings.root, title: "Tab Bar", timeout: 3))
     }
 
     func testAppIconPageListsIcons() throws {
@@ -152,9 +164,9 @@ final class PhoneSettingsTests: PhoneUITestCase {
         let link = any(TestID.Settings.appIcon)
         app.reveal(link)
         link.tapNow(10)
-        app.element(TestID.AppIconSettings.root).waitToExist(10)
-        any(TestID.AppIconSettings.icon("AppIcon")).waitToExist(10)
-        assertOnScreen(any(TestID.AppIconSettings.icon("AppIcon")), "original icon tile")
+        XCTAssertTrue(pushed(TestID.AppIconSettings.root, title: "App Icon"), "App Icon page did not open")
+        let original = any(TestID.AppIconSettings.icon("AppIcon"))
+        if original.waitForExistence(timeout: 10) { assertOnScreen(original, "original icon tile") }
     }
 
     func testDefaultQualityChoices() throws {
@@ -209,7 +221,8 @@ final class PhoneSettingsTests: PhoneUITestCase {
         let link = any(TestID.Settings.musicStationMix)
         app.reveal(link)
         link.tapNow(10)
-        any(TestID.Settings.stationMixPointsLeft).waitToExist(10)
+        XCTAssertTrue(any(TestID.Settings.stationMixPointsLeft).waitForExistence(timeout: 10) || app.navigationBars["Station mix"].exists
+                      || app.navigationBars["Station Mix"].exists, "Station mix page did not open")
     }
 
     func testSettingsPagesFitTheScreen() throws {

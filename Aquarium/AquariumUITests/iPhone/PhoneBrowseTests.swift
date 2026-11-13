@@ -230,7 +230,10 @@ final class PhoneLibraryTests: PhoneUITestCase {
         let fx = try Fixtures.require()
         try openFilms()
         let menu = app.descendants(matching: .any).matching(identifier: TestID.Library.genreMenu).firstMatch
-        app.reveal(menu, up: false)
+        menu.waitToExist(20)
+        // The chips scroll sideways; Genre is past the screen's edge.
+        let sort = app.descendants(matching: .any).matching(identifier: TestID.Library.sortMenu).firstMatch
+        for _ in 0..<3 where menu.frame.maxX > app.windows.firstMatch.frame.maxX { sort.swipeLeft() }
         menu.tapNow(20)
         menuItem(TestID.Library.genre("Versions"), label: "Versions").tapNow(10)
         app.buttons.matching(identifier: TestID.Item.card(try fx.item("film.versions").id)).firstMatch.waitToExist(30)

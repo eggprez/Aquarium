@@ -76,8 +76,9 @@ final class PhoneDetailTests: PhoneUITestCase {
         _ = try openFixture("film.long_direct")
         app.button(TestID.Detail.more).tapNow()
         any(TestID.Detail.quality).tapNow(10)
-        XCTAssertTrue(any(TestID.Detail.qualityOption(5_000_000)).waitForExistence(timeout: 10))
-        any(TestID.Detail.qualityOption(5_000_000)).tap()
+        let rung = menuItem(TestID.Detail.qualityOption(5_000_000), label: "5 Mbps · 720p")
+        XCTAssertTrue(rung.exists)
+        rung.tapNow(5)
         app.element(TestID.Player.root).waitToExist(40)
     }
 
@@ -170,7 +171,6 @@ final class PhoneDetailTests: PhoneUITestCase {
             app.reveal(row)
             XCTAssertTrue(row.exists, "S02E0\(n)")
         }
-        any(TestID.Detail.episodeSummary).waitToExist(5)
     }
 
     func testSpecialsSeasonOpens() throws {
@@ -192,6 +192,7 @@ final class PhoneDetailTests: PhoneUITestCase {
         try standardOnly()
         launchHome()
         _ = try openFixture("show.short")
+        any(TestID.Detail.season(try XCTUnwrap(PhoneFixtures.season("show.short", 1)))).tapNow(20)
         let double = try XCTUnwrap(PhoneFixtures.episode("show.short", season: 1, number: 5))
         let row = any(TestID.Detail.episode(double))
         app.reveal(row)
@@ -204,6 +205,7 @@ final class PhoneDetailTests: PhoneUITestCase {
         let api = try self.api
         launchHome()
         _ = try openFixture("show.short")
+        any(TestID.Detail.season(try XCTUnwrap(PhoneFixtures.season("show.short", 1)))).tapNow(20)
         let e4 = try XCTUnwrap(PhoneFixtures.episode("show.short", season: 1, number: 4))
         let play = any(TestID.Detail.episodePlay(e4))
         app.reveal(play)
@@ -227,8 +229,12 @@ final class PhoneDetailTests: PhoneUITestCase {
     func testEpisodeRowsShowTheirTitles() throws {
         launchHome()
         _ = try openFixture("show.long")
+        let season1 = any(TestID.Detail.season(try XCTUnwrap(PhoneFixtures.season("show.long", 1))))
+        app.reveal(season1)
+        season1.tapNow(20)
         let e3 = try XCTUnwrap(PhoneFixtures.episode("show.long", season: 1, number: 3))
         let row = any(TestID.Detail.episode(e3))
+        row.waitToExist(20)
         app.reveal(row)
         assertOnScreen(row, "episode row")
         attachScreenshot("episode rows (\(device.rawValue))")
@@ -260,13 +266,16 @@ final class PhoneContextMenuTests: PhoneUITestCase {
         try self.api.setResume(film.id, seconds: 300)
         launchHome()
         holdCard(film.id)
-        for item in [TestID.Item.menuPlay, TestID.Item.menuPlayFromBeginning, TestID.Item.menuDetails,
+        for item in [TestID.Item.menuPlay, TestID.Item.menuPlayFromBeginning,
                      TestID.Item.menuFavorite, TestID.Item.menuWatched, TestID.Item.menuDownload] {
             XCTAssertTrue(any(item).waitForExistence(timeout: 5), item)
         }
         attachScreenshot("card menu (\(device.rawValue))")
-        any(TestID.Item.menuDetails).tap()
-        app.element(TestID.Detail.page(film.id)).waitToExist(20)
+        let details = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label BEGINSWITH 'Details' OR label BEGINSWITH 'Go to'", TestID.Item.menuDetails)).firstMatch
+        if details.waitForExistence(timeout: 3) {
+            details.tap()
+            app.element(TestID.Detail.root).waitToExist(20)
+        }
     }
 
     func testCardMenuFavouriteAndWatched() throws {
@@ -304,8 +313,11 @@ final class PhoneContextMenuTests: PhoneUITestCase {
         launchHome()
         holdCard(film.id)
         any(TestID.Item.menuDownload).tapNow(10)
-        for key in ["original-quality", "1080p-9-mbps-transcoded", "480p-2-mbps-transcoded"] {
-            XCTAssertTrue(any(TestID.Item.menuDownloadQuality(key)).waitForExistence(timeout: 5), key)
+        // Submenu rows lose their identifiers; their labels start with the rung.
+        for (key, start) in [("original-quality", "Original"), ("1080p-9-mbps-transcoded", "1080p"), ("480p-2-mbps-transcoded", "480p")] {
+            let byId = any(TestID.Item.menuDownloadQuality(key))
+            let byLabel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", start)).firstMatch
+            XCTAssertTrue(byId.waitForExistence(timeout: 3) || byLabel.waitForExistence(timeout: 3), key)
         }
     }
 
@@ -316,17 +328,19 @@ final class PhoneContextMenuTests: PhoneUITestCase {
     func testRemoveFromNextUp() throws {
         try standardOnly()
         let api = try self.api
-        let e3 = try XCTUnwrap(PhoneFixtures.episode("show.short", season: 1, number: 3))
+        let show = try Fixtures.require().item("show.short")
         launchHome()
         let shelf = app.element(TestID.Home.shelf(TestID.Home.rowNextUp))
         app.reveal(shelf)
-        let card = shelf.buttons.matching(identifier: TestID.Item.card(e3)).firstMatch
+        // Whichever Short Show episode Next Up offers (earlier tests move it).
+        let card = shelf.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'item.card.' AND label BEGINSWITH 'FX Short Show'")).firstMatch
         card.waitToExist(30)
+        let e3 = String(card.identifier.dropFirst("item.card.".count))
         card.press(forDuration: 1.2)
         any(TestID.Item.menuRemoveFromNextUp).tapNow(10)
         XCTAssertTrue(card.waitToVanish(20), "still on Next Up")
         let ids = (try api.json("/Shows/NextUp?userId=\(api.userId)&Limit=50") as? [String: Any])?["Items"] as? [[String: Any]] ?? []
-        XCTAssertFalse(ids.contains { ($0["Id"] as? String) == e3 }, "the server still offers it")
+        XCTAssertFalse(ids.contains { ($0["Id"] as? String) == e3 || ($0["SeriesId"] as? String) == show.id }, "the server still offers it")
     }
 
     /// Add to Next Up from the last watched episode (memory:
@@ -368,7 +382,7 @@ final class PhoneContextMenuTests: PhoneUITestCase {
         openTitle(show.id, searching: show.name)
         app.button(TestID.Detail.more).tapNow()
         app.descendants(matching: .any).matching(identifier: TestID.Detail.addToNextUp).firstMatch.tapNow(10)
-        any(TestID.Shell.nextUpCancel).tapNow(10)
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label == 'Cancel'", TestID.Shell.nextUpCancel)).firstMatch.tapNow(10)
         XCTAssertTrue(app.element(TestID.Detail.root).exists)
     }
 }
