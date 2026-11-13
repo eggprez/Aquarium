@@ -39,6 +39,9 @@ struct ItemDetailView: View {
     @State private var nextUp: BaseItem?
     @State private var isLoading = true
     @State private var error: String?
+    /// The server said this title isn't there for this account (404): asking
+    /// again can only get the same answer, so the error offers no Try again.
+    @State private var errorIsFinal = false
     /// The item the state below belongs to — so a new id starts clean, while
     /// coming back to the same page keeps what it had.
     @State private var loadedId: String?
@@ -502,7 +505,7 @@ struct ItemDetailView: View {
                 .padding(.bottom, 40)
                 .testAnchor(TestID.Detail.loading)
             } else if let error, item == nil {
-                ErrorState(error: error) { Task { await load() } }
+                ErrorState(error: error, retry: errorIsFinal ? nil : { Task { await load() } })
                     .padding(.top, skeletonInset)
                     .testAnchor(TestID.Detail.error)
             } else if let item {
@@ -2353,6 +2356,7 @@ struct ItemDetailView: View {
             // Left for another item or page; nothing to report.
         } catch {
             guard !Task.isCancelled else { return }
+            if case APIError.server(status: 404, path: _) = error { errorIsFinal = true } else { errorIsFinal = false }
             self.error = error.localizedDescription
         }
     }

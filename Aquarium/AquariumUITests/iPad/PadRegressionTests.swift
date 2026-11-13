@@ -108,7 +108,9 @@ final class PadRegressionTests: PadUITestCase {
     /// ipad-qa-findings.md bug 10 / master-fix-list: "Raw server paths in
     /// errors for qa-kid: a blocked title reads 'Server error 404 on
     /// /Items/…' with Try again". Fixed on claude/qa-fix-list-cb0b58
-    /// (4775e86, "An item this account can't see offers no Try again"), not on main.
+    /// (4775e86, "An item this account can't see offers no Try again"), not on
+    /// main. On main 2026-11-13: plain words from claude/fix-tv (APIError),
+    /// and no Try again on a 404 from this branch.
     func testBlockedTitleSaysSoInPlainWords() throws {
         guard let kid = QA.account(named: "fx-kid") else { throw XCTSkip("no fx-kid password") }
         let blocked = try fx.item("film.rated_r")
@@ -119,7 +121,6 @@ final class PadRegressionTests: PadUITestCase {
         XCTAssertTrue(error.waitForExistence(timeout: 30), "a blocked title's page shows its error")
         let words = app.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " | ")
         attachScreenshot("blocked title")
-        XCTExpectFailure("bug: blocked title shows the raw server path and Try again (4775e86 not on main)", strict: false)
         XCTAssertFalse(words.contains("/Items/"), "raw path in: \(words)")
         XCTAssertFalse(app.button(TestID.Common.errorStateRetry).exists, "Try again can't help a 404")
     }
