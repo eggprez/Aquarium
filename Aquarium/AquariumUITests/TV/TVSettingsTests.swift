@@ -197,10 +197,6 @@ final class TVSettingsTests: TVTestCase {
         let sheet = app.sheets.firstMatch
         let question = sheet.exists ? sheet.label + " " + sheet.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " ") : ""
         attachScreenshot("sign-out dialog")
-        if !question.contains(name) {
-            // Seen 2026-11-13: "Sign out of http://127.0.0.1:8196?"
-            XCTExpectFailure("bug: the Apple TV's sign-out question names the server ('Sign out of http://127.0.0.1:8196?'), not the account being signed out (Views/TVSettingsView.swift, the signOut confirmationDialog)")
-        }
         XCTAssertTrue(question.contains(name), "the sign-out question doesn't name \(name): \(question)")
         Remote.menu()
         XCTAssertTrue(cancel.waitToVanish(10))

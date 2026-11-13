@@ -177,7 +177,7 @@ struct MacSidebarFooter<Status: View>: View {
         }
         .animation(.easeOut(duration: 0.2), value: player.isActive)
         .confirmationDialog(
-            "Sign out of \(client.session?.server ?? "this server")?",
+            client.session?.signOutQuestion ?? "Sign out?",
             isPresented: $confirmSignOut,
             titleVisibility: .visible
         ) {

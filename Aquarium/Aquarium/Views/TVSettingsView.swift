@@ -201,7 +201,7 @@ private struct ServerSettingsPage: View {
             }
         }
         .testAnchor(TestID.Settings.pageRoot(SettingsPage.account.rawValue))
-        .confirmationDialog("Sign out of \(client.session?.server ?? "this server")?",
+        .confirmationDialog(client.session?.signOutQuestion ?? "Sign out?",
                             isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) {
                 Task {
