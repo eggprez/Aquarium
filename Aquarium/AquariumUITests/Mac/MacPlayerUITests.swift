@@ -48,8 +48,17 @@ final class MacPlayerUITests: MacUITestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
         XCTAssertFalse(stillPlaying, "closing the window stops the player")
-        XCTAssertTrue(try eventually(30) { try api.macSessions().first { $0.id == session.id }?.nowPlayingId == nil },
-                      "the server hears the stop")
+        let heard = try eventually(30) { try api.macSessions().first { $0.id == session.id }?.nowPlayingId == nil }
+        if !heard {
+            // What the server had, for whoever looks at this failure next.
+            let all = (try? api.json("/Sessions?ActiveWithinSeconds=300")) as? [[String: Any]] ?? []
+            let mine = all.filter { ($0["UserId"] as? String) == api.userId }.map { s in
+                "\(s["Id"] ?? "") dev=\(s["DeviceId"] ?? "") last=\(s["LastActivityDate"] ?? "") np=\((s["NowPlayingItem"] as? [String: Any])?["Name"] ?? "-") ps=\(s["PlayState"] ?? "")"
+            }
+            let diag = XCTAttachment(string: "watched session \(session.id)\n" + mine.joined(separator: "\n"))
+            diag.lifetime = .keepAlways; add(diag)
+        }
+        XCTAssertTrue(heard, "the server hears the stop")
     }
 
     /// Escape leaves full screen first, and only then stops.

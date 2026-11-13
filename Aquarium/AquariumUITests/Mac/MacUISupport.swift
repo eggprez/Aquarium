@@ -248,9 +248,8 @@ extension MacUITestCase {
     }
 
     /// A title's page, opened from its library's grid (Fixture Films, else
-    /// Fixture Shows). Not through Search: under XCUITest, Return in the
-    /// sidebar's search field doesn't show Search (see the report), and every
-    /// test that only needs a title page shouldn't depend on that.
+    /// Fixture Shows). Not through Search, so that every test that only
+    /// needs a title page doesn't depend on Search working.
     func openTitle(named name: String, id: String) {
         let fx = Fixtures.shared
         for library in ["Fixture Films", "Fixture Shows"] {
@@ -314,24 +313,49 @@ extension MacUITestCase {
 /// keep this account's, the test's own device left out. Kept in the Mac
 /// folder; the shared helper is the other agents' too (see the report).
 extension JellyfinAPI {
-    /// When this test last launched the app with a reset (a new device id,
-    /// so a new session) — set by `MacUITestCase.launch`.
-    nonisolated(unsafe) static var macLaunchedAt: Date?
+    /// This account's sessions on the server just before this test launched
+    /// the app with a reset (a new device id, so a new session) — set by
+    /// `MacUITestCase.launch`.
+    nonisolated(unsafe) static var sessionsBeforeLaunch: Set<String> = []
 
-    /// This launch's sessions, newest activity first. A session an earlier
-    /// test left behind stays "playing" until the server times it out, and
-    /// it is often the same film: sorting alone let `macWaitForPlayback`
-    /// pick it, and every later check (paused, position, stopped) then
-    /// watched a session nobody was driving — the flaky close-window,
-    /// Space / ⌘→ and Skip Credits checks. Sessions last active before this
-    /// launch are left out.
+    /// Asked with the QA server's admin token (`admin.token` in the QA
+    /// folder), as the token alone in a MediaBrowser header — the way
+    /// `api.sh` asks, and the server refuses `X-Emby-Token`. Signing this
+    /// suite's account in again here would revoke the token the test
+    /// already holds, since the server keeps one per device id.
+    static func noteSessionsBeforeLaunch() {
+        sessionsBeforeLaunch = []
+        guard let name = QA.account()?.name,
+              let token = try? String(contentsOf: QA.folder.appendingPathComponent("admin.token"), encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              let url = URL(string: QA.server + "/Sessions") else { return }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        request.setValue("MediaBrowser Token=\"\(token)\"", forHTTPHeaderField: "Authorization")
+        let done = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var body: Data?
+        URLSession.shared.dataTask(with: request) { data, _, _ in body = data; done.signal() }.resume()
+        _ = done.wait(timeout: .now() + 12)
+        let list = body.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [[String: Any]] ?? []
+        sessionsBeforeLaunch = Set(list.compactMap { s in
+            (s["UserName"] as? String) == name ? s["Id"] as? String : nil
+        })
+    }
+
+    /// This launch's sessions, newest activity first. The sessions earlier
+    /// tests left behind stay "playing" — often the same film — and the
+    /// server keeps moving their position and activity date on as if they
+    /// were (seen 2026-11-13: three such, minutes after their apps had
+    /// quit). Sorting alone let `macWaitForPlayback` pick one, and every
+    /// later check (paused, position, stopped) watched a session nobody was
+    /// driving: the flaky close-window, Space / ⌘→ and quality-while-paused
+    /// checks. Sessions that were there before this launch are left out.
     func macSessions(activeWithinSeconds: Int = 120) throws -> [Session] {
         let list = (try json("/Sessions?ActiveWithinSeconds=\(activeWithinSeconds)") as? [[String: Any]] ?? [])
             .sorted { ($0["LastActivityDate"] as? String ?? "") > ($1["LastActivityDate"] as? String ?? "") }
-        let since = Self.macLaunchedAt?.addingTimeInterval(-2)
         return list.compactMap { s in
-            guard (s["UserId"] as? String) == userId, (s["DeviceId"] as? String) != Self.deviceId else { return nil }
-            if let since, let last = Self.serverDate(s["LastActivityDate"] as? String), last < since { return nil }
+            guard (s["UserId"] as? String) == userId, (s["DeviceId"] as? String) != Self.deviceId,
+                  !Self.sessionsBeforeLaunch.contains(s["Id"] as? String ?? "") else { return nil }
             let playing = s["NowPlayingItem"] as? [String: Any]
             let state = s["PlayState"] as? [String: Any]
             let ticks = (state?["PositionTicks"] as? Int64) ?? (state?["PositionTicks"] as? Int).map(Int64.init)
@@ -341,13 +365,6 @@ extension JellyfinAPI {
                 userName: s["UserName"] as? String ?? "", nowPlayingId: playing?["Id"] as? String,
                 positionSeconds: ticks.map { Double($0) / 10_000_000 }, isPaused: state?["IsPaused"] as? Bool, raw: s)
         }
-    }
-
-    /// Jellyfin's dates have seven decimal places, which
-    /// `ISO8601DateFormatter` won't read: the whole seconds are enough.
-    static func serverDate(_ text: String?) -> Date? {
-        guard let text, text.count >= 19 else { return nil }
-        return ISO8601DateFormatter().date(from: String(text.prefix(19)) + "Z")
     }
 
     func macWaitForPlayback(of itemId: String? = nil, timeout: TimeInterval = 30) throws -> Session? {
