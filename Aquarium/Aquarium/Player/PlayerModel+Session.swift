@@ -288,7 +288,7 @@ extension PlayerModel {
         #if os(tvOS)
         false
         #else
-        prefs.adaptiveQuality
+        prefs.adaptiveQuality && !qualityPinned
         #endif
     }
 

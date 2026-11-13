@@ -334,6 +334,12 @@ struct SavedSession: Codable, Hashable, Sendable {
     var serverLabel: String {
         server.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: "")
     }
+
+    /// The sign-out confirmation's question. It names the account: with
+    /// several saved, the server's address alone doesn't say which goes.
+    var signOutQuestion: String {
+        userName.isEmpty ? "Sign out of \(serverLabel)?" : "Sign out \(userName) on \(serverLabel)?"
+    }
 }
 
 // MARK: - Preferences

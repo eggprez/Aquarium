@@ -27,7 +27,7 @@ struct RootView: View {
     /// the navigation bar, and the pages that hide that bar — Home, a title,
     /// Live TV — hide the toggle with it, stranding the sidebar with no way
     /// back. Driving visibility ourselves lets those pages draw a toggle of
-    /// their own — see `showSidebar`.
+    /// their own — see `SidebarToggle`.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
     #if os(iOS)
     /// The trailing safe-area inset of the tab shell: a foldable's status
@@ -42,6 +42,11 @@ struct RootView: View {
     /// draws, the music bar coming back across the page) ever knew. See
     /// `onChange` in `sidebarShell`.
     @State private var sidebarHidden = false
+    #if os(iOS)
+    /// What the pages without a navigation bar read to draw a toggle of
+    /// their own — see `SidebarToggle`.
+    @State private var sidebarToggle = SidebarToggle()
+    #endif
 
     var body: some View {
         Group {
@@ -68,7 +73,10 @@ struct RootView: View {
                 // `-AquariumShowSettings YES`: Settings with no server signed
                 // in, for looking at it on a simulator. Debug builds only.
                 if UserDefaults.standard.bool(forKey: "AquariumShowSettings") {
-                    NavigationStack { SettingsView() }
+                    NavigationStack {
+                        SettingsView()
+                            .navigationDestination(for: Route.self) { RouteDestination(route: $0) }
+                    }
                 } else {
                     LoginView()
                         .testAnchor(TestID.Shell.signedOut)
@@ -526,7 +534,17 @@ struct RootView: View {
                     NavigationStack(path: stackPath(for: app.shownSelection)) {
                         SectionView(section: app.shownSelection)
                             .clearsBottomChrome()
-                            .navigationDestination(for: Route.self) { destination($0).clearsBottomChrome() }
+                            .navigationDestination(for: Route.self) { route in
+                                destination(route)
+                                    .clearsBottomChrome()
+                                    #if os(iOS)
+                                    // Handed to each pushed page itself: the
+                                    // value set on the column below never
+                                    // reached a page the stack pushed, so a
+                                    // title page drew no toggle.
+                                    .environment(\.sidebarToggle, sidebarToggle)
+                                    #endif
+                            }
                     }
                     // A stack per section, not one stack handed each
                     // section's path in turn — see `stackPath`.
@@ -545,7 +563,7 @@ struct RootView: View {
             // page has the system's toggle in its bar, so this is handed down
             // rather than floated over the column, which drew a second toggle
             // under the system's on all of those.
-            .environment(\.showSidebar, showSidebarAction)
+            .environment(\.sidebarToggle, sidebarToggle)
             #endif
         }
         // An explicit value is the column going or coming; `.automatic` is
@@ -557,6 +575,9 @@ struct RootView: View {
             default: break
             }
         }
+        #if os(iOS)
+        .onChange(of: sidebarHidden, initial: true) { _, _ in sidebarToggle.show = showSidebarAction }
+        #endif
         #if os(macOS)
         // Search is the field at the top of the sidebar, as in Music, rather
         // than a row in it. Typing there and pressing Return shows the Search
@@ -592,7 +613,7 @@ struct RootView: View {
     /// The app's appearance, for the tent cover — see `playerBinding`'s cover.
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Brings the sidebar back, while it is collapsed — see `showSidebar`.
+    /// Brings the sidebar back, while it is collapsed — see `SidebarToggle`.
     private var showSidebarAction: (() -> Void)? {
         guard sidebarHidden else { return nil }
         return { sidebarVisibility = .all }

@@ -39,6 +39,9 @@ struct ItemDetailView: View {
     @State private var nextUp: BaseItem?
     @State private var isLoading = true
     @State private var error: String?
+    /// The server said this title isn't there for this account (404): asking
+    /// again can only get the same answer, so the error offers no Try again.
+    @State private var errorIsFinal = false
     /// The item the state below belongs to — so a new id starts clean, while
     /// coming back to the same page keeps what it had.
     @State private var loadedId: String?
@@ -55,6 +58,8 @@ struct ItemDetailView: View {
     /// Which item the quality dialog is picking a stream for — the television's
     /// stand-in for the quality menu, for the reason given on the button.
     @State private var qualityChoice: BaseItem?
+    /// Which item the version dialog is choosing among the files of.
+    @State private var versionChoice: BaseItem?
 
     /// Where the selector goes once this page has something on it.
     ///
@@ -89,6 +94,19 @@ struct ItemDetailView: View {
     #endif
 
     var body: some View {
+        // A folder or an album opens as what it holds, a photo as the photo:
+        // decided once the item is in, since the load is what says what it is.
+        if let item, item.opensAsContainer {
+            ContainerPage(item: item)
+        } else if let item, item.kind == "Photo" {
+            PhotoPage(item: item)
+        } else {
+            titlePage
+        }
+    }
+
+    @ViewBuilder
+    private var titlePage: some View {
         #if os(iOS)
         // The artwork starts below the bar rather than behind it, which is what
         // Home does too — and, like Home, the bar is this page's own rather
@@ -275,7 +293,9 @@ struct ItemDetailView: View {
 
     #if os(iOS)
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.showSidebar) private var showSidebar
+    @Environment(\.sidebarToggle) private var sidebarToggle
+    /// The way back to a collapsed sidebar — see `SidebarToggle`.
+    private var showSidebar: (() -> Void)? { sidebarToggle?.show }
     /// What the top of the screen keeps for the clock, read from outside the
     /// scroll view that ignores it — see `body`. iPad only.
     @State private var padTopInset: CGFloat = 0
@@ -487,7 +507,7 @@ struct ItemDetailView: View {
                 .padding(.bottom, 40)
                 .testAnchor(TestID.Detail.loading)
             } else if let error, item == nil {
-                ErrorState(error: error) { Task { await load() } }
+                ErrorState(error: error, retry: errorIsFinal ? nil : { Task { await load() } })
                     .padding(.top, skeletonInset)
                     .testAnchor(TestID.Detail.error)
             } else if let item {
@@ -603,6 +623,20 @@ struct ItemDetailView: View {
             }
             Button("Cancel", role: .cancel) { qualityChoice = nil }
                 .accessibilityIdentifier(TestID.Detail.qualityCancel)
+        }
+        .confirmationDialog(
+            "Play version",
+            isPresented: Binding(
+                get: { versionChoice != nil },
+                set: { if !$0 { versionChoice = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let target = versionChoice {
+                versionMenu(target)
+            }
+            Button("Cancel", role: .cancel) { versionChoice = nil }
+                .accessibilityIdentifier(TestID.Detail.versionCancel)
         }
         #endif
     }
@@ -1460,12 +1494,46 @@ struct ItemDetailView: View {
                 Task {
                     await player.play(
                         item: playable,
-                        options: StreamOptions(maxBitrate: choice.maxBitrate)
+                        options: StreamOptions(maxBitrate: choice.maxBitrate, bitrateIsChosen: true)
                     )
                 }
             }
             .accessibilityIdentifier(TestID.Detail.qualityOption(choice.maxBitrate))
         }
+        #if !os(tvOS)
+        // A title with several files offers each. The television has its
+        // own button for this — see `actionButtons`.
+        if Self.versions(of: playable).count > 1 {
+            Section("Version") {
+                versionMenu(playable)
+            }
+        }
+        #endif
+    }
+
+    /// One button per version of a title, each playing that one: the
+    /// version is the media source asked for (`StreamOptions.mediaSourceId`).
+    @ViewBuilder
+    private func versionMenu(_ playable: BaseItem) -> some View {
+        ForEach(Self.versions(of: playable), id: \.Id) { version in
+            Button(Self.versionLabel(version)) {
+                Task {
+                    await player.play(item: playable, options: StreamOptions(mediaSourceId: version.Id))
+                }
+            }
+            .accessibilityIdentifier(TestID.Detail.versionOption(version.Id ?? ""))
+        }
+    }
+
+    /// The title's versions that can be asked for by id.
+    private static func versions(of item: BaseItem) -> [MediaSource] {
+        (item.MediaSources ?? []).filter { !($0.Id ?? "").isEmpty }
+    }
+
+    /// The server's name for a version ("2160p HEVC"), else its container.
+    private static func versionLabel(_ version: MediaSource) -> String {
+        if let name = version.Name, !name.isEmpty { return name }
+        return version.Container?.uppercased() ?? "Version"
     }
 
     // The row of buttons the phone and the television draw. The Mac's
@@ -1489,6 +1557,18 @@ struct ItemDetailView: View {
             .appButtonStyle()
             .focused($focus, equals: .quality)
             .accessibilityIdentifier(TestID.Detail.quality)
+
+            // A title with several files: which one plays. Its own button,
+            // as Quality is, since a dialog holding both would be a long one.
+            if Self.versions(of: playable).count > 1 {
+                Button {
+                    versionChoice = playable
+                } label: {
+                    Label("Version", systemImage: "square.stack")
+                }
+                .appButtonStyle()
+                .accessibilityIdentifier(TestID.Detail.version)
+            }
             #else
             Menu {
                 qualityMenu(playable)
@@ -2222,6 +2302,7 @@ struct ItemDetailView: View {
         #endif
         #if os(tvOS)
         qualityChoice = nil
+        versionChoice = nil
         placedFocus = false
         #endif
     }
@@ -2277,6 +2358,7 @@ struct ItemDetailView: View {
             // Left for another item or page; nothing to report.
         } catch {
             guard !Task.isCancelled else { return }
+            if case APIError.server(status: 404, path: _) = error { errorIsFinal = true } else { errorIsFinal = false }
             self.error = error.localizedDescription
         }
     }

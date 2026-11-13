@@ -212,7 +212,7 @@ final class RemoteInputView: UIView {
             onEvent(.panelTouchDown)
         case .ended:
             let t = pan.translation(in: pan.view)
-            if t.y < -60, abs(t.y) > abs(t.x) * 1.3 { onEvent(.panelSwipeUp) }
+            if RemoteRules.isPanelSwipeUp(t) { onEvent(.panelSwipeUp) }
         default:
             break
         }

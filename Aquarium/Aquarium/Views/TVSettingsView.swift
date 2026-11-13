@@ -201,7 +201,7 @@ private struct ServerSettingsPage: View {
             }
         }
         .testAnchor(TestID.Settings.pageRoot(SettingsPage.account.rawValue))
-        .confirmationDialog("Sign out of \(client.session?.server ?? "this server")?",
+        .confirmationDialog(client.session?.signOutQuestion ?? "Sign out?",
                             isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) {
                 Task {
@@ -283,9 +283,10 @@ private struct VideoSettingsPage: View {
                 }
                 .disabled(!prefs.pictureIsAdjusted)
                 .accessibilityIdentifier(TestID.Settings.videoResetPicture)
-                SettingChoice(Copy.nightMode, selection: $prefs.nightMode,
-                              options: [(false, "Off"), (true, "On — quiet dialogue up, loud passages down")])
-                .accessibilityIdentifier(TestID.Settings.videoNightMode)
+                // No Night mode row: AVPlayer has no night mode, and
+                // MPVKit's FFmpeg has no audio compressor (MPVEngine
+                // `nightModeFilter`), so on a television the setting could
+                // only ever say On and change nothing.
             }
             .onChange(of: prefs.nightMode) { _, _ in player.applyNightMode() }
             .onChange(of: prefs.fillScreen) { _, _ in player.applyFraming() }
