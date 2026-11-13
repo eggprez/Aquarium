@@ -275,13 +275,33 @@ pub async fn request(path: &str, method: Option<String>, body: Option<Value>) ->
 
     let resp = req.send().await.map_err(|e| offline_err(&e))?;
     let status = resp.status().as_u16();
-    let text = resp.text().await.unwrap_or_default();
+    let text = without_token(&resp.text().await.unwrap_or_default(), &token);
     let parsed: Option<Value> = if text.trim().is_empty() {
         None
     } else {
         serde_json::from_str(&text).ok()
     };
     Ok(json!({ "status": status, "body": parsed }))
+}
+
+/// A reply with the access token taken out before it reaches the webview.
+/// Jellyfin writes it into the addresses it builds (`ApiKey=<token>` in a
+/// transcode's `TranscodingUrl` and a subtitle's `DeliveryUrl`); those
+/// parameters go, and the token anywhere else is blanked. Every stream the app
+/// opens on the server authenticates with the Authorization header instead.
+fn without_token(text: &str, token: &str) -> String {
+    if token.is_empty() || !text.contains(token) {
+        return text.to_string();
+    }
+    let mut out = text.to_string();
+    for key in ["ApiKey", "api_key"] {
+        let param = format!("{key}={token}");
+        out = out
+            .replace(&format!("{param}&"), "")
+            .replace(&format!("&{param}"), "")
+            .replace(&format!("?{param}"), "");
+    }
+    out.replace(token, "")
 }
 
 /// The raw body of an authenticated GET, for the few things fetched from Rust
@@ -1190,6 +1210,38 @@ mod tests {
         assert!(req.header("x-emby-token").is_none());
         assert!(!req.target.to_ascii_lowercase().contains("api_key"));
         assert_eq!(req.query(), "userId=user-1");
+    }
+
+    #[test]
+    fn without_token_drops_api_key_parameters_and_blanks_the_token_elsewhere() {
+        let t = "0123abcd";
+        assert_eq!(without_token("/v/master.m3u8?A=1&ApiKey=0123abcd&B=2", t), "/v/master.m3u8?A=1&B=2");
+        assert_eq!(without_token("/v/master.m3u8?A=1&ApiKey=0123abcd", t), "/v/master.m3u8?A=1");
+        assert_eq!(without_token("/s/Stream.srt?ApiKey=0123abcd", t), "/s/Stream.srt");
+        assert_eq!(without_token("/s/Stream.srt?api_key=0123abcd&x=1", t), "/s/Stream.srt?x=1");
+        assert_eq!(without_token(r#"{"Other":"0123abcd"}"#, t), r#"{"Other":""}"#);
+        assert_eq!(without_token("nothing here", t), "nothing here");
+        assert_eq!(without_token("nothing here", ""), "nothing here");
+    }
+
+    #[tokio::test]
+    async fn replies_reach_the_webview_without_the_access_token() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|_| {
+            Resp::json(
+                200,
+                json!({ "MediaSources": [{
+                    "TranscodingUrl": format!("/videos/1/master.m3u8?MediaSourceId=1&ApiKey={TEST_TOKEN}&Tag=t"),
+                    "MediaStreams": [{ "DeliveryUrl": format!("/Videos/1/1/Subtitles/3/0/Stream.srt?ApiKey={TEST_TOKEN}") }],
+                }] }),
+            )
+        });
+        sign_in(&server.url);
+        let out = request("/Items/1/PlaybackInfo", Some("POST".into()), Some(json!({}))).await.unwrap();
+        assert!(!out.to_string().contains(TEST_TOKEN), "{out}");
+        let ms = &out["body"]["MediaSources"][0];
+        assert_eq!(ms["TranscodingUrl"], json!("/videos/1/master.m3u8?MediaSourceId=1&Tag=t"));
+        assert_eq!(ms["MediaStreams"][0]["DeliveryUrl"], json!("/Videos/1/1/Subtitles/3/0/Stream.srt"));
     }
 
     #[tokio::test]

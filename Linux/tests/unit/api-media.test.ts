@@ -315,6 +315,28 @@ describe("resolvePlayback", () => {
     });
   });
 
+  it("takes the server's ApiKey out of every address it hands on, so the token stays out of the webview and mpv", async () => {
+    const api = await signIn();
+    playbackInfo({
+      PlaySessionId: "ps",
+      MediaSources: [
+        {
+          Id: "ms",
+          SupportsDirectPlay: false,
+          SupportsDirectStream: false,
+          TranscodingUrl: "/videos/x/master.m3u8?a=1&ApiKey=tok&b=2",
+          MediaStreams: [{ Type: "Subtitle", DeliveryUrl: "/Videos/x/ms/Subtitles/3/0/Stream.srt?api_key=tok" }, { Type: "Audio" }],
+        },
+      ],
+    });
+    const src = await api.resolvePlayback("x");
+    expect(src.url).toBe(`${SERVER}/videos/x/master.m3u8?a=1&b=2`);
+    expect(JSON.stringify(src)).not.toContain("tok");
+    expect(api.withoutApiKey("/a?ApiKey=t")).toBe("/a");
+    expect(api.withoutApiKey("/a?x=1&apikey=t")).toBe("/a?x=1");
+    expect(api.withoutApiKey("/a")).toBe("/a");
+  });
+
   it("forced transcode offers no direct-play profiles and takes the transcode URL even when direct play is possible", async () => {
     const api = await signIn();
     playbackInfo({

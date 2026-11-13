@@ -1350,6 +1350,36 @@ function deviceProfile(forceTranscode: boolean, maxBitrate?: number): any {
   };
 }
 
+/**
+ * An address the server built, without the `ApiKey`/`api_key` parameter
+ * Jellyfin puts in it (a transcode's `TranscodingUrl`, a subtitle's
+ * `DeliveryUrl`). mpv sends the token as an Authorization header instead (see
+ * player.rs), so it stays out of the webview, mpv's command and log, and the
+ * server's access log. server.rs takes it out of replies before they get here;
+ * this is for anything that still carries one.
+ */
+export function withoutApiKey(address: string): string {
+  const q = address.indexOf("?");
+  if (q < 0) return address;
+  const kept = address
+    .slice(q + 1)
+    .split("&")
+    .filter((p) => !/^(api_?key)=/i.test(p));
+  return kept.length ? `${address.slice(0, q)}?${kept.join("&")}` : address.slice(0, q);
+}
+
+/** The server's media source with every address in it cleaned by `withoutApiKey`. */
+function sourceWithoutApiKey(ms: any): any {
+  const out = { ...ms };
+  if (typeof out.TranscodingUrl === "string") out.TranscodingUrl = withoutApiKey(out.TranscodingUrl);
+  if (Array.isArray(out.MediaStreams)) {
+    out.MediaStreams = out.MediaStreams.map((st: any) =>
+      typeof st?.DeliveryUrl === "string" ? { ...st, DeliveryUrl: withoutApiKey(st.DeliveryUrl) } : st
+    );
+  }
+  return out;
+}
+
 export async function resolvePlayback(
   itemId: string,
   opts: { maxBitrate?: number; forceTranscode?: boolean; live?: boolean; startTicks?: number } = {}
@@ -1369,8 +1399,8 @@ export async function resolvePlayback(
   if (opts.maxBitrate) body.MaxStreamingBitrate = opts.maxBitrate;
 
   const info = await api(`/Items/${itemId}/PlaybackInfo`, { method: "POST", body });
-  const ms = info.MediaSources?.[0];
-  if (!ms) throw new Error("No playable media source returned by the server");
+  if (!info.MediaSources?.[0]) throw new Error("No playable media source returned by the server");
+  const ms = sourceWithoutApiKey(info.MediaSources[0]);
   const playSessionId = info.PlaySessionId;
 
   if (ms.TranscodingUrl && (force || (!ms.SupportsDirectPlay && !ms.SupportsDirectStream))) {

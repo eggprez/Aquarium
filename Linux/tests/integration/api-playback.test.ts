@@ -158,15 +158,7 @@ describe.skipIf(!qa)("QA server: resolvePlayback", () => {
     expect(src.mediaSource.TranscodingUrl).toBeTruthy();
   });
 
-  // BUG: the token reaches the webview. api.ts:3-8 says the access token is
-  // never in the frontend ("a script that gets into the webview has no
-  // credential to steal"), and resolvePlayback strips api_key from the
-  // direct-stream address for the same reason (api.ts:1373). But a transcode
-  // hands back the server's TranscodingUrl as is (api.ts:1363-1370), and
-  // Jellyfin 12.2 puts `ApiKey=<the session's access token>` in it. The token
-  // is then in PlaybackSource.url and mediaSource.TranscodingUrl in the
-  // webview, in mpv's command line and log, and in the server's access log.
-  it.fails("hands the webview no access token in a transcode address", async () => {
+  it("hands the webview no access token in a transcode address", async () => {
     const api = await qaApiFull();
     const src = await resolve(api, fx("film.long_multitrack").id, { forceTranscode: true });
     expect(src.url).not.toContain(qa!.token);
