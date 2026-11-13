@@ -566,22 +566,40 @@ async fn run_download<R: Runtime>(
     // Leftover partial file from an interrupted run: ask the server to resume
     // where it stopped. Only static downloads honor Range; transcodes return
     // 200 and we start over.
-    let part_len = std::fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
-    let mut request = jellyfin::http().get(&req.url);
-    // Authenticate by header. The URL is persisted in meta.json so an
-    // interrupted transfer can be resumed, and an `api_key=` in it would leave
-    // a live credential lying in the downloads folder (as well as in the
-    // server's access log).
-    if let Some(auth) = auth_header_now() {
-        request = request.header("Authorization", auth);
+    let mut part_len = std::fs::metadata(&part_path).map(|m| m.len()).unwrap_or(0);
+    let ask = |from: u64| {
+        let mut request = jellyfin::http().get(&req.url);
+        // Authenticate by header. The URL is persisted in meta.json so an
+        // interrupted transfer can be resumed, and an `api_key=` in it would
+        // leave a live credential lying in the downloads folder (as well as in
+        // the server's access log).
+        if let Some(auth) = auth_header_now() {
+            request = request.header("Authorization", auth);
+        }
+        if from > 0 {
+            request = request.header("Range", format!("bytes={}-", from));
+        }
+        request.send()
+    };
+    let mut resp = ask(part_len).await.map_err(|e| format!("request failed: {}", e))?;
+    // 416: the .part reaches the end of the file or past it. An earlier run
+    // stopped between its last byte and the rename leaves the whole file
+    // there (the server answers `bytes */<its length>`), and that copy is
+    // finished as it is; anything else is not this file, and starts over.
+    if part_len > 0 && resp.status().as_u16() == 416 {
+        let whole = resp
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("bytes */"))
+            .and_then(|n| n.trim().parse::<u64>().ok());
+        if whole == Some(part_len) {
+            return tokio::fs::rename(&part_path, &final_path).await.map_err(|e| e.to_string());
+        }
+        let _ = tokio::fs::remove_file(&part_path).await;
+        part_len = 0;
+        resp = ask(0).await.map_err(|e| format!("request failed: {}", e))?;
     }
-    if part_len > 0 {
-        request = request.header("Range", format!("bytes={}-", part_len));
-    }
-    let resp = request
-        .send()
-        .await
-        .map_err(|e| format!("request failed: {}", e))?;
     if !resp.status().is_success() {
         return Err(format!("server returned {}", resp.status()));
     }
@@ -1274,7 +1292,8 @@ mod tests {
             match from {
                 Some(n) if n < body.len() => Resp::bytes(206, "video/mp4", body[n..].to_vec())
                     .header("Content-Range", &format!("bytes {}-{}/{}", n, body.len() - 1, body.len())),
-                Some(_) => Resp::status(416),
+                // As Jellyfin answers it (checked on the QA server, 12.2).
+                Some(_) => Resp::status(416).header("Content-Range", &format!("bytes */{}", body.len())),
                 None => Resp::bytes(200, "video/mp4", body.clone()),
             }
         }
@@ -1527,6 +1546,42 @@ mod tests {
         assert_eq!(std::fs::read(dir.join("f.mp4")).unwrap(), whole);
         assert!(crate::test_support::debug_log().contains("resume old1 failed: download predates resume support"));
         assert_eq!(terminals(&events).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_part_that_already_holds_the_whole_file_is_finished_not_failed_with_416() {
+        let _s = sandbox();
+        let whole = film(3000);
+        let server = dl_server(ranged(DL, whole.clone()));
+        sign_in(&server.url);
+        let dir = write_record(ID, json!({ "item_id": ID, "file": "f.mp4", "status": "error", "request": { "url": format!("{}{DL}", server.url) } }));
+        std::fs::write(dir.join("f.mp4.part"), &whole).unwrap();
+        let app = mock_app();
+        let events = capture_events(app.handle(), "download-progress");
+        restart(app.handle().clone(), &app.state::<DlManager>(), ID, true).unwrap();
+        assert_eq!(nth_end(&events, 1).await["state"], json!("complete"));
+        subtitles_done(ID).await;
+        assert_eq!(server.requests_to(DL).len(), 1);
+        assert_eq!(std::fs::read(dir.join("f.mp4")).unwrap(), whole);
+        assert!(!dir.join("f.mp4.part").exists());
+    }
+
+    #[tokio::test]
+    async fn a_part_longer_than_the_file_is_dropped_and_the_file_fetched_again() {
+        let _s = sandbox();
+        let whole = film(3000);
+        let server = dl_server(ranged(DL, whole.clone()));
+        sign_in(&server.url);
+        let dir = write_record(ID, json!({ "item_id": ID, "file": "f.mp4", "status": "error", "request": { "url": format!("{}{DL}", server.url) } }));
+        std::fs::write(dir.join("f.mp4.part"), vec![0u8; 4000]).unwrap();
+        let app = mock_app();
+        let events = capture_events(app.handle(), "download-progress");
+        restart(app.handle().clone(), &app.state::<DlManager>(), ID, true).unwrap();
+        assert_eq!(nth_end(&events, 1).await["state"], json!("complete"));
+        subtitles_done(ID).await;
+        let asked = server.requests_to(DL);
+        assert_eq!(asked.iter().map(|r| r.header("range").map(str::to_string)).collect::<Vec<_>>(), vec![Some("bytes=4000-".to_string()), None]);
+        assert_eq!(std::fs::read(dir.join("f.mp4")).unwrap(), whole);
     }
 
     #[tokio::test]
