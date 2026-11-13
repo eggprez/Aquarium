@@ -219,14 +219,23 @@ extension MacUITestCase {
 
     /// Open the sidebar's account menu.
     func openAccountMenu() {
-        // The label is several parts, each a menu button with the identifier;
-        // the chevron is the one that reliably opens it.
+        // The label is several parts, each a menu button with the identifier.
+        // A plain click opens it (`press(forDuration:)` reaches nothing on a
+        // Mac). Its items are not in XCUITest's tree on macOS 27 — a menu
+        // popped up from a SwiftUI `Menu` in a window isn't, unlike context
+        // menus and the menu bar — so choose from it with `chooseInOpenMenu`.
         let parts = app.menuButtons.matching(identifier: TestID.Sidebar.accountMenu)
         parts.firstMatch.waitToExist(20)
-        let chevron = parts.matching(NSPredicate(format: "title CONTAINS[c] 'Chevron'")).firstMatch
-        // A plain-styled Menu opens on mouse-down; a quick click can close it
-        // again before XCUITest looks.
-        (chevron.exists ? chevron : parts.firstMatch).press(forDuration: 0.4)
+        parts.firstMatch.click()
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+
+    /// Choose an item of the open pop-up menu by typing the start of its
+    /// title (the menu's type-select) and Return. For menus whose items
+    /// XCUITest can't see — see `openAccountMenu`.
+    func chooseInOpenMenu(typing prefix: String) {
+        app.typeText(prefix)
+        app.typeKey(.return, modifierFlags: [])
     }
 
     /// A title's page, opened from its library's grid (Fixture Films, else

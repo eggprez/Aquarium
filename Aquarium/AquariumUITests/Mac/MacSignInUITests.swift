@@ -84,16 +84,25 @@ final class MacSignInUITests: MacUITestCase {
         app.element(TestID.Home.root).waitToExist(60)
     }
 
+    /// The menu's items can't be listed (see `openAccountMenu`), so each is
+    /// chosen by its title and checked by what it does.
     func testAccountMenuOffersAddSettingsAndSignOut() throws {
         launchToHome()
         openAccountMenu()
-        if !menuChoice(startingWith: "Sign Out", timeout: 3).exists {
-            throw XCTSkip("the sidebar footer's account Menu (.menuStyle(.button) + .plain) doesn't open for XCUITest clicks, presses or the chevron; MANUAL.md A1")
-        }
-        for prefix in ["Add Account", "Sign Out"] {
-            XCTAssertTrue(menuChoice(startingWith: prefix).exists, prefix)
-        }
-        dismissMenus()
+        chooseInOpenMenu(typing: "Add Account")
+        XCTAssertTrue(app.element(TestID.Login.root).waitForExistence(timeout: 10), "Add Account… opens the sign-in sheet")
+        app.typeKey(.escape, modifierFlags: [])   // AutoFill's list, if it is up
+        if !app.element(TestID.Login.root).waitToVanish(3) { app.typeKey(.escape, modifierFlags: []) }
+        XCTAssertTrue(app.element(TestID.Login.root).waitToVanish(10))
+        openAccountMenu()
+        chooseInOpenMenu(typing: "Settings")
+        XCTAssertTrue(settingsWindow.waitForExistence(timeout: 10), "Settings… opens Settings")
+        app.typeKey("w", modifierFlags: .command)
+        mainWindow.click()
+        openAccountMenu()
+        chooseInOpenMenu(typing: "Sign Out")
+        app.button(TestID.Shell.signOutCancel).tapWhenReady(10)
+        XCTAssertTrue(app.element(TestID.Home.root).exists, "Sign Out… asks first; Cancel keeps you in")
     }
 
     func testSignOutAsksFirstAndCancelKeepsYouIn() {
@@ -117,7 +126,17 @@ final class MacSignInUITests: MacUITestCase {
         settingsWindow.toolbars.buttons["Account"].tapWhenReady()
         app.element(TestID.Settings.addAccount).tapWhenReady()
         app.element(TestID.Login.root).waitToExist(20)
-        app.button(TestID.Login.cancel).tapWhenReady()
+        // The username field has the keyboard, and the system's AutoFill
+        // list drops down from it over the sheet's buttons: a click on
+        // Cancel landed on that list. Escape puts the list away first.
+        let autoFill = app.windows.matching(identifier: "SafariPlatformSupportAutoCompleteWindow").firstMatch
+        if autoFill.waitForExistence(timeout: 2) {
+            app.typeKey(.escape, modifierFlags: [])
+            _ = autoFill.waitToVanish(5)
+        }
+        if app.element(TestID.Login.root).exists {
+            app.button(TestID.Login.cancel).tapWhenReady()
+        }
         XCTAssertTrue(app.element(TestID.Login.root).waitToVanish(10))
     }
 

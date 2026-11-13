@@ -123,14 +123,20 @@ final class MacSectionsUITests: MacUITestCase {
         launchToHome()
         openTitle(named: film.name, id: film.id)
         clickCentre(app.element(TestID.Detail.download))
-        menuChoice(TestID.Detail.downloadQuality("Original quality"), title: "Original quality").click()
+        // Chosen by typing its title: this pop-up menu's items aren't in
+        // XCUITest's tree (see `openAccountMenu`), and on a Mac the title
+        // carries the size ("Original quality — About 2.0 MiB").
+        chooseInOpenMenu(typing: "Original quality")
         app.typeKey("j", modifierFlags: [.command, .option])
         app.element(TestID.Downloads.root).waitToExist(20)
         let card = app.element(TestID.Downloads.filmCard(film.id))
         XCTAssertTrue(card.waitForExistence(timeout: 120), "the download finished")
         card.rightClick()
         menuChoice(TestID.Downloads.filmCardDelete(film.id), title: "Delete…").click()
-        app.button(TestID.Downloads.deletionConfirm).tapWhenReady()
+        // On a Mac the question is an alert (`downloadDeletionDialog`), and an
+        // alert's buttons don't keep SwiftUI identifiers ("action-button-1"):
+        // its Delete by title.
+        app.sheets.buttons["Delete"].firstMatch.tapWhenReady()
         XCTAssertTrue(card.waitToVanish(20))
     }
 
