@@ -132,7 +132,7 @@ final class TVHomeTests: TVTestCase {
         Remote.longPress(.select, seconds: 1.2)
         let watched = app.element(TestID.Item.menuWatched)
         watched.waitToExist(10)
-        XCTAssertTrue(Remote.focus(on: watched, in: app))
+        XCTAssertTrue(focusInColumn(watched) || Remote.focus(on: watched, in: app), "can't reach Mark as Watched (on \(focused?.summary ?? "nothing"))")
         Remote.select()
         waitUntil("the server to mark it played", timeout: 15) { (try? api.userData(hevc).played) == true }
     }

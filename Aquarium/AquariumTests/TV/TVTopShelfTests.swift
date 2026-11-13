@@ -25,9 +25,37 @@ final class TVTopShelfTests: TVUnitTestCase {
         directory = dir
         manifest = man
         images = img
-        ClientStub.install()
         URLProtocol.registerClass(StubURLProtocol.self)
+        if !Self.signedIn {
+            // Signing the stub account in reloads the host app's Home, which
+            // publishes its own Next Up — an empty one, against the stub
+            // server — some moments later. Once per class, and waited out, so
+            // it can't land in the middle of a test.
+            ClientStub.install()
+            Self.signedIn = true
+            await waitForHomesPublish()
+        }
         await drainPendingClears()
+        StubURLProtocol.reset()
+    }
+
+    private static var signedIn = false
+
+    override class func tearDown() {
+        MainActor.assumeIsolated {
+            if signedIn { ClientStub.remove() }
+            signedIn = false
+        }
+        super.tearDown()
+    }
+
+    /// Home's publish, after a sign-in: the manifest appears. Not a failure
+    /// if Home isn't on screen to do it.
+    private func waitForHomesPublish() async {
+        let manifest = self.manifest!
+        let written = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in FileManager.default.fileExists(atPath: manifest.path) }, object: nil)
+        _ = await XCTWaiter.fulfillment(of: [written], timeout: 15)
     }
 
     /// `TopShelf.clear()` runs in a task of its own, and a sign-out (the
@@ -37,14 +65,15 @@ final class TVTopShelfTests: TVUnitTestCase {
     private func drainPendingClears() async {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         TopShelf.clear()
-        let gone = expectation(for: NSPredicate { _, _ in !FileManager.default.fileExists(atPath: self.directory.path) },
-                               evaluatedWith: nil)
-        await fulfillment(of: [gone], timeout: 10)
+        let path = directory.path
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !FileManager.default.fileExists(atPath: path) },
+                                             object: nil)
+        // Not a failure by itself: a test that needs the folder empty says so.
+        _ = await XCTWaiter.fulfillment(of: [gone], timeout: 10)
     }
 
     override func tearDown() async throws {
         URLProtocol.unregisterClass(StubURLProtocol.self)
-        ClientStub.remove()
         if let directory { try? FileManager.default.removeItem(at: directory) }
     }
 
@@ -178,11 +207,13 @@ final class TVTopShelfTests: TVUnitTestCase {
 
     func testSignedOutPublishesNothing() async throws {
         ClientStub.remove()
-        stubPoster(seriesId: "series1")
+        await drainPendingClears()  // signing out clears the shelf in a task of its own
+        StubURLProtocol.stub("/Items/series1/Images/Primary",
+                             StubURLProtocol.Response(status: 200, headers: ["Content-Type": "image/jpeg"], body: Data("x".utf8)))
         await TopShelf.publish([episode(1)])
         XCTAssertFalse(FileManager.default.fileExists(atPath: manifest.path))
         ClientStub.install()
-        URLProtocol.registerClass(StubURLProtocol.self)
+        await waitForHomesPublish()
     }
 
     func testClearTakesTheShelfAway() async throws {
@@ -190,8 +221,9 @@ final class TVTopShelfTests: TVUnitTestCase {
         await TopShelf.publish([episode(1)])
         XCTAssertTrue(FileManager.default.fileExists(atPath: manifest.path))
         TopShelf.clear()
-        let gone = expectation(for: NSPredicate { _, _ in !FileManager.default.fileExists(atPath: self.directory.path) },
-                               evaluatedWith: nil)
+        let path = directory.path
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !FileManager.default.fileExists(atPath: path) },
+                                             object: nil)
         await fulfillment(of: [gone], timeout: 10)
     }
 

@@ -27,7 +27,14 @@ final class TVSyncCodeUITests: TVPlayerTestCase {
         Remote.select()
         let play = app.element(TestID.TVSettings.syncTestPlay)
         play.waitToExist(10, file: file, line: line)
-        XCTAssertTrue(focusInColumn(play) || Remote.focus(on: play, in: app), file: file, line: line)
+        // The warning is a system alert: its buttons don't report focus by
+        // identifier, only by label.
+        for move in [nil, XCUIRemote.Button.up, .down, .down] {
+            if let move { Remote.press(move) }
+            if focusedLabel.localizedCaseInsensitiveContains("play") || play.hasFocus { break }
+        }
+        XCTAssertTrue(focusedLabel.localizedCaseInsensitiveContains("play") || play.hasFocus,
+                      "Play not focused in the warning (on \(focused?.summary ?? "nothing"))", file: file, line: line)
         Remote.select()
         app.element(TestID.Player.root).waitToExist(30, file: file, line: line)
         app.element(TestID.Player.syncCodeImage).waitToExist(30, file: file, line: line)

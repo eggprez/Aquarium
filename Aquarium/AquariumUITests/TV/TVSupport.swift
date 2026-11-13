@@ -185,19 +185,28 @@ class TVTestCase: TVUITestCase {
     /// Up and Down only, judged by the target's middle against the focused
     /// element's: for a single column (Settings, a choice list, a dialog),
     /// where `Remote.focus` can stall on frames that overlap sideways.
+    /// Focus is on `target`, or on the element that wraps it (a menu's row
+    /// is a focused Cell around the identified element).
+    func isFocused(on target: XCUIElement) -> Bool {
+        if target.hasFocusInside { return true }
+        guard let f = focused, target.exists else { return false }
+        let t = target.frame
+        return f.frame.contains(CGPoint(x: t.midX, y: t.midY)) && f.frame.height < t.height * 2
+    }
+
     @discardableResult
     func focusInColumn(_ target: XCUIElement, maxPresses: Int = 30) -> Bool {
         guard target.waitForExistence(timeout: 10) else { return false }
         var last: CGFloat?
         for _ in 0..<maxPresses {
-            if target.hasFocusInside { return true }
+            if isFocused(on: target) { return true }
             guard let current = focused else { Remote.press(.down); continue }
             let dy = target.frame.midY - current.frame.midY
             if let last, last == current.frame.midY, abs(dy) < 2 { break }
             last = current.frame.midY
             Remote.press(dy > 0 ? .down : .up)
         }
-        return target.hasFocusInside
+        return isFocused(on: target)
     }
 
     /// Presses `button` until `condition` holds, at most `max` times. True
