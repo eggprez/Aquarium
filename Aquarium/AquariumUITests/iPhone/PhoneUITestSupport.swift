@@ -328,3 +328,21 @@ enum PhoneSessions {
     }
 }
 #endif
+
+#if os(iOS)
+extension PhoneUITestCase {
+    /// The first element with this identifier whose frame is on screen (the
+    /// same card can sit in several shelves, some scrolled out of sight).
+    func visible(_ id: String, timeout: TimeInterval = 20, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        let all = app.descendants(matching: .any).matching(identifier: id)
+        let window = app.windows.firstMatch.frame
+        var found: XCUIElement?
+        _ = eventually(timeout: timeout) {
+            found = all.allElementsBoundByIndex.first { $0.isOnScreen(in: window) }
+            return found != nil
+        }
+        if found == nil { XCTFail("no \(id) on screen", file: file, line: line) }
+        return found ?? all.firstMatch
+    }
+}
+#endif

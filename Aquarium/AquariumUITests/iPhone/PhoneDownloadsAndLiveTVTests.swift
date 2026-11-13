@@ -107,7 +107,8 @@ final class PhoneDownloadsTests: PhoneUITestCase {
         let manage = any(TestID.Downloads.manageMenu)
         if manage.exists {
             manage.tap()
-            any(TestID.Downloads.manageClearQueue).tapNow(10)
+            let clear = any(TestID.Downloads.manageClearQueue)
+            if clear.waitForExistence(timeout: 5) { clear.tap() } else { app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).tap() }
         }
         for key in ["film.long_multitrack", "film.long_direct"] {
             let id = try Fixtures.require().item(key).id

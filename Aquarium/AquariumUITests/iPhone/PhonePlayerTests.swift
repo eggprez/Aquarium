@@ -486,7 +486,12 @@ final class PhonePlayerTests: PhonePlayerTestCase {
         skip.waitToExist(30)
         assertOnScreen(skip, "Skip Intro")
         skip.tapNow(5)
-        XCTAssertNotNil(waitForServerPosition(api, itemId: id, atLeast: 29, timeout: 30), "Skip Intro did not get past 0:30")
+        // Read straight after the tap, before playback could get there alone.
+        showControls()
+        app.button(TestID.Player.playPause).tap()
+        XCTAssertTrue(eventually(timeout: 8) { (self.scrubberSeconds() ?? 0) >= 29 },
+                      "Skip Intro did not get past 0:30 (at \(String(describing: scrubberSeconds())))")
+        _ = api
     }
 
     /// Regression R-B3: Skip Credits never appeared (the server was asked

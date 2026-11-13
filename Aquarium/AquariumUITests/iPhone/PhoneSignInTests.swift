@@ -26,16 +26,18 @@ final class PhoneSignInTests: PhoneUITestCase {
     private func typeCredentials(_ name: String, _ password: String, file: StaticString = #filePath, line: UInt = #line) {
         let user = app.textFields[TestID.Login.username]
         user.tapNow(20, file: file, line: line)
-        // Return moves to the password (onSubmit), which may sit under the
-        // keyboard, so it is typed into whatever has focus.
-        user.typeText(name + "\n")
-        app.typeText(password + "\n")
+        user.typeText(name)
+        // Return does not move to the password on a phone, and the password
+        // can sit under the keyboard. XCUITest's own tap scrolls it into view
+        // (a tap by coordinate would land on a key).
+        let pw = app.secureTextFields[TestID.Login.password]
+        pw.waitToExist(10, file: file, line: line)
+        pw.tap()
+        if !password.isEmpty { pw.typeText(password) }
+        dismissKeyboard()
         let signIn = app.button(TestID.Login.signIn)
-        if signIn.waitForExistence(timeout: 3), !app.element(TestID.Home.root).exists, !app.element(TestID.Login.error).exists {
-            dismissKeyboard()
-            app.reveal(signIn)
-            signIn.tapNow(5, file: file, line: line)
-        }
+        app.reveal(signIn)
+        signIn.tapNow(10, file: file, line: line)
     }
 
     private func dismissKeyboard() {
@@ -228,13 +230,16 @@ final class PhoneSignInTests: PhoneUITestCase {
         let signOut = app.button(TestID.Settings.signOut)
         app.reveal(signOut)
         signOut.tapNow(20)
-        let cancel = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label == 'Cancel'", TestID.Settings.signOutCancel)).firstMatch
-        cancel.waitToExist(20)
-        let named = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", account.name)).count > 0
-            || app.otherElements.containing(NSPredicate(format: "label CONTAINS %@", account.name)).count > 0
-        XCTExpectFailure("bug: the sign-out confirmation says \"Sign out of <server>\" without the account's name")
+        // A popover with no Cancel on iOS 27: the question, then Sign out.
+        app.button(TestID.Settings.signOutConfirm).waitToExist(20)
+        let question = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Sign out of'")).firstMatch
+        question.waitToExist(10)
+        attachScreenshot("sign-out question")
+        let named = question.label.contains(account.name)
+        // Dismiss without signing out: a tap outside the popover.
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75)).tap()
+        XCTExpectFailure("bug R-TV30: the sign-out question reads \"\(question.label)\", naming the server and not the account")
         XCTAssertTrue(named, "the question should name \(account.name)")
-        cancel.tap()
     }
 
     /// Add a second account (suite-spare1) from Settings, then switch back

@@ -271,11 +271,8 @@ final class PhoneContextMenuTests: PhoneUITestCase {
             XCTAssertTrue(any(item).waitForExistence(timeout: 5), item)
         }
         attachScreenshot("card menu (\(device.rawValue))")
-        let details = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label BEGINSWITH 'Details' OR label BEGINSWITH 'Go to'", TestID.Item.menuDetails)).firstMatch
-        if details.waitForExistence(timeout: 3) {
-            details.tap()
-            app.element(TestID.Detail.root).waitToExist(20)
-        }
+        any(TestID.Item.menuPlay).tap()
+        app.element(TestID.Player.root).waitToExist(40)
     }
 
     func testCardMenuFavouriteAndWatched() throws {
@@ -329,12 +326,21 @@ final class PhoneContextMenuTests: PhoneUITestCase {
         try standardOnly()
         let api = try self.api
         let show = try Fixtures.require().item("show.short")
+        // Back to the baseline: E01 and E02 watched, so E03 is next.
+        for n in [1, 2] { try api.markPlayed(try XCTUnwrap(PhoneFixtures.episode("show.short", season: 1, number: n))) }
         launchHome()
         let shelf = app.element(TestID.Home.shelf(TestID.Home.rowNextUp))
         app.reveal(shelf)
         // Whichever Short Show episode Next Up offers (earlier tests move it).
-        let card = shelf.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'item.card.' AND label BEGINSWITH 'FX Short Show'")).firstMatch
-        card.waitToExist(30)
+        // An anchor has no children: find the card by where it sits.
+        shelf.waitToExist(30)
+        let candidates = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'item.card.' AND label CONTAINS 'FX Short Show'"))
+        var found: XCUIElement?
+        _ = eventually(timeout: 30) {
+            found = candidates.allElementsBoundByIndex.first { $0.frame.midY > shelf.frame.minY && $0.frame.midY < shelf.frame.maxY }
+            return found != nil
+        }
+        let card = try XCTUnwrap(found, "no Short Show card on Next Up")
         let e3 = String(card.identifier.dropFirst("item.card.".count))
         card.press(forDuration: 1.2)
         any(TestID.Item.menuRemoveFromNextUp).tapNow(10)
@@ -382,7 +388,13 @@ final class PhoneContextMenuTests: PhoneUITestCase {
         openTitle(show.id, searching: show.name)
         app.button(TestID.Detail.more).tapNow()
         app.descendants(matching: .any).matching(identifier: TestID.Detail.addToNextUp).firstMatch.tapNow(10)
-        app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label == 'Cancel'", TestID.Shell.nextUpCancel)).firstMatch.tapNow(10)
+        let cancel = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@ OR label == 'Cancel'", TestID.Shell.nextUpCancel)).firstMatch
+        any(TestID.Shell.nextUpFromLastWatched).waitToExist(10)
+        if cancel.waitForExistence(timeout: 2) { cancel.tap() } else {
+            // A popover with no Cancel row: a tap outside it.
+            app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92)).tap()
+        }
+        XCTAssertTrue(any(TestID.Shell.nextUpFromLastWatched).waitToVanish(10))
         XCTAssertTrue(app.element(TestID.Detail.root).exists)
     }
 }

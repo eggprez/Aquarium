@@ -78,6 +78,30 @@ final class PhoneMusicTests: PhoneMusicTestCase {
         }
     }
 
+    /// Reported by the Watch fixer (2026-11-13): `/Artists/AlbumArtists`
+    /// with no music scope lists audiobook authors (FX Author, Mary Shelley)
+    /// among Music › Artists. `MusicLibraryView.swift:219` asks the same way.
+    func testArtistsListHasNoAudiobookAuthors() throws {
+        launchHome()
+        openMusic()
+        any(TestID.Music.page("library")).tapNow(10)
+        any(TestID.Music.libraryDoor("artists")).tapNow(10)
+        app.element(TestID.Music.artists).waitToExist(20)
+        let band = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'FX Band'")).firstMatch
+        for _ in 0..<8 where !band.exists { app.swipeUp() }
+        // Walk the whole list (it is short) looking for the authors.
+        var seen = Set<String>()
+        for _ in 0..<12 {
+            for e in app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'music.row.' OR identifier BEGINSWITH 'music.card.'")).allElementsBoundByIndex {
+                seen.insert(e.label)
+            }
+            app.swipeUp()
+        }
+        let authors = seen.filter { $0.hasPrefix("FX Author") || $0.hasPrefix("Mary Shelley") }
+        XCTExpectFailure("bug: Music › Artists lists audiobook authors (albumArtists called with no music scope)", options: .nonStrict())
+        XCTAssertTrue(authors.isEmpty, "authors listed as artists: \(authors.sorted())")
+    }
+
     func testSongsSortMenu() throws {
         try standardOnly()
         launchHome()
@@ -169,10 +193,17 @@ final class PhoneMusicTests: PhoneMusicTestCase {
         let last = try XCTUnwrap(tracks(album).last)
         playSong(last)
         openNowPlaying()
-        let autoplay = any(TestID.NowPlaying.next)
-        autoplay.tap()
-        // With music autoplay on, a mix may follow; the album itself is over.
-        XCTAssertTrue(eventually(timeout: 20) { (try? self.api.sessions().first?.nowPlayingId) != last })
+        let next = any(TestID.NowPlaying.next)
+        next.waitToExist(10)
+        // Either Next is off on the last song (nothing to go to), or it
+        // stops / moves on. It must never start the last song again.
+        if !next.isEnabled { return }
+        next.tap()
+        let api = try self.api
+        XCTAssertTrue(eventually(timeout: 20) {
+            guard let s = PhoneSessions.current(api, last) else { return true }
+            return s.isPaused == true || (s.positionSeconds ?? 0) > 5
+        }, "Next on the last song restarted it")
     }
 
     /// Disc One Opener has synced lyrics (6 lines); Disc One Middle plain.
@@ -353,7 +384,7 @@ final class PhoneAudiobookTests: PhoneMusicTestCase {
         try api.setResume(book, seconds: 400)
         launchHome()
         tab("Audiobooks")
-        any(TestID.Books.card(book)).tapNow(30)
+        visible(TestID.Books.card(book), timeout: 30).tapNow(5)
         app.element(TestID.Books.detail).waitToExist(20)
         let chapters = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'books.detail.chapter.'"))
         for _ in 0..<6 where chapters.count < 6 { app.swipeUp() }
@@ -374,7 +405,7 @@ final class PhoneAudiobookTests: PhoneMusicTestCase {
         let book = try XCTUnwrap(PhoneFixtures.book("FX Chaptered Audiobook"))
         launchHome()
         tab("Audiobooks")
-        any(TestID.Books.card(book)).tapNow(30)
+        visible(TestID.Books.card(book), timeout: 30).tapNow(5)
         let chapter = any(TestID.Books.chapter(3))
         for _ in 0..<6 where !chapter.exists { app.swipeUp() }
         chapter.tapNow(10)
@@ -387,7 +418,7 @@ final class PhoneAudiobookTests: PhoneMusicTestCase {
         let book = try XCTUnwrap(PhoneFixtures.book("FX Chaptered Audiobook"))
         launchHome()
         tab("Audiobooks")
-        any(TestID.Books.card(book)).tapNow(30)
+        visible(TestID.Books.card(book), timeout: 30).tapNow(5)
         any(TestID.Books.detailPlay).tapNow(20)
         openNowPlaying()
         any(TestID.NowPlaying.speed).tapNow(10)
