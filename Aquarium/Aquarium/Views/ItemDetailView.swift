@@ -89,6 +89,19 @@ struct ItemDetailView: View {
     #endif
 
     var body: some View {
+        // A folder or an album opens as what it holds, a photo as the photo:
+        // decided once the item is in, since the load is what says what it is.
+        if let item, item.opensAsContainer {
+            ContainerPage(item: item)
+        } else if let item, item.kind == "Photo" {
+            PhotoPage(item: item)
+        } else {
+            titlePage
+        }
+    }
+
+    @ViewBuilder
+    private var titlePage: some View {
         #if os(iOS)
         // The artwork starts below the bar rather than behind it, which is what
         // Home does too — and, like Home, the bar is this page's own rather

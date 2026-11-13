@@ -204,6 +204,10 @@ struct LibraryView: View {
         switch resolvedCollectionType {
         case "movies": "Movie"
         case "tvshows": "Series"
+        // Clips and the albums of photos. Not the server's raw folders: a
+        // recursive list finds the library's own folder on disk as one,
+        // a second copy of the whole library under its directory's name.
+        case "homevideos": "Video,PhotoAlbum"
         // The Collections view lists the collections themselves; anything
         // else under it is what is inside them, a level down.
         case "boxsets": "BoxSet"

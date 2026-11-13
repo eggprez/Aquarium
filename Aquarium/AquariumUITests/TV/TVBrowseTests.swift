@@ -123,13 +123,6 @@ final class TVBrowseTests: TVTestCase {
             return self.app.elements(prefix: "item.card.").count > 2 && !self.app.element(folderId).exists
         }
         attachScreenshot("the folder opened")
-        if !opened {
-            // Seen 2026-11-13: the "photos" folder opens as a title page —
-            // its name, Play, Quality, Favorite, Mark watched — and nothing
-            // inside it. fix-status.md has this fixed on claude/qa-fix-list-cb0b58,
-            // which is not merged.
-            XCTExpectFailure("bug: a photo folder in Fixture Photos opens as an empty title page with a Play button (ItemDetailView), not a grid of its contents")
-        }
         XCTAssertTrue(opened, "the folder showed none of its contents")
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Server error'")).firstMatch.exists)
         XCTAssertFalse(app.element(TestID.Library.empty).exists, "the folder opened empty")

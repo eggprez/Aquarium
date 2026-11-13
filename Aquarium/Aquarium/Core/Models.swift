@@ -351,7 +351,10 @@ struct BaseItem: Codable, Hashable, Sendable, Identifiable {
     }
     var isSeries: Bool { kind == "Series" }
     var isSeason: Bool { kind == "Season" }
-    var isFolderLike: Bool { ["Series", "Season", "BoxSet", "Folder", "CollectionFolder"].contains(kind) }
+    var isFolderLike: Bool { ["Series", "Season", "BoxSet", "Folder", "CollectionFolder", "PhotoAlbum"].contains(kind) }
+    /// A folder or a photo album: it opens as what is inside it, since it has
+    /// nothing of its own to play and a title page with a Play is no use.
+    var opensAsContainer: Bool { kind == "Folder" || kind == "PhotoAlbum" }
     var userData: UserData { UserData ?? .init() }
     var runtimeSeconds: Double { Double(RunTimeTicks ?? 0) / 10_000_000 }
 

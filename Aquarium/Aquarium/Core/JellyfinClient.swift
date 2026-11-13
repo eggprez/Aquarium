@@ -1722,6 +1722,22 @@ final class JellyfinClient {
 
     /// "More like this" — the server's own recommendation. Purely additive to
     /// the detail page, so callers treat a failure as an empty list.
+    /// What is directly inside a folder or a photo album, sub-albums first:
+    /// its videos, photos and albums, not the audio or books a mixed folder
+    /// can also hold.
+    func children(of parentId: String, limit: Int = 500) async throws -> [BaseItem] {
+        guard let s = prefs.session else { throw APIError.notConfigured }
+        let q = [
+            URLQueryItem(name: "ParentId", value: parentId),
+            URLQueryItem(name: "SortBy", value: "IsFolder,SortName"),
+            URLQueryItem(name: "SortOrder", value: "Ascending"),
+            URLQueryItem(name: "ExcludeItemTypes", value: "Audio,AudioBook,Book,MusicAlbum,MusicArtist"),
+            URLQueryItem(name: "Fields", value: Self.listFields),
+            URLQueryItem(name: "Limit", value: String(limit)),
+        ]
+        return try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))").items
+    }
+
     func similar(to itemId: String, limit: Int = 12) async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
         return try await get(

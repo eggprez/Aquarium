@@ -946,6 +946,9 @@ final class LibraryIndex {
             guard JellyfinClient.shared.isOffline else { return nil }
             types = ["Movie", "Series", "Video"]
         }
+        // Photo albums aren't indexed (`types` below), so a list that wants
+        // them asks the server — unless there is no server to ask.
+        if types.contains("PhotoAlbum"), !JellyfinClient.shared.isOffline { return nil }
         let key = [
             parentId, types.sorted().joined(separator: ","), query.sortBy, query.sortOrder,
             String(query.unwatched), String(query.favorites), query.genre ?? "",
