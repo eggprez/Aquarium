@@ -187,8 +187,9 @@ final class WatchLink: NSObject {
     private var revision = 0
 
     #if DEBUG
-    /// Unit tests only: while non-nil, `send(_:)` keeps each message here
-    /// instead of handing it to WatchConnectivity.
+    /// Unit tests only: while non-nil, `send(_:)`, `remote(_:)` and
+    /// `requestPlayback()` keep each message here instead of handing it to
+    /// WatchConnectivity, and take the phone's reach from `testSetPhone`.
     @ObservationIgnored var testOutbox: [WatchMessage]?
     /// Unit tests only: the phone's answer to `send(events:)`, in place of
     /// WatchConnectivity's.
@@ -308,6 +309,13 @@ final class WatchLink: NSObject {
 
     /// Ask the phone what it is playing, now, in the reply.
     func requestPlayback() {
+        #if DEBUG
+        if testOutbox != nil {
+            guard isPhoneReachable else { remoteError = "iPhone out of reach"; return }
+            testOutbox?.append(.requestPlayback)
+            return
+        }
+        #endif
         guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return }
         guard WCSession.default.isReachable else {
             remoteError = "iPhone out of reach"
@@ -333,7 +341,7 @@ final class WatchLink: NSObject {
     /// Tell the phone's player to do something. Only ever a live message: a
     /// pause that arrived an hour late would be a surprise.
     func remote(_ command: RemoteCommand) {
-        guard WCSession.isSupported(), WCSession.default.activationState == .activated, WCSession.default.isReachable else {
+        guard phoneTakesLiveMessages else {
             remoteError = "iPhone out of reach"
             return
         }
@@ -358,6 +366,13 @@ final class WatchLink: NSObject {
             guess.at = now
             phonePlayback = guess
         }
+        #if DEBUG
+        if testOutbox != nil {
+            testOutbox?.append(.remote(command))
+            remoteBusy = false
+            return
+        }
+        #endif
         WCSession.default.sendMessage(WatchSync.pack(WatchMessage.remote(command)), replyHandler: { _ in
             Task { @MainActor in self.remoteBusy = false }
         }, errorHandler: { error in
@@ -367,6 +382,15 @@ final class WatchLink: NSObject {
                 self.remoteError = "The iPhone didn't answer"
             }
         })
+    }
+
+    /// A live message can go now: the session is up and the phone in reach.
+    /// (Unit tests: the reach `testSetPhone` gave.)
+    private var phoneTakesLiveMessages: Bool {
+        #if DEBUG
+        if testOutbox != nil { return isPhoneReachable }
+        #endif
+        return WCSession.isSupported() && WCSession.default.activationState == .activated && WCSession.default.isReachable
     }
 
     /// The watch's log, as a file transfer: it goes in the background, in

@@ -98,10 +98,25 @@ final class JellyfinClient {
     /// Unit tests only: answer requests through these `URLProtocol` classes
     /// (canned JSON) from now on; nil puts the plain session back. See
     /// WatchTests and AquariumTests/Shared/Support.
+    ///
+    /// On the watchOS 27 simulator a session's own protocol classes see GET
+    /// requests only: a POST or DELETE goes to the network. `testTransport`
+    /// covers every method.
     func useTestProtocols(_ protocols: [AnyClass]?) {
         session = Self.makeSession(protocols: protocols)
     }
+
+    /// Unit tests only: when set, every `request` is answered by this in
+    /// place of the session (its errors are taken as the network's).
+    @ObservationIgnored var testTransport: ((URLRequest) async throws -> (Data, URLResponse))?
     #endif
+
+    private func load(_ req: URLRequest) async throws -> (Data, URLResponse) {
+        #if DEBUG
+        if let testTransport { return try await testTransport(req) }
+        #endif
+        return try await session.data(for: req)
+    }
 
     private init() {
         if let id = defaults.string(forKey: "watch_device_id") {
@@ -223,7 +238,7 @@ final class JellyfinClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: req)
+            (data, response) = try await load(req)
         } catch {
             if (error as? URLError)?.code == .cancelled || error is CancellationError { throw CancellationError() }
             WatchLog.error("client", "\(method) \(path.components(separatedBy: "?")[0]) failed: \(error.localizedDescription)\(countsForOffline ? " — now offline" : "")")
