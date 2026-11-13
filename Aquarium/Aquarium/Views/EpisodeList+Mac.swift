@@ -41,8 +41,13 @@ struct MacEpisodeList: View {
     /// last episode off at the bottom of a frame that has no scrolling to
     /// reach it with.
     private var height: CGFloat {
-        let counted = CGFloat(episodes.count) * Self.rowHeight + Self.listPadding * 2
-        return max(counted, measuredHeight ?? 0)
+        Self.listHeight(episodeCount: episodes.count, measured: measuredHeight)
+    }
+
+    /// `height`, as a static for the unit tests.
+    static func listHeight(episodeCount: Int, measured: CGFloat?) -> CGFloat {
+        let counted = CGFloat(episodeCount) * rowHeight + listPadding * 2
+        return max(counted, measured ?? 0)
     }
 
     /// One row's share of `height`, for the anchors below.
@@ -88,7 +93,7 @@ struct MacEpisodeList: View {
             // The earliest of the selection, in the season's order. `ids` is
             // a set, and its `first` was whichever the hash put there: Return
             // on episodes 3 to 5 played any one of them.
-            guard let episode = episodes.first(where: { ids.contains($0.Id) }) else { return }
+            guard let episode = Self.episodeToPlay(ids, in: episodes) else { return }
             onPlay(episode)
         }
         .onChange(of: episodes.map(\.Id)) { _, ids in
@@ -102,6 +107,12 @@ struct MacEpisodeList: View {
         }
         .accessibilityLabel("Episodes")
         .testAnchor(TestID.Detail.episodeList)
+    }
+
+    /// The earliest of a selection, in the season's order — what Return and
+    /// a double-click play. Static for the unit tests.
+    static func episodeToPlay(_ ids: Set<String>, in episodes: [BaseItem]) -> BaseItem? {
+        episodes.first { ids.contains($0.Id) }
     }
 
     /// One row held: its own menu, which already has Play, Get Info and the

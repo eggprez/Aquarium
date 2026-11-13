@@ -41,7 +41,10 @@ struct HeroCarousel: View {
     /// the middle out of it, held between a height that still fits a title
     /// and two buttons and one that doesn't push the first shelf off a
     /// laptop's screen.
-    private var height: CGFloat {
+    private var height: CGFloat { Self.height(forWidth: width) }
+
+    /// `height`, as a static for the unit tests.
+    static func height(forWidth width: CGFloat) -> CGFloat {
         guard width > 0 else { return HeroHeader.height }
         return min(520, max(280, (width / 2.4).rounded()))
     }
@@ -124,8 +127,14 @@ struct HeroCarousel: View {
     private func turn(by offset: Int) {
         guard items.count > 1 else { return }
         withAnimation(.easeInOut(duration: 0.35)) {
-            index = (index + offset + items.count) % items.count
+            index = Self.turned(index, by: offset, count: items.count)
         }
+    }
+
+    /// One page along, wrapping at either end. Static for the unit tests.
+    static func turned(_ index: Int, by offset: Int, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        return ((index + offset) % count + count) % count
     }
 
     /// Everything but the page on screen, pulled into the image cache, at the

@@ -60,11 +60,17 @@ struct MacSidebarRows: View {
     /// The time is still a bound, so a selection moved with the arrow keys,
     /// which no tap ends, doesn't swallow a real re-click made long after.
     private func reselected(_ section: AppSection) {
-        let endsTheSelectingClick = Self.selectionAwaitsTap
-            && Date().timeIntervalSince(Self.selectionChangedAt) < 10
+        let endsTheSelectingClick = Self.endsSelectingClick(
+            awaitsTap: Self.selectionAwaitsTap, changedAt: Self.selectionChangedAt, now: Date())
         Self.selectionAwaitsTap = false
         guard app.shownSelection == section, !endsTheSelectingClick else { return }
         app.showAtTop(section)
+    }
+
+    /// Whether a tap ends the click that moved the selection (and so is not
+    /// a re-click). Static for the unit tests.
+    static func endsSelectingClick(awaitsTap: Bool, changedAt: Date, now: Date) -> Bool {
+        awaitsTap && now.timeIntervalSince(changedAt) < 10
     }
 
     /// A row's menu: the section in a window of its own, and a fresh answer
@@ -74,7 +80,7 @@ struct MacSidebarRows: View {
     /// guide, and Downloads is the device's queue.
     @ViewBuilder
     private func menu(for section: AppSection) -> some View {
-        if let route = windowRoute(for: section) {
+        if let route = Self.windowRoute(for: section) {
             Button("Open in New Window") { openWindow(id: RouteWindow.id, value: route) }
                 .accessibilityIdentifier(TestID.Sidebar.rowOpenInNewWindow(section.id))
         }
@@ -100,7 +106,8 @@ struct MacSidebarRows: View {
         }
     }
 
-    private func windowRoute(for section: AppSection) -> Route? {
+    /// Static for the unit tests.
+    static func windowRoute(for section: AppSection) -> Route? {
         switch section {
         case .library(let id, let name, let type): .library(id: id, name: name, collectionType: type)
         case .favorites, .libraries, .collections: .section(section)
@@ -111,8 +118,13 @@ struct MacSidebarRows: View {
     /// Transfers still to finish, on Downloads — the count the Dock icon shows
     /// too. Zero draws no badge.
     private func badge(for section: AppSection) -> Int {
+        Self.badge(for: section, transfersToFinish: DownloadManager.shared.transfersToFinish)
+    }
+
+    /// Static for the unit tests.
+    static func badge(for section: AppSection, transfersToFinish: Int) -> Int {
         guard section == .downloads else { return 0 }
-        return DownloadManager.shared.transfersToFinish
+        return transfersToFinish
     }
 }
 

@@ -110,26 +110,32 @@ struct PlayerWindow: View {
         window.contentAspectRatio = size
 
         let content = window.contentRect(forFrameRect: window.frame)
+        let maxHeight = window.screen.map { $0.visibleFrame.height - (window.frame.height - content.height) }
+        guard let resized = Self.fittedContent(content, picture: size, maxContentHeight: maxHeight) else { return }
+        window.setFrame(window.frameRect(forContentRect: resized), display: true, animate: true)
+    }
+
+    /// `fit`'s arithmetic, as a static so it can be unit-tested: the content
+    /// rect that gives `content` the picture's shape, keeping its width and
+    /// top edge unless the height would pass `maxContentHeight`. Nil when the
+    /// window is already within a point of it.
+    static func fittedContent(_ content: NSRect, picture size: CGSize, maxContentHeight: CGFloat?) -> NSRect? {
+        guard size.width > 0, size.height > 0 else { return nil }
         var width = content.width
         var height = width * size.height / size.width
-        if let visible = window.screen?.visibleFrame {
-            let chrome = window.frame.height - content.height
-            let maxHeight = visible.height - chrome
-            if height > maxHeight {
-                height = maxHeight
-                width = height * size.width / size.height
-            }
+        if let maxHeight = maxContentHeight, height > maxHeight {
+            height = maxHeight
+            width = height * size.width / size.height
         }
-        guard abs(height - content.height) > 1 || abs(width - content.width) > 1 else { return }
+        guard abs(height - content.height) > 1 || abs(width - content.width) > 1 else { return nil }
         // Pinned at the top edge, where the title bar is, so the window grows
         // or shrinks downwards rather than jumping.
-        let resized = NSRect(
+        return NSRect(
             x: content.minX,
             y: content.maxY - height,
             width: width,
             height: height
         )
-        window.setFrame(window.frameRect(forContentRect: resized), display: true, animate: true)
     }
 }
 
@@ -288,6 +294,12 @@ struct PlaybackCommands: Commands {
     /// control of the player's that has a use for it. See
     /// `playerKeysYielded`.
     private func gated(_ key: KeyEquivalent, _ modifiers: EventModifiers) -> KeyboardShortcut? {
+        Self.gatedShortcut(key, modifiers, inPlayer: inPlayer, keysYielded: keysYielded)
+    }
+
+    /// `gated`'s rule, as a static so it can be unit-tested.
+    static func gatedShortcut(_ key: KeyEquivalent, _ modifiers: EventModifiers,
+                              inPlayer: Bool?, keysYielded: Bool?) -> KeyboardShortcut? {
         guard inPlayer == true else { return nil }
         if modifiers.isEmpty, keysYielded == true { return nil }
         return KeyboardShortcut(key, modifiers: modifiers)

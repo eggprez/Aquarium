@@ -194,7 +194,14 @@ struct MacCommands: Commands {
 
     /// The sections in the order the sidebar's rows show them.
     private var sidebarOrder: [AppSection] {
-        MacSidebarGroup.grouped(app.sections).flatMap(\.sections).filter { $0 != .search }
+        Self.sidebarOrder(app.sections)
+    }
+
+    /// The order ⌘1…⌘9 number: the sidebar's rows as drawn. Static for the
+    /// unit tests.
+    @MainActor
+    static func sidebarOrder(_ sections: [AppSection]) -> [AppSection] {
+        MacSidebarGroup.grouped(sections).flatMap(\.sections).filter { $0 != .search }
     }
 
     /// Straight to a section, at its top. Selecting it alone left whatever
@@ -219,6 +226,12 @@ struct MacCommands: Commands {
     /// film (see `PlaybackCommands`), and the guide behind it is not what
     /// they're for.
     private var isGuideShowing: Bool {
+        Self.isGuideShowing(app, inPlayer: inPlayer)
+    }
+
+    /// `isGuideShowing`, as a static for the unit tests.
+    @MainActor
+    static func isGuideShowing(_ app: AppModel, inPlayer: Bool?) -> Bool {
         inPlayer != true
             && app.keyNavigator == nil
             && app.shownSelection == .liveTV
@@ -278,12 +291,19 @@ struct MacCommands: Commands {
     }
 
     /// A title window in front goes back through its own pages.
-    private var canGoBack: Bool {
+    private var canGoBack: Bool { Self.canGoBack(app) }
+
+    private func goBack() { Self.goBack(app) }
+
+    /// `canGoBack` and `goBack`, as statics for the unit tests.
+    @MainActor
+    static func canGoBack(_ app: AppModel) -> Bool {
         if let window = app.keyNavigator { return !window.path.isEmpty }
         return !app.path(for: app.shownSelection).wrappedValue.isEmpty
     }
 
-    private func goBack() {
+    @MainActor
+    static func goBack(_ app: AppModel) {
         if let window = app.keyNavigator {
             window.goBack()
             return
