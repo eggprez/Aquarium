@@ -152,9 +152,11 @@ final class JellyfinAPI {
     }
 
     /// This account's sessions, the test's own excluded, most recent first.
-    /// Needs the account to be allowed to see its sessions (suite accounts are).
+    /// Not `ControllableByUserId`: that leaves out every session that does not
+    /// support remote control, which is the app's (found 2026-11-13).
     func sessions(activeWithinSeconds: Int = 300) throws -> [Session] {
-        let list = try json("/Sessions?ControllableByUserId=\(userId)&ActiveWithinSeconds=\(activeWithinSeconds)") as? [[String: Any]] ?? []
+        let list = (try json("/Sessions?ActiveWithinSeconds=\(activeWithinSeconds)") as? [[String: Any]] ?? [])
+            .sorted { ($0["LastActivityDate"] as? String ?? "") > ($1["LastActivityDate"] as? String ?? "") }
         return list.compactMap { s in
             guard (s["UserId"] as? String) == userId, (s["DeviceId"] as? String) != Self.deviceId else { return nil }
             let playing = s["NowPlayingItem"] as? [String: Any]
