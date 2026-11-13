@@ -441,7 +441,7 @@ extension PlayerModel {
         guard let ready = prefetched else { return nil }
         prefetched = nil
         let forced = opts.forceTranscode || opts.forceFullEncode || opts.maxBitrate != nil
-        guard inherited, !opts.live, ready.itemId == item.Id, ready.engine == kind,
+        guard inherited, !opts.live, opts.mediaSourceId == nil, ready.itemId == item.Id, ready.engine == kind,
               ready.maxBitrate == opts.maxBitrate, ready.forceTranscode == forced,
               ready.audioStreamIndex == opts.audioStreamIndex,
               ready.subtitleStreamIndex == opts.subtitleStreamIndex,

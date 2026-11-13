@@ -102,6 +102,11 @@ struct StreamOptions: Sendable {
     /// `nil` leaves it to the server; `-1` for the subtitle means none.
     var audioStreamIndex: Int?
     var subtitleStreamIndex: Int?
+    /// Which of the title's versions (its media sources), where it has
+    /// several and one was picked. `nil` leaves it to the server, which
+    /// plays the first. Carried through a reopen of the same title; dropped
+    /// for any other, whose versions are its own.
+    var mediaSourceId: String?
 }
 
 /// One entry in a track menu. `avIndex` (here, the engine's track id) says the

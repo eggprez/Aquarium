@@ -2056,7 +2056,8 @@ final class JellyfinClient {
             countsForOffline: !live, patient: live
         )
         let info = try await Self.decode(PlaybackInfoResponse.self, from: data)
-        guard let ms = info.MediaSources?.first else {
+        // The version asked for, where the server lists more than that one.
+        guard let ms = mediaSourceId.flatMap({ id in info.MediaSources?.first { $0.Id == id } }) ?? info.MediaSources?.first else {
             throw APIError.message("No playable media source returned by the server")
         }
         let playSessionId = info.PlaySessionId ?? UUID().uuidString

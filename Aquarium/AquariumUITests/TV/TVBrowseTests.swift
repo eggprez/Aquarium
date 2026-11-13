@@ -258,7 +258,6 @@ final class TVBrowseTests: TVTestCase {
         // A control, not the title ("FX Versions") or its genre ("Versions").
         let version = app.buttons.matching(NSPredicate(
             format: "(label BEGINSWITH[c] 'version' OR identifier CONTAINS[c] 'version') AND NOT (label CONTAINS 'FX Versions')")).firstMatch
-        XCTExpectFailure("bug: a title with three media sources offers no version choice on tvOS (ItemDetailView has no version control on the TV)")
         XCTAssertTrue(version.waitForExistence(timeout: 5), "no version choice on a title with 3 versions")
     }
 

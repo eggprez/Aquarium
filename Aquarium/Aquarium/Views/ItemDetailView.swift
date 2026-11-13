@@ -55,6 +55,8 @@ struct ItemDetailView: View {
     /// Which item the quality dialog is picking a stream for — the television's
     /// stand-in for the quality menu, for the reason given on the button.
     @State private var qualityChoice: BaseItem?
+    /// Which item the version dialog is choosing among the files of.
+    @State private var versionChoice: BaseItem?
 
     /// Where the selector goes once this page has something on it.
     ///
@@ -616,6 +618,20 @@ struct ItemDetailView: View {
             }
             Button("Cancel", role: .cancel) { qualityChoice = nil }
                 .accessibilityIdentifier(TestID.Detail.qualityCancel)
+        }
+        .confirmationDialog(
+            "Play version",
+            isPresented: Binding(
+                get: { versionChoice != nil },
+                set: { if !$0 { versionChoice = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let target = versionChoice {
+                versionMenu(target)
+            }
+            Button("Cancel", role: .cancel) { versionChoice = nil }
+                .accessibilityIdentifier(TestID.Detail.versionCancel)
         }
         #endif
     }
@@ -1479,6 +1495,40 @@ struct ItemDetailView: View {
             }
             .accessibilityIdentifier(TestID.Detail.qualityOption(choice.maxBitrate))
         }
+        #if !os(tvOS)
+        // A title with several files offers each. The television has its
+        // own button for this — see `actionButtons`.
+        if Self.versions(of: playable).count > 1 {
+            Section("Version") {
+                versionMenu(playable)
+            }
+        }
+        #endif
+    }
+
+    /// One button per version of a title, each playing that one: the
+    /// version is the media source asked for (`StreamOptions.mediaSourceId`).
+    @ViewBuilder
+    private func versionMenu(_ playable: BaseItem) -> some View {
+        ForEach(Self.versions(of: playable), id: \.Id) { version in
+            Button(Self.versionLabel(version)) {
+                Task {
+                    await player.play(item: playable, options: StreamOptions(mediaSourceId: version.Id))
+                }
+            }
+            .accessibilityIdentifier(TestID.Detail.versionOption(version.Id ?? ""))
+        }
+    }
+
+    /// The title's versions that can be asked for by id.
+    private static func versions(of item: BaseItem) -> [MediaSource] {
+        (item.MediaSources ?? []).filter { !($0.Id ?? "").isEmpty }
+    }
+
+    /// The server's name for a version ("2160p HEVC"), else its container.
+    private static func versionLabel(_ version: MediaSource) -> String {
+        if let name = version.Name, !name.isEmpty { return name }
+        return version.Container?.uppercased() ?? "Version"
     }
 
     // The row of buttons the phone and the television draw. The Mac's
@@ -1502,6 +1552,18 @@ struct ItemDetailView: View {
             .appButtonStyle()
             .focused($focus, equals: .quality)
             .accessibilityIdentifier(TestID.Detail.quality)
+
+            // A title with several files: which one plays. Its own button,
+            // as Quality is, since a dialog holding both would be a long one.
+            if Self.versions(of: playable).count > 1 {
+                Button {
+                    versionChoice = playable
+                } label: {
+                    Label("Version", systemImage: "square.stack")
+                }
+                .appButtonStyle()
+                .accessibilityIdentifier(TestID.Detail.version)
+            }
             #else
             Menu {
                 qualityMenu(playable)
@@ -2235,6 +2297,7 @@ struct ItemDetailView: View {
         #endif
         #if os(tvOS)
         qualityChoice = nil
+        versionChoice = nil
         placedFocus = false
         #endif
     }
