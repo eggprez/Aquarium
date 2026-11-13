@@ -101,7 +101,6 @@ final class PadRegressionTests: PadUITestCase {
             .map { app.button($0) }.filter(\.exists)
         let alone = !others.contains { abs($0.frame.minY - quality.frame.minY) < 12 }
         attachScreenshot("portrait actions")
-        XCTExpectFailure("bug: Quality wraps alone onto its own row in portrait (4775e86 not on main)", strict: false)
         XCTAssertFalse(alone, "Quality shares a row with another action")
     }
 

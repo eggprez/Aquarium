@@ -283,7 +283,6 @@ final class PadDetailTests: PadUITestCase {
         }
         let offered = !rows.isEmpty
         attachScreenshot("quality menu on FX Versions")
-        XCTExpectFailure("bug: no way to choose one of a title's versions (4775e86 not on main)", strict: false)
         XCTAssertTrue(offered, "a version choice beside the quality ladder")
     }
 }

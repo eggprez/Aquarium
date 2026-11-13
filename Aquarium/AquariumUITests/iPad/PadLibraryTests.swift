@@ -170,7 +170,6 @@ final class PadLibraryTests: PadUITestCase {
         // A collection opens as a grid of what is in it.
         let first = items.compactMap { $0["id"] as? String }.first ?? ""
         let opened = cardButton(first).waitForExistence(timeout: 30)
-        XCTExpectFailure("bug: a collection shows none of its titles (master-fix-list iPad #7; 5209e95 not on main)", strict: false)
         XCTAssertTrue(opened, "FX Collection's titles")
     }
 }
@@ -191,7 +190,6 @@ final class PadPhotosTests: PadUITestCase {
         let raw = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'item.card.' AND label BEGINSWITH 'photos'")).firstMatch
         _ = raw.waitForExistence(timeout: 15)
         attachScreenshot("fixture photos")
-        XCTExpectFailure("bug: a photo folder is listed by its raw folder name 'photos'", strict: false)
         XCTAssertFalse(raw.exists, "card reads \(raw.label)")
     }
 
@@ -214,9 +212,8 @@ final class PadPhotosTests: PadUITestCase {
             folder.padTap()
             albumCard = cardButton(album)
         }
-        // On main the folder opens as a title page (detail.page), not a grid,
-        // so FX Album is never reached.
-        XCTExpectFailure("bug: photo folders and albums open as an empty title page, not a grid of what they hold (master-fix-list iPad #8; 5209e95 not on main)", strict: false)
+        // Until claude/fix-tv the folder opened as a title page (detail.page),
+        // not a grid, so FX Album was never reached.
         guard albumCard.waitForExistence(timeout: 20) else {
             attachScreenshot("folder opened")
             XCTFail("FX Album in Fixture Photos (the folder opened as \(app.elements(prefix: "detail.page.").firstMatch.identifier))")
