@@ -19,6 +19,8 @@ mod progress;
 mod secret;
 mod server;
 mod theme;
+#[cfg(test)]
+mod test_support;
 mod video_thread;
 mod wl;
 

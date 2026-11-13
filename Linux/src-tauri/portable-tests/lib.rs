@@ -30,6 +30,10 @@ mod secret;
 #[path = "../src/server.rs"]
 mod server;
 
+#[cfg(test)]
+#[path = "../src/test_support.rs"]
+mod test_support;
+
 #[cfg(not(target_os = "linux"))]
 mod stubs;
 #[cfg(not(target_os = "linux"))]

@@ -110,6 +110,12 @@ pub fn load() -> Value {
 /// see `quarantine`.
 static SAVE_BLOCKED: AtomicBool = AtomicBool::new(false);
 
+/// Test hook: forget a blocked save from an earlier test.
+#[cfg(test)]
+pub fn reset_for_tests() {
+    SAVE_BLOCKED.store(false, Ordering::SeqCst);
+}
+
 /// Move a config.json that can't be read aside before anything writes over it.
 ///
 /// Starting from defaults is the only way forward, but the first save after

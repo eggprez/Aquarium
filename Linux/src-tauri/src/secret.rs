@@ -75,6 +75,15 @@ static STATE: Mutex<State> = Mutex::new(State {
     pending: None,
 });
 
+/// Test hook: forget everything cached about the keyring.
+#[cfg(test)]
+pub fn reset_for_tests() {
+    let mut s = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    s.token = None;
+    s.backend = None;
+    s.pending = None;
+}
+
 /// A poisoned lock here means some earlier caller panicked mid-lookup. The
 /// cache is still coherent — worst case a field is unset and gets refilled —
 /// so recover rather than take the whole app down over it.

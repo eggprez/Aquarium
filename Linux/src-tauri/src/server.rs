@@ -153,6 +153,12 @@ pub async fn probe(raw: &str) -> Result<Value, String> {
 /// The server URL whose identity has been checked in this process.
 static VERIFIED: Mutex<Option<String>> = Mutex::new(None);
 
+/// Test hook: forget which server this process has verified.
+#[cfg(test)]
+pub fn reset_for_tests() {
+    *VERIFIED.lock().unwrap_or_else(|p| p.into_inner()) = None;
+}
+
 /// Confirm the address in the config still points at the Jellyfin install the
 /// user signed in to, before anything authenticated goes out over it.
 ///
