@@ -127,15 +127,13 @@ final class MacSignInUITests: MacUITestCase {
         app.element(TestID.Settings.addAccount).tapWhenReady()
         app.element(TestID.Login.root).waitToExist(20)
         // The username field has the keyboard, and the system's AutoFill
-        // list drops down from it over the sheet's buttons: a click on
-        // Cancel landed on that list. Escape puts the list away first.
-        let autoFill = app.windows.matching(identifier: "SafariPlatformSupportAutoCompleteWindow").firstMatch
-        if autoFill.waitForExistence(timeout: 2) {
+        // list drops down from it over the sheet's buttons, sometimes a
+        // while after the sheet, and a click on Cancel landed on the list.
+        // So Cancel is pressed with its key, Escape (`.cancelAction`): the
+        // first Escape may only put the list away.
+        for _ in 0..<3 where app.element(TestID.Login.root).exists {
             app.typeKey(.escape, modifierFlags: [])
-            _ = autoFill.waitToVanish(5)
-        }
-        if app.element(TestID.Login.root).exists {
-            app.button(TestID.Login.cancel).tapWhenReady()
+            _ = app.element(TestID.Login.root).waitToVanish(3)
         }
         XCTAssertTrue(app.element(TestID.Login.root).waitToVanish(10))
     }
