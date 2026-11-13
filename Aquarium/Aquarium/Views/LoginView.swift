@@ -551,7 +551,6 @@ struct LoginView: View {
                         Text(Self.spaced(quick.code))
                             .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
                             .foregroundStyle(quickExpired ? .secondary : .primary)
-                            .textSelection(.enabled)
                             .contentTransition(.numericText())
                             .animation(.default, value: quick.code)
                             .accessibilityLabel("Quick Connect code \(quick.code.map(String.init).joined(separator: " "))")
