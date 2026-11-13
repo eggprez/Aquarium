@@ -54,6 +54,7 @@ XCUITest cannot hover on iOS, so none of this is automated.
 |---|---|
 | Hover over sidebar rows, poster cards, the hero's thumbnails and the player's pills | The pointer takes each control's shape and a highlight; nothing is unreachable by pointer |
 | Secondary click (two-finger click) on a card, a season chip, a song | The same press-and-hold menu as a long press (`PadContextMenuTests` covers the long press) |
+| Press and hold a card in a library grid (Fixture Films), upright and on its side | The card lifts and its menu opens (Play, Play Next, Favorite, Download…); the title does not open. XCUITest's press opens the title instead, so `testLibraryGridCardHasTheMenuToo` is an expected failure; a real touch gave the menu on the simulator, 2026-11-13 |
 | Move the pointer over the playing picture | The controls come up; they hide again after 4 s still (the Mac's pointer clock is macOS-only, so check the iPad's behaviour is sensible) |
 | Two-finger scroll on Home's shelves and the hero | Shelves scroll sideways; the hero pages |
 | Drag the timeline with the pointer | Scrubs with the trickplay thumbnail and the chapter name above the thumb |

@@ -117,9 +117,13 @@ final class PadContextMenuTests: PadUITestCase {
         attachScreenshot("grid card held")
         // 3 of 3 runs on 2026-11-13 (1.2 s and 2.5 s holds): the title opened
         // and no menu came, while the same hold on a Home shelf card gives
-        // the menu. Grid cards carry `.posterZoomSource` before
-        // `.itemContextMenu` (Components.swift ~2032). Confirm by hand.
-        XCTExpectFailure("bug: holding a library grid card opens the title instead of its menu", strict: false)
+        // the menu. Checked by hand the same day: not an app bug. A real
+        // 1.6 s touch on a Fixture Films grid card (simulator, upright) lifts
+        // it and shows the menu, and grid and shelf cards apply the same
+        // modifiers in the same order (`.posterZoomSource` then
+        // `.itemContextMenu`, Components.swift `card` and `tile`). Only
+        // XCUITest's press on the grid misses it; MANUAL.md has the check.
+        XCTExpectFailure("XCUITest: its press on a library grid card opens the title; a real long press gives the menu", strict: false)
         XCTAssertFalse(opened, "holding a grid card opened the title instead of its menu")
         XCTAssertTrue(menu, "the menu on a library grid card")
         guard menu else { return }
