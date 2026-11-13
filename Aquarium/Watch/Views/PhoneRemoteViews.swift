@@ -317,7 +317,7 @@ struct PhonePlayerScreen: View {
             if isBook {
                 HStack(spacing: 8) {
                     Button { link.remote(.setSpeed(Self.nextSpeed(after: state.speed))) } label: {
-                        Text(speedLabel(state.speed)).font(.caption2.weight(.semibold).monospacedDigit())
+                        Text(Self.speedLabel(state.speed)).font(.caption2.weight(.semibold).monospacedDigit())
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
@@ -354,13 +354,13 @@ struct PhonePlayerScreen: View {
         .testAnchor(TestID.Watch.phoneLayout(compact ? "compact" : "full"))
     }
 
-    private static func nextSpeed(after speed: Double) -> Double {
+    static func nextSpeed(after speed: Double) -> Double {
         let speeds = WatchPlayer.speeds
         guard let i = speeds.firstIndex(where: { abs($0 - speed) < 0.01 }) else { return 1 }
         return speeds[(i + 1) % speeds.count]
     }
 
-    private func speedLabel(_ s: Double) -> String {
+    static func speedLabel(_ s: Double) -> String {
         s == s.rounded() ? "\(Int(s))×" : String(format: "%.2g×", s)
     }
 

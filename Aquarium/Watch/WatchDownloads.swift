@@ -276,6 +276,13 @@ final class WatchDownloads: NSObject {
     private var pendingItems: [String: BaseItem] = [:]
     private let pathMonitor = NWPathMonitor()
     private var backgroundCompletion: (() -> Void)?
+    #if DEBUG
+    /// Unit tests only: see `testSetNetwork`.
+    @ObservationIgnored var testPinsNetwork = false
+    /// Unit tests only: the pump asks the phone as usual but never starts a
+    /// transfer of the watch's own.
+    @ObservationIgnored var testHoldsOwnTransfers = false
+    #endif
 
     @ObservationIgnored private var session: URLSession!
 
@@ -318,6 +325,9 @@ final class WatchDownloads: NSObject {
             WatchLog.note("downloads", "network: \(up ? "up" : "down") via \(path.availableInterfaces.map { "\($0.type)" }.joined(separator: ",")) expensive=\(path.isExpensive)")
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                #if DEBUG
+                guard !self.testPinsNetwork else { return }
+                #endif
                 let gained = up && !self.hasNetwork
                 let first = !self.pathKnown
                 self.pathKnown = true
@@ -484,6 +494,9 @@ final class WatchDownloads: NSObject {
     }
 
     nonisolated static func freeBytes() -> Int64? {
+        #if DEBUG
+        if let testFreeBytes { return testFreeBytes }
+        #endif
         let values = try? root.resourceValues(forKeys: [.volumeAvailableCapacityKey])
         return values?.volumeAvailableCapacity.map(Int64.init)
     }
@@ -1023,6 +1036,9 @@ final class WatchDownloads: NSObject {
         // What is left for this watch: with no phone app to ask, or given
         // up on by the phone.
         guard canFetchItself, active == nil else { return }
+        #if DEBUG
+        guard !testHoldsOwnTransfers else { return }
+        #endif
         guard let next = candidates.first(where: { r in
             (!link.hasCompanion || phoneGaveUpOn(r.itemId)) && (!r.automatic || isOnWiFi || link.hasCompanion)
         }) else { return }
@@ -1304,7 +1320,7 @@ final class WatchDownloads: NSObject {
     // MARK: - Landing
 
     /// A file has arrived. Opened and measured before it is believed.
-    private func landed(itemId: String, at url: URL, bytes: Int64) async {
+    func landed(itemId: String, at url: URL, bytes: Int64) async {
         settling += 1
         defer { settling -= 1 }
         guard var rec = record(for: itemId) else {
@@ -1350,7 +1366,7 @@ final class WatchDownloads: NSObject {
         await cacheArt(for: rec)
     }
 
-    private func failed(itemId: String, message: String) {
+    func failed(itemId: String, message: String) {
         guard var rec = record(for: itemId) else { finishActive(itemId); return }
         WatchLog.error("downloads", "\(itemId) failed (attempt \(rec.attempts + 1)): \(message)")
         rec.attempts += 1
@@ -1668,6 +1684,82 @@ final class WatchDownloads: NSObject {
         enqueue(audio, reason: request.reason)
     }
 }
+
+#if DEBUG
+// MARK: - Unit-test seams (DEBUG only; nothing here runs unless a test sets it)
+
+extension WatchDownloads {
+    /// Unit tests only: the room the watch reports, in place of the disk's.
+    nonisolated(unsafe) static var testFreeBytes: Int64?
+
+    /// Unit tests only: the network as if the path monitor had said so, and
+    /// held there (the monitor's later word is ignored until `testReset`).
+    func testSetNetwork(known: Bool = true, up: Bool, wifi: Bool) {
+        testPinsNetwork = true
+        pathKnown = known
+        hasNetwork = up
+        isOnWiFi = wifi
+    }
+
+    /// Unit tests only: change a record in place, as time or the disk would
+    /// have (an ask made an hour ago, a file gone).
+    func testUpdate(_ itemId: String, _ change: (inout WatchRecord) -> Void) {
+        guard let i = byId[itemId] else { return }
+        change(&records[i])
+        changed()
+    }
+
+    /// Unit tests only: when a want's item was last queued again.
+    func testSetWantRetried(_ itemId: String, at date: Date?) { wantRetriedAt[itemId] = date }
+
+    /// Unit tests only: when a want was taken off here.
+    func testSetDroppedWant(_ key: String, at date: Date?) { droppedWants[key] = date }
+
+    /// Unit tests only: the items cancelled by hand while a want names them.
+    var testDeclined: Set<String> { declined }
+
+    /// Unit tests only: what each want comes to, as kept on disk.
+    var testWantContents: [String: WatchDownloadContents] { wantContents }
+
+    /// Unit tests only: forget everything — records, files, playlists, the
+    /// plan, the wants and every note kept about them — and stop holding
+    /// the network.
+    func testReset() {
+        cancelActiveTask()
+        mirrorTask?.cancel()
+        mirrorTask = nil
+        mirrorGeneration += 1
+        try? FileManager.default.removeItem(at: Self.root)
+        records = []
+        reindex()
+        playlists = []
+        liveBytes = [:]
+        plan = WatchMirrorPlan()
+        mirrorNote = nil
+        phoneLists = [:]
+        phoneBooks = [:]
+        phoneGaveUp = [:]
+        phoneWorking = []
+        playlistSyncedAt = [:]
+        droppedPlaylists = [:]
+        wantContents = [:]
+        droppedWants = [:]
+        declined = []
+        wantRetriedAt = [:]
+        pendingItems = [:]
+        relayReasks = [:]
+        tasks = [:]
+        lastReported.withLock { $0 = [:] }
+        for key in ["watch_tasks", "watch_plan", "watch_dropped_playlists", "watch_dropped_wants", "watch_declined_items"] {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        testPinsNetwork = false
+        testHoldsOwnTransfers = false
+        Self.testFreeBytes = nil
+        changed()
+    }
+}
+#endif
 
 // MARK: - URLSession delegate
 

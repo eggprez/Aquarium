@@ -342,7 +342,7 @@ final class WatchPlayer: NSObject {
     /// A book with a record opens from the record: it has the watch's own
     /// listening, and the server's whenever that is newer, brought in just
     /// before. The item handed in may be a list row loaded an hour ago.
-    private func resumePoint(for item: BaseItem, explicit: Double?) -> Double {
+    func resumePoint(for item: BaseItem, explicit: Double?) -> Double {
         if let explicit { return max(0, explicit) }
         guard item.isAudiobook else { return 0 }
         if let record = downloads.record(for: item.Id) { return record.resumeSeconds }
@@ -451,7 +451,7 @@ final class WatchPlayer: NSObject {
         updateNowPlayingRate()
     }
 
-    private func tick(_ seconds: Double) {
+    func tick(_ seconds: Double) {
         guard isActive, positionKnown, seconds.isFinite else { return }
         position = seconds
         let now = Date()
@@ -517,7 +517,7 @@ final class WatchPlayer: NSObject {
     /// the end arriving afterwards said so a second time: a played event is
     /// a play on the server's count, and the queue keeps every one of them,
     /// so the count went up by two.
-    private func note(finished: Bool, periodic: Bool = false) {
+    func note(finished: Bool, periodic: Bool = false) {
         guard let item = current, positionKnown || finished else { return }
         let total = duration > 0 ? duration : item.runtimeSeconds
         let at = finished ? total : position
@@ -741,7 +741,7 @@ final class WatchPlayer: NSObject {
     /// widget — a watch's widget budget spent on moving a progress bar by a
     /// few pixels' worth of nothing. The file is still written each time, so
     /// whatever redraw comes next reads the latest place.
-    private static func worthRedrawing(_ new: ListeningSnapshot?, over old: ListeningSnapshot?) -> Bool {
+    static func worthRedrawing(_ new: ListeningSnapshot?, over old: ListeningSnapshot?) -> Bool {
         guard let new, let old else { return new != nil || old != nil }
         if new.itemId != old.itemId || new.title != old.title || new.subtitle != old.subtitle
             || new.isPlaying != old.isPlaying || new.isAudiobook != old.isAudiobook {
@@ -752,4 +752,58 @@ final class WatchPlayer: NSObject {
         return abs(new.position - old.position) >= max(60, new.duration / 100)
             || abs(new.duration - old.duration) >= 1
     }
+
+    #if DEBUG
+    // MARK: - Unit-test seams (DEBUG only)
+
+    /// Unit tests only: the state `play` would reach once the item opened
+    /// and its seek landed, without opening anything: a queue, the item at
+    /// `index` current at `position`. `positionKnown: false` is the moment
+    /// before the seek lands. `streamed` marks it as played from the server.
+    func testLoad(_ items: [BaseItem], index: Int = 0, position: Double = 0, duration: Double? = nil,
+                  playing: Bool = true, positionKnown: Bool = true, streamed: Bool = false) {
+        generation &+= 1
+        queue = items.map(Entry.init)
+        currentIndex = items.isEmpty ? nil : min(max(0, index), items.count - 1)
+        isActive = !items.isEmpty
+        isPlaying = playing
+        isBuffering = false
+        errorMessage = nil
+        self.position = position
+        let item = currentIndex.map { items[$0] }
+        self.duration = duration ?? item?.runtimeSeconds ?? 0
+        chapters = item?.Chapters ?? []
+        countedPlay = nil
+        userPaused = !playing
+        self.positionKnown = positionKnown
+        stream = streamed ? WatchStream(url: URL(string: "http://stub.invalid/stream")!, headers: [:], isTranscode: false,
+                                        mediaSourceId: "", playSessionId: "test") : nil
+        lastLocalNoteAt = .distantPast
+        lastEventAt = .distantPast
+        lastReportAt = .distantPast
+    }
+
+    /// Unit tests only: as if nothing had ever played. Silent: nothing is
+    /// noted or reported.
+    func testReset() {
+        generation &+= 1
+        positionKnown = false
+        isActive = false
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        queue = []
+        currentIndex = nil
+        isPlaying = false
+        isBuffering = false
+        position = 0
+        duration = 0
+        chapters = []
+        stream = nil
+        countedPlay = nil
+        errorMessage = nil
+        isShuffled = false
+        queueTitle = nil
+        speed = 1
+    }
+    #endif
 }

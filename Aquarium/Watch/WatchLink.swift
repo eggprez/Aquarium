@@ -127,6 +127,16 @@ final class WatchSyncQueue {
         lastFlushedAt = Date()
     }
 
+    #if DEBUG
+    /// Unit tests only: nothing waiting, nothing sent.
+    func testReset() {
+        pending = []
+        lastFlushedAt = nil
+        lastRoute = nil
+        persist()
+    }
+    #endif
+
     /// These have reached the server, or been found older than what it has.
     private func settle(_ done: [WatchProgressEvent]) {
         guard !done.isEmpty else { return }
@@ -175,6 +185,15 @@ final class WatchLink: NSObject {
 
     private var inventoryTask: Task<Void, Never>?
     private var revision = 0
+
+    #if DEBUG
+    /// Unit tests only: while non-nil, `send(_:)` keeps each message here
+    /// instead of handing it to WatchConnectivity.
+    @ObservationIgnored var testOutbox: [WatchMessage]?
+    /// Unit tests only: the phone's answer to `send(events:)`, in place of
+    /// WatchConnectivity's.
+    @ObservationIgnored var testEventReply: (([WatchProgressEvent]) -> WatchReply?)?
+    #endif
     /// When the newest context applied was built. The phone's revision
     /// restarts with each launch, so its clock is what orders them: the
     /// context the system kept from last time can land after a fresh one.
@@ -212,7 +231,7 @@ final class WatchLink: NSObject {
         })
     }
 
-    private func apply(_ context: PhoneContext) {
+    func apply(_ context: PhoneContext) {
         if let last = lastContextSentAt, context.sentAt < last {
             WatchLog.note("link", "ignoring an older context from the phone: revision \(context.revision), built \(context.sentAt.formatted(.iso8601))")
             return
@@ -235,7 +254,7 @@ final class WatchLink: NSObject {
         publishInventory()
     }
 
-    private func handle(_ message: WatchMessage) {
+    func handle(_ message: WatchMessage) {
         let downloads = WatchDownloads.shared
         switch message {
         case .deleteGroup(let kind, let id):
@@ -267,7 +286,7 @@ final class WatchLink: NSObject {
 
     // MARK: The remote
 
-    private func take(playback state: PhonePlaybackState?) {
+    func take(playback state: PhonePlaybackState?) {
         phonePlaybackAt = Date()
         remoteError = nil
         guard let state else {
@@ -407,6 +426,9 @@ final class WatchLink: NSObject {
     /// next wake otherwise. A fetch is always queued, so it survives both
     /// apps being put away.
     func send(_ message: WatchMessage) {
+        #if DEBUG
+        if testOutbox != nil { testOutbox?.append(message); return }
+        #endif
         guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return }
         let payload = WatchSync.pack(message)
         // In reach, a message lands at once; away, a queued transfer waits
@@ -450,6 +472,9 @@ final class WatchLink: NSObject {
     /// Hand the phone these events and wait for its answer: which of them
     /// reached the server. Nil when it didn't answer.
     func send(events: [WatchProgressEvent]) async -> WatchReply? {
+        #if DEBUG
+        if let testEventReply { return testEventReply(events) }
+        #endif
         guard WCSession.isSupported(), WCSession.default.isReachable else { return nil }
         let payload = WatchSync.pack(WatchMessage.progress(events))
         return await withCheckedContinuation { continuation in
@@ -478,6 +503,19 @@ final class WatchLink: NSObject {
         }
     }
 }
+
+#if DEBUG
+// MARK: - Unit-test seams (DEBUG only; nothing here runs unless a test sets it)
+
+extension WatchLink {
+    /// Unit tests only: the phone's reach and its app, as if WatchConnectivity
+    /// had said so. See WatchTests.
+    func testSetPhone(reachable: Bool, companion: Bool) {
+        isPhoneReachable = reachable
+        hasCompanion = companion
+    }
+}
+#endif
 
 extension WatchLink: WCSessionDelegate {
     nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
@@ -581,7 +619,7 @@ extension WatchLink: WCSessionDelegate {
     /// partial file when its turn comes — pieces mostly arrive in order,
     /// and one that doesn't waits beside it — so nothing is copied whole at
     /// the end. The finished file, once the last piece is in.
-    nonisolated private static func takePiece(_ file: URL, metadata m: [String: Any]?, send: String, itemId: String, folder: URL) -> URL? {
+    nonisolated static func takePiece(_ file: URL, metadata m: [String: Any]?, send: String, itemId: String, folder: URL) -> URL? {
         guard let index = m?[WatchFileTransfer.pieceKey] as? Int,
               let count = m?[WatchFileTransfer.piecesKey] as? Int, count > 0,
               let pieceBytes = (m?[WatchFileTransfer.pieceBytesKey] as? NSNumber)?.int64Value, pieceBytes > 0 else {
@@ -646,7 +684,7 @@ extension WatchLink: WCSessionDelegate {
     }
 
     /// Whatever sends in pieces an item still has on the go.
-    nonisolated private static func removeIncoming(in folder: URL) {
+    nonisolated static func removeIncoming(in folder: URL) {
         for other in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
         where other.lastPathComponent.hasPrefix("incoming-") {
             try? FileManager.default.removeItem(at: other)

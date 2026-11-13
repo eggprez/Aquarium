@@ -198,9 +198,11 @@ struct NowPlayingScreen: View {
         .testAnchor(TestID.Watch.nowPlayingLayout(compact ? "compact" : "full"))
     }
 
-    private var speedLabel: String {
-        let s = player.speed
-        return s == s.rounded() ? "\(Int(s))×" : String(format: "%.2g×", s)
+    private var speedLabel: String { Self.speedLabel(player.speed) }
+
+    /// The speed button's text for a rate.
+    static func speedLabel(_ s: Double) -> String {
+        s == s.rounded() ? "\(Int(s))×" : String(format: "%.2g×", s)
     }
 
     private func subtitle(_ item: BaseItem) -> String {
