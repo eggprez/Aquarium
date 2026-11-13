@@ -103,7 +103,6 @@ final class TVSettingsTests: TVTestCase {
         // phase 6), so the row can only ever lie.
         openSettings()
         openPage("video")
-        XCTExpectFailure("bug: Settings → Video on tvOS still offers Night mode (Views/TVSettingsView.swift:286), which this mpv build refuses")
         XCTAssertFalse(app.element(TestID.Settings.videoNightMode).exists, "Night mode row offered")
     }
 
