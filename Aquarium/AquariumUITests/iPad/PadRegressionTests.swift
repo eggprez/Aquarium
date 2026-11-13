@@ -128,8 +128,9 @@ final class PadRegressionTests: PadUITestCase {
 
     /// master-fix-list.md iPad: "Default text size: 'Home Videos & Phot…'
     /// truncates in the sidebar". Fixed on claude/qa-fix-list-cb0b58
-    /// (4775e86, "two-line a long name"), not on main. The row's text gets
-    /// less width than the same words in Home's chip.
+    /// (4775e86, "two-line a long name"), not on main; fixed again on main
+    /// 2026-11-13 (the row wraps to two lines). The row's text got less
+    /// width than the same words in Home's chip.
     func testLongLibraryNameIsNotCutInTheSidebar() throws {
         let homeVideos = try fx.libraryId("Home Videos & Photos")
         launchHome()
@@ -143,7 +144,6 @@ final class PadRegressionTests: PadUITestCase {
         guard rowText.exists, chipText.exists else { throw XCTSkip("text elements not exposed") }
         let lines = rowText.frame.height / 18
         let cut = lines < 1.5 && rowText.frame.width < chipText.frame.width * 0.85
-        XCTExpectFailure("bug: 'Home Videos & Photos' truncated in the sidebar (4775e86 not on main)", strict: false)
         XCTAssertFalse(cut, "row text \(rowText.frame.size) vs chip text \(chipText.frame.size)")
     }
 

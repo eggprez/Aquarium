@@ -134,10 +134,15 @@ struct PadSidebar: View {
                     .font(.body.weight(.medium))
                     .frame(width: 24)
                     .foregroundStyle(selected ? Theme.accent : Theme.textBody)
+                // Two lines before an ellipsis: the column is sized for
+                // short words, and a library's own name ("Home Videos &
+                // Photos") needs a touch more than it has. The row grows
+                // to hold the second line rather than cutting the name.
                 Text(section.title)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(selected ? Theme.text : Theme.textBody)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
                 if section == .downloads, DownloadManager.shared.transfersToFinish > 0 {
                     Text("\(DownloadManager.shared.transfersToFinish)")
@@ -149,7 +154,8 @@ struct PadSidebar: View {
                 }
             }
             .padding(.horizontal, 12)
-            .frame(height: 40)
+            .padding(.vertical, 4)
+            .frame(minHeight: 40)
             .background {
                 if selected {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
