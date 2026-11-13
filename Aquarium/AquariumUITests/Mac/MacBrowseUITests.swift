@@ -228,7 +228,10 @@ final class MacBrowseUITests: MacUITestCase {
         let fx = try fixtures()
         launchToHome()
         searchFromSidebar("FX Long")
-        app.element(TestID.Search.results).waitToExist(30)
+        // With the scope on All, a Mac groups the results under a heading
+        // per kind (`search.results.section.<kind>`); `search.results`
+        // itself is the anchor of a single scope's grid.
+        app.elements(prefix: TestID.Search.section("")).firstMatch.waitToExist(30)
         for key in ["film.long_direct", "film.long_multitrack", "show.long"] {
             let item = try fx.item(key)
             XCTAssertTrue(app.elements(prefix: TestID.Item.card(item.id)).firstMatch.waitForExistence(timeout: 20), key)
@@ -239,9 +242,21 @@ final class MacBrowseUITests: MacUITestCase {
         launchToHome()
         searchFromSidebar("Unicode")
         openSection("home")
+        XCTAssertFalse(app.element(TestID.Search.root).exists)
+        // Recent terms drop down from the field while it is empty (it still
+        // holds the term until it is cleared). The list is a pop-up XCUITest
+        // doesn't see, so the first recent term is chosen from it with ↓ and
+        // Return, which searches for it again.
         app.typeKey("f", modifierFlags: .command)
-        XCTAssertTrue(app.element(TestID.Sidebar.searchSuggestion(TestID.key("Unicode"))).waitForExistence(timeout: 10))
-        dismissMenus()
+        let field = app.searchFields.firstMatch
+        field.waitToExist(10)
+        field.typeKey("a", modifierFlags: .command)
+        field.typeKey(.delete, modifierFlags: [])
+        Thread.sleep(forTimeInterval: 1)
+        field.typeKey(.downArrow, modifierFlags: [])
+        field.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(app.element(TestID.Search.root).waitForExistence(timeout: 10), "the recent term searches again")
+        XCTAssertEqual(field.value as? String, "Unicode")
     }
 
     func testUnicodeTitleOpens() throws {
