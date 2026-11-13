@@ -50,15 +50,20 @@ struct PlayerWindow: View {
         // `PlaybackCommands`.
         .focusedSceneValue(\.playerWindowFocused, true)
         .onExitCommand { leave() }
-        .onAppear {
-            // Brought back by window restoration at launch, with nothing to play.
-            if !player.isActive { dismissWindow(id: Self.id) }
-        }
         .onChange(of: player.isActive) { _, active in
             if !active { dismissWindow(id: Self.id) }
         }
         .onChange(of: window) { _, window in
             window?.backgroundColor = .black
+            // Brought back by window restoration at launch, with nothing to
+            // play: closed as soon as there is a window to close.
+            // `dismissWindow` from `onAppear` used to do this, and during
+            // restoration it took the scene's view down but left the
+            // AppKit window up, black and titled "Player".
+            if let window, !player.isActive {
+                window.close()
+                return
+            }
             // Full Screen (F) acts on the window from the menu bar and
             // Picture in Picture puts it away, neither of which has a view
             // to ask — see `PlayerMacState`.

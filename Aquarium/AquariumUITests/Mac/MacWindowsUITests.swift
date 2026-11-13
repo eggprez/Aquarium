@@ -100,7 +100,7 @@ final class MacWindowsUITests: MacUITestCase {
 
     /// Regression: RestoredPlayerWindowBlack — relaunched with window
     /// restoration on, a player window with nothing to play dismisses itself.
-    /// Source: Player/PlayerWindow.swift:53-56.
+    /// Source: Player/PlayerWindow.swift (`onChange(of: window)`).
     func testBugRestoredPlayerWindowBlack() throws {
         let film = try fixtures().item("film.rated_g")
         launchToHome()
@@ -111,7 +111,6 @@ final class MacWindowsUITests: MacUITestCase {
         launch(reset: false, signIn: false, arguments: ["-ApplePersistenceIgnoreState", "NO"])
         app.element(TestID.Home.root).waitToExist(60)
         Thread.sleep(forTimeInterval: 3)
-        XCTExpectFailure("bug: a player window restored at launch with nothing playing stays open, black and titled 'Player' (Player/PlayerWindow.swift:53-56 onAppear dismissWindow doesn't take during restoration)")
         XCTAssertFalse(playerWindow.exists, "no black player window comes back")
     }
 }
