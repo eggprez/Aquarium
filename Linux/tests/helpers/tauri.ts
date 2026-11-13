@@ -65,6 +65,11 @@ export function onInvoke(cmd: string, handler: InvokeHandler | unknown): void {
   handlers.set(cmd, typeof handler === "function" ? (handler as InvokeHandler) : () => handler);
 }
 
+/** The handler registered for a command, to wrap it. */
+export function invokeHandler(cmd: string): InvokeHandler | undefined {
+  return handlers.get(cmd);
+}
+
 /** Answer several commands at once: `{ cmd: handlerOrValue }`. */
 export function onInvokes(map: Record<string, InvokeHandler | unknown>): void {
   for (const [k, v] of Object.entries(map)) onInvoke(k, v);

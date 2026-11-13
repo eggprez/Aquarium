@@ -13,3 +13,5 @@ src-tauri/gen/
 wayland-spike/
 coverage/
 src-tauri/portable-tests/target/
+coverage-*/
+src-tauri/portable-tests*/target/

@@ -280,7 +280,10 @@ mod tests {
     /// for "on" and the bundled profile Automatic applies are one list.
     #[test]
     fn battery_profile_matches_battery_args() {
-        let conf = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/mpv-config/mpv.conf"))
+        // From the app crate, or from portable-tests one folder below it.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let conf = std::fs::read_to_string(dir.join("mpv-config/mpv.conf"))
+            .or_else(|_| std::fs::read_to_string(dir.join("../mpv-config/mpv.conf")))
             .expect("bundled mpv.conf");
         let header = format!("[{BATTERY_PROFILE}]");
         let body: Vec<String> = conf

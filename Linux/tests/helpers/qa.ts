@@ -11,7 +11,8 @@
 //   AQUARIUM_QA_WRITE=1    says the env account may have its watch state,
 //                          favourites and playlists changed
 //
-// Without the env account, `fixtures.json` in the QA folder is asked for a
+// Without the env account, `suite-linux` from `suite-accounts.txt` is used;
+// failing that, `fixtures.json` in the QA folder is asked for a
 // Linux account (any account whose name contains "linux"), then
 // `device-accounts.txt` (`name=password` lines). An account whose name
 // contains "linux" is the Linux suite's own, and the only kind the tests will
@@ -84,10 +85,10 @@ function accountsIn(node: any, out: QaAccount[] = [], key = ""): QaAccount[] {
   return out;
 }
 
-function readDeviceAccounts(): QaAccount[] {
+function readAccountFile(file: string): QaAccount[] {
   try {
     return fs
-      .readFileSync(path.join(qaDir(), "device-accounts.txt"), "utf8")
+      .readFileSync(path.join(qaDir(), file), "utf8")
       .split("\n")
       .map((l) => l.trim())
       .filter((l) => l && !l.startsWith("#") && l.includes("="))
@@ -109,7 +110,12 @@ function pickAccount(fixtures: any | null): QaAccount | null {
       writable: process.env.AQUARIUM_QA_WRITE === "1" || /linux/i.test(process.env.AQUARIUM_QA_USER),
     };
   }
-  const all = [...accountsIn(fixtures), ...readDeviceAccounts()];
+  // suite-accounts.txt holds one account per test suite; `suite-linux` is
+  // this one's, and the only one it writes with.
+  const suite = readAccountFile("suite-accounts.txt").map((a) => ({ ...a, writable: a.name === "suite-linux" }));
+  const own = suite.find((a) => a.writable);
+  if (own) return own;
+  const all = [...accountsIn(fixtures), ...readAccountFile("device-accounts.txt")];
   // The suite's own account first; otherwise a plain (not parental-limited)
   // device account, read-only.
   return (

@@ -5,10 +5,15 @@
 // a handler for rejects loudly instead of hanging.
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, vi } from "vitest";
-import { resetTauri } from "./helpers/tauri";
+import * as tauri from "./helpers/tauri";
 
-vi.mock("@tauri-apps/api/core", async () => (await import("./helpers/tauri")).coreModule);
-vi.mock("@tauri-apps/api/event", async () => (await import("./helpers/tauri")).eventModule);
+// The factories hand back the helpers/tauri instance this setup file loaded,
+// not a fresh import: after `vi.resetModules()` a dynamic import would build a
+// second copy of the bridge, and handlers a test registered on the first copy
+// would never be seen by the freshly imported app modules.
+vi.mock("@tauri-apps/api/core", () => tauri.coreModule);
+vi.mock("@tauri-apps/api/event", () => tauri.eventModule);
+const { resetTauri } = tauri;
 
 // jsdom has no layout, no media queries and no observers; the app only needs
 // them to exist.
