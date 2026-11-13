@@ -33,7 +33,7 @@
 #   xcrun xcresulttool get test-results summary --path <file>.xcresult
 #
 # Signing: simulator builds are ad-hoc signed (CODE_SIGN_IDENTITY=-); the Mac
-# build uses the project's automatic signing. Test mode keeps the app out of
+# build is ad-hoc signed without sandbox or entitlements (see MAC_SIGN). Test mode keeps the app out of
 # the keychain, so neither depends on a signed-in keychain.
 
 set -u
@@ -128,6 +128,14 @@ run() {
 }
 
 SIM_SIGN=(CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-)
+# The Mac: signed to run locally, without the sandbox or entitlements. The
+# team's Mac provisioning profile doesn't list every Mac, and the app's
+# iCloud and SharePlay entitlements need one. Unsandboxed, test mode's state
+# lands in ~/Library/Preferences/scottai.FellyJin.uitest.plist and
+# ~/Library/{Application Support,Caches}/AquariumUITest, away from the real
+# app's container.
+MAC_SIGN=(CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER=
+          CODE_SIGN_ENTITLEMENTS= ENABLE_APP_SANDBOX=NO ENABLE_HARDENED_RUNTIME=NO)
 
 do_unit() {
   local phone tv watch
@@ -139,7 +147,7 @@ do_unit() {
     if pgrep -x Aquarium > /dev/null; then
       echo "Unit Mac: skipped, Aquarium is running on this Mac" | tee -a "$summary"
     else
-      run Aquarium Unit Mac "platform=macOS"
+      run Aquarium Unit Mac "platform=macOS" "${MAC_SIGN[@]}"
     fi
   fi
   watch=$(watch_pair) || return
@@ -183,7 +191,7 @@ do_mac() {
     return
   fi
   reset_account mac
-  run Aquarium Mac Mac "platform=macOS"
+  run Aquarium Mac Mac "platform=macOS" "${MAC_SIGN[@]}"
 }
 
 do_tv() {

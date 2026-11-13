@@ -59,7 +59,9 @@ xcodebuild test -scheme Aquarium -testPlan Unit   -destination 'id=<iPhone sim>'
 xcodebuild test -scheme Aquarium -testPlan iPhone -destination 'id=<iPhone sim>' CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-
 xcodebuild test -scheme Aquarium -testPlan iPad   -destination 'id=<iPad sim>'   CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-
 xcodebuild test -scheme Aquarium -testPlan TV     -destination 'id=<Apple TV sim>' CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-
-xcodebuild test -scheme Aquarium -testPlan Mac    -destination 'platform=macOS'
+xcodebuild test -scheme Aquarium -testPlan Mac    -destination 'platform=macOS' \
+  CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+  CODE_SIGN_ENTITLEMENTS= ENABLE_APP_SANDBOX=NO ENABLE_HARDENED_RUNTIME=NO
 xcodebuild test -scheme AquariumWatch -testPlan Watch     -destination 'id=<watch sim>' CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-
 xcodebuild test -scheme AquariumWatch -testPlan WatchUnit -destination 'id=<watch sim>' CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-
 ```
@@ -246,10 +248,22 @@ exception; anything else watch tests need goes in `WatchTests/`.
 - **The Mac app in real use.** The debug build has the same bundle id: launching
   it for a test quits a running Aquarium. `MacUITestCase` skips and the script
   refuses while one is running. Test mode keeps the data apart either way.
-- **Mac UI testing permission.** The first Mac UI run may need Accessibility /
-  "Automation" approval for Xcode's test runner in System Settings > Privacy &
-  Security; a headless run then fails to start the runner until someone allows
-  it.
+- **Mac signing.** The team's Mac provisioning profile doesn't list this Mac
+  ("doesn't include the currently selected device"), and the app's iCloud and
+  SharePlay entitlements need a profile. So Mac test runs (unit and UI) are
+  ad-hoc signed with no entitlements and no sandbox (the flags above, `MAC_SIGN`
+  in the script). Unsandboxed, test mode's state is
+  `~/Library/Preferences/scottai.FellyJin.uitest.plist` and
+  `~/Library/{Application Support,Caches}/AquariumUITest`; the real app's
+  container is never opened. Mac unit tests pass this way.
+- **Mac UI testing needs Automation Mode.** As of 2026-11-13 the Mac UI runner
+  stops with "Timed out while enabling automation mode": macOS asks for an
+  administrator's approval to let XCTest drive the UI, and a headless run can't
+  answer. The owner of the Mac has to allow it once, either by running a Mac UI
+  test from Xcode and approving the prompt, or with
+  `sudo automationmodetool enable-automationmode-without-authentication`
+  (a security setting: the person, not an agent, makes that change). Until
+  then the Mac UI tests build but don't run.
 - **Signing on simulators.** A build with `CODE_SIGNING_ALLOWED=NO` installed on
   a simulator that has a real sign-in wipes that sign-in (keychain access goes
   with the entitlements). The script only uses its own simulators, and test mode
