@@ -71,11 +71,12 @@ final class WatchHomeTests: WatchUITestCase {
         let server = waitForText(TestID.Watch.settingsServerStatus) { $0.contains("Connected") }
         XCTAssertTrue(server.contains("Connected"), server)
         XCTAssertTrue(text(TestID.Watch.settingsServer).contains("127.0.0.1"))
-        for id in [TestID.Watch.settingsPhoneReach, TestID.Watch.settingsFromPhone, TestID.Watch.settingsWaitingToSend,
-                   TestID.Watch.settingsSyncNow, TestID.Watch.settingsSendLog] {
+        // In the page's order: what is above is gone from the tree once
+        // scrolled past.
+        for id in [TestID.Watch.settingsPhoneReach, TestID.Watch.storageUsed, TestID.Watch.settingsFromPhone,
+                   TestID.Watch.settingsWaitingToSend, TestID.Watch.settingsSyncNow, TestID.Watch.settingsSendLog] {
             XCTAssertTrue(reach(app.element(id)), "no \(id)")
         }
-        XCTAssertTrue(reach(app.element(TestID.Watch.storageUsed)), "storage line")
         attachScreenshot("settings")
     }
 

@@ -25,26 +25,26 @@ class WatchUITestCase: AquariumUITestCase {
     @discardableResult
     func reach(_ element: XCUIElement, tries: Int = 30) -> Bool {
         let window = app.windows.firstMatch
-        var lowTries = 0
         for _ in 0..<tries {
-            if element.exists && element.isHittable {
-                // Clear of the bottom bar: a toolbar button there takes taps
-                // meant for the row under it (master fix list).
-                let h = window.exists ? window.frame.height : 248
-                if element.frame.midY < h * 0.62 || lowTries >= 2 { return true }
-                lowTries += 1
+            let screen = window.exists ? window.frame : CGRect(x: 0, y: 0, width: 208, height: 248)
+            var up = true
+            if element.exists {
+                let mid = element.frame.midY
+                // Well inside the screen, clear of the title and of the
+                // bottom bar (whose button takes taps meant for the row
+                // under it: master fix list).
+                if mid > screen.minY + screen.height * 0.12, mid < screen.minY + screen.height * 0.62 { return true }
+                up = mid >= screen.minY + screen.height * 0.62
             }
-            let screen = window.exists ? window.frame : CGRect(x: 0, y: 0, width: 200, height: 240)
-            // Above the middle and out of reach (under the title, or past
-            // the top): bring the list down; otherwise move it up.
-            let above = element.exists && element.frame.midY < screen.minY + screen.height * 0.3
-            let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: above ? 0.35 : 0.7))
-            let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: above ? 0.7 : 0.35))
+            let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.7 : 0.35))
+            let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.35 : 0.7))
             start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
         }
-        // On screen but not hittable (under the title bar): there, at least.
-        return element.exists && (element.isHittable || window.frame.intersects(element.frame))
+        // Where scrolling can't move it further (the top or end of a list):
+        // on screen is enough.
+        return element.exists && window.frame.intersects(element.frame)
     }
+
     /// Launch clean and signed in, and wait for the home list to say so.
     @discardableResult
     func launchHome(reset: Bool = true, file: StaticString = #filePath, line: UInt = #line) -> XCUIApplication {
@@ -60,7 +60,7 @@ class WatchUITestCase: AquariumUITestCase {
         if !target.waitForExistence(timeout: 5) { reach(target) }
         target.waitToExist(30, file: file, line: line)
         reach(target)
-        target.tapWhenReady(20, file: file, line: line)
+        if target.isHittable { target.tap() } else { target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
     }
 
     /// Back one page: the navigation bar's back button (top left).

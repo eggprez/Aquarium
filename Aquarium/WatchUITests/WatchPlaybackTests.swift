@@ -44,9 +44,18 @@ final class WatchPlaybackTests: WatchUITestCase {
         XCTAssertEqual(text(TestID.Watch.nowPlayingTitle), album.tracks[0].name)
         let moved = waitForElapsed { $0 >= 2 }
         XCTAssertGreaterThanOrEqual(moved ?? 0, 2, "the clock runs: it is playing")
-        let session = try api.waitForPlayback(of: album.tracks[0].id, timeout: 30)
-        XCTAssertNotNil(session, "the server's dashboard shows the watch playing")
-        XCTAssertEqual(session?.client, "Aquarium")
+        // The watch posts no capabilities, so it isn't one of the "controllable"
+        // sessions JellyfinAPI.sessions() lists: ask for this user's sessions.
+        var seen: [String: Any]?
+        let end = Date().addingTimeInterval(30)
+        repeat {
+            let list = (try? api.json("/Sessions?ActiveWithinSeconds=120")) as? [[String: Any]] ?? []
+            seen = list.first { ($0["DeviceName"] as? String) == "Apple Watch"
+                && (($0["NowPlayingItem"] as? [String: Any])?["Id"] as? String) == album.tracks[0].id }
+            if seen == nil { Thread.sleep(forTimeInterval: 1) }
+        } while seen == nil && Date() < end
+        XCTAssertNotNil(seen, "the server's dashboard shows the watch playing")
+        XCTAssertEqual(seen?["Client"] as? String, "Aquarium")
         XCTAssertTrue(text(TestID.Watch.nowPlayingNotes).contains("3 up next"))
         attachScreenshot("song playing")
     }
@@ -67,6 +76,8 @@ final class WatchPlaybackTests: WatchUITestCase {
         let second = waitForText(TestID.Watch.nowPlayingTitle) { $0 == album.tracks[1].name }
         XCTAssertEqual(second, album.tracks[1].name)
         _ = waitForElapsed { $0 >= 4 }
+        // Paused, so the clock doesn't run on between the two Previous taps.
+        app.button(TestID.Watch.nowPlayingPlayPause).tapWhenReady()
         app.button(TestID.Watch.nowPlayingPrevious).tapWhenReady()
         XCTAssertEqual(waitForElapsed(timeout: 10) { $0 < 3 } ?? 99, 0, accuracy: 3, "a few seconds in, Previous goes to the top")
         XCTAssertEqual(text(TestID.Watch.nowPlayingTitle), album.tracks[1].name)
@@ -101,12 +112,16 @@ final class WatchPlaybackTests: WatchUITestCase {
         let start = waitForElapsed { $0 >= 400 }
         XCTAssertEqual(start ?? 0, 400, accuracy: 15, "suite-reset leaves it at 6:40")
         XCTAssertTrue(text(TestID.Watch.nowPlayingSubtitle).contains("Chapter 3"), "6:40 is in the third chapter")
+        // Paused, so the clock stands still between the taps.
+        app.button(TestID.Watch.nowPlayingPlayPause).tapWhenReady()
+        Thread.sleep(forTimeInterval: 1)
+        let held = elapsed() ?? 0
         app.button(TestID.Watch.nowPlayingSkipForward).tapWhenReady()
-        let on = waitForElapsed { $0 >= (start ?? 400) + 28 }
-        XCTAssertNotNil(on)
+        let on = waitForElapsed(timeout: 10) { abs($0 - (held + 30)) <= 2 }
+        XCTAssertEqual(on ?? 0, held + 30, accuracy: 2, "thirty seconds on")
         app.button(TestID.Watch.nowPlayingSkipBack).tapWhenReady()
-        let backAgain = waitForElapsed { $0 < (on ?? 430) - 10 }
-        XCTAssertLessThan(backAgain ?? 9999, (on ?? 430) - 10)
+        let back = waitForElapsed(timeout: 10) { abs($0 - (held + 15)) <= 2 }
+        XCTAssertEqual(back ?? 0, held + 15, accuracy: 2, "fifteen back")
         attachScreenshot("book playing")
     }
 
@@ -190,11 +205,14 @@ final class WatchPlaybackTests: WatchUITestCase {
     func testPausingABookKeepsItsPlaceOnTheServer() throws {
         let book = try WatchFixtures.require().book("FX Chaptered Audiobook")
         let api = try JellyfinAPI.signIn()
+        // Past the server's five minutes with no place kept, and well short
+        // of the last five that count as finished, whatever the UI's pace.
+        try api.setResume(book.id, seconds: 310)
         launchHome()
         openBook(book.id)
         open(TestID.Watch.bookPlay)
         app.element(TestID.Watch.nowPlayingRoot).waitToExist(30)
-        let playing = waitForElapsed { $0 >= 405 }
+        let playing = waitForElapsed { $0 >= 312 }
         XCTAssertNotNil(playing)
         app.button(TestID.Watch.nowPlayingPlayPause).tapWhenReady()
         let pausedAt = elapsed() ?? 0

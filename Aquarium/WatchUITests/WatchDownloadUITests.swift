@@ -72,7 +72,13 @@ final class WatchDownloadUITests: WatchUITestCase {
         back(); back(); back()
         open(TestID.Watch.rootDoor("onWatch"))
         open(TestID.Watch.onWatchRemoveEverything)
-        app.button(TestID.Watch.onWatchConfirmRemoveEverything).tapWhenReady()
+        // The dialog's button doesn't carry its identifier on watchOS (a
+        // confirmationDialog gap, like TESTING.md's known ones): by label.
+        let byId = app.button(TestID.Watch.onWatchConfirmRemoveEverything)
+        let byLabel = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label ENDSWITH %@", "Remove ", "items")).firstMatch
+        let confirm = byId.waitForExistence(timeout: 5) ? byId : byLabel
+        XCTAssertTrue(confirm.waitForExistence(timeout: 15), "the confirmation")
+        confirm.tap()
         app.element(TestID.Watch.statusEmpty).waitToExist(20)
         XCTAssertFalse(app.element(TestID.Watch.onWatchGroup("album", album.id)).exists)
     }
