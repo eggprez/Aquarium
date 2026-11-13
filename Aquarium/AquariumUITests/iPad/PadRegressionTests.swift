@@ -136,7 +136,8 @@ final class PadRegressionTests: PadUITestCase {
         let row = app.button(TestID.Sidebar.row("lib-\(homeVideos)"))
         row.waitToExist(30)
         let chip = app.button(TestID.Library.chip(homeVideos))
-        XCTAssertTrue(reveal(chip))
+        XCTAssertTrue(reveal(app.element(TestID.Library.chips)))
+        for _ in 0..<3 where !isOnScreen(chip) { app.element(TestID.Library.chips).swipeLeft() }
         let rowText = row.staticTexts["Home Videos & Photos"]
         let chipText = chip.staticTexts["Home Videos & Photos"]
         guard rowText.exists, chipText.exists else { throw XCTSkip("text elements not exposed") }
@@ -220,8 +221,10 @@ final class PadRegressionTests: PadUITestCase {
         spanish.padTap()
         waitForPlaying(60)
         tapControl(TestID.Player.pillInfo)
-        let subs = app.element(TestID.Player.infoFact("subtitles"))
-        XCTAssertTrue(waitUntil(30, "Info to name the Spanish track") { self.text(subs).localizedCaseInsensitiveContains("Spa") })
+        let subs = app.descendants(matching: .any).matching(identifier: TestID.Player.infoFact("subtitles"))
+        XCTAssertTrue(waitUntil(30, "Info to name the Spanish track") {
+            subs.allElementsBoundByIndex.contains { self.text($0).localizedCaseInsensitiveContains("Spa") }
+        })
     }
 
     private func openCardFor(_ pill: String, _ card: String) -> XCUIElement {

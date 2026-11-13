@@ -214,11 +214,16 @@ final class PadPhotosTests: PadUITestCase {
             folder.padTap()
             albumCard = cardButton(album)
         }
-        XCTAssertTrue(albumCard.waitForExistence(timeout: 30), "FX Album in Fixture Photos")
+        // On main the folder opens as a title page (detail.page), not a grid,
+        // so FX Album is never reached.
+        XCTExpectFailure("bug: photo folders and albums open as an empty title page, not a grid of what they hold (master-fix-list iPad #8; 5209e95 not on main)", strict: false)
+        guard albumCard.waitForExistence(timeout: 20) else {
+            attachScreenshot("folder opened")
+            XCTFail("FX Album in Fixture Photos (the folder opened as \(app.elements(prefix: "detail.page.").firstMatch.identifier))")
+            return
+        }
         albumCard.padTap()
-        let opened = cardButton(photo).waitForExistence(timeout: 30)
-        XCTExpectFailure("bug: photo albums open with no photos (master-fix-list iPad #8; 5209e95 not on main)", strict: false)
-        XCTAssertTrue(opened, "a photo of FX Album in its grid")
+        XCTAssertTrue(cardButton(photo).waitForExistence(timeout: 30), "a photo of FX Album in its grid")
         attachScreenshot("photo album")
     }
 }

@@ -70,7 +70,7 @@ final class PadLiveTVTests: PadUITestCase {
         row.padTap()
         XCTAssertTrue(waitUntil(30, "the second channel to be tuned") {
             self.app.element(TestID.Player.title).label.contains(channels[1].name)
-                || (try? self.api().sessions().first?.nowPlayingId) == channels[1].id
+                || (try? self.api())?.padPlaying()?.nowPlayingId == channels[1].id
         })
         closePlayer()
     }
@@ -84,7 +84,7 @@ final class PadLiveTVTests: PadUITestCase {
         tapControl(TestID.Player.channelNext)
         XCTAssertTrue(waitUntil(30, "wrapped to the first channel") {
             self.app.element(TestID.Player.title).label.contains(channels[0].name)
-                || (try? self.api().sessions().first?.nowPlayingId) == channels[0].id
+                || (try? self.api())?.padPlaying()?.nowPlayingId == channels[0].id
         })
         closePlayer()
     }

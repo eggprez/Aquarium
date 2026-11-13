@@ -183,10 +183,10 @@ final class PadHomeTests: PadUITestCase {
             showSection("home")
         }
         XCTAssertTrue(live.waitForExistence(timeout: 30), "On Now: the QA server's channels")
-        XCTAssertTrue(reveal(live, maxSwipes: 25))
+        XCTAssertTrue(reveal(live, maxSwipes: 10))
         let music = app.element(TestID.Home.shelf(TestID.Home.rowMusicRecent))
         let newMusic = app.element(TestID.Home.shelf(TestID.Home.rowMusicNew))
-        XCTAssertTrue(reveal(music, maxSwipes: 25) || reveal(newMusic, maxSwipes: 25), "a music shelf on Home")
+        XCTAssertTrue(reveal(music, maxSwipes: 10) || reveal(newMusic, maxSwipes: 4), "a music shelf on Home")
     }
 
     func testHomeInBothOrientations() {

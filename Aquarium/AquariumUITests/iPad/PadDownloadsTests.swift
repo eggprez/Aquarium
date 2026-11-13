@@ -48,7 +48,10 @@ final class PadDownloadsTests: PadUITestCase {
         // Delete, with the confirmation.
         contextMenu(on: card, waitingFor: TestID.Downloads.filmCardDelete(film.id))
         app.button(TestID.Downloads.filmCardDelete(film.id)).padTap()
-        app.button(TestID.Downloads.deletionConfirm).padTap()
+        // A film card's Delete acts at once (2026-11-13); a confirmation, if
+        // one comes, is a popover whose button is the system's.
+        let confirm = app.button(TestID.Downloads.deletionConfirm)
+        if confirm.waitForExistence(timeout: 3) { confirm.padTap() }
         XCTAssertTrue(card.waitToVanish(20), "the film is gone from Downloads")
     }
 

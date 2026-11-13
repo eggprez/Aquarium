@@ -246,8 +246,10 @@ extension PadUITestCase {
                 control.tap()
                 return
             }
-            if !app.element(TestID.Player.controls).exists, video.exists { video.tap() }
-            _ = control.waitForExistence(timeout: 3)
+            // Up but fading, or gone: a tap on the picture brings them back
+            // (or puts them away; the next turn of the loop brings them back).
+            if video.exists { video.tap() }
+            _ = eventually(3) { control.exists && control.isHittable }
         }
         XCTFail("\(id) was not there to tap", file: file, line: line)
     }
@@ -276,10 +278,23 @@ extension PadUITestCase {
     }
 
     /// "1:02:03", "12:34", "0:05" → seconds; the first such run in the text.
+    /// Also reads the spoken form the timeline's labels use: "5 minutes,
+    /// 3 seconds", "1 hour 2 minutes".
     static func seconds(in text: String) -> Double? {
-        guard let match = text.range(of: #"\d+(:\d{2}){1,2}"#, options: .regularExpression) else { return nil }
-        let parts = text[match].split(separator: ":").compactMap { Double($0) }
-        return parts.reduce(0) { $0 * 60 + $1 }
+        if let match = text.range(of: #"\d+(:\d{2}){1,2}"#, options: .regularExpression) {
+            let parts = text[match].split(separator: ":").compactMap { Double($0) }
+            return parts.reduce(0) { $0 * 60 + $1 }
+        }
+        var total: Double = 0
+        var found = false
+        for (unit, scale) in [("hour", 3600.0), ("minute", 60.0), ("second", 1.0)] {
+            if let r = text.range(of: #"(\d+)\s*"# + unit, options: .regularExpression) {
+                let number = text[r].prefix { $0.isNumber }
+                total += (Double(number) ?? 0) * scale
+                found = true
+            }
+        }
+        return found ? total : nil
     }
 
     /// Closes the player with its own Back and waits for it to go.
@@ -294,8 +309,8 @@ extension PadUITestCase {
         for _ in 0..<4 {
             if back.exists && back.isHittable { back.tap(); break }
             if !player.exists { return }
-            if !app.element(TestID.Player.controls).exists, video.exists { video.tap() }
-            _ = back.waitForExistence(timeout: 3)
+            if video.exists { video.tap() }
+            _ = eventually(3) { back.exists && back.isHittable }
         }
         if !player.waitToVanish(20) { XCTFail("the player did not close", file: file, line: line) }
     }
@@ -366,6 +381,38 @@ extension PadUITestCase {
         let byId = app.buttons.matching(identifier: id).firstMatch
         if byId.waitForExistence(timeout: 3) { return byId }
         return app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
+    }
+}
+#endif
+
+#if os(iOS)
+extension JellyfinAPI {
+    /// This account's sessions, most recently active first, the test's own
+    /// left out. `sessions()` in the shared client asks with
+    /// `ControllableByUserId`, which Jellyfin 12.2 answers with an empty list
+    /// for an app that takes no remote control (the QA server, 2026-11-13),
+    /// so the iPad tests ask for every active session and filter by user.
+    /// Every test run is a new device, so older runs' sessions can still be
+    /// listed for a few minutes: the most recent is the app under test.
+    func padSessions(activeWithinSeconds: Int = 120) throws -> [Session] {
+        let list = try json("/Sessions?ActiveWithinSeconds=\(activeWithinSeconds)") as? [[String: Any]] ?? []
+        let mine = list.filter { ($0["UserId"] as? String) == userId && ($0["DeviceId"] as? String) != Self.deviceId }
+        let sorted = mine.sorted { ($0["LastActivityDate"] as? String ?? "") > ($1["LastActivityDate"] as? String ?? "") }
+        return sorted.map { s in
+            let playing = s["NowPlayingItem"] as? [String: Any]
+            let state = s["PlayState"] as? [String: Any]
+            let ticks = (state?["PositionTicks"] as? Int64) ?? (state?["PositionTicks"] as? Int).map(Int64.init)
+            return Session(
+                id: s["Id"] as? String ?? "", client: s["Client"] as? String ?? "",
+                deviceName: s["DeviceName"] as? String ?? "", deviceId: s["DeviceId"] as? String ?? "",
+                userName: s["UserName"] as? String ?? "", nowPlayingId: playing?["Id"] as? String,
+                positionSeconds: ticks.map { Double($0) / 10_000_000 }, isPaused: state?["IsPaused"] as? Bool, raw: s)
+        }
+    }
+
+    /// The most recent session playing `itemId` (or anything, with nil).
+    func padPlaying(_ itemId: String? = nil) -> Session? {
+        (try? padSessions())?.first { $0.nowPlayingId != nil && (itemId == nil || $0.nowPlayingId == itemId) }
     }
 }
 #endif

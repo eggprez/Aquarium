@@ -57,9 +57,11 @@ final class PadSettingsTests: PadUITestCase {
                                          ("libraryCopy", "Library copy"), ("about", "About")]
         for (key, name) in pages {
             let link = app.element(TestID.Settings.pageLink(key))
-            guard link.waitForExistence(timeout: 5) else { XCTFail("no \(key) row"); continue }
-            for _ in 0..<4 where !isOnScreen(link) { splitList.swipeDown() }
+            // A list builds only the rows near the screen: scroll for it.
+            _ = link.waitForExistence(timeout: 3)
             for _ in 0..<4 where !isOnScreen(link) { splitList.swipeUp() }
+            for _ in 0..<6 where !isOnScreen(link) { splitList.swipeDown() }
+            guard link.exists else { XCTFail("no \(key) row"); continue }
             link.padTap()
             XCTAssertTrue(waitUntil(10, "\(name)'s page") { title.label == name }, "\(key): title reads \(title.label)")
             XCTAssertTrue(app.element(TestID.Settings.pageRoot(key)).waitForExistence(timeout: 10), "\(key)'s page")

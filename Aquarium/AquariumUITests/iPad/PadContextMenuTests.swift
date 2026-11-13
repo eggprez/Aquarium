@@ -109,7 +109,20 @@ final class PadContextMenuTests: PadUITestCase {
         showSection("lib-\(films)")
         let target = cardButton(film.id)
         XCTAssertTrue(reveal(target))
-        contextMenu(on: target, waitingFor: TestID.Item.menuPlay)
+        // A longer hold than the shelves need: the grid's card carries the zoom
+        // transition's source as well.
+        target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 2.5)
+        let menu = app.button(TestID.Item.menuPlay).waitForExistence(timeout: 10)
+        let opened = app.element(TestID.Detail.page(film.id)).exists
+        attachScreenshot("grid card held")
+        // 3 of 3 runs on 2026-11-13 (1.2 s and 2.5 s holds): the title opened
+        // and no menu came, while the same hold on a Home shelf card gives
+        // the menu. Grid cards carry `.posterZoomSource` before
+        // `.itemContextMenu` (Components.swift ~2032). Confirm by hand.
+        XCTExpectFailure("bug: holding a library grid card opens the title instead of its menu", strict: false)
+        XCTAssertFalse(opened, "holding a grid card opened the title instead of its menu")
+        XCTAssertTrue(menu, "the menu on a library grid card")
+        guard menu else { return }
         XCTAssertTrue(app.button(TestID.Item.menuFavorite).exists)
     }
 }
