@@ -69,8 +69,20 @@ final class PadPlayerChromeTests: PadPlayerTestCase {
         XCTAssertTrue(app.button(TestID.Player.pillAudio).label.contains("Audio"))
         attachScreenshot("chrome portrait")
         turn(.landscapeLeft)
-        showControls()
-        XCTAssertTrue(app.element(TestID.Player.pillRow).waitForExistence(timeout: 10))
+        // The controls came up with the player and hide 4 s later, which is
+        // about when the turn finishes: `showControls()` could find them up
+        // and hittable, return, and see them fade a moment later, so the pill
+        // row was never there to find. Bring them back whenever they are
+        // gone (only then: a tap while they are up puts them away) until the
+        // row is seen.
+        let pillRow = app.element(TestID.Player.pillRow)
+        let controls = app.element(TestID.Player.controls)
+        let video = app.element(TestID.Player.video)
+        XCTAssertTrue(eventually(20) {
+            if pillRow.exists { return true }
+            if !controls.exists, video.exists { video.tap() }
+            return pillRow.waitForExistence(timeout: 2)
+        }, "the pill row in landscape")
         attachScreenshot("chrome landscape")
     }
 

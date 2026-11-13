@@ -259,11 +259,12 @@ The two failures:
 - `PadRegressionTests.testHeroFirstPageSitsWhereTheOthersDo`: failed once in
   the full plan (first hero page measured 182 pt off in landscape) and passed
   rerun alone.
-- `PadPlayerChromeTests.testIPadChromeHasEveryControl`: the pill row is not
-  found within 10 s after turning to landscape. Flaky before these fixes as
-  well: on the commit before them it failed 2 of 3 runs, on the fixed branch
-  2 of 4. The controls are timing out between `showControls()` and the
-  check; a test fix, not an app one.
+- `PadPlayerChromeTests.testIPadChromeHasEveryControl`: the pill row was not
+  found after turning to landscape (2 of 3 runs before these fixes failed
+  too). The controls come up with the player and hide 4 s later, about when
+  the turn ends: `showControls()` found them up, returned, and they faded.
+  Fixed in the test (it brings the controls back whenever they are gone until
+  the row is seen); 10 of 10 with `-test-iterations 10`.
 
 The two expected failures are no longer app bugs: the PiP window's position
 is iPadOS's (MANUAL.md), and the grid card's missing menu is XCUITest's (a
