@@ -118,7 +118,7 @@ final class WatchLibraryTests: WatchUITestCase {
 
     /// Regression, master-fix-list "Layout, all watches": "Sort button floats
     /// over the third row of Albums and Audiobooks, hides its text and takes
-    /// its taps". Fixed on claude/qa-fix-list-cb0b58 (352c592), not here.
+    /// its taps". The Audiobooks sort is now a row at the head of the list.
     func testTheAudiobooksSortControlCoversNoRow() throws {
         launchHome()
         open(TestID.Watch.rootDoor("books"))
@@ -128,8 +128,6 @@ final class WatchLibraryTests: WatchUITestCase {
         let rows = app.elements(prefix: "watch.library.book.")
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 30))
         let covered = rows.allElementsBoundByIndex.filter { $0.isHittable && $0.frame.intersects(sort.frame) }
-        XCTExpectFailure("bug: the Audiobooks sort button sits over a row and takes its taps (LibraryViews.swift BooksView toolbar .bottomBar)",
-                         options: .nonStrict())
         XCTAssertTrue(covered.isEmpty, "rows under the sort button: \(covered.map(\.identifier))")
     }
 

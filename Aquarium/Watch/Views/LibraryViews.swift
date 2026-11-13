@@ -31,6 +31,27 @@ struct BooksView: View {
                 }
             } else {
                 StatusRow(loading: loading && books.isEmpty, error: error, empty: !loading && books.isEmpty && error == nil ? "No audiobooks on this server" : nil)
+                // No menus on a watch: the row steps through the orders. A row
+                // at the head of the list rather than a bar item: a top-bar
+                // item on a pushed page inside the vertical TabView pops the
+                // page straight back, and a bottom-bar one floated over the
+                // third row and took its taps.
+                if !books.isEmpty {
+                    Button {
+                        let all = Sort.allCases
+                        sort = all[(all.firstIndex(of: sort)! + 1) % all.count]
+                    } label: {
+                        Label("Sorted by \(sort.rawValue)",
+                              systemImage: sort == .title ? "textformat.abc" : (sort == .author ? "person" : "clock"))
+                            .font(.caption2)
+                            .foregroundStyle(WatchTheme.dim)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .listRowBackground(Color.clear)
+                    .accessibilityHint("Changes the order")
+                    .accessibilityIdentifier(TestID.Watch.booksSort)
+                }
                 ForEach(books) { book in
                     NavigationLink(value: WatchRoute.book(book)) { BookRow(item: book) }
                         .accessibilityIdentifier(TestID.Watch.book(book.Id))
@@ -38,22 +59,6 @@ struct BooksView: View {
             }
         }
         .navigationTitle("Audiobooks")
-        .toolbar {
-            if !offline {
-                // No menus on a watch: the button steps through the orders.
-                // It sits in the bottom bar: a top-bar item on a pushed page
-                // inside the vertical TabView pops the page straight back.
-                ToolbarItem(placement: .bottomBar) {
-                    Button {
-                        let all = Sort.allCases
-                        sort = all[(all.firstIndex(of: sort)! + 1) % all.count]
-                    } label: {
-                        Image(systemName: sort == .title ? "textformat.abc" : (sort == .author ? "person" : "clock"))
-                    }
-                    .accessibilityIdentifier(TestID.Watch.booksSort)
-                }
-            }
-        }
         .task(id: sort) { await load() }
         .testAnchor(TestID.Watch.booksRoot)
     }

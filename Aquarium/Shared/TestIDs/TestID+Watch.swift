@@ -72,7 +72,7 @@ extension TestID {
         // MARK: Library lists
 
         static let booksRoot = "watch.library.books.root"
-        /// The bottom-bar button that steps through the sort orders.
+        /// The row at the head of the list that steps through the sort orders.
         static let booksSort = "watch.library.books.sort"
         /// A book row, wherever it opens the book's page (Audiobooks, Search).
         static func book(_ itemId: String) -> String { "watch.library.book.\(itemId)" }
