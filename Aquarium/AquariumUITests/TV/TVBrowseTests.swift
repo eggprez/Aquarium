@@ -39,7 +39,6 @@ final class TVBrowseTests: TVTestCase {
         app.element(TestID.Library.count).waitToExist(20)
         let focusedOnOpen = waitUntil("a card focused on opening", timeout: 10, fail: false) { [weak self] in self?.focused != nil }
         attachScreenshot("Fixture Films on opening")
-        XCTExpectFailure("bug: a library opened from the Library tab (AppModel.push → detailRoot .library, LibraryView on tvOS) shows no focused card until a remote press; focus is lost on arrival")
         XCTAssertTrue(focusedOnOpen, "nothing focused on the library grid")
     }
 
@@ -93,12 +92,8 @@ final class TVBrowseTests: TVTestCase {
             guard let id = member["id"] as? String else { continue }
             app.element(TestID.Item.card(id)).waitToExist(20)
         }
-        if !waitUntil("focus on FX Collection", timeout: 10, fail: false, { [weak self] in self?.focused != nil }) {
-            XCTExpectFailure("bug: a collection opened from Collections shows nothing focused until a remote press (same as a library grid)") {
-                XCTFail("nothing focused on FX Collection")
-            }
-            XCTAssertTrue(recoverFocus(), "no focus on FX Collection even after a press")
-        }
+        XCTAssertTrue(waitUntil("focus on FX Collection", timeout: 10, fail: false, { [weak self] in self?.focused != nil }),
+                      "nothing focused on FX Collection")
     }
 
     func testFolderOfPhotosOpensItsContents() throws {
@@ -351,12 +346,7 @@ final class TVBrowseTests: TVTestCase {
         app.element(TestID.Person.name).waitToExist(10)
         waitUntil("the person's films", timeout: 20) { [weak self] in self?.app.element(TestID.Person.films).exists ?? false }
         let focusedOnOpen = waitUntil("focus on the person page", timeout: 10, fail: false) { [weak self] in self?.focused != nil }
-        if !focusedOnOpen {
-            XCTExpectFailure("bug: a person page opened from a cast face (PersonView on tvOS) shows nothing focused until a remote press") {
-                XCTFail("nothing focused on the person page")
-            }
-            XCTAssertTrue(recoverFocus(), "no focus on the person page even after a press")
-        }
+        XCTAssertTrue(focusedOnOpen, "nothing focused on the person page")
         Remote.menu()
         app.element(TestID.Detail.page(film.id)).waitToExist(10)
     }

@@ -41,6 +41,7 @@ struct ContainerPage: View {
             }
             .padding(.top, 8)
         }
+        .focusOnArrival()
         .screenTitle(item.title)
         .paletteBar()
         .testAnchor(TestID.Detail.page(item.Id))

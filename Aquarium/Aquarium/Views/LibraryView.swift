@@ -442,6 +442,7 @@ struct LibraryView: View {
             }
             .padding(.top, 8)
         }
+        .focusOnArrival()
     }
 
     #if os(iOS)

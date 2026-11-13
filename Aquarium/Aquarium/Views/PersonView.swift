@@ -65,6 +65,7 @@ struct PersonView: View {
             .padding(.top, 12)
             .padding(.bottom, 32)
         }
+        .focusOnArrival()
         .screenTitle(displayName)
         .paletteBar()
         .task(id: personId) { await load() }
