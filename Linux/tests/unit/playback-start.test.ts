@@ -253,12 +253,7 @@ describe("playItem", () => {
       expect(playbackInfos()[0]!.body.EnableDirectPlay).toBe(true);
     });
 
-    // BUG: pickStartingBitrate's own comment says it returns undefined (Direct
-    // Play, unconditionally) when "the item carries no bitrate of its own to
-    // compare against", but with no MediaSources[0].Bitrate it skips the
-    // comparison and returns a transcode rung instead. On a 1 Gbps LAN an item
-    // passed without MediaSources is forced to a 35 Mbps transcode.
-    it.fails("direct-plays an item that carries no bitrate of its own, whatever the probe measures", async () => {
+    it("direct-plays an item that carries no bitrate of its own, whatever the probe measures", async () => {
       const { pb } = await boot({ probe: 1_000_000_000 });
       mockServer();
       await pb.playItem(movie("m1"));

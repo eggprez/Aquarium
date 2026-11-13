@@ -649,7 +649,7 @@ async function pickStartingBitrate(item: any): Promise<number | undefined> {
   if (!measured) return undefined;
   const budget = measured * BITRATE_PROBE_SAFETY;
   const source = item?.MediaSources?.[0]?.Bitrate;
-  if (typeof source === "number" && source > 0 && source <= budget) return undefined;
+  if (typeof source !== "number" || source <= 0 || source <= budget) return undefined;
   // QUALITY_CHOICES runs best-first after Direct Play (index 0), so the first
   // rung whose cap fits the budget is the best one that does.
   const rung = QUALITY_CHOICES.slice(1).find((q) => (q.maxBitrate ?? 0) <= budget);
