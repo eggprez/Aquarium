@@ -334,7 +334,12 @@ final class MacBrowseUITests: MacUITestCase {
         let season = app.element(TestID.Detail.season(s1["id"] as? String ?? ""))
         if season.waitForExistence(timeout: 10) { season.click() }
         let last = solid(TestID.Detail.episode(lastId))
-        XCTAssertTrue(last.isHittable)
+        // Not `isHittable`: XCUITest never says so of these rows (see
+        // `scrollIntoView`). The regression was the list's frame cutting the
+        // last row off, with no scrolling inside it to reach it.
+        XCTAssertTrue(isWhollyVisible(last), "the page scrolls the last episode into view")
+        let list = app.element(TestID.Detail.episodeList)
+        XCTAssertLessThanOrEqual(last.frame.maxY, list.frame.maxY + 0.5, "the list is tall enough for its last row")
     }
 
     /// Regression: ReturnOnEpisodesPlaysRandomOne — ⇧-click three episodes,
@@ -349,9 +354,10 @@ final class MacBrowseUITests: MacUITestCase {
         else { throw XCTSkip("no Season 01 in fixtures.json") }
         launchToHome()
         openTitle(named: show.name, id: show.id)
-        solid(TestID.Detail.episode(eps[1])).click()
+        // The rows by their centre: see `scrollIntoView`.
+        clickCentre(solid(TestID.Detail.episode(eps[1])))
         let last = solid(TestID.Detail.episode(eps[3]))
-        XCUIElement.perform(withKeyModifiers: .shift) { last.click() }
+        XCUIElement.perform(withKeyModifiers: .shift) { clickCentre(last) }
         app.typeKey(.return, modifierFlags: [])
         playerWindow.waitToExist(45)
         XCTAssertEqual(try api.macWaitForPlayback(timeout: 30)?.nowPlayingId, eps[1])

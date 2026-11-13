@@ -153,15 +153,39 @@ extension MacUITestCase {
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
     }
 
-    /// Scroll the window under the element until it can be clicked.
+    /// Scroll the window under the element until it can be clicked: until
+    /// XCUITest calls it hittable, or it lies wholly inside the window below
+    /// the toolbar. The second is for the Mac episode list's rows, which
+    /// XCUITest never calls hittable (a row's combined element sits inside
+    /// the list's cell, and the hit test finds the cell) — and whose own
+    /// `click()` tries to scroll the list, which can't scroll, rather than
+    /// the page ("Unable to find hit point for ScrollView"). Click those
+    /// with `clickCentre`.
+    ///
+    /// The scroll is made at the window's trailing edge, over the page's
+    /// scroll bar: in the middle of the window it could land on a shelf or
+    /// the episode list, whose own scroll views took it, and the page
+    /// didn't move.
     func scrollIntoView(_ element: XCUIElement, window: XCUIElement? = nil, maxScrolls: Int = 15) {
         let window = window ?? mainWindow
         var n = 0
-        while element.exists, !element.isHittable, n < maxScrolls {
-            let up = element.frame.minY < window.frame.minY
-            window.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6)).scroll(byDeltaX: 0, deltaY: up ? 300 : -300)
+        while element.exists, !element.isHittable, !isWhollyVisible(element, in: window), n < maxScrolls {
+            let up = element.frame.midY < window.frame.midY
+            window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.6))
+                .withOffset(CGVector(dx: -8, dy: 0))
+                .scroll(byDeltaX: 0, deltaY: up ? 200 : -200)
             n += 1
         }
+    }
+
+    /// The element's frame lies inside the window, clear of a toolbar's
+    /// worth at the top.
+    func isWhollyVisible(_ element: XCUIElement, in window: XCUIElement? = nil) -> Bool {
+        let window = (window ?? mainWindow).frame
+        let frame = element.frame
+        guard !frame.isEmpty else { return false }
+        return frame.minY >= window.minY + 60 && frame.maxY <= window.maxY
+            && frame.minX >= window.minX && frame.maxX <= window.maxX
     }
 
     /// An item in an open menu whose title starts with `prefix` ("Sign Out"

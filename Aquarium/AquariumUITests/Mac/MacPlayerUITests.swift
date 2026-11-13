@@ -414,7 +414,8 @@ final class MacPlayerUITests: MacUITestCase {
         let api = try JellyfinAPI.signIn()
         launchToHome()
         openTitle(named: show.name, id: show.id)
-        app.element(TestID.Detail.episode(eps[2])).tapWhenReady(30)
+        // The row by its centre: see `scrollIntoView`.
+        clickCentre(solid(TestID.Detail.episode(eps[2])))
         app.typeKey(.return, modifierFlags: [])
         playerWindow.waitToExist(45)
         _ = try api.macWaitForPlayback(of: eps[2])
