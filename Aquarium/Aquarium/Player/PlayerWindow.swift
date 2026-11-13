@@ -69,6 +69,13 @@ struct PlayerWindow: View {
                 window.close()
                 return
             }
+            // A full-screen window of its own, as QuickTime's is. SwiftUI
+            // makes a `Window` scene an auxiliary one — it can only join
+            // another window's full-screen Space — so F, the menu and a
+            // double-click on the picture asked for full screen and got
+            // nothing.
+            window?.collectionBehavior.remove(.fullScreenAuxiliary)
+            window?.collectionBehavior.insert(.fullScreenPrimary)
             // Full Screen (F) acts on the window from the menu bar and
             // Picture in Picture puts it away, neither of which has a view
             // to ask — see `PlayerMacState`.
@@ -208,18 +215,38 @@ private struct EscapeKeyMonitor: NSViewRepresentable {
 }
 
 /// Hands the hosting `NSWindow` to SwiftUI once the view is in one.
+///
+/// Told by the view itself when it joins a window. Looking one run-loop turn
+/// after the view was made was a race: when the view wasn't in its window
+/// yet, nothing called `updateNSView` again and the window was never handed
+/// over — the player then had no window to take full screen, Escape or the
+/// picture's shape.
 struct WindowReader: NSViewRepresentable {
     @Binding var window: NSWindow?
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { window = view.window }
+        let view = ReportingView()
+        view.report = { found in
+            DispatchQueue.main.async { if window !== found { window = found } }
+        }
         return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
+        (view as? ReportingView)?.report = { found in
+            DispatchQueue.main.async { if window !== found { window = found } }
+        }
         if view.window !== window {
             DispatchQueue.main.async { window = view.window }
+        }
+    }
+
+    final class ReportingView: NSView {
+        var report: ((NSWindow?) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            report?(window)
         }
     }
 }

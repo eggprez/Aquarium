@@ -263,16 +263,25 @@ final class MacPlayerUITests: MacUITestCase {
 
     /// Regression: FullScreenMenuFullScreensMainWindow. F (and the menu) act
     /// on the player window and only it. Source: commit 430f7d6.
+    /// Regression: PlayerWindowNeverFullScreen. SwiftUI made the player's
+    /// `Window` an auxiliary full-screen window, and `WindowReader` could
+    /// miss the window altogether, so F did nothing. Source:
+    /// Player/PlayerWindow.swift (`onChange(of: window)`, `WindowReader`).
     func testBugFullScreenIsThePlayersAndEscapeLeavesIt() throws {
         _ = try playLongDirect()
         focusPlayerWindow()
         let mainFrame = mainWindow.frame
+        let before = playerWindow.frame
         app.typeKey("f", modifierFlags: [])
-        Thread.sleep(forTimeInterval: 2)   // the full-screen animation
-        let screen = playerWindow.frame
-        XCTAssertGreaterThan(screen.width, mainFrame.width * 0.9)
+        // The full-screen animation, and the move to a Space of its own.
+        // (Checked against the window's own size: the player opens wider
+        // than the main window, so comparing with that passed with no full
+        // screen at all — PlayerWindowNeverFullScreen.)
+        XCTAssertTrue(eventually(15) { self.playerWindow.frame.width > before.width + 40 },
+                      "F takes the player window full screen")
         app.typeKey(.escape, modifierFlags: [])
-        Thread.sleep(forTimeInterval: 2)
+        XCTAssertTrue(eventually(15) { self.playerWindow.frame.width <= before.width + 1 },
+                      "Escape in full screen leaves full screen")
         XCTAssertTrue(playerWindow.exists, "Escape in full screen leaves full screen, it doesn't stop")
         XCTAssertEqual(mainWindow.frame, mainFrame, "the main window was never full screen")
     }
