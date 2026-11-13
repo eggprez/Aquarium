@@ -68,10 +68,11 @@ Before starting: `python3 -I suite-reset.py suite-mac` in the QA folder.
 
 | # | Check | Expect |
 |---|---|---|
-| A1 | Click the account row at the foot of the sidebar. | A menu: the saved accounts (with a second one added, "Switch Account"), Add Account…, Settings…, Sign Out…. Sign Out asks first; Cancel keeps you in. XCUITest can't open this menu (2026-11-13). |
-| A2 | Type a title into the sidebar's search field and press Return. | The Search page with results; the term is remembered under the field. Under XCUITest, Return left Home showing (2026-11-13) — check whether a person sees the same. |
-| A3 | Coming from Favorites, click a library row where a title page was left open, then click that row again. | First click: the title page is still there. Second click: the library's top. |
-| A4 | Play a film, click in the player window, press Escape. | Playback stops and the window closes. (Failed under XCUITest.) |
+| A1 | Click the account row at the foot of the sidebar. | A menu: the saved accounts (with a second one added, "Switch Account"), Add Account…, Settings…, Sign Out…. Sign Out asks first; Cancel keeps you in. XCUITest opens it and chooses from it by typing (`MacSignInUITests.testAccountMenuOffersAddSettingsAndSignOut`) but can't see its items: look at the list itself. |
+| A2 | Type a title into the sidebar's search field and press Return; clear the field and look at what drops down. | The Search page with results; the term is listed under the empty field. (Return did nothing until 2026-11-13, fixed on `claude/fix-mac`; the recents list is a pop-up XCUITest can't see.) |
+| A3 | Coming from Favorites, click a library row where a title page was left open, then click that row again. | First click: the title page is still there. Second click: the library's top. Automated since 2026-11-13; worth a look with a trackpad's tap-to-click too. |
+| A4 | Play a film, click in the player window, press Escape; play again, F, Escape, Escape. | Escape stops playback and the window closes; in full screen the first Escape leaves full screen, the second stops. Automated since 2026-11-13. |
+| A5 | Turn VoiceOver on (⌘F5), open the sign-in sheet's Quick Connect, and move over the code. | VoiceOver reads "Quick Connect code" and the digits; the app doesn't crash (it crashed under XCUITest's accessibility queries until 2026-11-13, when the code was a selectable Text). |
 
 ## Things the UI runner can't do on a Mac
 
@@ -80,4 +81,6 @@ Before starting: `python3 -I suite-reset.py suite-mac` in the QA folder.
 - Window restoration across a real quit/relaunch with the system's "Close windows when quitting" setting off.
 - Drag a library window to another Space; ⌘` between windows.
 - Accessibility: VoiceOver through Home, a title page and the player; the thumbnail size buttons read "Smaller" and "Bigger" (commit 6704c21).
+- See what pop-up menus from buttons in a window list (Download, the account row, Quality): XCUITest on macOS 27 doesn't have their items in its tree, so the tests choose from them by typing and check the result.
+- The search field's recent terms: the drop-down list is a pop-up XCUITest can't see.
 - Not enough disk space: fill a disk image to near full, set the downloads there, ask for a 2160p download — the alert lists the rungs that fit; Return takes the first.

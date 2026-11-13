@@ -53,13 +53,13 @@ in a comment.
 |---|---|---|---|
 | Player window: own window, ≥ 480×270, titled | `MacPlayerUITests.testBugPlayerWasTinySheet` | UI | built |
 | Window takes the picture's shape | `MacPlayerTests.testWindowTakesThePicturesShapeKeepingWidthAndTop`, `testWindowShrinksBothWaysRatherThanRunOffTheScreen`, `testWindowAlreadyTheRightShapeIsLeftAlone`, `testNoPictureSizeNoChange` | unit | built |
-| Closing the window stops; Escape stops / leaves full screen | `MacPlayerUITests.testClosingThePlayerWindowStopsPlayback`, `testEscapeStopsWhenNotFullScreen`, `testBugFullScreenIsThePlayersAndEscapeLeavesIt` | UI | built |
-| Restored window with nothing to play dismisses itself | `MacWindowsUITests.testBugRestoredPlayerWindowBlack` | UI | built |
+| Closing the window stops; Escape stops / leaves full screen | `MacPlayerUITests.testClosingThePlayerWindowStopsPlayback`, `testEscapeStopsWhenNotFullScreen`, `testBugFullScreenIsThePlayersAndEscapeLeavesIt`; MANUAL A4 | UI, manual | pass (Escape fixed ee0982e; close-window: see Run state) |
+| Restored window with nothing to play dismisses itself | `MacWindowsUITests.testBugRestoredPlayerWindowBlack` | UI | pass (fixed 406fd71) |
 | No Window ▸ Player | `MacPlayerUITests.testBugWindowMenuPlayerOpensBlackWindow` | UI | built |
 | Stream Info inspector (⌘I) | `MacPlayerUITests.testSpeedFromTheMenuAndBrackets`, `MacPlayerTests.testStreamInfoAndPanelRequests` | UI, unit | built |
 | Playback menu items exist / disabled when idle | `MacPlayerUITests.testPlaybackMenuHasEverything`, `testPlaybackMenuIsDisabledWithNothingPlaying` | UI | built |
 | Key gating (bare keys only in the player window, yielded to inspector/error card) | `MacPlayerTests.testKeysAreBoundWhileThePlayerWindowIsInFront`, `testBugSpaceBarPausesWhileTypingSearch`, `testBugCmdArrowSkipsInTextFieldsAndGuide`, `testBugBareKeysStealInspectorAndErrorCard`; `MacPlayerUITests.testBugTypingASpaceInSearchDoesNotPause` | unit, UI | built |
-| Space, ⌘← ⌘→ | `MacPlayerUITests.testSpaceAndArrowKeysWhileThePlayerIsInFront` | UI | built |
+| Space, ⌘← ⌘→ (Go ▸ Earlier / Later give the keys up away from the guide) | `MacPlayerUITests.testSpaceAndArrowKeysWhileThePlayerIsInFront`, `MacSectionsUITests.testGuideEarlierLaterNow` | UI | pass (⌘→ fixed 949c8fe) |
 | [ / ] speed, Speed menu | `MacPlayerTests.testSpeedSteps`, `testSpeedNames`, `MacPlayerUITests.testSpeedFromTheMenuAndBrackets` | unit, UI | built |
 | ↑ / ↓ volume, M mute | `MacPlayerTests.testVolumeStepsFivePercentAndClamps`, `testVolumeUpUnmutesButDownDoesNot`, `testVolumeIsRemembered`, `MacPlayerUITests.testMuteAndVolumeKeys` | unit, UI | built |
 | C toggle subtitles | `MacPlayerTests.testCTurnsOnTheTrackThatWasOnLast` … `testCKeyTogglesOffAndBackToTheSameTrack` (6), `MacPlayerUITests.testCTogglesSubtitles` | unit, UI | built |
@@ -72,7 +72,7 @@ in a comment.
 | Up Next card and menu, Stop after this | `MacPlayerUITests.testUpNextCardPlaysTheNextEpisode`, `testUpNextMenuListsTheNextEpisodes`, `testBugStopAfterNotOfferedOnAFilm`, `MacPlayerTests.testBugStopAfterOfferedOnFilm`, `testStopAfterWordingFollowsTheItem`, `testDisplayTitleForAnEpisodeNamesTheShow` | UI, unit | built |
 | Sleep timer | `MacPlayerUITests.testSleepTimerSetAndCancel` | UI | built |
 | Fill Screen toggle | `MacPlaybackCoreTests.testFillScreenPreferenceRoundTrips`; menu item in `testPlaybackMenuHasEverything` | unit, UI | built |
-| Full screen (F) on the player window only; not while PiP has it | `MacPlayerTests.testBugFullScreenMenuFullScreensMainWindow`, `testBugHiddenForPictureInPictureIsDetected`, `testNoWindowIsNotHiddenForPictureInPicture`, `MacPlayerUITests.testBugFullScreenIsThePlayersAndEscapeLeavesIt`; MANUAL D6 | unit, UI, manual | built |
+| Full screen (F) on the player window only; not while PiP has it | `MacPlayerTests.testBugFullScreenMenuFullScreensMainWindow`, `testBugHiddenForPictureInPictureIsDetected`, `testNoWindowIsNotHiddenForPictureInPicture`, `MacPlayerUITests.testBugFullScreenIsThePlayersAndEscapeLeavesIt` (now checks the window really grows: it passed with no full screen before); MANUAL D6 | unit, UI, manual | pass (fixed cdca18b) |
 | Picture in Picture (P), mpv hand-over | `MacPlayerTests.testPictureInPictureMenuIsOffWithNoController`; MANUAL N3 | unit, manual | built |
 | SharePlay start / leave | MANUAL N5 | manual | manual |
 | Show Panel (⌘K) | `MacPlayerUITests.testShowPanelOpensInfo` | UI | built |
@@ -104,10 +104,10 @@ in a comment.
 | Function | Test | Kind | Status |
 |---|---|---|---|
 | Groups (top / Libraries / Live / You) | `MacSidebarTests.testGroups…` (4), `MacDeepWaterTests.testSidebarGroupHeadingsAreDeepWaters`, `MacBrowseUITests.testSidebarHasHomeLibrariesLiveTVFavoritesDownloads` | unit, UI | built |
-| Re-click goes to the top; the selecting click doesn't | `MacSidebarTests.testClickThatMovedTheSelectionIsNotAReclick`, `testBugSidebarSlowClickResetsSection`, `testTapLongAfterAnArrowKeyMoveIsAReclick`, `testSecondTapOnSelectedRowIsAReclick`, `MacBrowseUITests.testReclickingTheSelectedRowGoesToTheTop` | unit, UI | built |
+| Re-click goes to the top; the selecting click doesn't | `MacSidebarTests.testClickThatMovedTheSelectionIsNotAReclick`, `testBugSidebarSlowClickResetsSection`, `testTapLongAfterAnArrowKeyMoveIsAReclick`, `testSecondTapOnSelectedRowIsAReclick`, `testBugTapBeforeSelectionStillPairs`, `testSelectionMovedElsewhereDoesNotSwallowAReclick`, `testStaleTapDoesNotPairWithALaterArrowKeyMove` (`SidebarClickRule`), `MacBrowseUITests.testReclickingTheSelectedRowGoesToTheTop` (strict); MANUAL A3 | unit, UI, manual | pass (fixed c528230) |
 | Row menu: Open in New Window, Refresh | `MacSidebarTests.testOpenInNewWindowOnlyForLibrariesFavoritesCollections`, `MacBrowseUITests.testSidebarRowMenuRefreshAndOpenInNewWindow` | unit, UI | built |
 | Downloads badge | `MacSidebarTests.testDownloadsBadgeIsTheTransferCount` | unit | built |
-| Footer account menu: add, settings, sign out (confirm / cancel) | `MacSignInUITests.testAccountMenuOffersAddSettingsAndSignOut`, `testSignOutAsksFirstAndCancelKeepsYouIn`, `testSignOutReturnsToSignIn`, `testAddAccountOpensTheSignInSheet` | UI | built |
+| Footer account menu: add, settings, sign out (confirm / cancel) | `MacSignInUITests.testAccountMenuOffersAddSettingsAndSignOut` (chooses by type-select: the items aren't in XCUITest's tree), `testSignOutAsksFirstAndCancelKeepsYouIn`, `testSignOutReturnsToSignIn`, `testAddAccountOpensTheSignInSheet`; MANUAL A1 | UI, manual | pass |
 | Switch account | not automated: the suite has one Mac account signed in; needs a second saved account (`suite-spare1`) — see "No automated test" | — | — |
 | Mac section symbols, no Settings / Search / Music rows | `MacSidebarTests.testMacSymbols`, `testMacSidebarHasNoSettingsOrSearchRow`, `MacSectionsUITests.testNoMusicSectionOnTheMac` | unit, UI | built |
 
@@ -140,12 +140,12 @@ in a comment.
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Sign-in (password, wrong password, disabled account), Quick Connect, relaunch | `MacSignInUITests.*` | UI | built |
+| Sign-in (password, wrong password, disabled account), Quick Connect, relaunch | `MacSignInUITests.*`; MANUAL A5 (VoiceOver on the Quick Connect code) | UI, manual | pass (Quick Connect crash fixed cb59aa6) |
 | Authorization header ASCII on a Mac | `MacClientTests.testAuthorizationHeaderIsASCIIOnAMac` | unit | built |
 | Avatar URL (`/UserImage`) | `MacClientTests.testBugAvatarOnOldUsersRoute` | unit | built |
 | Home: Continue Watching, Next Up, toolbar, See all | `MacBrowseUITests.testHomeShowsContinueWatchingAndNextUp`, `testToolbarSearchRefreshAndPlayFeatured`, `testShelfHeadingOpensSeeAll` | UI | built |
 | Dock menu items from Home's rows | `MacAppShellTests.testDockMenuItemsDedupeAndStopAtFive`, `testDockMenuEpisodeTitleIsTheShowAndSubtitleTheEpisode`, `testClearDockMenu` | unit | built |
-| Search (sidebar field, results, recents, Unicode) | `MacBrowseUITests.testSidebarSearchFindsTheFXLongTitles`, `testSearchRemembersRecentTerms`, `testUnicodeTitleOpens`, `MacNavigationTests.testSidebarFieldReturnShowsSearch`, `testSearchStaysTheSelectionOnAMac` | UI, unit | built |
+| Search (sidebar field, results, recents, Unicode) | `MacBrowseUITests.testSidebarSearchFindsTheFXLongTitles`, `testSearchRemembersRecentTerms`, `testUnicodeTitleOpens`, `MacNavigationTests.testSidebarFieldReturnShowsSearch`, `testSearchStaysTheSelectionOnAMac`; MANUAL A2 | UI, unit, manual | pass (Return fixed ea316c7) |
 | Favorites | `MacBrowseUITests.testFavoritesListsTheBaselineFavourites` | UI | built |
 | Title page (actions, favourite, watched), series, person | `MacBrowseUITests.testFilmPageHasPlayFavoriteWatchedDownload`, `testFavoriteButtonReachesTheServer`, `testBugFavoriteThenWatchedLosesOne`, `testSeriesPageListsSeasonsAndEpisodes`, `testPersonPageFromCast`, `MacClientTests.testFavoriteAndWatchedRequests` | UI, unit | built |
 | Show's Play picks the episode in progress | `MacClientTests.testBugShowPlayOffersS1E1`, `testShowWithNothingInProgressFallsBackToNextUp` | unit | built |
@@ -162,7 +162,7 @@ in a comment.
 | ⌘, opens; every pane | `MacSectionsUITests.testSettingsWindowOpensWithCommandComma`, `testEverySettingsPaneOpens` | UI | built |
 | Video ▸ engine → About shows it | `MacSectionsUITests.testVideoSettingsChangeTheEngine`, `MacPlaybackCoreTests.testEngineDescriptionFollowsTheSetting` | UI, unit | built |
 | Account ▸ Sign Out asks; ▸ + opens the sheet in front | `MacSectionsUITests.testSettingsSignOutAsks`, `testBugAddAccountSheetOpensBehindSettings` | UI | built |
-| Video ▸ Night mode (open bug) | `MacSectionsUITests.testBugNightModeToggleDoesNothing` (XCTExpectFailure) | UI | built (xfail expected) |
+| Video ▸ no Night mode row (neither engine on a Mac can compress the sound) | `MacSectionsUITests.testBugNightModeToggleDoesNothing` | UI | pass (fixed c6eae9a) |
 | Theme | `MacDeepWaterUITests.testScreensInLightAndDark` | UI | built |
 | Preferences kept apart in test mode | `MacViewOptionsTests.testWritesGoToTheTestSuiteNotTheRealDefaults`, `MacPlaybackCoreTests.testTestModeIsOnAndStateIsApart` | unit | built |
 
@@ -184,18 +184,38 @@ in a comment.
 - **Offline shell on the Mac (`[.downloads]` only)**: needs the server unreachable mid-run; the Mac suite shares the QA server with the other agents, and stopping it is not allowed. Could be done with a private proxy (memory note qa-offline-via-private-proxy.md) in a later pass.
 - **mpv dropout counted as the end of the title** (open bug, MANUAL T4): needs a network cut during playback.
 
-## Run state (2026-11-13)
+## Run state (2026-11-13, `claude/fix-mac`)
 
-Status column above reads "built"; the results of the last runs are:
+- **Unit** (`TestPlans/Unit`, Mac): 285 tests, all pass (166 Mac, 3 of them new for
+  `SidebarClickRule`; the rest shared).
+- **UI** (`TestPlans/Mac`, `-collect-test-diagnostics never`, `TEST_RUNNER_AQUARIUM_QA_DIR`
+  set): first full run after the fixes, 122 tests: 118 pass, 1 skip
+  (`testShelfHeadingOpensSeeAll`, no See all on the shelf), 3 failures —
+  `testAddAccountOpensTheSignInSheet` (AutoFill over Cancel; fixed in fa17510 and passing
+  since), `testClosingThePlayerWindowStopsPlayback` and
+  `testBugQualityChangeWhilePausedStaysPaused`, both from watching a session an earlier test
+  left on the server (fixed in af73c54, not yet confirmed by a UI run). The second full run
+  could not start: from 2026-11-13 ~16:00 every UI run fails with "Timed out while enabling
+  automation mode" (see the report).
+- No expected failures left: the four bugs (restored black player window, Escape, sidebar
+  re-click, Night mode row) are fixed and their tests strict.
 
-- **Unit** (`TestPlans/Unit`, Mac): 163 Mac tests, all pass (the 119 shared tests pass on the Mac too).
-- **UI** (`TestPlans/Mac`, `-collect-test-diagnostics never`, `TEST_RUNNER_AQUARIUM_QA_DIR` set):
-  122 tests: 100 pass, 4 expected failures (bugs: Night mode row, restored black player window,
-  Escape doesn't stop, sidebar re-click rule), 3 skips, 15 failures. The failures are test-side or
-  unconfirmed: sidebar search's Return under XCUITest (2), episode rows only reachable as their
-  list's scroll view (3), menu items without identifiers in pop-up menus (Download, Add Account),
-  skip-credits overlay, the light/dark screenshot tour, a runner crash (2), and two playback-state
-  checks that passed in earlier runs.
+### What XCUITest can't do on this Mac (found 2026-11-13)
+
+- `press(forDuration:)` reaches nothing in the app: tests click with
+  `click(forDuration:thenDragTo:)` or `click()`.
+- Menus popped up from a SwiftUI `Menu` in a window (Download, Quality on a title page, the
+  account row) are not in the element tree; context menus and the menu bar are.
+  `chooseInOpenMenu` picks from them by type-select; MANUAL lists looking at them.
+- The sidebar search field's recent-terms list is a pop-up outside the tree (↓ Return picks
+  from it).
+- Mac episode rows are never "hittable" and their own `click()` tries to scroll the list
+  rather than the page: `scrollIntoView` + `clickCentre`.
+- Alert buttons lose their SwiftUI identifiers ("action-button-1"): by title.
+- `app.screenshot()` fails with the window on a second display; the base class attaches every
+  display's screenshot on a Mac.
+- The QA server keeps sessions earlier tests left "playing", with their position and activity
+  moving on: `macSessions` leaves out the sessions there before the launch.
 - Menu-bar items and pop-up/context menu items do **not** carry their `TestID` identifiers on a Mac
   (they read `menuAction:`); tests fall back to titles.
 - The UI runner is sandboxed: `QA.folder` resolves inside its container unless
