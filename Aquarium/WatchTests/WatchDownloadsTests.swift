@@ -396,6 +396,9 @@ final class WatchDownloadsTests: WatchUnitTestCase {
         askPhone("a", reachable: true)
         downloads.testUpdate("a") { $0.runTimeTicks = WX.ticks(2) }
         let folder = WatchDownloads.folder("a")
+        // The record's folder is made by enqueue's background write, which
+        // nothing here waits for.
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try Data("old".utf8).write(to: folder.appendingPathComponent("audio.m4a"))
         let incoming = try WX.audioFile(seconds: 2, in: folder, name: "received-x.wav")
         await downloads.receivedFromPhone(itemId: "a", at: incoming, bytes: 99)
