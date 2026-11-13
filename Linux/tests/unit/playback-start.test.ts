@@ -82,13 +82,36 @@ describe("playItem", () => {
     expect(lastPlay().url).toContain("/stream.mp4?");
   });
 
+  it("hands mpv the subtitle files the server sends beside the stream, and none when there are none", async () => {
+    const { pb } = await boot();
+    mockServer();
+    await pb.playItem(movie("m0"));
+    expect(lastPlay()).not.toHaveProperty("subtitles");
+    mockServer({
+      mediaSource: (id) => ({
+        Id: `ms-${id}`,
+        Container: "mp4",
+        SupportsDirectPlay: true,
+        SupportsDirectStream: true,
+        MediaStreams: [
+          { Type: "Subtitle", DeliveryMethod: "External", DeliveryUrl: `/Videos/${id}/ms-${id}/Subtitles/1/0/Stream.srt`, Language: "eng", IsDefault: true },
+        ],
+      }),
+    });
+    await pb.playItem(movie("m1"));
+    expect(lastPlay().subtitles).toEqual([
+      { url: `${SERVER}/Videos/m1/ms-m1/Subtitles/1/0/Stream.srt`, lang: "eng", title: "", default: true, forced: false },
+    ]);
+  });
+
   it("asks for MPEG-TS HLS segments, which keep subtitle cues in time (cf. the Apple app's fMP4 + WebVTT offset)", async () => {
     const { pb } = await boot();
     mockServer();
     await pb.playItem(movie("m1"), { maxBitrate: 5_000_000 });
     const profile = playbackInfos()[0]!.body.DeviceProfile;
     expect(profile.TranscodingProfiles[0]).toMatchObject({ Container: "ts", Protocol: "hls", Type: "Video" });
-    expect(profile.SubtitleProfiles.every((p: any) => p.Method === "Embed")).toBe(true);
+    // No HLS subtitle playlists (the WebVTT that went late on fMP4) and no burning in.
+    expect(profile.SubtitleProfiles.every((p: any) => p.Method === "Embed" || p.Method === "External")).toBe(true);
   });
 
   it("resumes from the server's position when asked to", async () => {

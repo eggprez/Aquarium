@@ -159,6 +159,30 @@ pub fn subtitles_for(video: &str) -> Vec<Value> {
     subs
 }
 
+/// A stream's subtitle files, as the frontend sends them (`url`, `lang`,
+/// `title`, `default`, `forced`), in the shape `sub_add_commands` reads, defaults
+/// first. Only addresses `allowed` passes are kept: mpv sends every request
+/// in the session with the stream's Authorization header.
+pub fn stream_subtitles(subs: &[Value], allowed: impl Fn(&str) -> bool) -> Vec<Value> {
+    let mut out: Vec<Value> = subs
+        .iter()
+        .filter_map(|e| {
+            let url = e["url"].as_str()?;
+            allowed(url).then(|| {
+                json!({
+                    "path": url,
+                    "lang": e["lang"].as_str().unwrap_or(""),
+                    "title": e["title"].as_str().unwrap_or(""),
+                    "default": e["default"] == true,
+                    "forced": e["forced"] == true,
+                })
+            })
+        })
+        .collect();
+    out.sort_by_key(|e| !(e["default"] == true));
+    out
+}
+
 /// The `sub-add` commands for a download's saved subtitles, once its file has
 /// loaded. At most one is selected, standing in for what mpv's own pick would
 /// have done had the tracks been inside the file: nothing when Settings says
@@ -389,6 +413,33 @@ mod tests {
         assert_eq!(sub_format("ASS"), "ass");
         assert_eq!(sub_format("webvtt"), "srt");
         assert_eq!(sub_format(""), "srt");
+    }
+
+    #[test]
+    fn stream_subtitles_keep_only_allowed_addresses_defaults_first() {
+        let subs = vec![
+            json!({ "url": "http://jf:8096/Videos/1/1/Subtitles/2/0/Stream.srt", "lang": "fre", "title": "French" }),
+            json!({ "url": "http://elsewhere/evil.srt", "lang": "eng", "default": true }),
+            json!({ "url": "http://jf:8096/Videos/1/1/Subtitles/1/0/Stream.srt", "lang": "eng", "title": "English", "default": true, "forced": false }),
+            json!({ "lang": "deu" }),
+        ];
+        let out = stream_subtitles(&subs, |u| u.starts_with("http://jf:8096/"));
+        assert_eq!(
+            out,
+            vec![
+                json!({ "path": "http://jf:8096/Videos/1/1/Subtitles/1/0/Stream.srt", "lang": "eng", "title": "English", "default": true, "forced": false }),
+                json!({ "path": "http://jf:8096/Videos/1/1/Subtitles/2/0/Stream.srt", "lang": "fre", "title": "French", "default": false, "forced": false }),
+            ]
+        );
+        // What the player does with them: the default selected, the rest offered.
+        assert_eq!(
+            sub_add_commands(&out, "", false),
+            vec![
+                json!(["sub-add", "http://jf:8096/Videos/1/1/Subtitles/1/0/Stream.srt", "select", "English", "eng"]),
+                json!(["sub-add", "http://jf:8096/Videos/1/1/Subtitles/2/0/Stream.srt", "auto", "French", "fre"]),
+            ]
+        );
+        assert!(stream_subtitles(&[], |_| true).is_empty());
     }
 
     #[test]

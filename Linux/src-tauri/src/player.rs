@@ -109,6 +109,10 @@ pub struct PlayRequest {
     /// HTTP User-Agent for the stream (custom playlist channels only).
     #[serde(default)]
     pub user_agent: Option<String>,
+    /// Subtitle files the server sends beside a stream (`StreamSubtitle` in
+    /// api.ts), added once it has loaded. See `download_extras::stream_subtitles`.
+    #[serde(default)]
+    pub subtitles: Vec<Value>,
 }
 
 struct SessionHandle {
@@ -512,7 +516,13 @@ impl Player {
         // refused before then, and it is the only way to give each track its
         // language and name (`sub-files` leaves both to the file name).
         let local = req.ctx.as_ref().is_some_and(|c| c.is_local);
-        let mut local_subs = if local { crate::download_extras::subtitles_for(&req.url) } else { Vec::new() };
+        // A stream brings the server's own subtitle files the same way, but
+        // only from the signed-in server: mpv sends them its Authorization header.
+        let mut local_subs = if local {
+            crate::download_extras::subtitles_for(&req.url)
+        } else {
+            crate::download_extras::stream_subtitles(&req.subtitles, crate::server::is_session_origin)
+        };
         if let Err(e) = session.command(json!(["loadfile", &req.url])) {
             let _ = session.command(json!(["quit"]));
             surface_arc.detach();
@@ -1520,6 +1530,7 @@ mod tests {
             volume: None,
             ctx: with_ctx.then(|| ctx("http://127.0.0.1:9")),
             user_agent: None,
+            subtitles: Vec::new(),
         };
         assert_eq!(
             http_auth_header(&req("http://127.0.0.1:9/Videos/1/stream", true)),

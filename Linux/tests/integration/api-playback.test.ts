@@ -166,25 +166,13 @@ describe.skipIf(!qa)("QA server: resolvePlayback", () => {
     expect(query(src.url).has("ApiKey")).toBe(false);
   });
 
-  // BUG: the device profile (api.ts:1327-1335) offers every subtitle format
-  // only as "Embed". An HLS transcode cannot embed one, so Jellyfin 12.2
-  // falls back to burning the default text track into the picture
-  // (`SubtitleMethod=Encode&SubtitleStreamIndex=7`). On any forced transcode
-  // ("Try a smaller stream", the quality menu, a slow-link starting rung) the
-  // subtitles can then be neither turned off nor changed in mpv.
-  it.fails("leaves a text subtitle switchable on a transcode instead of burning it in", async () => {
+  it("leaves a text subtitle switchable on a transcode instead of burning it in", async () => {
     const api = await qaApiFull();
     const src = await resolve(api, fx("film.long_multitrack").id, { forceTranscode: true });
     expect(query(src.url).get("SubtitleMethod")).not.toBe("Encode");
   });
 
-  // BUG: the device profile (api.ts:1327-1335) has no "External" subtitle
-  // method, so a file that mpv plays as it is but has subtitle files beside it
-  // (Film.en.srt, the commonest way subtitles arrive) is transcoded by the
-  // server with TranscodeReasons=SubtitleCodecNotSupported and the default
-  // sidecar burnt in. With External methods added the same request
-  // direct-plays (checked against this server, 2026-11-12).
-  it.fails("direct-plays a file with sidecar subtitle files (FIXTURES.md: mpv DirectPlay)", async () => {
+  it("direct-plays a file with sidecar subtitle files (FIXTURES.md: mpv DirectPlay)", async () => {
     const api = await qaApiFull();
     const f = fx("film.sidecar_subs");
     expect(f.mediaSources[0].playback.mpv.outcome).toBe("DirectPlay");

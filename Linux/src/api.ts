@@ -1307,6 +1307,32 @@ export interface PlaybackSource {
   live: boolean;
   /** The server's MediaSource for it: container, bitrate, streams. */
   mediaSource?: any;
+  /** Subtitles the server sends as files of their own, for the player to add
+   *  beside the stream. Absent when there are none. */
+  subtitles?: StreamSubtitle[];
+}
+
+/** One subtitle file the player fetches from the server beside a stream. */
+export interface StreamSubtitle {
+  url: string;
+  lang: string;
+  title: string;
+  default: boolean;
+  forced: boolean;
+}
+
+/** The source's subtitles the server delivers as separate files. */
+function externalSubtitles(server: string, ms: any): StreamSubtitle[] | undefined {
+  const subs = (ms.MediaStreams ?? [])
+    .filter((st: any) => st?.Type === "Subtitle" && st.DeliveryMethod === "External" && st.DeliveryUrl)
+    .map((st: any) => ({
+      url: /^https?:/i.test(st.DeliveryUrl) ? st.DeliveryUrl : server + st.DeliveryUrl,
+      lang: st.Language ?? "",
+      title: st.DisplayTitle ?? st.Title ?? "",
+      default: !!st.IsDefault,
+      forced: !!st.IsForced,
+    }));
+  return subs.length ? subs : undefined;
 }
 
 function deviceProfile(forceTranscode: boolean, maxBitrate?: number): any {
@@ -1338,6 +1364,10 @@ function deviceProfile(forceTranscode: boolean, maxBitrate?: number): any {
       { Container: "mp3", Type: "Audio", Protocol: "http", AudioCodec: "mp3", Context: "Streaming" },
     ],
     CodecProfiles: [],
+    // Text formats can also come as a file of their own, which the player adds
+    // beside the stream (`subtitles` below). Without that the server burns the
+    // default track into every transcode, where it can be neither turned off
+    // nor changed, and transcodes a file just for the subtitle files beside it.
     SubtitleProfiles: [
       { Format: "srt", Method: "Embed" },
       { Format: "ass", Method: "Embed" },
@@ -1346,6 +1376,11 @@ function deviceProfile(forceTranscode: boolean, maxBitrate?: number): any {
       { Format: "sub", Method: "Embed" },
       { Format: "pgssub", Method: "Embed" },
       { Format: "dvdsub", Method: "Embed" },
+      { Format: "srt", Method: "External" },
+      { Format: "ass", Method: "External" },
+      { Format: "ssa", Method: "External" },
+      { Format: "vtt", Method: "External" },
+      { Format: "sub", Method: "External" },
     ],
   };
 }
@@ -1402,6 +1437,7 @@ export async function resolvePlayback(
   if (!info.MediaSources?.[0]) throw new Error("No playable media source returned by the server");
   const ms = sourceWithoutApiKey(info.MediaSources[0]);
   const playSessionId = info.PlaySessionId;
+  const subtitles = externalSubtitles(s.server, ms);
 
   if (ms.TranscodingUrl && (force || (!ms.SupportsDirectPlay && !ms.SupportsDirectStream))) {
     return {
@@ -1411,6 +1447,7 @@ export async function resolvePlayback(
       playSessionId,
       live: !!opts.live,
       mediaSource: ms,
+      subtitles,
     };
   }
 
@@ -1431,7 +1468,7 @@ export async function resolvePlayback(
   // Live channels that direct-play expose an open stream path instead.
   if (opts.live && ms.TranscodingUrl) {
     url = s.server + ms.TranscodingUrl;
-    return { url, playMethod: "Transcode", mediaSourceId: ms.Id, playSessionId, live: true, mediaSource: ms };
+    return { url, playMethod: "Transcode", mediaSourceId: ms.Id, playSessionId, live: true, mediaSource: ms, subtitles };
   }
   return {
     url,
@@ -1440,6 +1477,7 @@ export async function resolvePlayback(
     playSessionId,
     live: !!opts.live,
     mediaSource: ms,
+    subtitles,
   };
 }
 

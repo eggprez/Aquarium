@@ -229,8 +229,14 @@ describe("resolvePlayback", () => {
     expect(b.DeviceProfile.MaxStreamingBitrate).toBe(200_000_000);
     expect(b.DeviceProfile.DirectPlayProfiles.map((p: any) => p.Type)).toEqual(["Video", "Audio"]);
     expect(b.DeviceProfile.DirectPlayProfiles[0].Container.split(",")).toEqual(expect.arrayContaining(["mkv", "mp4", "ts", "webm"]));
-    // Every subtitle format is embedded, so the server never burns one in.
-    expect(b.DeviceProfile.SubtitleProfiles.every((p: any) => p.Method === "Embed")).toBe(true);
+    // Every subtitle format can stay embedded, and the text ones can also come
+    // as files of their own: an HLS transcode cannot embed one, and with
+    // Embed alone the server burns the default track in (checked against the
+    // QA server, tests/integration/api-playback.test.ts).
+    const methods = (f: string) => b.DeviceProfile.SubtitleProfiles.filter((p: any) => p.Format === f).map((p: any) => p.Method);
+    for (const f of ["srt", "ass", "ssa", "vtt", "sub"]) expect(methods(f)).toEqual(["Embed", "External"]);
+    for (const f of ["pgssub", "dvdsub"]) expect(methods(f)).toEqual(["Embed"]);
+    expect(b.DeviceProfile.SubtitleProfiles.every((p: any) => p.Method === "Embed" || p.Method === "External")).toBe(true);
     expect(b.DeviceProfile.SubtitleProfiles.map((p: any) => p.Format)).toEqual(
       expect.arrayContaining(["srt", "ass", "vtt", "pgssub"])
     );
@@ -335,6 +341,44 @@ describe("resolvePlayback", () => {
     expect(api.withoutApiKey("/a?ApiKey=t")).toBe("/a");
     expect(api.withoutApiKey("/a?x=1&apikey=t")).toBe("/a?x=1");
     expect(api.withoutApiKey("/a")).toBe("/a");
+  });
+
+  it("lists the subtitles the server sends as files of their own, for the player to add", async () => {
+    const api = await signIn();
+    playbackInfo({
+      PlaySessionId: "ps",
+      MediaSources: [
+        {
+          Id: "ms",
+          SupportsDirectPlay: true,
+          SupportsDirectStream: true,
+          Container: "mp4",
+          MediaStreams: [
+            { Type: "Video" },
+            { Type: "Subtitle", Index: 2, DeliveryMethod: "Embed" },
+            { Type: "Subtitle", Index: 3, DeliveryMethod: "Encode" },
+            {
+              Type: "Subtitle",
+              Index: 4,
+              DeliveryMethod: "External",
+              DeliveryUrl: "/Videos/x/ms/Subtitles/4/0/Stream.srt?ApiKey=tok",
+              Language: "eng",
+              DisplayTitle: "English - SUBRIP - External",
+              IsDefault: true,
+              IsForced: false,
+            },
+            { Type: "Subtitle", Index: 5, DeliveryMethod: "External", DeliveryUrl: "/Videos/x/ms/Subtitles/5/0/Stream.ass", IsForced: true },
+          ],
+        },
+      ],
+    });
+    const src = await api.resolvePlayback("x");
+    expect(src.subtitles).toEqual([
+      { url: `${SERVER}/Videos/x/ms/Subtitles/4/0/Stream.srt`, lang: "eng", title: "English - SUBRIP - External", default: true, forced: false },
+      { url: `${SERVER}/Videos/x/ms/Subtitles/5/0/Stream.ass`, lang: "", title: "", default: false, forced: true },
+    ]);
+    playbackInfo({ PlaySessionId: "ps", MediaSources: [{ Id: "ms", SupportsDirectPlay: true, MediaStreams: [{ Type: "Subtitle", DeliveryMethod: "Embed" }] }] });
+    expect((await api.resolvePlayback("x")).subtitles).toBeUndefined();
   });
 
   it("forced transcode offers no direct-play profiles and takes the transcode URL even when direct play is possible", async () => {

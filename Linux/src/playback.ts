@@ -730,6 +730,7 @@ export async function playItem(
     await invoke("player_play", {
       req: {
         url: src.url,
+        ...(src.subtitles ? { subtitles: src.subtitles } : {}),
         title: itemTitle(item),
         start_seconds: startTicks > 0 ? startTicks / 10_000_000 : null,
         volume,

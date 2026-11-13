@@ -1005,6 +1005,7 @@ pub fn run() {
                         volume: None,
                         ctx: None,
                         user_agent: None,
+                        subtitles: Vec::new(),
                     };
                     if let Err(e) = player.play(handle.clone(), req).await {
                         eprintln!("aquarium: test playback failed: {e}");
@@ -1027,6 +1028,7 @@ pub fn run() {
                             volume: None,
                             ctx: None,
                             user_agent: None,
+                            subtitles: Vec::new(),
                         };
                         if let Err(e) = player.play(handle.clone(), req2).await {
                             eprintln!("aquarium: replay test failed: {e}");
@@ -1099,6 +1101,7 @@ pub fn run() {
                                     volume: None,
                                     ctx: None,
                                     user_agent: None,
+                                    subtitles: Vec::new(),
                                 };
                                 if let Err(e) = player.play(handle.clone(), req).await {
                                     eprintln!("aquarium: test sequence: play failed: {e}");
