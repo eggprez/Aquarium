@@ -272,13 +272,24 @@ extension MacUITestCase {
 /// keep this account's, the test's own device left out. Kept in the Mac
 /// folder; the shared helper is the other agents' too (see the report).
 extension JellyfinAPI {
-    /// Newest activity first, so a session a previous test left behind
-    /// (still "playing" until the server times it out) comes after this one's.
+    /// When this test last launched the app with a reset (a new device id,
+    /// so a new session) — set by `MacUITestCase.launch`.
+    nonisolated(unsafe) static var macLaunchedAt: Date?
+
+    /// This launch's sessions, newest activity first. A session an earlier
+    /// test left behind stays "playing" until the server times it out, and
+    /// it is often the same film: sorting alone let `macWaitForPlayback`
+    /// pick it, and every later check (paused, position, stopped) then
+    /// watched a session nobody was driving — the flaky close-window,
+    /// Space / ⌘→ and Skip Credits checks. Sessions last active before this
+    /// launch are left out.
     func macSessions(activeWithinSeconds: Int = 120) throws -> [Session] {
         let list = (try json("/Sessions?ActiveWithinSeconds=\(activeWithinSeconds)") as? [[String: Any]] ?? [])
             .sorted { ($0["LastActivityDate"] as? String ?? "") > ($1["LastActivityDate"] as? String ?? "") }
+        let since = Self.macLaunchedAt?.addingTimeInterval(-2)
         return list.compactMap { s in
             guard (s["UserId"] as? String) == userId, (s["DeviceId"] as? String) != Self.deviceId else { return nil }
+            if let since, let last = Self.serverDate(s["LastActivityDate"] as? String), last < since { return nil }
             let playing = s["NowPlayingItem"] as? [String: Any]
             let state = s["PlayState"] as? [String: Any]
             let ticks = (state?["PositionTicks"] as? Int64) ?? (state?["PositionTicks"] as? Int).map(Int64.init)
@@ -288,6 +299,13 @@ extension JellyfinAPI {
                 userName: s["UserName"] as? String ?? "", nowPlayingId: playing?["Id"] as? String,
                 positionSeconds: ticks.map { Double($0) / 10_000_000 }, isPaused: state?["IsPaused"] as? Bool, raw: s)
         }
+    }
+
+    /// Jellyfin's dates have seven decimal places, which
+    /// `ISO8601DateFormatter` won't read: the whole seconds are enough.
+    static func serverDate(_ text: String?) -> Date? {
+        guard let text, text.count >= 19 else { return nil }
+        return ISO8601DateFormatter().date(from: String(text.prefix(19)) + "Z")
     }
 
     func macWaitForPlayback(of itemId: String? = nil, timeout: TimeInterval = 30) throws -> Session? {

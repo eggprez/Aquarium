@@ -23,5 +23,15 @@ class MacUITestCase: AquariumUITestCase {
         }
         try super.setUpWithError()
     }
+
+    /// Notes the time for `macSessions`, which leaves out the sessions of
+    /// earlier launches — see there.
+    @discardableResult
+    override func launch(reset: Bool = true, signIn: Bool = true, account: QA.Account? = QA.account(),
+                         engine: String? = nil, arguments: [String] = [], environment: [String: String] = [:]) -> XCUIApplication {
+        if reset { JellyfinAPI.macLaunchedAt = Date() }
+        return super.launch(reset: reset, signIn: signIn, account: account, engine: engine,
+                            arguments: arguments, environment: environment)
+    }
 }
 #endif
