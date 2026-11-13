@@ -40,13 +40,7 @@ describe("iconSvg", () => {
     expect(iconSvg("folder")).toContain("<path");
   });
 
-  // BUG: STROKE already carries stroke-width="1.8", and the icons that ask for
-  // their own weight append a second stroke-width attribute after it. The HTML
-  // parser keeps the FIRST of two duplicate attributes, so every per-icon
-  // weight (2.2 check and chevrons, 2.1 close, 1.6 for the lighter empty-state
-  // icons the comment describes) is dropped and all of them draw at 1.8.
-  // src/icons.ts:16 (STROKE) with :27, :30, :33, :37-39, :43-49.
-  it.fails.each([
+  it.each([
     ["check", "2.2"],
     ["close", "2.1"],
     ["chevron-right", "2.2"],
@@ -57,6 +51,13 @@ describe("iconSvg", () => {
     host.innerHTML = iconSvg(name);
     const shape = host.querySelector("svg > *")!;
     expect(shape.getAttribute("stroke-width")).toBe(width);
+  });
+
+  it("an icon without a weight of its own draws at the 1.8 default", () => {
+    const host = document.createElement("div");
+    host.innerHTML = iconSvg("arrow-left");
+    expect(host.querySelector("svg")!.getAttribute("stroke-width")).toBe("1.8");
+    expect(host.querySelector("svg > *")!.hasAttribute("stroke-width")).toBe(false);
   });
 
   it("an unknown name (from untyped code) draws the error icon rather than nothing", () => {
