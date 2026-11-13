@@ -13,8 +13,9 @@ final class MacMenuCommandUITests: MacUITestCase {
     func testAboutPanelShowsVersionAndEngine() {
         launchToHome()
         chooseMenu("Aquarium", id: TestID.MacMenu.about, title: "About Aquarium")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value CONTAINS 'Playback engine' OR label CONTAINS 'Playback engine'")).firstMatch.waitForExistence(timeout: 10),
+        XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value BEGINSWITH 'Playback engine'")).firstMatch.waitForExistence(timeout: 10),
                       "the About panel names the playback engine")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH 'Version '")).firstMatch.exists)
         attachScreenshot("about")
         app.typeKey("w", modifierFlags: .command)
     }
@@ -87,17 +88,15 @@ final class MacMenuCommandUITests: MacUITestCase {
     func testGoBackAndHome() throws {
         let film = try fixtures().item("film.long_direct")
         launchToHome()
-        let card = app.elements(prefix: TestID.Item.card(film.id)).firstMatch
-        card.waitToExist(30)
-        card.doubleClick()
-        app.element(TestID.Detail.page(film.id)).waitToExist(30)
+        openTitle(named: film.name, id: film.id)
         app.typeKey("[", modifierFlags: .command)
         XCTAssertTrue(app.element(TestID.Detail.page(film.id)).waitToVanish(10), "⌘[ goes back")
-        card.doubleClick()
-        app.element(TestID.Detail.page(film.id)).waitToExist(30)
+        openTitle(named: film.name, id: film.id)
         // Regression: GoHomeDoesNothingFromPushedPage (commit 9c6fb8c).
+        // ⇧⌘H: Home, at its top (Films keeps its own stack).
         app.typeKey("h", modifierFlags: [.command, .shift])
-        XCTAssertTrue(app.element(TestID.Detail.page(film.id)).waitToVanish(10), "⇧⌘H goes to the top of Home")
+        XCTAssertTrue(app.element(TestID.Home.root).waitForExistence(timeout: 10), "⇧⌘H shows Home")
+        XCTAssertFalse(app.element(TestID.Detail.page(film.id)).exists)
     }
 
     func testBackIsDisabledAtTheTop() {
@@ -189,8 +188,7 @@ final class MacMenuCommandUITests: MacUITestCase {
         let film = try fx.item("film.hevc_mp4")
         launchToHome()
         openSection("lib-\(lib)")
-        let card = app.elements(prefix: TestID.Item.card(film.id)).firstMatch
-        card.waitToExist(30)
+        let card = card(film.id)
         card.click()
         XCTAssertTrue(menuItem("Item", id: TestID.MacMenu.itemPlay, title: "Play").isEnabled)
         dismissMenus()
@@ -209,9 +207,8 @@ final class MacMenuCommandUITests: MacUITestCase {
         let selectedWasFavorite = try api.userData(selected.id).favorite
         launchToHome()
         openSection("lib-\(lib)")
-        app.elements(prefix: TestID.Item.card(selected.id)).firstMatch.tapWhenReady(30)
-        let other = app.elements(prefix: TestID.Item.card(opened.id)).firstMatch
-        other.waitToExist(30)
+        card(selected.id).click()
+        let other = card(opened.id)
         other.doubleClick()
         app.element(TestID.Detail.page(opened.id)).waitToExist(30)
         app.typeKey("d", modifierFlags: .command)

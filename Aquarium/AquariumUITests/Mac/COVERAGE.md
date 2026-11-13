@@ -184,7 +184,21 @@ in a comment.
 - **Offline shell on the Mac (`[.downloads]` only)**: needs the server unreachable mid-run; the Mac suite shares the QA server with the other agents, and stopping it is not allowed. Could be done with a private proxy (memory note qa-offline-via-private-proxy.md) in a later pass.
 - **mpv dropout counted as the end of the title** (open bug, MANUAL T4): needs a network cut during playback.
 
-## Run state
+## Run state (2026-11-13)
 
-See the agent's report for the exact counts. As of 2026-11-13: both bundles build;
-Mac UI tests cannot run until the Mac's owner allows Automation Mode (TESTING.md).
+Status column above reads "built"; the results of the last runs are:
+
+- **Unit** (`TestPlans/Unit`, Mac): 163 Mac tests, all pass (the 119 shared tests pass on the Mac too).
+- **UI** (`TestPlans/Mac`, `-collect-test-diagnostics never`, `TEST_RUNNER_AQUARIUM_QA_DIR` set):
+  122 tests: 100 pass, 4 expected failures (bugs: Night mode row, restored black player window,
+  Escape doesn't stop, sidebar re-click rule), 3 skips, 15 failures. The failures are test-side or
+  unconfirmed: sidebar search's Return under XCUITest (2), episode rows only reachable as their
+  list's scroll view (3), menu items without identifiers in pop-up menus (Download, Add Account),
+  skip-credits overlay, the light/dark screenshot tour, a runner crash (2), and two playback-state
+  checks that passed in earlier runs.
+- Menu-bar items and pop-up/context menu items do **not** carry their `TestID` identifiers on a Mac
+  (they read `menuAction:`); tests fall back to titles.
+- The UI runner is sandboxed: `QA.folder` resolves inside its container unless
+  `AQUARIUM_QA_DIR` is passed (`TEST_RUNNER_AQUARIUM_QA_DIR=…`).
+- Shared `JellyfinAPI.sessions()` sees nothing (`ControllableByUserId`); the Mac tests use
+  `macSessions()` in `MacUISupport.swift`.

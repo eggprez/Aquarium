@@ -64,6 +64,15 @@ Before starting: `python3 -I suite-reset.py suite-mac` in the QA folder.
 | T3 | The QA throttle proxy (8098) at 3 Mbps: play F:film.long_multitrack. | Auto quality steps down; no hang (below ~2.6 Mbps the proxy itself can hang — not an app bug). |
 | T4 | Kill the network mid-film on mpv (Wi-Fi off 30 s). | Open bug (master fix list, fix fe83c5b unmerged): mpv's EOF on a dropout may be treated as the end of the title — marked watched, next episode starts. Expected: a stall and a retry. |
 
+## Account menu
+
+| # | Check | Expect |
+|---|---|---|
+| A1 | Click the account row at the foot of the sidebar. | A menu: the saved accounts (with a second one added, "Switch Account"), Add Account…, Settings…, Sign Out…. Sign Out asks first; Cancel keeps you in. XCUITest can't open this menu (2026-11-13). |
+| A2 | Type a title into the sidebar's search field and press Return. | The Search page with results; the term is remembered under the field. Under XCUITest, Return left Home showing (2026-11-13) — check whether a person sees the same. |
+| A3 | Coming from Favorites, click a library row where a title page was left open, then click that row again. | First click: the title page is still there. Second click: the library's top. |
+| A4 | Play a film, click in the player window, press Escape. | Playback stops and the window closes. (Failed under XCUITest.) |
+
 ## Things the UI runner can't do on a Mac
 
 - Clipboard: guide ▸ Copy Title, item ▸ Copy Title. Paste into TextEdit: the title, nothing else.

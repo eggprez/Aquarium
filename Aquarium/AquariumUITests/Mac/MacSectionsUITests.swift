@@ -47,13 +47,19 @@ final class MacSectionsUITests: MacUITestCase {
         app.element(TestID.Guide.root).waitToExist(30)
         let mark = app.element(TestID.Guide.timeMark(0))
         mark.waitToExist(30)
-        let first = mark.label
+        // A Text's words are its value on a Mac, not its label.
+        func firstMark() -> String {
+            let m = app.element(TestID.Guide.timeMark(0))
+            return (m.value as? String).flatMap { $0.isEmpty ? nil : $0 } ?? m.label
+        }
+        let first = firstMark()
+        XCTAssertFalse(first.isEmpty)
         app.typeKey(.rightArrow, modifierFlags: .command)
-        XCTAssertTrue(eventually(10) { self.app.element(TestID.Guide.timeMark(0)).label != first }, "⌘→ is later")
+        XCTAssertTrue(eventually(10) { firstMark() != first }, "⌘→ is later")
         app.typeKey("t", modifierFlags: .command)
-        XCTAssertTrue(eventually(10) { self.app.element(TestID.Guide.timeMark(0)).label == first }, "⌘T is now")
+        XCTAssertTrue(eventually(10) { firstMark() == first }, "⌘T is now")
         app.typeKey(.leftArrow, modifierFlags: .command)
-        XCTAssertTrue(eventually(10) { self.app.element(TestID.Guide.timeMark(0)).label != first }, "⌘← is earlier")
+        XCTAssertTrue(eventually(10) { firstMark() != first }, "⌘← is earlier")
     }
 
     func testProgrammePopoverAndContextMenu() throws {
@@ -67,9 +73,9 @@ final class MacSectionsUITests: MacUITestCase {
         XCTAssertTrue(app.element(TestID.Guide.infoPlay).exists)
         app.typeKey(.escape, modifierFlags: [])
         app.element(TestID.Guide.channel(first.id)).rightClick()
-        for id in [TestID.Guide.menuPlay, TestID.Guide.menuInfo, TestID.Guide.menuCopyTitle] {
-            XCTAssertTrue(app.menuItems.matching(identifier: id).firstMatch.waitForExistence(timeout: 5)
-                          || app.element(id).exists, id)
+        for (id, title) in [(TestID.Guide.menuPlay, "Play Channel"), (TestID.Guide.menuInfo, "Show Info"),
+                            (TestID.Guide.menuCopyTitle, "Copy Title")] {
+            XCTAssertTrue(menuChoice(id, title: title).exists, title)
         }
         dismissMenus()   // Copy Title is left alone: it writes the shared clipboard.
     }
@@ -82,7 +88,7 @@ final class MacSectionsUITests: MacUITestCase {
         app.element(TestID.Guide.channel(first.id)).waitToExist(30)
         app.element(TestID.Guide.channel(first.id)).doubleClick()
         playerWindow.waitToExist(60)
-        XCTAssertNotNil(try api.waitForPlayback(timeout: 60))
+        XCTAssertNotNil(try api.macWaitForPlayback(timeout: 60))
         focusPlayerWindow()
         // Live: no Speed and no Slower/Faster.
         XCTAssertFalse(menuItem("Playback", id: TestID.Player.menuSlower, title: "Slower").isEnabled)
@@ -116,15 +122,14 @@ final class MacSectionsUITests: MacUITestCase {
         let film = try fixtures().item("film.rated_g")
         launchToHome()
         openTitle(named: film.name, id: film.id)
-        app.element(TestID.Detail.download).tapWhenReady()
-        let original = app.element(TestID.Detail.downloadQuality("Original quality"))
-        if original.waitForExistence(timeout: 5) { original.click() }
+        clickCentre(app.element(TestID.Detail.download))
+        menuChoice(TestID.Detail.downloadQuality("Original quality"), title: "Original quality").click()
         app.typeKey("j", modifierFlags: [.command, .option])
         app.element(TestID.Downloads.root).waitToExist(20)
         let card = app.element(TestID.Downloads.filmCard(film.id))
         XCTAssertTrue(card.waitForExistence(timeout: 120), "the download finished")
         card.rightClick()
-        app.menuItems.matching(identifier: TestID.Downloads.filmCardDelete(film.id)).firstMatch.tapWhenReady()
+        menuChoice(TestID.Downloads.filmCardDelete(film.id), title: "Delete…").click()
         app.button(TestID.Downloads.deletionConfirm).tapWhenReady()
         XCTAssertTrue(card.waitToVanish(20))
     }
@@ -181,11 +186,14 @@ final class MacSectionsUITests: MacUITestCase {
         settingsWindow.toolbars.buttons["Video"].tapWhenReady()
         let engine = app.element(TestID.Settings.videoEngine)
         engine.tapWhenReady()
-        app.element(TestID.Settings.option(TestID.Settings.videoEngine, "mpv")).tapWhenReady()
-        settingsWindow.toolbars.buttons["General"].tapWhenReady()
-        XCTAssertTrue(app.element(TestID.Settings.aboutEngine).waitForExistence(timeout: 10))
-        let text = app.element(TestID.Settings.aboutEngine)
-        XCTAssertTrue((text.value as? String ?? text.label).contains("mpv"))
+        menuChoice(TestID.Settings.option(TestID.Settings.videoEngine, "mpv"), title: "mpv").click()
+        app.typeKey("w", modifierFlags: .command)
+        // The Mac shows the engine in the About panel (Settings has no About page).
+        chooseMenu("Aquarium", id: TestID.MacMenu.about, title: "About Aquarium")
+        let credits = app.textViews.matching(NSPredicate(format: "value BEGINSWITH 'Playback engine'")).firstMatch
+        XCTAssertTrue(credits.waitForExistence(timeout: 10))
+        XCTAssertTrue((credits.value as? String ?? "").hasPrefix("Playback engine: mpv"), credits.value as? String ?? "")
+        app.typeKey("w", modifierFlags: .command)
     }
 
     func testSettingsSignOutAsks() {
