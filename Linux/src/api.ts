@@ -701,8 +701,8 @@ export async function removeFromNextUp(seriesId: string): Promise<void> {
  *
  * - "last": today's date on the last watched episode, so the show goes to the
  *   front everywhere and back inside the day limit.
- * - "first": the whole show marked unwatched (play counts, positions and dates
- *   go), then today's date on its first episode.
+ * - "first": every other episode marked unwatched (play counts, positions and
+ *   dates go), then today's date and a clean state on its first episode.
  *
  * The episode's whole state goes with the date; sent alone, the date is
  * written over what the server last cached of it. Returns the episode the
@@ -720,7 +720,18 @@ export async function addToNextUp(seriesId: string, from: "last" | "first"): Pro
   } else {
     target = walked(all)[0];
     if (!target) return null;
-    await api(`/UserPlayedItems/${seriesId}?userId=${s.userId}`, { method: "DELETE" });
+    // Episode by episode: `DELETE /UserPlayedItems/<series>` answers 200 and
+    // changes nothing on Jellyfin 12.2. Each one with anything to clear gets
+    // the whole clean state, its date included, as the series call used to give.
+    for (const ep of all) {
+      if (ep.Id === target.Id) continue;
+      const u = ep.UserData ?? {};
+      if (!u.Played && !u.PlayCount && !u.PlaybackPositionTicks && !hasPlayedDate(ep)) continue;
+      await api(`/UserItems/${ep.Id}/UserData?userId=${s.userId}`, {
+        method: "POST",
+        body: { LastPlayedDate: NOT_PLAYED_DATE, Played: false, PlayCount: 0, PlaybackPositionTicks: 0 },
+      });
+    }
     dated = target;
   }
   const started = from === "last";

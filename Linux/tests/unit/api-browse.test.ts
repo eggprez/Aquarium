@@ -567,27 +567,33 @@ describe("addToNextUp", () => {
     expect(jfCalls().filter((c) => c.method !== "GET")).toEqual([]);
   });
 
-  it("from the first episode: marks the whole show unwatched, then dates episode one with a clean state", async () => {
+  it("from the first episode: marks every other episode unwatched, then dates episode one with a clean state (regression: DELETE /UserPlayedItems/<series> changes nothing on 12.2)", async () => {
     vi.useFakeTimers({ now: NOW });
     const api = await signIn();
     show([
-      episode("sp", 0, 1),
+      episode("sp", 0, 1, { LastPlayedDate: "2025-01-01T00:00:00Z" }),
       episode("e1", 1, 1, { Played: true, PlayCount: 4, PlaybackPositionTicks: 77, LastPlayedDate: "2026-01-01T00:00:00Z" }),
       episode("e2", 1, 2, { Played: true }),
+      episode("e3", 1, 3, { PlaybackPositionTicks: 900 }),
+      episode("e4", 1, 4),
     ]);
     const target = await api.addToNextUp("series-1", "first");
     expect(target.Id).toBe("e1");
+    const clean = { LastPlayedDate: api.NOT_PLAYED_DATE, Played: false, PlayCount: 0, PlaybackPositionTicks: 0 };
     expect(jfCalls().slice(1)).toEqual([
-      { path: "/UserPlayedItems/series-1?userId=user-1", method: "DELETE", body: null },
+      { path: "/UserItems/sp/UserData?userId=user-1", method: "POST", body: clean },
+      { path: "/UserItems/e2/UserData?userId=user-1", method: "POST", body: clean },
+      { path: "/UserItems/e3/UserData?userId=user-1", method: "POST", body: clean },
       {
         path: "/UserItems/e1/UserData?userId=user-1",
         method: "POST",
-        // The full state goes with the date: after the DELETE the server
-        // would otherwise write the date over its stale copy and the old
-        // Played and PlayCount would come back.
+        // The full state goes with the date: sent alone, the date is written
+        // over the server's cached copy and the old Played and PlayCount
+        // come back.
         body: { LastPlayedDate: "2026-11-12T12:00:00.000Z", Played: false, PlayCount: 0, PlaybackPositionTicks: 0 },
       },
     ]);
+    expect(jfCalls().some((c) => c.path.startsWith("/UserPlayedItems/"))).toBe(false);
   });
 
   it("from the first episode on a show with no episodes: offers nothing and leaves the watch state alone", async () => {
@@ -600,12 +606,12 @@ describe("addToNextUp", () => {
   it("does not date the episode when marking the show unwatched failed", async () => {
     const api = await signIn();
     mockJellyfin([
-      ["/Shows/series-1/Episodes", { Items: [episode("e1", 1, 1, { Played: true })] }],
-      ["/UserPlayedItems/", { __status: 500 }],
+      ["/Shows/series-1/Episodes", { Items: [episode("e1", 1, 1), episode("e2", 1, 2, { Played: true })] }],
+      ["/UserItems/e2/", { __status: 500 }],
       ["/UserItems/", null],
     ]);
-    await expect(api.addToNextUp("series-1", "first")).rejects.toThrow("Server error 500 on /UserPlayedItems/series-1");
-    expect(jfCalls().some((c) => c.method === "POST")).toBe(false);
+    await expect(api.addToNextUp("series-1", "first")).rejects.toThrow("Server error 500 on /UserItems/e2/UserData");
+    expect(jfCalls().some((c) => c.path.startsWith("/UserItems/e1/"))).toBe(false);
   });
 });
 

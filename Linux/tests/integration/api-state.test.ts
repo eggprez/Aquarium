@@ -247,15 +247,7 @@ describe.skipIf(!qa || !qaWritable)("QA server: api.ts writing state (restored a
     }
   });
 
-  // BUG: addToNextUp(id, "first") (src/api.ts:723) unwatches the show with
-  // `DELETE /UserPlayedItems/{seriesId}`. On the QA server's Jellyfin 12.2
-  // that call answers 200 and changes no episode (measured 2026-11-12 on FX
-  // Short Show, FX Long Show and Firefly, and `POST` on a series marks none
-  // either; the 2026-10-27 note that it clears every episode no longer
-  // holds). So "start over" leaves the watched episodes watched, the server
-  // keeps offering the episode after them, and the episode returned (S01E01)
-  // is not the one Next Up shows.
-  it.fails("starts a show over from its first episode: unwatched throughout, front of the row (regression: partial UserData POST resurrected Played)", async () => {
+  it("starts a show over from its first episode: unwatched throughout, front of the row (regression: partial UserData POST resurrected Played)", async () => {
     const api = await qaApiFull();
     const eps = regular(await episodesOf(sherlock.Id));
     const before = await saveUserData(eps.map((e) => e.Id));
