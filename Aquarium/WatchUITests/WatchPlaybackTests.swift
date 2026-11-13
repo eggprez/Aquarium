@@ -192,9 +192,7 @@ final class WatchPlaybackTests: WatchUITestCase {
         speed.tap()
         XCTAssertEqual(speed.label, "2×")
         speed.tap()
-        XCTExpectFailure("bug: the speed stops at 2× instead of going round (WatchPlayer.stepSpeed)") {
-            XCTAssertEqual(speed.label, "0.75×")
-        }
+        XCTAssertEqual(speed.label, "0.75×")
         attachScreenshot("speed")
     }
 

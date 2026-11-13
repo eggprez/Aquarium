@@ -229,9 +229,12 @@ final class WatchPlayer: NSObject {
         }
     }
 
+    /// One speed up or down. Up from the fastest goes round to the slowest,
+    /// as the phone remote's button does; down stops at the slowest.
     func stepSpeed(_ direction: Int) {
         let i = Self.speeds.firstIndex(of: speed) ?? 1
-        let next = min(max(0, i + direction), Self.speeds.count - 1)
+        let up = i + direction
+        let next = up >= Self.speeds.count ? 0 : max(0, up)
         speed = Self.speeds[next]
     }
 

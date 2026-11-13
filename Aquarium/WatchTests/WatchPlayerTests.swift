@@ -34,12 +34,10 @@ final class WatchPlayerTests: WatchUnitTestCase {
 
     /// Regression, master-fix-list "From Apple Watch": "Speed stops at 2× on
     /// the watch's own player; the phone remote wraps … WatchPlayer.swift:232".
-    /// Fixed on claude/qa-fix-list-cb0b58 (314251e), not on this branch.
     func testTheSpeedGoesRoundFromTheTop() {
         player.testLoad([WX.book("b")])
         player.speed = 2
         player.stepSpeed(1)
-        XCTExpectFailure("bug: the watch's speed button stops at 2× instead of going round to 0.75× (WatchPlayer.stepSpeed)")
         XCTAssertEqual(player.speed, 0.75)
     }
 
