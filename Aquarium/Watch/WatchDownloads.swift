@@ -55,6 +55,10 @@ struct WatchRecord: Codable, Identifiable, Hashable, Sendable {
     /// Why this is here: "book", "song", "album:<id>", "playlist:<id>". A
     /// group deleted takes its reason away; a record with none left goes.
     var reasons: Set<String> = []
+    /// The server has given a place or a finish for this book at some time:
+    /// a 0 from it after that is someone starting over, not its
+    /// minimum-resume rule.
+    var serverHasHeldPlace = false
     /// Put here by the mirror plan rather than a tap. Waits for Wi-Fi.
     var automatic = false
     /// Being fetched by the phone and handed over as a file, rather than
@@ -97,6 +101,7 @@ struct WatchRecord: Codable, Identifiable, Hashable, Sendable {
         self.automatic = automatic
         positionTicks = item.userData.positionTicks
         played = item.userData.played
+        serverHasHeldPlace = positionTicks > 0 || played
         chapters = item.Chapters
         overview = item.Overview
     }
@@ -125,6 +130,7 @@ struct WatchRecord: Codable, Identifiable, Hashable, Sendable {
         lackedSpace = try c.decodeIfPresent(Bool.self, forKey: .lackedSpace) ?? false
         attempts = try c.decodeIfPresent(Int.self, forKey: .attempts) ?? 0
         reasons = try c.decodeIfPresent(Set<String>.self, forKey: .reasons) ?? ["song"]
+        serverHasHeldPlace = try c.decodeIfPresent(Bool.self, forKey: .serverHasHeldPlace) ?? false
         automatic = try c.decodeIfPresent(Bool.self, forKey: .automatic) ?? false
         relayAskedAt = try c.decodeIfPresent(Date.self, forKey: .relayAskedAt)
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
@@ -931,6 +937,9 @@ final class WatchDownloads: NSObject {
             }
     }
 
+    /// How much of a book Jellyfin keeps no place for: its MinAudiobookResume.
+    private static let serverEarlyWindow: TimeInterval = 5 * 60
+
     /// The server's word on a book — a chapter listened to on the phone last
     /// night — taken unless the watch has something newer to say: listening
     /// still queued, or noted since the server last heard and later than the
@@ -940,6 +949,24 @@ final class WatchDownloads: NSObject {
         guard !WatchSyncQueue.shared.hasPending(for: itemId) else { return }
         guard BookProgress.takesServer(synced: r.progressSynced, localChangedAt: r.localChangedAt, serverLastPlayed: lastPlayed) else {
             WatchLog.note("downloads", "keeping the watch's place in \(itemId): newer than the server's")
+            return
+        }
+        if positionTicks > 0 || played, !r.serverHasHeldPlace {
+            r.serverHasHeldPlace = true
+            save(r)
+        }
+        // Jellyfin stores no place for the first part of a book
+        // (MinAudiobookResume, five minutes unless changed): a place sent from
+        // early on reads back as 0, dated or, if the book was only ever
+        // reported stopped, not. That 0 is a reset only if the server has
+        // held a place for this book before, or the watch is past that part.
+        if positionTicks == 0, !played, !r.played, !r.serverHasHeldPlace, r.positionTicks > 0,
+           Double(r.positionTicks) / 10_000_000 < Self.serverEarlyWindow {
+            WatchLog.note("downloads", "keeping the watch's place in \(itemId): the server keeps none this early")
+            if !r.progressSynced {
+                r.progressSynced = true
+                save(r)
+            }
             return
         }
         guard r.positionTicks != positionTicks || r.played != played || !r.progressSynced else { return }

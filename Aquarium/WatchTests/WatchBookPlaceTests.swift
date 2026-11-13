@@ -3,12 +3,10 @@
 //  WatchActions.refreshBookPositions, BookProgress). Commit 1228f45: "the
 //  newest position wins".
 //
-//  Two known bugs on this branch, fixed on claude/qa-fix-list-cb0b58 and not
-//  merged here (master-fix-list "From Apple Watch", top priority):
-//  the server stores 0 for the first five minutes of a book
-//  (MinAudiobookResume) and the refresh copied that 0 over the watch's own
-//  place. The tests below expect the fixed behaviour, marked as expected
-//  failures, and check the real resets that must still be taken.
+//  Regression (master-fix-list "From Apple Watch", top priority): the server
+//  stores 0 for the first five minutes of a book (MinAudiobookResume) and the
+//  refresh copied that 0 over the watch's own place. The tests below pin the
+//  fix and check the real resets that must still be taken.
 
 import XCTest
 @testable import AquariumWatch
@@ -131,12 +129,10 @@ final class WatchBookPlaceTests: WatchUnitTestCase {
     /// its place in the first 5 minutes of any book: the server stores 0
     /// under MinAudiobookResume and refreshBookPositions copies that over the
     /// watch's record; 1:27 became Play from the start (2/2).
-    /// WatchDownloads.swift:925". Fixed on claude/qa-fix-list-cb0b58
-    /// (f50fc11, dec4915), not on this branch.
+    /// WatchDownloads.swift:925". Fixed in WatchDownloads.applyServerState.
     func testABooksEarlyPlaceSurvivesTheServersZero() {
         bookOnWatch(at: 87)
         downloads.applyServerState(itemId: "b", positionTicks: 0, played: false, lastPlayed: Date())
-        XCTExpectFailure("bug: the server's MinAudiobookResume 0 overwrites the watch's place at 1:27 (WatchDownloads.applyServerState)")
         XCTAssertEqual(place(), 87, accuracy: 0.001)
     }
 
@@ -145,7 +141,6 @@ final class WatchBookPlaceTests: WatchUnitTestCase {
     func testABooksEarlyPlaceSurvivesAnUndatedZero() {
         bookOnWatch(at: 46)
         downloads.applyServerState(itemId: "b", positionTicks: 0, played: false, lastPlayed: nil)
-        XCTExpectFailure("bug: an undated server 0 overwrites the watch's place at 0:46 (WatchDownloads.applyServerState)")
         XCTAssertEqual(place(), 46, accuracy: 0.001)
     }
 
@@ -209,7 +204,6 @@ final class WatchBookPlaceTests: WatchUnitTestCase {
         bookOnWatch(at: 87)
         WatchStub.on("/Items", items: [WX.book("b", position: 0, lastPlayed: WX.serverDate(Date()))])
         await WatchActions.refreshBookPositions()
-        XCTExpectFailure("bug: refreshBookPositions copies the server's early 0 over 1:27 (WatchDownloads.applyServerState)")
         XCTAssertEqual(place(), 87, accuracy: 0.001)
     }
 
