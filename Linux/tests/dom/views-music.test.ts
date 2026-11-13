@@ -546,14 +546,7 @@ describe("Library: albums, artists, songs", () => {
     expect(texts(page(), ".mu-card-title")).toEqual(["Album a3"]);
   });
 
-  // BUG: a sort, filter or Favorites change made while a page is still loading
-  // is swallowed. `reset()` bumps `gen` and calls `more()`, but `more()` returns
-  // at once because `loading` is still true for the old request
-  // (src/views/music.ts:384); the old reply is then dropped as stale
-  // (music.ts:390), so the list is left empty until something else scrolls the
-  // sentinel. library.ts's loadPage lets a reset supersede an in-flight page
-  // for exactly this reason ("a sort or filter change must never be dropped").
-  it.fails("shows the new list when a filter changes while a page is still loading (drops the stale page)", async () => {
+  it("shows the new list when a filter changes while a page is still loading (drops the stale page)", async () => {
     let gate: ((v: any) => void) | null = null;
     let n = 0;
     await boot((q) => {
@@ -603,12 +596,7 @@ describe("Library: genres", () => {
     await p;
   });
 
-  // BUG: with no genres at all the spinner never goes. The first paint is a
-  // spinner because nothing is cached, and the fresh answer ([]) has the same
-  // signature as the empty starting list, so `paint()` is never called
-  // (src/views/music.ts:474). books.ts's All Books guards the same compare
-  // with `|| !books.length`.
-  it.fails("says so when there are no genres (the spinner gives way to an empty state)", async () => {
+  it("says so when there are no genres (the spinner gives way to an empty state)", async () => {
     await boot(() => [], [[/^\/MusicGenres\?/, { Items: [] }]]);
     const p = music.renderMusic(content, "library/genres");
     expect(page().querySelector(".spinner")).not.toBeNull();
