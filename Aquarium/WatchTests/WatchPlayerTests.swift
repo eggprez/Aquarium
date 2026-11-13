@@ -51,10 +51,8 @@ final class WatchPlayerTests: WatchUnitTestCase {
     }
 
     /// Regression, master-fix-list "Layout, all watches": "Speed label: 1.25×
-    /// reads '1.2×', 1.75× reads '1.8×', on both players". Fixed on
-    /// claude/qa-fix-list-cb0b58 (314251e), not on this branch.
+    /// reads '1.2×', 1.75× reads '1.8×', on both players".
     func testOnePointTwoFiveAndOnePointSevenFiveReadRight() {
-        XCTExpectFailure("bug: %.2g shows 1.25× as 1.2× and 1.75× as 1.8× (NowPlayingScreen.speedLabel, PhonePlayerScreen.speedLabel)")
         XCTAssertEqual(NowPlayingScreen.speedLabel(1.25), "1.25×")
         XCTAssertEqual(NowPlayingScreen.speedLabel(1.75), "1.75×")
         XCTAssertEqual(PhonePlayerScreen.speedLabel(1.25), "1.25×")

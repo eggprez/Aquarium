@@ -167,8 +167,7 @@ final class WatchPlaybackTests: WatchUITestCase {
 
     /// The speed button steps 1× → 1.25× → 1.5× → 1.75× → 2× → round to 0.75×.
     /// Two regressions from master-fix-list ("Speed label: 1.25× reads '1.2×',
-    /// 1.75× reads '1.8×'" and "Speed stops at 2× on the watch's own player"),
-    /// fixed on claude/qa-fix-list-cb0b58 (314251e), not on this branch.
+    /// 1.75× reads '1.8×'" and "Speed stops at 2× on the watch's own player").
     func testTheSpeedButtonStepsThroughEverySpeed() throws {
         continueAfterFailure = true
         let book = try WatchFixtures.require().book("FX Chaptered Audiobook")
@@ -180,15 +179,11 @@ final class WatchPlaybackTests: WatchUITestCase {
         speed.waitToExist()
         XCTAssertEqual(speed.label, "1×")
         speed.tap()
-        XCTExpectFailure("bug: 1.25× reads 1.2× (NowPlayingScreen.speedLabel %.2g)") {
-            XCTAssertEqual(speed.label, "1.25×")
-        }
+        XCTAssertEqual(speed.label, "1.25×")
         speed.tap()
         XCTAssertEqual(speed.label, "1.5×")
         speed.tap()
-        XCTExpectFailure("bug: 1.75× reads 1.8× (NowPlayingScreen.speedLabel %.2g)") {
-            XCTAssertEqual(speed.label, "1.75×")
-        }
+        XCTAssertEqual(speed.label, "1.75×")
         speed.tap()
         XCTAssertEqual(speed.label, "2×")
         speed.tap()

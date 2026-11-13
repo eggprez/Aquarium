@@ -202,7 +202,7 @@ struct NowPlayingScreen: View {
 
     /// The speed button's text for a rate.
     static func speedLabel(_ s: Double) -> String {
-        s == s.rounded() ? "\(Int(s))×" : String(format: "%.2g×", s)
+        s == s.rounded() ? "\(Int(s))×" : String(format: "%g×", s)
     }
 
     private func subtitle(_ item: BaseItem) -> String {
