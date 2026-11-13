@@ -159,6 +159,30 @@ pub fn subtitles_for(video: &str) -> Vec<Value> {
     subs
 }
 
+/// A stream's subtitle files, as the frontend sends them (`url`, `lang`,
+/// `title`, `default`, `forced`), in the shape `sub_add_commands` reads, defaults
+/// first. Only addresses `allowed` passes are kept: mpv sends every request
+/// in the session with the stream's Authorization header.
+pub fn stream_subtitles(subs: &[Value], allowed: impl Fn(&str) -> bool) -> Vec<Value> {
+    let mut out: Vec<Value> = subs
+        .iter()
+        .filter_map(|e| {
+            let url = e["url"].as_str()?;
+            allowed(url).then(|| {
+                json!({
+                    "path": url,
+                    "lang": e["lang"].as_str().unwrap_or(""),
+                    "title": e["title"].as_str().unwrap_or(""),
+                    "default": e["default"] == true,
+                    "forced": e["forced"] == true,
+                })
+            })
+        })
+        .collect();
+    out.sort_by_key(|e| !(e["default"] == true));
+    out
+}
+
 /// The `sub-add` commands for a download's saved subtitles, once its file has
 /// loaded. At most one is selected, standing in for what mpv's own pick would
 /// have done had the tracks been inside the file: nothing when Settings says
@@ -302,17 +326,23 @@ pub fn reveal(item_ids: &[String]) -> Result<(), String> {
         return Err("Nothing on disk to show".into());
     }
     let uris: Vec<String> = targets.iter().map(|p| file_uri(p)).collect();
-    let shown = dbus::blocking::Connection::new_session().and_then(|conn| {
-        conn.with_proxy(
-            "org.freedesktop.FileManager1",
-            "/org/freedesktop/FileManager1",
-            Duration::from_secs(3),
-        )
-        .method_call::<(), _, _, _>("org.freedesktop.FileManager1", "ShowItems", (uris, ""))
-    });
-    if shown.is_ok() {
-        return Ok(());
+    #[cfg(target_os = "linux")]
+    {
+        let shown = dbus::blocking::Connection::new_session().and_then(|conn| {
+            conn.with_proxy(
+                "org.freedesktop.FileManager1",
+                "/org/freedesktop/FileManager1",
+                Duration::from_secs(3),
+            )
+            .method_call::<(), _, _, _>("org.freedesktop.FileManager1", "ShowItems", (uris, ""))
+        });
+        if shown.is_ok() {
+            return Ok(());
+        }
     }
+    // No D-Bus off Linux (the portable test build); straight to the fallback.
+    #[cfg(not(target_os = "linux"))]
+    let _ = uris;
     let folder = if targets.len() == 1 {
         let t = &targets[0];
         if t.is_dir() { t.clone() } else { t.parent().map(Path::to_path_buf).unwrap_or_default() }
@@ -366,5 +396,503 @@ mod tests {
             file_uri(Path::new("/home/a b/Ep #1 (720p).mkv")),
             "file:///home/a%20b/Ep%20%231%20%28720p%29.mkv"
         );
+    }
+
+    #[test]
+    fn file_uris_encode_every_byte_outside_the_unreserved_set() {
+        assert_eq!(file_uri(Path::new("/d/Amélie_1-2.~x")), "file:///d/Am%C3%A9lie_1-2.~x");
+        assert_eq!(file_uri(Path::new("/a%b?c&d")), "file:///a%25b%3Fc%26d");
+    }
+
+    #[test]
+    fn subtitle_names_are_safe_and_bounded() {
+        assert_eq!(sub_file_name(1, Some(""), false, "srt"), "sub.1.und.srt");
+        assert_eq!(sub_file_name(1, Some("///"), false, "srt"), "sub.1.und.srt");
+        assert_eq!(sub_file_name(1, Some("pt-BR"), false, "srt"), "sub.1.pt-BR.srt");
+        assert_eq!(sub_file_name(1, Some(&"a".repeat(40)), false, "srt"), format!("sub.1.{}.srt", "a".repeat(16)));
+        assert_eq!(sub_format("ASS"), "ass");
+        assert_eq!(sub_format("webvtt"), "srt");
+        assert_eq!(sub_format(""), "srt");
+    }
+
+    #[test]
+    fn stream_subtitles_keep_only_allowed_addresses_defaults_first() {
+        let subs = vec![
+            json!({ "url": "http://jf:8096/Videos/1/1/Subtitles/2/0/Stream.srt", "lang": "fre", "title": "French" }),
+            json!({ "url": "http://elsewhere/evil.srt", "lang": "eng", "default": true }),
+            json!({ "url": "http://jf:8096/Videos/1/1/Subtitles/1/0/Stream.srt", "lang": "eng", "title": "English", "default": true, "forced": false }),
+            json!({ "lang": "deu" }),
+        ];
+        let out = stream_subtitles(&subs, |u| u.starts_with("http://jf:8096/"));
+        assert_eq!(
+            out,
+            vec![
+                json!({ "path": "http://jf:8096/Videos/1/1/Subtitles/1/0/Stream.srt", "lang": "eng", "title": "English", "default": true, "forced": false }),
+                json!({ "path": "http://jf:8096/Videos/1/1/Subtitles/2/0/Stream.srt", "lang": "fre", "title": "French", "default": false, "forced": false }),
+            ]
+        );
+        // What the player does with them: the default selected, the rest offered.
+        assert_eq!(
+            sub_add_commands(&out, "", false),
+            vec![
+                json!(["sub-add", "http://jf:8096/Videos/1/1/Subtitles/1/0/Stream.srt", "select", "English", "eng"]),
+                json!(["sub-add", "http://jf:8096/Videos/1/1/Subtitles/2/0/Stream.srt", "auto", "French", "fre"]),
+            ]
+        );
+        assert!(stream_subtitles(&[], |_| true).is_empty());
+    }
+
+    #[test]
+    fn sub_add_commands_edge_cases() {
+        // Only a forced track in the wanted language: that one, rather than none.
+        let subs = vec![json!({"path": "/d/a.srt", "lang": "ENG", "forced": true})];
+        assert_eq!(sub_add_commands(&subs, " eng ", false)[0][2], json!("select"));
+        // Entries without a file are skipped; missing title and language are empty.
+        let subs = vec![json!({"lang": "eng"}), json!({"path": "/d/b.srt"})];
+        assert_eq!(sub_add_commands(&subs, "", false), vec![json!(["sub-add", "/d/b.srt", "auto", "", ""])]);
+        // Nothing matches the preference: nothing selected.
+        let subs = vec![json!({"path": "/d/c.srt", "lang": "fra", "default": true})];
+        assert_eq!(sub_add_commands(&subs, "deu", false)[0][2], json!("auto"));
+        assert!(sub_add_commands(&[], "eng", false).is_empty());
+    }
+
+    // ---------- With a download folder and a server ----------
+
+    use crate::test_support::{debug_log, sandbox, sign_in, FakeServer, Req, Resp};
+
+    fn item_folder(id: &str) -> PathBuf {
+        let dir = config::downloads_dir().join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn sub(index: u64, codec: &str, lang: Option<&str>, text: bool, external: bool) -> Value {
+        json!({
+            "Type": "Subtitle", "Index": index, "Codec": codec, "Language": lang,
+            "IsTextSubtitleStream": text, "IsExternal": external,
+            "DisplayTitle": format!("Track {index}"),
+        })
+    }
+
+    /// An item with one source `src1` and these streams.
+    fn item(streams: Vec<Value>) -> Value {
+        json!({ "Id": "item1", "MediaSources": [{ "Id": "src1", "MediaStreams": streams }] })
+    }
+
+    /// A Jellyfin that knows `item` and serves `sub_body(index)` for each
+    /// subtitle (`None` = 500).
+    fn server_with(item: Value, sub_body: fn(u64) -> Option<Vec<u8>>) -> FakeServer {
+        FakeServer::jellyfin(move |req: &Req| {
+            let p = req.path();
+            if p == "/Items/item1" {
+                return Resp::json(200, item.clone());
+            }
+            if let Some(rest) = p.strip_prefix("/Videos/item1/src1/Subtitles/") {
+                let index: u64 = rest.split('/').next().unwrap().parse().unwrap();
+                return match sub_body(index) {
+                    Some(b) => Resp::bytes(200, "text/plain", b),
+                    None => Resp::status(500),
+                };
+            }
+            Resp::status(404)
+        })
+    }
+
+    fn index_of(dir: &Path) -> Value {
+        read_json(&dir.join(SUB_INDEX)).unwrap_or(Value::Null)
+    }
+
+    fn sub_requests(s: &FakeServer) -> Vec<String> {
+        s.requests().into_iter().filter(|r| r.path().contains("/Subtitles/")).map(|r| r.path().to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn a_transcode_gets_every_text_subtitle_as_a_file() {
+        let _s = sandbox();
+        let streams = vec![
+            json!({ "Type": "Audio", "Index": 1 }),
+            sub(2, "subrip", Some("eng"), true, false),
+            {
+                let mut s = sub(3, "ass", Some("fra"), true, true);
+                s["IsForced"] = json!(true);
+                s["IsDefault"] = json!(true);
+                s["DisplayTitle"] = Value::Null;
+                s["Title"] = json!("Signs");
+                s
+            },
+            sub(4, "PGSSUB", Some("eng"), false, false),
+        ];
+        let server = server_with(item(streams), |i| Some(format!("subtitle {i}").into_bytes()));
+        sign_in(&server.url);
+        let dir = item_folder("item1");
+
+        fetch_subtitles("item1", false).await;
+
+        assert_eq!(std::fs::read_to_string(dir.join("sub.2.eng.srt")).unwrap(), "subtitle 2");
+        assert_eq!(std::fs::read_to_string(dir.join("sub.3.fra.forced.ass")).unwrap(), "subtitle 3");
+        assert!(!dir.join("sub.4.eng.srt").exists(), "picture subtitles have no text to fetch");
+        let mut asked = sub_requests(&server);
+        asked.sort();
+        assert_eq!(
+            asked,
+            vec!["/Videos/item1/src1/Subtitles/2/0/Stream.srt", "/Videos/item1/src1/Subtitles/3/0/Stream.ass"]
+        );
+        let idx = index_of(&dir);
+        assert_eq!(idx["media_source_id"], json!("src1"));
+        assert_eq!(idx["complete"], json!(true));
+        assert_eq!(idx["attempts"], json!(1));
+        assert_eq!(
+            idx["entries"],
+            json!([
+                { "index": 2, "file": "sub.2.eng.srt", "lang": "eng", "title": "Track 2", "default": false, "forced": false, "external": false },
+                { "index": 3, "file": "sub.3.fra.forced.ass", "lang": "fra", "title": "Signs", "default": true, "forced": true, "external": true },
+            ])
+        );
+        assert!(subtitles_settled(&dir));
+        assert!(debug_log().contains("subtitles for item1: 2 file(s)"));
+
+        // Done is done: another call doesn't go near the server.
+        server.forget_requests();
+        fetch_subtitles("item1", false).await;
+        assert!(server.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_original_file_only_wants_the_servers_external_files() {
+        let _s = sandbox();
+        let server = server_with(
+            item(vec![sub(2, "subrip", Some("eng"), true, false), sub(3, "srt", Some("deu"), true, true)]),
+            |_| Some(b"x".to_vec()),
+        );
+        sign_in(&server.url);
+        let dir = item_folder("item1");
+        fetch_subtitles("item1", true).await;
+        assert_eq!(sub_requests(&server), vec!["/Videos/item1/src1/Subtitles/3/0/Stream.srt"]);
+        assert!(dir.join("sub.3.deu.srt").exists());
+        assert!(!dir.join("sub.2.eng.srt").exists());
+    }
+
+    #[tokio::test]
+    async fn a_file_already_there_is_not_fetched_again() {
+        let _s = sandbox();
+        let server = server_with(item(vec![sub(2, "srt", Some("eng"), true, false)]), |_| Some(b"new".to_vec()));
+        sign_in(&server.url);
+        let dir = item_folder("item1");
+        std::fs::write(dir.join("sub.2.eng.srt"), "kept").unwrap();
+        fetch_subtitles("item1", false).await;
+        assert!(sub_requests(&server).is_empty());
+        assert_eq!(std::fs::read_to_string(dir.join("sub.2.eng.srt")).unwrap(), "kept");
+        assert_eq!(index_of(&dir)["entries"][0]["file"], json!("sub.2.eng.srt"));
+    }
+
+    #[tokio::test]
+    async fn refused_subtitles_are_asked_for_three_times_then_left() {
+        // Regression: 251c55d. Some streams the server always refuses; without
+        // a limit every refresh would ask again.
+        let _s = sandbox();
+        let server = server_with(
+            item(vec![sub(2, "srt", Some("eng"), true, false), sub(3, "srt", Some("fra"), true, false), sub(5, "srt", None, true, false)]),
+            |i| match i {
+                2 => Some(b"ok".to_vec()),
+                3 => None,         // the server fails
+                _ => Some(vec![]), // an empty answer is no subtitle either
+            },
+        );
+        sign_in(&server.url);
+        let dir = item_folder("item1");
+        for attempt in 1..=3u64 {
+            fetch_subtitles("item1", false).await;
+            let idx = index_of(&dir);
+            assert_eq!(idx["attempts"], json!(attempt));
+            assert_eq!(idx["complete"], json!(attempt == 3), "attempt {attempt}");
+            assert_eq!(idx["entries"].as_array().unwrap().len(), 1, "only the fetched one is listed");
+        }
+        assert!(subtitles_settled(&dir));
+        assert!(!dir.join("sub.5.und.srt").exists());
+        assert!(debug_log().contains("subtitle 3 of item1 not fetched"));
+        server.forget_requests();
+        fetch_subtitles("item1", false).await;
+        assert!(server.requests().is_empty(), "a settled index is not asked again");
+    }
+
+    #[tokio::test]
+    async fn a_download_deleted_mid_fetch_is_not_recreated() {
+        // "Deleted while this ran: nothing to write into."
+        let _s = sandbox();
+        let dir = item_folder("item1");
+        let doomed = dir.clone();
+        let it = item(vec![sub(2, "srt", Some("eng"), true, false)]);
+        let server = FakeServer::jellyfin(move |req| {
+            if req.path() == "/Items/item1" {
+                return Resp::json(200, it.clone());
+            }
+            let _ = std::fs::remove_dir_all(&doomed);
+            Resp::bytes(200, "text/plain", b"late".to_vec())
+        });
+        sign_in(&server.url);
+        fetch_subtitles("item1", false).await;
+        assert!(!dir.exists(), "the deleted download came back");
+    }
+
+    #[tokio::test]
+    async fn nothing_is_fetched_without_what_it_needs() {
+        let _s = sandbox();
+        let server = server_with(item(vec![sub(2, "srt", Some("eng"), true, false)]), |_| Some(b"x".to_vec()));
+        let dir = item_folder("item1");
+        // Not signed in: no user id.
+        fetch_subtitles("item1", false).await;
+        assert!(server.requests().is_empty());
+        // Not an id.
+        sign_in(&server.url);
+        fetch_subtitles("../item1", false).await;
+        assert!(server.requests_to("/Items/../item1").is_empty());
+        assert_eq!(index_of(&dir), Value::Null);
+
+        // The item can't be read, or has no sources.
+        server.set_handler(|req| match req.path() {
+            "/System/Info/Public" => Resp::json(200, json!({ "Id": crate::test_support::FAKE_SERVER_ID })),
+            "/Items/item1" => Resp::status(404),
+            _ => Resp::status(500),
+        });
+        fetch_subtitles("item1", false).await;
+        assert_eq!(index_of(&dir), Value::Null);
+        server.set_handler(|req| match req.path() {
+            "/System/Info/Public" => Resp::json(200, json!({ "Id": crate::test_support::FAKE_SERVER_ID })),
+            "/Items/item1" => Resp::json(200, json!({ "Id": "item1", "MediaSources": [] })),
+            _ => Resp::status(500),
+        });
+        fetch_subtitles("item1", false).await;
+        assert_eq!(index_of(&dir), Value::Null);
+    }
+
+    #[test]
+    fn local_subtitles_lists_only_files_that_are_there() {
+        let _s = sandbox();
+        let dir = item_folder("item1");
+        assert!(local_subtitles(&dir).is_empty(), "no index, nothing");
+        std::fs::write(dir.join("sub.2.eng.srt"), "x").unwrap();
+        std::fs::write(
+            dir.join(SUB_INDEX),
+            json!({ "complete": false, "entries": [
+                { "index": 2, "file": "sub.2.eng.srt", "lang": "eng" },
+                { "index": 3, "file": "sub.3.fra.srt", "lang": "fra" },
+                { "index": 4 },
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        let subs = local_subtitles(&dir);
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0]["lang"], json!("eng"));
+        assert_eq!(subs[0]["path"], json!(dir.join("sub.2.eng.srt").to_string_lossy()));
+        assert!(!subtitles_settled(&dir));
+        std::fs::write(dir.join(SUB_INDEX), "not json").unwrap();
+        assert!(local_subtitles(&dir).is_empty());
+        assert!(!subtitles_settled(&dir));
+    }
+
+    #[test]
+    fn subtitles_for_a_video_puts_the_default_first_and_stays_inside_downloads() {
+        let _s = sandbox();
+        let dir = item_folder("item1");
+        for f in ["sub.2.eng.srt", "sub.3.fra.srt"] {
+            std::fs::write(dir.join(f), "x").unwrap();
+        }
+        std::fs::write(
+            dir.join(SUB_INDEX),
+            json!({ "complete": true, "entries": [
+                { "index": 2, "file": "sub.2.eng.srt" },
+                { "index": 3, "file": "sub.3.fra.srt", "default": true },
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        let video = dir.join("video.mkv");
+        let subs = subtitles_for(&video.to_string_lossy());
+        assert_eq!(subs.iter().map(|s| s["index"].as_u64().unwrap()).collect::<Vec<_>>(), vec![3, 2]);
+
+        // The same layout outside the downloads folder is not read.
+        let outside = config::data_dir().join("elsewhere");
+        std::fs::create_dir_all(&outside).unwrap();
+        for f in ["sub.2.eng.srt", SUB_INDEX] {
+            std::fs::copy(dir.join(f), outside.join(f)).unwrap();
+        }
+        assert!(subtitles_for(&outside.join("v.mkv").to_string_lossy()).is_empty());
+        assert!(subtitles_for("https://jf/stream.mkv").is_empty());
+        assert!(subtitles_for("/").is_empty());
+    }
+
+    /// Against the live QA server (read-only): the server's sidecar text
+    /// subtitles come down through the route this builds, picture ones don't.
+    #[tokio::test]
+    async fn qa_server_sidecar_subtitles_are_saved() {
+        crate::test_support::with_qa_session(|_qa, _who| async move {
+            let item = crate::test_support::qa_find_item("Movie", "FX Sidecar Subs", "MediaSources")
+                .await
+                .expect("the QA library has FX Sidecar Subs");
+            let id = item["Id"].as_str().unwrap().to_string();
+            let dir = item_folder(&id);
+            fetch_subtitles(&id, true).await;
+            let idx = index_of(&dir);
+            assert_eq!(idx["complete"], json!(true), "{idx}");
+            let entries = idx["entries"].as_array().unwrap();
+            let text_sidecars = item["MediaSources"][0]["MediaStreams"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|s| s["Type"] == "Subtitle" && s["IsExternal"] == true && s["IsTextSubtitleStream"] == true)
+                .count();
+            assert!(text_sidecars >= 2, "the fixture should have several text sidecars");
+            assert_eq!(entries.len(), text_sidecars);
+            for e in entries {
+                let f = dir.join(e["file"].as_str().unwrap());
+                assert!(std::fs::metadata(&f).map(|m| m.len() > 0).unwrap_or(false), "{} is empty", f.display());
+            }
+            assert!(entries.iter().any(|e| e["file"].as_str().unwrap().ends_with(".ass")), "ASS should stay ASS");
+            assert!(!entries.iter().any(|e| e["lang"] == "ita"), "the PGS sidecar has no text");
+            let subs = subtitles_for(&dir.join("video.mkv").to_string_lossy());
+            assert_eq!(subs.len(), entries.len());
+        })
+        .await;
+    }
+
+    // ---------- Details refresh ----------
+
+    #[tokio::test]
+    async fn details_refresh_touches_only_the_details() {
+        let _s = sandbox();
+        let dir = item_folder("item1");
+        std::fs::write(
+            dir.join("meta.json"),
+            json!({ "name": "Old", "file": "video.mkv", "status": "done", "request": { "x": 1 } }).to_string(),
+        )
+        .unwrap();
+        update_details(
+            "item1",
+            &json!({ "name": "New", "overview": "o", "year": 2020, "file": "../../evil", "status": "failed", "path": "/etc" }),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let m = read_json(&dir.join("meta.json")).unwrap();
+        assert_eq!(m["name"], json!("New"));
+        assert_eq!(m["overview"], json!("o"));
+        assert_eq!(m["year"], json!(2020));
+        assert_eq!(m["file"], json!("video.mkv"), "the server may not rename the file");
+        assert_eq!(m["status"], json!("done"));
+        assert_eq!(m["request"], json!({ "x": 1 }));
+        assert!(m.get("path").is_none());
+        for k in DETAIL_KEYS {
+            assert!(!["file", "status", "path", "request", "played", "position_ticks"].contains(k));
+        }
+    }
+
+    #[tokio::test]
+    async fn details_refresh_needs_a_download() {
+        let _s = sandbox();
+        assert!(update_details("item1", &json!({}), None, None).await.is_err());
+        assert!(update_details("..", &json!({}), None, None).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn new_artwork_replaces_the_old_and_a_failed_fetch_keeps_it() {
+        let _s = sandbox();
+        let dir = item_folder("item1");
+        std::fs::write(dir.join("meta.json"), r#"{"name":"x"}"#).unwrap();
+        std::fs::write(dir.join("poster.jpg"), "old poster").unwrap();
+        std::fs::write(dir.join("series_poster.jpg"), "old series").unwrap();
+        let server = FakeServer::start(|req| match req.path() {
+            "/new.jpg" => Resp::bytes(200, "image/jpeg", b"new poster".to_vec()),
+            "/empty.jpg" => Resp::bytes(200, "image/jpeg", vec![]),
+            _ => Resp::status(404),
+        });
+        update_details("item1", &json!({}), Some(format!("{}/new.jpg", server.url)), Some(format!("{}/gone.jpg", server.url)))
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("poster.jpg")).unwrap(), "new poster");
+        assert_eq!(std::fs::read_to_string(dir.join("series_poster.jpg")).unwrap(), "old series");
+        update_details("item1", &json!({}), Some(format!("{}/empty.jpg", server.url)), Some(FakeServer::dead_url()))
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("poster.jpg")).unwrap(), "new poster");
+        assert_eq!(std::fs::read_to_string(dir.join("series_poster.jpg")).unwrap(), "old series");
+        assert!(!dir.join("poster.jpg.new").exists());
+        assert!(!dir.join("series_poster.jpg.new").exists());
+    }
+
+    #[tokio::test]
+    async fn a_status_change_during_the_refresh_is_not_lost() {
+        // "Re-read so a status change that landed meanwhile isn't overwritten."
+        let _s = sandbox();
+        let dir = item_folder("item1");
+        let meta = dir.join("meta.json");
+        std::fs::write(&meta, json!({ "name": "Old", "status": "downloading" }).to_string()).unwrap();
+        let during = meta.clone();
+        let server = FakeServer::start(move |_| {
+            // The transfer finishes while the poster is on its way.
+            std::fs::write(&during, json!({ "name": "Old", "status": "done" }).to_string()).unwrap();
+            Resp::bytes(200, "image/jpeg", b"p".to_vec())
+        });
+        update_details("item1", &json!({ "name": "New" }), Some(format!("{}/p.jpg", server.url)), None)
+            .await
+            .unwrap();
+        let m = read_json(&meta).unwrap();
+        assert_eq!(m["status"], json!("done"));
+        assert_eq!(m["name"], json!("New"));
+    }
+
+    // ---------- Show in Files ----------
+
+    #[test]
+    fn one_finished_download_is_shown_as_its_file() {
+        let _s = sandbox();
+        let dir = item_folder("item1");
+        std::fs::write(dir.join("meta.json"), r#"{"file":"Ep 1.mkv"}"#).unwrap();
+        std::fs::write(dir.join("Ep 1.mkv"), "v").unwrap();
+        assert_eq!(reveal_targets(&["item1".into()]), vec![dir.join("Ep 1.mkv")]);
+        // The file not there (yet): its folder.
+        std::fs::remove_file(dir.join("Ep 1.mkv")).unwrap();
+        assert_eq!(reveal_targets(&["item1".into()]), vec![dir.clone()]);
+        std::fs::remove_file(dir.join("meta.json")).unwrap();
+        assert_eq!(reveal_targets(&["item1".into()]), vec![dir]);
+    }
+
+    #[test]
+    fn several_downloads_are_shown_as_their_folders() {
+        let _s = sandbox();
+        let a = item_folder("a");
+        let b = item_folder("b");
+        std::fs::write(a.join("meta.json"), r#"{"file":"v.mkv"}"#).unwrap();
+        std::fs::write(a.join("v.mkv"), "v").unwrap();
+        let ids: Vec<String> = ["a", "b", "missing", "../.."].iter().map(|s| s.to_string()).collect();
+        assert_eq!(reveal_targets(&ids), vec![a, b]);
+        assert!(reveal_targets(&["missing".into()]).is_empty());
+    }
+
+    #[test]
+    fn nothing_on_disk_is_an_error() {
+        let _s = sandbox();
+        assert_eq!(reveal(&["missing".into()]), Err("Nothing on disk to show".into()));
+        assert_eq!(reveal(&[]), Err("Nothing on disk to show".into()));
+    }
+
+    /// Off Linux there is no FileManager1 to ask, so `reveal` goes straight to
+    /// `xdg-open`, which a Mac doesn't have. (On Linux this would open a real
+    /// file manager window, so it is not run there.)
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn without_a_file_manager_it_falls_back_to_opening_the_folder() {
+        let _s = sandbox();
+        let on_path = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).any(|d| d.join("xdg-open").exists()))
+            .unwrap_or(false);
+        if on_path {
+            eprintln!("skipped: xdg-open is installed here and would open a window");
+            return;
+        }
+        item_folder("item1");
+        let err = reveal(&["item1".into()]).unwrap_err();
+        assert!(err.starts_with("Couldn't open the folder"), "{err}");
     }
 }

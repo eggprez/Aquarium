@@ -7,13 +7,18 @@ fn main() {
     // Wayland session, X11 otherwise. AQUARIUM_GDK_BACKEND overrides this for
     // debugging, e.g. `AQUARIUM_GDK_BACKEND=x11` to compare against the old
     // embedding path (hwdec resolves to `no` there — see Phase 0).
+    gdk_backend_override();
+    webkit_defaults();
+    aquarium_lib::run()
+}
+
+/// `AQUARIUM_GDK_BACKEND`, when set and not empty, becomes `GDK_BACKEND`.
+fn gdk_backend_override() {
     if let Ok(v) = std::env::var("AQUARIUM_GDK_BACKEND") {
         if !v.is_empty() {
             std::env::set_var("GDK_BACKEND", v);
         }
     }
-    webkit_defaults();
-    aquarium_lib::run()
 }
 
 /// WebKitGTK tuning for a mostly static page sitting next to a video surface.
@@ -80,5 +85,74 @@ fn webkit_defaults() {
         if std::env::var_os(key).is_none() {
             std::env::set_var(key, value);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const KEYS: [&str; 5] = [
+        "AQUARIUM_WEBKIT_DEFAULTS",
+        "WEBKIT_DISPLAY_REFRESH_THROTTLE_FPS",
+        "WEBKIT_FORCE_VBLANK_TIMER",
+        "WEBKIT_DMABUF_RENDERER_FORCE_SHM",
+        "WEBKIT_SKIA_ENABLE_CPU_RENDERING",
+    ];
+
+    fn clear() {
+        for k in KEYS {
+            std::env::remove_var(k);
+        }
+    }
+
+    fn get(k: &str) -> Option<String> {
+        std::env::var(k).ok()
+    }
+
+    /// One test, because it changes the process environment and the test
+    /// harness runs tests on several threads. The values were measured (see
+    /// the comments in `webkit_defaults` and CLAUDE.md): throttle 60 and the
+    /// vblank timer are set; shared-memory frames and CPU tiles were measured
+    /// worse and are no longer set.
+    #[test]
+    fn webkit_defaults_are_set_unless_the_environment_says_otherwise() {
+        clear();
+        webkit_defaults();
+        assert_eq!(get("WEBKIT_DISPLAY_REFRESH_THROTTLE_FPS").as_deref(), Some("60"));
+        assert_eq!(get("WEBKIT_FORCE_VBLANK_TIMER").as_deref(), Some("1"));
+        assert_eq!(get("WEBKIT_DMABUF_RENDERER_FORCE_SHM"), None, "SHM frames were dropped on 23 Sep 2026");
+        assert_eq!(get("WEBKIT_SKIA_ENABLE_CPU_RENDERING"), None, "CPU tiles were dropped on 4 Sep 2026");
+
+        // A value already in the environment is left alone, for comparison runs.
+        clear();
+        std::env::set_var("WEBKIT_FORCE_VBLANK_TIMER", "0");
+        std::env::set_var("WEBKIT_DISPLAY_REFRESH_THROTTLE_FPS", "30");
+        webkit_defaults();
+        assert_eq!(get("WEBKIT_FORCE_VBLANK_TIMER").as_deref(), Some("0"));
+        assert_eq!(get("WEBKIT_DISPLAY_REFRESH_THROTTLE_FPS").as_deref(), Some("30"));
+
+        // AQUARIUM_WEBKIT_DEFAULTS=0 skips all of them; any other value doesn't.
+        clear();
+        std::env::set_var("AQUARIUM_WEBKIT_DEFAULTS", "0");
+        webkit_defaults();
+        assert_eq!(get("WEBKIT_DISPLAY_REFRESH_THROTTLE_FPS"), None);
+        assert_eq!(get("WEBKIT_FORCE_VBLANK_TIMER"), None);
+        clear();
+        std::env::set_var("AQUARIUM_WEBKIT_DEFAULTS", "1");
+        webkit_defaults();
+        assert_eq!(get("WEBKIT_DISPLAY_REFRESH_THROTTLE_FPS").as_deref(), Some("60"));
+        clear();
+
+        // The GDK backend override, in the same test for the same reason.
+        std::env::remove_var("GDK_BACKEND");
+        std::env::set_var("AQUARIUM_GDK_BACKEND", "");
+        gdk_backend_override();
+        assert_eq!(get("GDK_BACKEND"), None, "an empty override is no override");
+        std::env::set_var("AQUARIUM_GDK_BACKEND", "x11");
+        gdk_backend_override();
+        assert_eq!(get("GDK_BACKEND").as_deref(), Some("x11"));
+        std::env::remove_var("AQUARIUM_GDK_BACKEND");
+        std::env::remove_var("GDK_BACKEND");
     }
 }

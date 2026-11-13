@@ -701,8 +701,8 @@ export async function removeFromNextUp(seriesId: string): Promise<void> {
  *
  * - "last": today's date on the last watched episode, so the show goes to the
  *   front everywhere and back inside the day limit.
- * - "first": the whole show marked unwatched (play counts, positions and dates
- *   go), then today's date on its first episode.
+ * - "first": every other episode marked unwatched (play counts, positions and
+ *   dates go), then today's date and a clean state on its first episode.
  *
  * The episode's whole state goes with the date; sent alone, the date is
  * written over what the server last cached of it. Returns the episode the
@@ -720,7 +720,18 @@ export async function addToNextUp(seriesId: string, from: "last" | "first"): Pro
   } else {
     target = walked(all)[0];
     if (!target) return null;
-    await api(`/UserPlayedItems/${seriesId}?userId=${s.userId}`, { method: "DELETE" });
+    // Episode by episode: `DELETE /UserPlayedItems/<series>` answers 200 and
+    // changes nothing on Jellyfin 12.2. Each one with anything to clear gets
+    // the whole clean state, its date included, as the series call used to give.
+    for (const ep of all) {
+      if (ep.Id === target.Id) continue;
+      const u = ep.UserData ?? {};
+      if (!u.Played && !u.PlayCount && !u.PlaybackPositionTicks && !hasPlayedDate(ep)) continue;
+      await api(`/UserItems/${ep.Id}/UserData?userId=${s.userId}`, {
+        method: "POST",
+        body: { LastPlayedDate: NOT_PLAYED_DATE, Played: false, PlayCount: 0, PlaybackPositionTicks: 0 },
+      });
+    }
     dated = target;
   }
   const started = from === "last";
@@ -1054,7 +1065,10 @@ export interface MediaSegment {
  * appears.
  */
 export async function getMediaSegments(itemId: string): Promise<MediaSegment[]> {
-  const r = await api(`/MediaSegments/${itemId}?includeSegmentTypes=Intro,Outro`).catch(() => null);
+  // Two values, not "Intro,Outro": Jellyfin reads a comma list as its first type only.
+  const r = await api(`/MediaSegments/${itemId}?includeSegmentTypes=Intro&includeSegmentTypes=Outro`).catch(
+    () => null
+  );
   const items: any[] = r?.Items ?? [];
   return items
     .map((s) => ({
@@ -1293,6 +1307,32 @@ export interface PlaybackSource {
   live: boolean;
   /** The server's MediaSource for it: container, bitrate, streams. */
   mediaSource?: any;
+  /** Subtitles the server sends as files of their own, for the player to add
+   *  beside the stream. Absent when there are none. */
+  subtitles?: StreamSubtitle[];
+}
+
+/** One subtitle file the player fetches from the server beside a stream. */
+export interface StreamSubtitle {
+  url: string;
+  lang: string;
+  title: string;
+  default: boolean;
+  forced: boolean;
+}
+
+/** The source's subtitles the server delivers as separate files. */
+function externalSubtitles(server: string, ms: any): StreamSubtitle[] | undefined {
+  const subs = (ms.MediaStreams ?? [])
+    .filter((st: any) => st?.Type === "Subtitle" && st.DeliveryMethod === "External" && st.DeliveryUrl)
+    .map((st: any) => ({
+      url: /^https?:/i.test(st.DeliveryUrl) ? st.DeliveryUrl : server + st.DeliveryUrl,
+      lang: st.Language ?? "",
+      title: st.DisplayTitle ?? st.Title ?? "",
+      default: !!st.IsDefault,
+      forced: !!st.IsForced,
+    }));
+  return subs.length ? subs : undefined;
 }
 
 function deviceProfile(forceTranscode: boolean, maxBitrate?: number): any {
@@ -1324,6 +1364,10 @@ function deviceProfile(forceTranscode: boolean, maxBitrate?: number): any {
       { Container: "mp3", Type: "Audio", Protocol: "http", AudioCodec: "mp3", Context: "Streaming" },
     ],
     CodecProfiles: [],
+    // Text formats can also come as a file of their own, which the player adds
+    // beside the stream (`subtitles` below). Without that the server burns the
+    // default track into every transcode, where it can be neither turned off
+    // nor changed, and transcodes a file just for the subtitle files beside it.
     SubtitleProfiles: [
       { Format: "srt", Method: "Embed" },
       { Format: "ass", Method: "Embed" },
@@ -1332,13 +1376,55 @@ function deviceProfile(forceTranscode: boolean, maxBitrate?: number): any {
       { Format: "sub", Method: "Embed" },
       { Format: "pgssub", Method: "Embed" },
       { Format: "dvdsub", Method: "Embed" },
+      { Format: "srt", Method: "External" },
+      { Format: "ass", Method: "External" },
+      { Format: "ssa", Method: "External" },
+      { Format: "vtt", Method: "External" },
+      { Format: "sub", Method: "External" },
     ],
   };
 }
 
+/**
+ * An address the server built, without the `ApiKey`/`api_key` parameter
+ * Jellyfin puts in it (a transcode's `TranscodingUrl`, a subtitle's
+ * `DeliveryUrl`). mpv sends the token as an Authorization header instead (see
+ * player.rs), so it stays out of the webview, mpv's command and log, and the
+ * server's access log. server.rs takes it out of replies before they get here;
+ * this is for anything that still carries one.
+ */
+export function withoutApiKey(address: string): string {
+  const q = address.indexOf("?");
+  if (q < 0) return address;
+  const kept = address
+    .slice(q + 1)
+    .split("&")
+    .filter((p) => !/^(api_?key)=/i.test(p));
+  return kept.length ? `${address.slice(0, q)}?${kept.join("&")}` : address.slice(0, q);
+}
+
+/** The server's media source with every address in it cleaned by `withoutApiKey`. */
+function sourceWithoutApiKey(ms: any): any {
+  const out = { ...ms };
+  if (typeof out.TranscodingUrl === "string") out.TranscodingUrl = withoutApiKey(out.TranscodingUrl);
+  if (Array.isArray(out.MediaStreams)) {
+    out.MediaStreams = out.MediaStreams.map((st: any) =>
+      typeof st?.DeliveryUrl === "string" ? { ...st, DeliveryUrl: withoutApiKey(st.DeliveryUrl) } : st
+    );
+  }
+  return out;
+}
+
 export async function resolvePlayback(
   itemId: string,
-  opts: { maxBitrate?: number; forceTranscode?: boolean; live?: boolean; startTicks?: number } = {}
+  opts: {
+    maxBitrate?: number;
+    forceTranscode?: boolean;
+    live?: boolean;
+    startTicks?: number;
+    /** The audio track a transcode carries (it holds only the one). */
+    audio?: { mediaSourceId: string; index: number };
+  } = {}
 ): Promise<PlaybackSource> {
   const s = session!;
   const force = !!opts.forceTranscode;
@@ -1353,11 +1439,18 @@ export async function resolvePlayback(
     EnableTranscoding: true,
   };
   if (opts.maxBitrate) body.MaxStreamingBitrate = opts.maxBitrate;
+  // Only for a transcode: direct play delivers every track and mpv picks. The
+  // server ignores the index without the source it belongs to.
+  if (force && opts.audio) {
+    body.MediaSourceId = opts.audio.mediaSourceId;
+    body.AudioStreamIndex = opts.audio.index;
+  }
 
   const info = await api(`/Items/${itemId}/PlaybackInfo`, { method: "POST", body });
-  const ms = info.MediaSources?.[0];
-  if (!ms) throw new Error("No playable media source returned by the server");
+  if (!info.MediaSources?.[0]) throw new Error("No playable media source returned by the server");
+  const ms = sourceWithoutApiKey(info.MediaSources[0]);
   const playSessionId = info.PlaySessionId;
+  const subtitles = externalSubtitles(s.server, ms);
 
   if (ms.TranscodingUrl && (force || (!ms.SupportsDirectPlay && !ms.SupportsDirectStream))) {
     return {
@@ -1367,6 +1460,7 @@ export async function resolvePlayback(
       playSessionId,
       live: !!opts.live,
       mediaSource: ms,
+      subtitles,
     };
   }
 
@@ -1387,7 +1481,7 @@ export async function resolvePlayback(
   // Live channels that direct-play expose an open stream path instead.
   if (opts.live && ms.TranscodingUrl) {
     url = s.server + ms.TranscodingUrl;
-    return { url, playMethod: "Transcode", mediaSourceId: ms.Id, playSessionId, live: true, mediaSource: ms };
+    return { url, playMethod: "Transcode", mediaSourceId: ms.Id, playSessionId, live: true, mediaSource: ms, subtitles };
   }
   return {
     url,
@@ -1396,6 +1490,7 @@ export async function resolvePlayback(
     playSessionId,
     live: !!opts.live,
     mediaSource: ms,
+    subtitles,
   };
 }
 
@@ -1453,7 +1548,8 @@ function resolutionLabel(stream: any): string | null {
 
 function channelLabel(stream: any): string | null {
   const layout = stream?.ChannelLayout;
-  if (typeof layout === "string" && layout) return layout === "mono" ? "Mono" : layout;
+  // Jellyfin names the plain layouts in lower case ("mono", "stereo").
+  if (typeof layout === "string" && layout) return layout.charAt(0).toUpperCase() + layout.slice(1);
   switch (stream?.Channels) {
     case 8: return "7.1";
     case 6: return "5.1";

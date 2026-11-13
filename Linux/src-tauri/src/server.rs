@@ -120,7 +120,11 @@ fn str_field(v: &Value, key: &str) -> Option<String> {
 /// the fallback, and the caller is told which one answered so it can say so.
 pub async fn probe(raw: &str) -> Result<Value, String> {
     let typed = raw.trim();
-    let has_scheme = typed.starts_with("http://") || typed.starts_with("https://");
+    // Any scheme typed goes to normalize as it is, which accepts only http
+    // and https: "file:///x" is a config error, not a host called "file".
+    let has_scheme = typed.split_once("://").is_some_and(|(scheme, _)| {
+        !scheme.is_empty() && scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+    });
     let candidates: Vec<String> = if has_scheme {
         vec![normalize(typed)?]
     } else {
@@ -152,6 +156,12 @@ pub async fn probe(raw: &str) -> Result<Value, String> {
 
 /// The server URL whose identity has been checked in this process.
 static VERIFIED: Mutex<Option<String>> = Mutex::new(None);
+
+/// Test hook: forget which server this process has verified.
+#[cfg(test)]
+pub fn reset_for_tests() {
+    *VERIFIED.lock().unwrap_or_else(|p| p.into_inner()) = None;
+}
 
 /// Confirm the address in the config still points at the Jellyfin install the
 /// user signed in to, before anything authenticated goes out over it.
@@ -269,13 +279,33 @@ pub async fn request(path: &str, method: Option<String>, body: Option<Value>) ->
 
     let resp = req.send().await.map_err(|e| offline_err(&e))?;
     let status = resp.status().as_u16();
-    let text = resp.text().await.unwrap_or_default();
+    let text = without_token(&resp.text().await.unwrap_or_default(), &token);
     let parsed: Option<Value> = if text.trim().is_empty() {
         None
     } else {
         serde_json::from_str(&text).ok()
     };
     Ok(json!({ "status": status, "body": parsed }))
+}
+
+/// A reply with the access token taken out before it reaches the webview.
+/// Jellyfin writes it into the addresses it builds (`ApiKey=<token>` in a
+/// transcode's `TranscodingUrl` and a subtitle's `DeliveryUrl`); those
+/// parameters go, and the token anywhere else is blanked. Every stream the app
+/// opens on the server authenticates with the Authorization header instead.
+fn without_token(text: &str, token: &str) -> String {
+    if token.is_empty() || !text.contains(token) {
+        return text.to_string();
+    }
+    let mut out = text.to_string();
+    for key in ["ApiKey", "api_key"] {
+        let param = format!("{key}={token}");
+        out = out
+            .replace(&format!("{param}&"), "")
+            .replace(&format!("&{param}"), "")
+            .replace(&format!("?{param}"), "");
+    }
+    out.replace(token, "")
 }
 
 /// The raw body of an authenticated GET, for the few things fetched from Rust
@@ -988,5 +1018,1043 @@ mod tests {
         assert!(normalize("http://").is_err());
         // A bare hostname has no scheme — probe() adds one, normalize doesn't.
         assert!(normalize("example.com").is_err());
+    }
+
+    // ---------- With a stand-in server ----------
+
+    use crate::test_support::{sandbox, sign_in, FakeServer, Req, Resp, FAKE_SERVER_ID, TEST_TOKEN, TEST_USER};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    const INFO: &str = "/System/Info/Public";
+
+    fn auth_reply(token: &str, user_id: &str, name: &str) -> Value {
+        json!({ "AccessToken": token, "User": { "Id": user_id, "Name": name } })
+    }
+
+    /// A Jellyfin that signs anyone in as `user_id` with `token`, accepts a
+    /// logout, and answers everything else with `{"ok": true}`.
+    fn signing_server(id: &str, token: &'static str, user_id: &'static str) -> FakeServer {
+        FakeServer::jellyfin_with_id(Some(id), move |req| match req.path() {
+            "/Users/AuthenticateByName" | "/Users/AuthenticateWithQuickConnect" => {
+                Resp::json(200, auth_reply(token, user_id, "Ann"))
+            }
+            "/Sessions/Logout" => Resp::status(204),
+            _ => Resp::json(200, json!({ "ok": true })),
+        })
+    }
+
+    fn info_count(server: &FakeServer) -> usize {
+        server.requests_to(INFO).len()
+    }
+
+    fn token_in(req: &Req) -> Option<String> {
+        let h = req.header("authorization")?;
+        let start = h.find("Token=\"")? + 7;
+        Some(h[start..].split('"').next()?.to_string())
+    }
+
+    #[test]
+    fn only_https_counts_as_secure() {
+        assert!(is_secure("https://jf.example.com"));
+        assert!(!is_secure("http://jf.example.com"));
+        assert!(!is_secure("httpsx://jf.example.com"));
+    }
+
+    #[test]
+    fn normalize_keeps_a_non_default_port_and_a_sub_path() {
+        assert_eq!(normalize("https://jf.example.com:8920/media/jf/").unwrap(), "https://jf.example.com:8920/media/jf");
+        assert_eq!(normalize("HTTP://JF.Example.com").unwrap(), "http://jf.example.com");
+    }
+
+    #[test]
+    fn empty_strings_count_as_missing_fields() {
+        let v = json!({ "a": "x", "b": "", "c": 3 });
+        assert_eq!(str_field(&v, "a").as_deref(), Some("x"));
+        assert_eq!(str_field(&v, "b"), None);
+        assert_eq!(str_field(&v, "c"), None);
+        assert_eq!(str_field(&v, "d"), None);
+    }
+
+    #[tokio::test]
+    async fn probe_with_a_scheme_asks_only_that_address_and_reports_the_server() {
+        let _s = sandbox();
+        let server = FakeServer::bare();
+        let out = probe(&format!("  {}/  ", server.url)).await.unwrap();
+        assert_eq!(out["server"], json!(server.url));
+        assert_eq!(out["secure"], json!(false));
+        assert_eq!(out["server_id"], json!(FAKE_SERVER_ID));
+        assert_eq!(out["server_name"], json!("Fake"));
+        assert_eq!(out["version"], json!("10.10.0"));
+        assert_eq!(server.requests().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn probe_reports_empty_or_missing_identity_fields_as_null() {
+        let _s = sandbox();
+        let server = FakeServer::start(|_| Resp::json(200, json!({ "Id": "", "ServerName": "" })));
+        let out = probe(&server.url).await.unwrap();
+        assert_eq!(out["server_id"], Value::Null);
+        assert_eq!(out["server_name"], Value::Null);
+        assert_eq!(out["version"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn probe_of_an_address_nobody_answers_is_offline_and_logged() {
+        let _s = sandbox();
+        let dead = FakeServer::dead_url();
+        let e = probe(&dead).await.unwrap_err();
+        assert_eq!(kind_of(&e), "offline");
+        // Without a scheme both https and http are tried; both fail the same way.
+        let e = probe(dead.trim_start_matches("http://")).await.unwrap_err();
+        assert_eq!(kind_of(&e), "offline");
+        assert!(crate::test_support::debug_log().contains("server: request failed"));
+    }
+
+    #[tokio::test]
+    async fn probe_of_something_that_is_not_jellyfin_is_a_server_error() {
+        let _s = sandbox();
+        let html = FakeServer::start(|_| Resp::bytes(200, "text/html", b"<html>router</html>".to_vec()));
+        let e = probe(&html.url).await.unwrap_err();
+        assert_eq!(kind_of(&e), "server");
+        assert!(e.contains("not like a Jellyfin server"), "{e}");
+
+        let broken = FakeServer::start(|_| Resp::status(500));
+        let e = probe(&broken.url).await.unwrap_err();
+        assert_eq!(e, "server|Server responded with 500");
+    }
+
+    #[tokio::test]
+    async fn probe_refuses_a_bad_address_before_touching_the_network() {
+        let _s = sandbox();
+        for bad in ["", "   ", "http://user:pw@example.com", "https://"] {
+            assert_eq!(kind_of(&probe(bad).await.unwrap_err()), "config", "{bad:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_refuses_a_typed_non_http_scheme_as_a_config_error() {
+        let _s = sandbox();
+        // Regression: "file:///etc/passwd" became https://file///etc/passwd,
+        // a DNS lookup of "file" and "you appear to be offline".
+        for bad in ["file:///etc/passwd", "ftp://example.com/x"] {
+            let e = probe(bad).await.unwrap_err();
+            assert_eq!(kind_of(&e), "config", "{bad:?}: {e}");
+        }
+    }
+
+    // ---------- Identity pinning ----------
+
+    #[tokio::test]
+    async fn the_first_check_pins_the_servers_id() {
+        let _s = sandbox();
+        let server = FakeServer::bare();
+        sign_in(&server.url);
+        assert!(config::load().get("server_id").is_none());
+        request("/Items", None, None).await.unwrap();
+        assert_eq!(config::load()["server_id"], json!(FAKE_SERVER_ID));
+    }
+
+    #[tokio::test]
+    async fn a_server_answering_as_another_install_never_gets_the_token() {
+        let _s = sandbox();
+        let server = FakeServer::bare();
+        sign_in(&server.url);
+        config::merge(json!({ "server_id": "the-one-signed-in-to" })).unwrap();
+        let e = request("/Items", None, None).await.unwrap_err();
+        assert_eq!(kind_of(&e), "identity");
+        // Only the unauthenticated identity check went out.
+        let seen = server.requests();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].path(), INFO);
+        assert!(token_in(&seen[0]).is_none());
+        // And the pin is not overwritten by the impostor's id.
+        assert_eq!(config::load()["server_id"], json!("the-one-signed-in-to"));
+        assert!(crate::test_support::debug_log().contains("identity mismatch"));
+    }
+
+    #[tokio::test]
+    async fn the_identity_is_checked_once_per_session() {
+        let _s = sandbox();
+        let server = FakeServer::bare();
+        sign_in(&server.url);
+        ensure_verified(&server.url).await.unwrap();
+        request("/a", None, None).await.unwrap();
+        request("/b", None, None).await.unwrap();
+        assert_eq!(info_count(&server), 1);
+    }
+
+    #[tokio::test]
+    async fn a_server_that_reports_no_id_is_let_through_and_nothing_is_pinned() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin_with_id(None, |_| Resp::json(200, json!({})));
+        sign_in(&server.url);
+        request("/Items", None, None).await.unwrap();
+        assert!(config::load().get("server_id").is_none());
+    }
+
+    // ---------- request ----------
+
+    #[tokio::test]
+    async fn requests_carry_the_mediabrowser_header_and_never_x_emby_token() {
+        let _s = sandbox();
+        let server = FakeServer::bare();
+        sign_in(&server.url);
+        request("/UserViews?userId=user-1", None, None).await.unwrap();
+        let req = server.requests_to("/UserViews").pop().expect("request reached the server");
+        assert_eq!(req.method, "GET");
+        let auth = req.header("authorization").expect("Authorization header");
+        assert!(auth.starts_with("MediaBrowser Client=\"Aquarium\""), "{auth}");
+        assert!(auth.contains(&format!("DeviceId=\"{}\"", config::device_id())), "{auth}");
+        assert_eq!(token_in(&req).as_deref(), Some(TEST_TOKEN));
+        assert!(req.header("x-emby-token").is_none());
+        assert!(!req.target.to_ascii_lowercase().contains("api_key"));
+        assert_eq!(req.query(), "userId=user-1");
+    }
+
+    #[test]
+    fn without_token_drops_api_key_parameters_and_blanks_the_token_elsewhere() {
+        let t = "0123abcd";
+        assert_eq!(without_token("/v/master.m3u8?A=1&ApiKey=0123abcd&B=2", t), "/v/master.m3u8?A=1&B=2");
+        assert_eq!(without_token("/v/master.m3u8?A=1&ApiKey=0123abcd", t), "/v/master.m3u8?A=1");
+        assert_eq!(without_token("/s/Stream.srt?ApiKey=0123abcd", t), "/s/Stream.srt");
+        assert_eq!(without_token("/s/Stream.srt?api_key=0123abcd&x=1", t), "/s/Stream.srt?x=1");
+        assert_eq!(without_token(r#"{"Other":"0123abcd"}"#, t), r#"{"Other":""}"#);
+        assert_eq!(without_token("nothing here", t), "nothing here");
+        assert_eq!(without_token("nothing here", ""), "nothing here");
+    }
+
+    #[tokio::test]
+    async fn replies_reach_the_webview_without_the_access_token() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|_| {
+            Resp::json(
+                200,
+                json!({ "MediaSources": [{
+                    "TranscodingUrl": format!("/videos/1/master.m3u8?MediaSourceId=1&ApiKey={TEST_TOKEN}&Tag=t"),
+                    "MediaStreams": [{ "DeliveryUrl": format!("/Videos/1/1/Subtitles/3/0/Stream.srt?ApiKey={TEST_TOKEN}") }],
+                }] }),
+            )
+        });
+        sign_in(&server.url);
+        let out = request("/Items/1/PlaybackInfo", Some("POST".into()), Some(json!({}))).await.unwrap();
+        assert!(!out.to_string().contains(TEST_TOKEN), "{out}");
+        let ms = &out["body"]["MediaSources"][0];
+        assert_eq!(ms["TranscodingUrl"], json!("/videos/1/master.m3u8?MediaSourceId=1&Tag=t"));
+        assert_eq!(ms["MediaStreams"][0]["DeliveryUrl"], json!("/Videos/1/1/Subtitles/3/0/Stream.srt"));
+    }
+
+    #[tokio::test]
+    async fn requests_send_json_bodies_and_hand_back_status_and_body() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|req| {
+            Resp::json(201, json!({ "method": req.method, "got": req.json(), "type": req.header("content-type") }))
+        });
+        sign_in(&server.url);
+        let out = request("/Items/1/Favorite", Some("POST".into()), Some(json!({ "a": 1 }))).await.unwrap();
+        assert_eq!(out["status"], json!(201));
+        assert_eq!(out["body"]["method"], json!("POST"));
+        assert_eq!(out["body"]["got"], json!({ "a": 1 }));
+        assert_eq!(out["body"]["type"], json!("application/json"));
+    }
+
+    #[tokio::test]
+    async fn an_empty_or_unreadable_reply_has_a_null_body_and_errors_are_returned_not_raised() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|req| match req.path() {
+            "/empty" => Resp::status(204),
+            "/text" => Resp::bytes(200, "text/plain", b"hello".to_vec()),
+            _ => Resp::bytes(500, "text/plain", b"   ".to_vec()),
+        });
+        sign_in(&server.url);
+        assert_eq!(request("/empty", None, None).await.unwrap(), json!({ "status": 204, "body": null }));
+        assert_eq!(request("/text", None, None).await.unwrap(), json!({ "status": 200, "body": null }));
+        assert_eq!(request("/boom", None, None).await.unwrap(), json!({ "status": 500, "body": null }));
+    }
+
+    #[tokio::test]
+    async fn request_refuses_bad_input_with_a_config_error_before_the_network() {
+        let _s = sandbox();
+        let server = FakeServer::bare();
+        sign_in(&server.url);
+        assert_eq!(kind_of(&request("Items", None, None).await.unwrap_err()), "config");
+        assert_eq!(server.requests().len(), 0);
+        let e = request("/Items", Some("NOT A METHOD".into()), None).await.unwrap_err();
+        assert!(e.starts_with("config|Unsupported method"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn request_without_a_server_is_a_config_error() {
+        let _s = sandbox();
+        assert_eq!(request("/Items", None, None).await.unwrap_err(), "config|Not connected to a server");
+        config::merge(json!({ "server": "" })).unwrap();
+        assert_eq!(kind_of(&request("/Items", None, None).await.unwrap_err()), "config");
+    }
+
+    /// config.json is a plain file; a `server` value rewritten to something
+    /// that isn't an http(s) origin must not be sent the token.
+    #[tokio::test]
+    async fn a_tampered_server_address_in_the_config_is_refused() {
+        let _s = sandbox();
+        sign_in("file:///etc/passwd");
+        assert_eq!(kind_of(&request("/Items", None, None).await.unwrap_err()), "config");
+        config::merge(json!({ "server": "http://me:pw@127.0.0.1:1" })).unwrap();
+        assert_eq!(kind_of(&request("/Items", None, None).await.unwrap_err()), "config");
+        assert!(!is_session_origin("http://127.0.0.1:1/x"));
+    }
+
+    #[tokio::test]
+    async fn request_without_a_token_is_an_auth_error() {
+        let _s = sandbox();
+        let server = FakeServer::bare();
+        config::merge(json!({ "server": server.url })).unwrap();
+        assert_eq!(request("/Items", None, None).await.unwrap_err(), "auth|Not signed in");
+    }
+
+    #[tokio::test]
+    async fn request_to_a_server_that_is_gone_is_offline() {
+        let _s = sandbox();
+        sign_in(&FakeServer::dead_url());
+        assert_eq!(kind_of(&request("/Items", None, None).await.unwrap_err()), "offline");
+    }
+
+    #[tokio::test]
+    async fn session_origin_is_the_configured_server_only() {
+        let _s = sandbox();
+        assert!(!is_session_origin("http://127.0.0.1:8096/x"), "nothing configured");
+        sign_in("https://jf.example.com/jellyfin");
+        assert!(is_session_origin("https://jf.example.com/Items/1/Download"));
+        assert!(!is_session_origin("http://jf.example.com/Items/1/Download"));
+        assert!(!is_session_origin("https://jf.example.com.evil.net/x"));
+    }
+
+    // ---------- get_bytes, image, bitrate_test ----------
+
+    #[tokio::test]
+    async fn get_bytes_hands_back_the_body_and_fails_on_anything_but_2xx() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|req| match req.path() {
+            "/sub.srt" => Resp::bytes(200, "text/plain", b"1\n00:00:01,000 --> 00:00:02,000\nHi\n".to_vec()),
+            _ => Resp::status(404),
+        });
+        sign_in(&server.url);
+        let bytes = get_bytes("/sub.srt").await.unwrap();
+        assert!(bytes.ends_with(b"Hi\n"));
+        assert_eq!(token_in(&server.requests_to("/sub.srt")[0]).as_deref(), Some(TEST_TOKEN));
+        assert_eq!(get_bytes("/missing").await.unwrap_err(), "server|Request failed (404)");
+        assert_eq!(kind_of(&get_bytes("sub.srt").await.unwrap_err()), "config");
+    }
+
+    #[test]
+    fn base64_matches_the_standard_test_vectors() {
+        // RFC 4648, section 10.
+        for (plain, encoded) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64(plain.as_bytes()), encoded);
+        }
+        assert_eq!(base64(&[0xFF, 0xFE, 0xFD, 0x00]), "//79AA==");
+    }
+
+    #[tokio::test]
+    async fn an_image_comes_back_as_a_data_url_of_the_servers_type() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|req| match req.path() {
+            "/t/0.png" => Resp::bytes(200, "image/PNG; charset=binary", b"foo".to_vec()),
+            "/t/0.jpg" => Resp::bytes(200, "application/octet-stream", b"foob".to_vec()),
+            "/t/0.webp" => Resp::status(200).header("X-None", "1"),
+            _ => Resp::status(404),
+        });
+        sign_in(&server.url);
+        assert_eq!(image("/t/0.png").await.unwrap(), "data:image/png;base64,Zm9v");
+        // A type that isn't an image's is not passed on.
+        assert_eq!(image("/t/0.jpg?fillWidth=320").await.unwrap(), "data:image/jpeg;base64,Zm9vYg==");
+        assert_eq!(image("/t/0.webp").await.unwrap(), "data:image/jpeg;base64,");
+        assert_eq!(token_in(&server.requests_to("/t/0.png")[0]).as_deref(), Some(TEST_TOKEN));
+        // A title with no trickplay 404s, as a server error.
+        assert_eq!(image("/t/1.jpg").await.unwrap_err(), "server|Image request failed (404)");
+    }
+
+    #[tokio::test]
+    async fn image_only_fetches_image_paths() {
+        let _s = sandbox();
+        let server = FakeServer::bare();
+        sign_in(&server.url);
+        for bad in ["/Users/Me", "/Items/1?fake=.jpg", "t/0.jpg", "/t/0.jpg.json"] {
+            assert_eq!(kind_of(&image(bad).await.unwrap_err()), "config", "{bad}");
+        }
+        assert_eq!(server.requests().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_image_over_eight_megabytes_is_refused() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|_| Resp::bytes(200, "image/jpeg", vec![0u8; (8 << 20) + 1]));
+        sign_in(&server.url);
+        assert_eq!(image("/big.jpg").await.unwrap_err(), "server|Image too large");
+    }
+
+    #[tokio::test]
+    async fn the_bitrate_test_measures_the_body_in_bits_per_second() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|req| match req.query() {
+            "Size=65536" => Resp::bytes(200, "application/octet-stream", vec![7u8; 65536]),
+            "Size=1" => Resp::bytes(200, "application/octet-stream", Vec::new()),
+            _ => Resp::status(404),
+        });
+        sign_in(&server.url);
+        let bps = bitrate_test(65536).await.unwrap();
+        assert!(bps > 0.0 && bps.is_finite(), "{bps}");
+        let asked = server.requests_to("/Playback/BitrateTest");
+        assert_eq!(token_in(&asked[0]).as_deref(), Some(TEST_TOKEN));
+        assert_eq!(bitrate_test(1).await.unwrap_err(), "server|Bitrate test returned nothing");
+        assert_eq!(bitrate_test(2).await.unwrap_err(), "server|Bitrate test failed (404)");
+    }
+
+    // ---------- warm ----------
+
+    #[tokio::test]
+    async fn warm_only_touches_streams_on_the_signed_in_server() {
+        let _s = sandbox();
+        let ours = FakeServer::bare();
+        let other = FakeServer::bare();
+        sign_in(&ours.url);
+        let e = warm(&format!("{}/Videos/1/stream", other.url)).await.unwrap_err();
+        assert_eq!(e, "config|Not a stream on this server");
+        // The prefix check includes the slash: a port with one more digit is
+        // another server.
+        let e = warm(&format!("{}0/Videos/1/stream", ours.url)).await.unwrap_err();
+        assert_eq!(kind_of(&e), "config");
+        assert_eq!(other.requests().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn warm_reads_only_the_start_of_a_file() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|_| Resp::bytes(200, "video/x-matroska", vec![1u8; 4096]));
+        sign_in(&server.url);
+        warm(&format!("{}/Videos/1/stream.mkv?static=true", server.url)).await.unwrap();
+        let asked = server.requests_to("/Videos/1/stream.mkv");
+        assert_eq!(asked.len(), 2);
+        assert_eq!(asked[0].header("range"), None);
+        assert_eq!(asked[1].header("range"), Some("bytes=0-524287"));
+        assert!(asked.iter().all(|r| token_in(r).as_deref() == Some(TEST_TOKEN)));
+    }
+
+    #[tokio::test]
+    async fn warm_opens_the_variant_playlist_that_starts_the_transcode() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|req| match req.path() {
+            "/Videos/1/master.m3u8" => Resp::bytes(
+                200,
+                "text/plain",
+                b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\n\n  main.m3u8?PlaySessionId=p  \n".to_vec(),
+            ),
+            // Recognised by its type when the path doesn't say.
+            "/Videos/2/master" => Resp::bytes(200, "application/vnd.apple.mpegURL", b"#EXTM3U\nvariant/two.m3u8\n".to_vec()),
+            _ => Resp::bytes(200, "application/vnd.apple.mpegurl", b"#EXTM3U\n".to_vec()),
+        });
+        sign_in(&server.url);
+        warm(&format!("{}/Videos/1/master.m3u8?x=1", server.url)).await.unwrap();
+        let variant = server.requests_to("/Videos/1/main.m3u8");
+        assert_eq!(variant.len(), 1);
+        assert_eq!(variant[0].query(), "PlaySessionId=p");
+        assert_eq!(token_in(&variant[0]).as_deref(), Some(TEST_TOKEN));
+
+        warm(&format!("{}/Videos/2/master", server.url)).await.unwrap();
+        assert_eq!(server.requests_to("/Videos/2/variant/two.m3u8").len(), 1);
+        // A playlist is never read with a Range.
+        assert!(server.requests().iter().all(|r| r.header("range").is_none()));
+    }
+
+    #[tokio::test]
+    async fn warm_never_follows_a_playlist_to_another_server() {
+        let _s = sandbox();
+        let other = FakeServer::bare();
+        let other_url = other.url.clone();
+        let server = FakeServer::jellyfin(move |_| {
+            Resp::bytes(200, "application/x-mpegurl", format!("#EXTM3U\n{other_url}/steal.m3u8\n").into_bytes())
+        });
+        sign_in(&server.url);
+        warm(&format!("{}/Videos/1/master.m3u8", server.url)).await.unwrap();
+        assert_eq!(other.requests().len(), 0);
+    }
+
+    // ---------- ping ----------
+
+    #[tokio::test]
+    async fn ping_is_true_for_a_reachable_server_of_the_right_identity() {
+        let _s = sandbox();
+        let server = FakeServer::bare();
+        sign_in(&server.url);
+        assert_eq!(ping().await, Ok(true));
+        assert_eq!(config::load()["server_id"], json!(FAKE_SERVER_ID));
+    }
+
+    /// The seconds after a wake or a Wi-Fi hand-off fail instantly, and one
+    /// such failure used to put the app in offline mode.
+    #[tokio::test]
+    async fn ping_asks_again_after_a_failure_that_came_back_at_once() {
+        let _s = sandbox();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c = calls.clone();
+        let server = FakeServer::start(move |req| {
+            if req.path() == INFO && c.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Resp::status(503);
+            }
+            Resp::json(200, json!({ "Id": FAKE_SERVER_ID }))
+        });
+        sign_in(&server.url);
+        assert_eq!(ping().await, Ok(true));
+        assert_eq!(info_count(&server), 2);
+    }
+
+    /// Ping decides "offline", and the Retry button's answer has to come from
+    /// the network rather than from having once seen the server.
+    #[tokio::test]
+    async fn ping_is_never_answered_from_the_verification_cache() {
+        let _s = sandbox();
+        let server = FakeServer::bare();
+        sign_in(&server.url);
+        request("/Items", None, None).await.unwrap();
+        server.set_handler(|_| Resp::status(503));
+        server.forget_requests();
+        assert_eq!(ping().await, Ok(false));
+        // Three quick failures, three attempts.
+        assert_eq!(info_count(&server), 3);
+    }
+
+    #[tokio::test]
+    async fn ping_of_an_unreachable_server_is_false_not_an_error() {
+        let _s = sandbox();
+        sign_in(&FakeServer::dead_url());
+        assert_eq!(ping().await, Ok(false));
+    }
+
+    /// A failure that took its time is already a wait, and is not repeated.
+    #[tokio::test]
+    async fn ping_does_not_repeat_a_slow_failure() {
+        let _s = sandbox();
+        let server = FakeServer::start(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(1700));
+            Resp::status(502)
+        });
+        sign_in(&server.url);
+        assert_eq!(ping().await, Ok(false));
+        assert_eq!(info_count(&server), 1);
+    }
+
+    #[tokio::test]
+    async fn ping_reports_a_changed_identity_as_an_error() {
+        let _s = sandbox();
+        let server = FakeServer::bare();
+        sign_in(&server.url);
+        config::merge(json!({ "server_id": "someone-else" })).unwrap();
+        assert_eq!(kind_of(&ping().await.unwrap_err()), "identity");
+        assert_eq!(info_count(&server), 1);
+    }
+
+    #[tokio::test]
+    async fn ping_without_a_server_is_a_config_error() {
+        let _s = sandbox();
+        assert_eq!(kind_of(&ping().await.unwrap_err()), "config");
+    }
+
+    // ---------- Sign in ----------
+
+    #[tokio::test]
+    async fn login_keeps_the_token_here_and_records_who_signed_in_where() {
+        let _s = sandbox();
+        let server = signing_server("srv-1", "tok-ann", "u-ann");
+        let out = login(&server.url, "ann", "pw").await.unwrap();
+        // The frontend learns who, not the credential.
+        assert!(!out.to_string().contains("tok-ann"));
+        assert_eq!(out["server"], json!(server.url));
+        assert_eq!(out["secure"], json!(false));
+        assert_eq!(out["user_id"], json!("u-ann"));
+        assert_eq!(out["user_name"], json!("Ann"));
+        assert_eq!(out["device_id"], json!(config::device_id()));
+        assert_eq!(out["token_storage"], json!(crate::secret::backend_name()));
+
+        assert_eq!(crate::secret::token().as_deref(), Some("tok-ann"));
+        let cfg = config::load();
+        assert_eq!(cfg["server"], json!(server.url));
+        assert_eq!(cfg["server_id"], json!("srv-1"));
+        assert_eq!(cfg["server_secure"], json!(false));
+        assert_eq!(cfg["user_id"], json!("u-ann"));
+        assert_eq!(cfg["account_key"], json!("srv-1|u-ann"));
+        assert_eq!(cfg["known_servers"], json!([{ "server": server.url, "name": "Fake" }]));
+        let list = accounts();
+        assert_eq!(list.as_array().unwrap().len(), 1);
+        assert_eq!(list[0]["key"], json!("srv-1|u-ann"));
+        assert_eq!(list[0]["server_name"], json!("Fake"));
+        assert_eq!(list[0]["current"], json!(true));
+        assert!(!list.to_string().contains("tok-ann"));
+    }
+
+    #[tokio::test]
+    async fn login_sends_the_credentials_under_the_anonymous_header() {
+        let _s = sandbox();
+        let server = signing_server("srv-1", "tok-ann", "u-ann");
+        login(&server.url, "ann", "secret pw").await.unwrap();
+        let req = server.requests_to("/Users/AuthenticateByName").pop().unwrap();
+        assert_eq!(req.method, "POST");
+        assert_eq!(req.json(), json!({ "Username": "ann", "Pw": "secret pw" }));
+        let auth = req.header("authorization").unwrap();
+        assert!(auth.starts_with("MediaBrowser Client=\"Aquarium\""), "{auth}");
+        assert!(!auth.contains("Token="), "{auth}");
+        assert!(req.header("x-emby-token").is_none());
+    }
+
+    #[tokio::test]
+    async fn sign_in_leaves_the_server_verified_for_the_session() {
+        let _s = sandbox();
+        let server = signing_server("srv-1", "tok-ann", "u-ann");
+        login(&server.url, "ann", "pw").await.unwrap();
+        request("/Items", None, None).await.unwrap();
+        // The probe's check, and no second one before the first request.
+        assert_eq!(info_count(&server), 1);
+    }
+
+    #[tokio::test]
+    async fn login_failures_say_what_kind_they_are() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|req| match req.json()["Username"].as_str() {
+            Some("wrong") => Resp::status(401),
+            Some("broken") => Resp::status(500),
+            Some("no-token") => Resp::json(200, json!({ "User": { "Id": "u" } })),
+            Some("no-user") => Resp::json(200, json!({ "AccessToken": "t" })),
+            _ => Resp::bytes(200, "text/html", b"<html>".to_vec()),
+        });
+        let try_as = |user: &'static str| {
+            let url = server.url.clone();
+            async move { login(&url, user, "pw").await.unwrap_err() }
+        };
+        assert_eq!(try_as("wrong").await, "auth|Invalid username or password");
+        assert_eq!(try_as("broken").await, "server|Login failed (500)");
+        assert_eq!(try_as("no-token").await, "server|Server issued no access token");
+        assert_eq!(try_as("no-user").await, "server|Server returned no user");
+        assert_eq!(kind_of(&try_as("garbage").await), "server");
+        // None of those left anything behind.
+        assert!(crate::secret::token().is_none());
+        assert!(config::load().get("user_id").is_none());
+        assert_eq!(kind_of(&login(&FakeServer::dead_url(), "a", "b").await.unwrap_err()), "offline");
+    }
+
+    #[tokio::test]
+    async fn quick_connect_turns_an_approved_code_into_a_session() {
+        let _s = sandbox();
+        let server = signing_server("srv-1", "tok-qc", "u-qc");
+        let out = login_quick_connect(&server.url, "code-123").await.unwrap();
+        assert_eq!(out["user_id"], json!("u-qc"));
+        assert_eq!(crate::secret::token().as_deref(), Some("tok-qc"));
+        let req = server.requests_to("/Users/AuthenticateWithQuickConnect").pop().unwrap();
+        assert_eq!(req.json(), json!({ "Secret": "code-123" }));
+        assert!(!req.header("authorization").unwrap().contains("Token="));
+
+        let refusing = FakeServer::jellyfin(|_| Resp::status(400));
+        let e = login_quick_connect(&refusing.url, "code-123").await.unwrap_err();
+        assert_eq!(e, "auth|The server didn't accept that code (400)");
+        let garbled = FakeServer::jellyfin(|_| Resp::bytes(200, "text/plain", b"ok".to_vec()));
+        assert_eq!(kind_of(&login_quick_connect(&garbled.url, "c").await.unwrap_err()), "server");
+    }
+
+    // ---------- Several accounts ----------
+
+    #[test]
+    fn an_account_is_keyed_by_the_servers_id_where_it_has_one() {
+        assert_eq!(account_key(Some("srv"), "http://a", "u"), "srv|u");
+        assert_eq!(account_key(Some(""), "http://a", "u"), "http://a|u");
+        assert_eq!(account_key(None, "http://a", "u"), "http://a|u");
+    }
+
+    #[test]
+    fn known_servers_are_newest_first_without_repeats_and_at_most_eight() {
+        let _s = sandbox();
+        for i in 0..10 {
+            remember_server(&format!("http://s{i}"), Some("S"));
+        }
+        remember_server("http://s5", None);
+        let list = config::load()["known_servers"].as_array().cloned().unwrap();
+        let names: Vec<&str> = list.iter().map(|s| s["server"].as_str().unwrap()).collect();
+        assert_eq!(names, ["http://s5", "http://s9", "http://s8", "http://s7", "http://s6", "http://s4", "http://s3", "http://s2"]);
+        assert_eq!(list[0]["name"], Value::Null);
+    }
+
+    #[test]
+    fn an_install_from_before_accounts_gets_a_key_and_shows_on_the_list() {
+        let _s = sandbox();
+        sign_in("http://127.0.0.1:1");
+        assert!(config::load().get("account_key").is_none());
+        let list = accounts();
+        let key = format!("http://127.0.0.1:1|{TEST_USER}");
+        assert_eq!(list.as_array().unwrap().len(), 1);
+        assert_eq!(list[0]["key"], json!(key));
+        assert_eq!(list[0]["current"], json!(true));
+        assert_eq!(config::load()["account_key"], json!(key));
+        // Its token was filed in its own slot, so switching away and back works.
+        assert_eq!(crate::secret::account_token(&key).as_deref(), Some(TEST_TOKEN));
+    }
+
+    #[test]
+    fn the_account_list_never_carries_a_token() {
+        let _s = sandbox();
+        config::upsert_account(json!({ "key": "k1", "server": "http://a", "user_id": "u", "token": "file-mode-token" })).unwrap();
+        let list = accounts();
+        assert_eq!(list[0]["key"], json!("k1"));
+        assert_eq!(list[0]["current"], json!(false));
+        assert!(list[0].get("token").is_none());
+        assert!(!list.to_string().contains("file-mode-token"));
+    }
+
+    #[tokio::test]
+    async fn a_second_sign_in_keeps_the_first_accounts_token_in_its_own_slot() {
+        // Regression: 13ea908 (tokens of saved accounts were dropped where
+        // there is no keyring, because the token was filed before the
+        // account's entry existed).
+        let _s = sandbox();
+        let a = signing_server("srv-a", "tok-a", "u-a");
+        let b = signing_server("srv-b", "tok-b", "u-b");
+        login(&a.url, "a", "pw").await.unwrap();
+        login(&b.url, "b", "pw").await.unwrap();
+        assert_eq!(crate::secret::token().as_deref(), Some("tok-b"));
+        assert_eq!(crate::secret::account_token("srv-a|u-a").as_deref(), Some("tok-a"));
+        assert_eq!(crate::secret::account_token("srv-b|u-b").as_deref(), Some("tok-b"));
+        let list = accounts();
+        let current: Vec<(&str, bool)> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| (a["key"].as_str().unwrap(), a["current"].as_bool().unwrap()))
+            .collect();
+        assert_eq!(current, [("srv-a|u-a", false), ("srv-b|u-b", true)]);
+    }
+
+    #[tokio::test]
+    async fn switching_accounts_moves_the_token_and_rechecks_the_identity() {
+        // Regression: d233f84 (identity pinning follows the account switched to).
+        let _s = sandbox();
+        let a = signing_server("srv-a", "tok-a", "u-a");
+        let b = signing_server("srv-b", "tok-b", "u-b");
+        login(&a.url, "a", "pw").await.unwrap();
+        login(&b.url, "b", "pw").await.unwrap();
+
+        assert_eq!(switch_account("srv-b|u-b").unwrap(), json!({ "switched": false }));
+        assert_eq!(switch_account("srv-a|u-a").unwrap(), json!({ "switched": true }));
+        assert_eq!(crate::secret::token().as_deref(), Some("tok-a"));
+        let cfg = config::load();
+        assert_eq!(cfg["server"], json!(a.url));
+        assert_eq!(cfg["server_id"], json!("srv-a"));
+        assert_eq!(cfg["user_id"], json!("u-a"));
+        assert_eq!(cfg["account_key"], json!("srv-a|u-a"));
+        // The account left keeps its token for coming back.
+        assert_eq!(crate::secret::account_token("srv-b|u-b").as_deref(), Some("tok-b"));
+
+        // The next request checks A's identity again, rather than trusting B's.
+        a.forget_requests();
+        request("/Items", None, None).await.unwrap();
+        assert_eq!(info_count(&a), 1);
+        assert_eq!(token_in(&a.requests_to("/Items")[0]).as_deref(), Some("tok-a"));
+
+        // And an A that now answers as someone else is refused.
+        switch_account("srv-b|u-b").unwrap();
+        config::upsert_account(json!({ "key": "srv-a|u-a", "server_id": "changed" })).unwrap();
+        switch_account("srv-a|u-a").unwrap();
+        assert_eq!(kind_of(&request("/Items", None, None).await.unwrap_err()), "identity");
+    }
+
+    #[test]
+    fn switching_to_an_account_that_is_gone_or_has_no_token_fails() {
+        let _s = sandbox();
+        sign_in("http://127.0.0.1:1");
+        let e = switch_account("nobody").unwrap_err();
+        assert_eq!(e, "config|That account isn't on this device any more");
+        config::upsert_account(json!({ "key": "srv-x|u-x", "server": "http://127.0.0.1:2", "user_id": "u-x" })).unwrap();
+        let e = switch_account("srv-x|u-x").unwrap_err();
+        assert_eq!(kind_of(&e), "auth");
+        // The only way back is to sign in again, so it leaves the list.
+        assert!(config::accounts().iter().all(|a| a["key"] != json!("srv-x|u-x")));
+        // Nothing about the account in use changed.
+        assert_eq!(crate::secret::token().as_deref(), Some(TEST_TOKEN));
+        assert_eq!(config::load()["server"], json!("http://127.0.0.1:1"));
+    }
+
+    #[tokio::test]
+    async fn forgetting_another_account_revokes_it_on_its_own_server_with_its_own_token() {
+        let _s = sandbox();
+        let a = signing_server("srv-a", "tok-a", "u-a");
+        let b = signing_server("srv-b", "tok-b", "u-b");
+        login(&a.url, "a", "pw").await.unwrap();
+        login(&b.url, "b", "pw").await.unwrap();
+
+        let e = forget_account("srv-b|u-b").await.unwrap_err();
+        assert_eq!(kind_of(&e), "config");
+
+        assert_eq!(forget_account("srv-a|u-a").await.unwrap(), json!({ "revoked": true }));
+        let out = a.requests_to("/Sessions/Logout");
+        assert_eq!(out.len(), 1);
+        assert_eq!(token_in(&out[0]).as_deref(), Some("tok-a"));
+        assert!(b.requests_to("/Sessions/Logout").is_empty());
+        assert!(crate::secret::account_token("srv-a|u-a").is_none());
+        assert!(config::accounts().iter().all(|x| x["key"] != json!("srv-a|u-a")));
+        // Still signed in as B.
+        assert_eq!(crate::secret::token().as_deref(), Some("tok-b"));
+
+        // An account with no token left has nothing to revoke.
+        config::upsert_account(json!({ "key": "gone", "server": a.url })).unwrap();
+        assert_eq!(forget_account("gone").await.unwrap(), json!({ "revoked": true }));
+    }
+
+    #[tokio::test]
+    async fn a_token_the_server_already_refuses_counts_as_revoked() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|req| match req.path() {
+            "/Sessions/Logout" => Resp::status(401),
+            _ => Resp::status(404),
+        });
+        sign_in(&server.url);
+        assert_eq!(logout().await.unwrap(), json!({ "revoked": true, "pending": false }));
+        assert_eq!(server.requests_to("/Sessions/Logout").len(), 1);
+    }
+
+    // ---------- Before signing in ----------
+
+    #[tokio::test]
+    async fn public_requests_reach_only_the_sign_in_screens_paths() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|req| match req.path() {
+            "/Users/Public" => Resp::json(200, json!([{ "Name": "Ann" }])),
+            "/QuickConnect/Initiate" => Resp::json(200, json!({ "Code": "123456", "Secret": "s" })),
+            "/QuickConnect/Enabled" => Resp::bytes(200, "text/plain", b"not json".to_vec()),
+            _ => Resp::json(200, json!({ "Authenticated": true })),
+        });
+        let out = public_request(&server.url, "/Users/Public", None).await.unwrap();
+        assert_eq!(out, json!({ "status": 200, "body": [{ "Name": "Ann" }] }));
+        let out = public_request(&server.url, "/QuickConnect/Initiate", Some("POST".into())).await.unwrap();
+        assert_eq!(out["body"]["Code"], json!("123456"));
+        let out = public_request(&server.url, "/QuickConnect/Connect?secret=abc", None).await.unwrap();
+        assert_eq!(out["body"]["Authenticated"], json!(true));
+        assert_eq!(public_request(&server.url, "/QuickConnect/Enabled", None).await.unwrap()["body"], Value::Null);
+        assert_eq!(server.requests_to("/QuickConnect/Initiate")[0].method, "POST");
+        for r in server.requests() {
+            assert!(!r.header("authorization").unwrap_or("").contains("Token="));
+        }
+
+        let before = server.requests().len();
+        for bad in ["/Users/Me", "/Users/Public/../Me", "/QuickConnect/Connect", "/QuickConnect/Enabledx", "Users/Public"] {
+            assert_eq!(public_request(&server.url, bad, None).await.unwrap_err(), "config|Not a public path", "{bad}");
+        }
+        assert_eq!(server.requests().len(), before);
+        assert_eq!(kind_of(&public_request("ftp://x", "/Users/Public", None).await.unwrap_err()), "config");
+        let e = public_request(&server.url, "/Users/Public", Some("BAD VERB".into())).await.unwrap_err();
+        assert_eq!(kind_of(&e), "config");
+        let e = public_request(&FakeServer::dead_url(), "/Users/Public", None).await.unwrap_err();
+        assert_eq!(kind_of(&e), "offline");
+    }
+
+    // ---------- Sign out ----------
+
+    #[tokio::test]
+    async fn logout_revokes_the_token_and_clears_everything_local() {
+        let _s = sandbox();
+        let server = signing_server("srv-1", "tok-ann", "u-ann");
+        login(&server.url, "ann", "pw").await.unwrap();
+        let logs = config::data_dir().join("mpv-logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("mpv.log"), "Authorization: token").unwrap();
+
+        assert_eq!(logout().await.unwrap(), json!({ "revoked": true, "pending": false }));
+        let out = server.requests_to("/Sessions/Logout");
+        assert_eq!(out.len(), 1);
+        assert_eq!(token_in(&out[0]).as_deref(), Some("tok-ann"));
+        assert!(out[0].header("x-emby-token").is_none());
+
+        assert!(crate::secret::token().is_none());
+        assert!(crate::secret::account_token("srv-1|u-ann").is_none());
+        let cfg = config::load();
+        for gone in ["user_id", "user_name", "account_key"] {
+            assert!(cfg.get(gone).is_none(), "{gone} survived sign-out");
+        }
+        // The server stays offered on the sign-in screen.
+        assert_eq!(cfg["server"], json!(server.url));
+        assert_eq!(cfg["known_servers"][0]["server"], json!(server.url));
+        assert!(config::accounts().is_empty());
+        assert!(!logs.exists(), "mpv logs hold the token and go at sign-out");
+        assert!(!revocation_pending());
+
+        // The next sign-in checks the server again.
+        server.forget_requests();
+        sign_in(&server.url);
+        request("/Items", None, None).await.unwrap();
+        assert_eq!(info_count(&server), 1);
+    }
+
+    #[tokio::test]
+    async fn a_token_the_server_would_not_revoke_is_parked_and_retried() {
+        let _s = sandbox();
+        let server = FakeServer::jellyfin(|req| match req.path() {
+            "/Sessions/Logout" => Resp::status(500),
+            _ => Resp::status(404),
+        });
+        sign_in(&server.url);
+        let device = config::device_id();
+        let out = logout().await.unwrap();
+        assert_eq!(out["revoked"], json!(false));
+        // Three tries before giving up for now.
+        assert_eq!(server.requests_to("/Sessions/Logout").len(), 3);
+        // Signed out locally either way.
+        assert!(crate::secret::token().is_none());
+        assert!(config::load().get("user_id").is_none());
+        // Parked where the platform can keep it (the keyring); on Linux
+        // without a session bus it can't, and says so.
+        assert_eq!(out["pending"], json!(crate::secret::pending_revocation().is_some()));
+        if out["pending"] != json!(true) {
+            eprintln!("skipped the retry half: no keyring to park the token in");
+            return;
+        }
+        assert!(revocation_pending());
+        let parked = crate::secret::pending_revocation().unwrap();
+        assert_eq!(parked["token"], json!(TEST_TOKEN));
+        assert_eq!(parked["server"], json!(server.url));
+        assert_eq!(parked["device_id"], json!(device));
+
+        // Next launch, the server answers: the parked token is revoked under
+        // the device id it was issued to, and the record goes.
+        server.set_handler(|_| Resp::status(204));
+        server.forget_requests();
+        config::merge(json!({ "device_id": "a-new-device-id" })).unwrap();
+        retry_pending_revocation().await;
+        let asked = server.requests_to("/Sessions/Logout");
+        assert_eq!(asked.len(), 1);
+        assert_eq!(token_in(&asked[0]).as_deref(), Some(TEST_TOKEN));
+        assert!(asked[0].header("authorization").unwrap().contains(&format!("DeviceId=\"{device}\"")));
+        assert!(!revocation_pending());
+        assert!(crate::test_support::debug_log().contains("pending token revocation completed"));
+    }
+
+    #[tokio::test]
+    async fn a_parked_revocation_waits_while_the_server_is_unreachable() {
+        let _s = sandbox();
+        if crate::secret::park_pending_revocation("tok", &FakeServer::dead_url(), "dev").is_err() {
+            eprintln!("skipped: no keyring to park a token in");
+            return;
+        }
+        retry_pending_revocation().await;
+        assert!(revocation_pending());
+        assert!(crate::test_support::debug_log().contains("server: logout failed"));
+    }
+
+    #[tokio::test]
+    async fn a_parked_revocation_with_no_server_is_dropped() {
+        let _s = sandbox();
+        if crate::secret::park_pending_revocation("tok", "", "dev").is_err() {
+            eprintln!("skipped: no keyring to park a token in");
+            return;
+        }
+        assert!(revocation_pending());
+        retry_pending_revocation().await;
+        assert!(!revocation_pending());
+        // Nothing parked: nothing to do.
+        retry_pending_revocation().await;
+    }
+
+    #[tokio::test]
+    async fn logout_with_no_server_or_token_still_signs_out() {
+        let _s = sandbox();
+        config::merge(json!({ "user_id": "u", "user_name": "n" })).unwrap();
+        assert_eq!(logout().await.unwrap(), json!({ "revoked": true, "pending": false }));
+        assert!(config::load().get("user_id").is_none());
+    }
+}
+
+/// Against the live QA Jellyfin (see `test_support::qa`). Each test skips,
+/// saying why, when the server or its account isn't there.
+#[cfg(test)]
+mod qa_tests {
+    use super::*;
+    use crate::test_support::{qa, sandbox, with_qa_session, QA_DEVICE_ID};
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn signing_in_works_and_signing_out_kills_the_token_on_the_server() {
+        let seen: Arc<Mutex<Option<(String, String)>>> = Arc::new(Mutex::new(None));
+        let keep = seen.clone();
+        with_qa_session(|qa, who| async move {
+            assert_eq!(who["user_name"], json!(qa.account.name));
+            assert_eq!(who["server"], json!(qa.server));
+            assert!(!who.to_string().contains("AccessToken"));
+            let token = crate::secret::token().expect("token kept in Rust");
+            assert!(!who.to_string().contains(&token));
+            let me = request(&format!("/Users/{}", who["user_id"].as_str().unwrap()), None, None).await.unwrap();
+            assert_eq!(me["status"], json!(200));
+            assert_eq!(me["body"]["Name"], json!(qa.account.name));
+            let cfg = config::load();
+            assert!(cfg["server_id"].as_str().is_some_and(|s| !s.is_empty()));
+            *keep.lock().unwrap() = Some((qa.server.clone(), token));
+        })
+        .await;
+        let Some((server, token)) = seen.lock().unwrap().clone() else { return };
+        // with_qa_session signed out and asserted `revoked`; the server agrees.
+        let status = jellyfin::http()
+            .get(format!("{server}/System/Info"))
+            .header("Authorization", jellyfin::auth_header(&token, QA_DEVICE_ID))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16();
+        assert_eq!(status, 401, "the signed-out token still works");
+    }
+
+    #[tokio::test]
+    async fn the_qa_server_answers_probe_ping_and_the_public_calls() {
+        with_qa_session(|qa, _who| async move {
+            let probed = probe(&qa.server).await.unwrap();
+            assert_eq!(probed["server_id"], config::load()["server_id"]);
+            assert!(probed["version"].as_str().is_some_and(|v| !v.is_empty()));
+            assert_eq!(ping().await, Ok(true));
+            let users = public_request(&qa.server, "/Users/Public", None).await.unwrap();
+            assert_eq!(users["status"], json!(200));
+            assert!(users["body"].is_array());
+            let qc = public_request(&qa.server, "/QuickConnect/Enabled", None).await.unwrap();
+            assert_eq!(qc["status"], json!(200));
+            assert!(qc["body"].is_boolean());
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn the_qa_server_serves_bytes_images_bitrate_tests_and_warms_streams() {
+        with_qa_session(|qa, _who| async move {
+            let info = get_bytes("/System/Info").await.unwrap();
+            let info: Value = serde_json::from_slice(&info).unwrap();
+            assert!(info["Id"].is_string());
+            let bps = bitrate_test(256 * 1024).await.unwrap();
+            assert!(bps > 0.0);
+            let item = crate::test_support::qa_find_item("Movie", "FX Long Direct Play", "Trickplay")
+                .await
+                .expect("FX Long Direct Play in the QA library");
+            let id = item["Id"].as_str().unwrap();
+            let tile = image(&format!("/Videos/{id}/Trickplay/320/0.jpg")).await.unwrap();
+            assert!(tile.starts_with("data:image/jpeg;base64,/9j/"), "{}", &tile[..40.min(tile.len())]);
+            warm(&format!("{}/Items/{id}/Download", qa.server)).await.unwrap();
+        })
+        .await;
+    }
+
+    /// A made-up account name, so no real account collects a failed attempt.
+    #[tokio::test]
+    async fn an_unknown_account_is_refused_as_an_auth_error() {
+        let _s = sandbox();
+        let Some(qa) = qa().await else { return };
+        let e = login(&qa.server, "suite-linux-no-such-user", "wrong").await.unwrap_err();
+        assert_eq!(e, "auth|Invalid username or password");
+        assert!(crate::secret::token().is_none());
     }
 }

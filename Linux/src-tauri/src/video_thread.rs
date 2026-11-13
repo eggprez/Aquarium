@@ -188,6 +188,30 @@ struct State {
     last_probe: Instant,
 }
 
+/// The EGL buffer for a size: logical × scale, at the height mpv fits to;
+/// 1×1 with no size yet.
+fn buffer_dims_of(size: Option<Size>) -> (i32, i32) {
+    match size {
+        Some(s) => (s.w_css * s.scale, s.full_h_css * s.scale),
+        None => (1, 1),
+    }
+}
+
+/// `size` cropped for a fullscreen bar `bar_css` tall: only the visible height
+/// changes, and never below 1.
+fn clipped(mut size: Size, bar_css: i32) -> Size {
+    size.vis_h_css = (size.full_h_css - bar_css.max(0)).max(1);
+    size
+}
+
+/// A redraw already due earlier than `at` stands; otherwise `at`.
+fn earliest(due: Option<Instant>, at: Instant) -> Instant {
+    match due {
+        Some(t) if t < at => t,
+        _ => at,
+    }
+}
+
 /// While hidden, draw one real frame this often anyway, with a fresh frame
 /// callback. Costs nothing worth measuring; guarantees a lost callback can
 /// freeze the picture for at most this long.
@@ -199,10 +223,7 @@ impl State {
     }
 
     fn buffer_dims(&self) -> (i32, i32) {
-        match self.size {
-            Some(s) => (s.w_css * s.scale, s.full_h_css * s.scale),
-            None => (1, 1),
-        }
+        buffer_dims_of(self.size)
     }
 
     /// (Re)build the EGL window surface on the current subsurface at the
@@ -368,8 +389,8 @@ impl State {
     /// See [`Cmd::Clip`]. Nothing to do before the first size: the `Resize`
     /// that brings it already carries the visible height.
     fn clip(&mut self, bar_css: i32) {
-        let Some(mut size) = self.size else { return };
-        size.vis_h_css = (size.full_h_css - bar_css.max(0)).max(1);
+        let Some(size) = self.size else { return };
+        let size = clipped(size, bar_css);
         let parent = self.sub.as_ref().map(|s| s.parent as usize).unwrap_or(0);
         self.resize(size, parent);
     }
@@ -377,10 +398,7 @@ impl State {
     fn schedule_redraw(&mut self, after: Duration) {
         if self.can_draw() {
             let at = Instant::now() + after;
-            self.redraw_at = Some(match self.redraw_at {
-                Some(t) if t < at => t,
-                _ => at,
-            });
+            self.redraw_at = Some(earliest(self.redraw_at, at));
         }
     }
 
@@ -608,5 +626,54 @@ fn run(
     if let Some(sub) = st.sub.take() {
         sub.destroy();
         st.globals.flush();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn size(w: i32, full: i32, vis: i32, scale: i32) -> Size {
+        Size { w_css: w, full_h_css: full, vis_h_css: vis, scale }
+    }
+
+    /// The buffer is a whole multiple of the scale (a buffer that isn't is a
+    /// protocol error and a disconnect), at the height mpv fits to.
+    #[test]
+    fn buffers_are_logical_size_times_scale() {
+        assert_eq!(buffer_dims_of(None), (1, 1));
+        assert_eq!(buffer_dims_of(Some(size(1440, 960, 888, 2))), (2880, 1920));
+        assert_eq!(buffer_dims_of(Some(size(640, 360, 360, 1))), (640, 360));
+    }
+
+    /// The bar reveal crops the visible height only; the buffer, and so the
+    /// picture, stays put.
+    #[test]
+    fn a_clip_changes_only_the_visible_height() {
+        let full = size(1440, 960, 960, 2);
+        let c = clipped(full, 72);
+        assert_eq!(c, size(1440, 960, 888, 2));
+        assert_eq!(buffer_dims_of(Some(c)), buffer_dims_of(Some(full)));
+        assert_eq!(clipped(c, 0), full, "hiding the bar uncrops");
+        assert_eq!(clipped(full, -5), full, "a negative bar is no bar");
+        assert_eq!(clipped(full, 5000).vis_h_css, 1, "never below one pixel");
+    }
+
+    /// GTK allocates twice per window resize; the earlier deadline wins so a
+    /// burst of resizes still redraws on time.
+    #[test]
+    fn the_earliest_redraw_wins() {
+        let now = Instant::now();
+        let later = now + Duration::from_millis(20);
+        assert_eq!(earliest(None, later), later);
+        assert_eq!(earliest(Some(now), later), now);
+        assert_eq!(earliest(Some(later), now), now);
+        assert_eq!(earliest(Some(now), now), now);
+    }
+
+    #[test]
+    fn timing_constants_are_what_the_comments_promise() {
+        assert_eq!(RESIZE_DEBOUNCE, Duration::from_millis(20));
+        assert_eq!(HIDDEN_PROBE_EVERY, Duration::from_secs(2));
     }
 }

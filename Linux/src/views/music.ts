@@ -343,7 +343,9 @@ async function renderLibrary(root: HTMLElement, tabArg: string): Promise<void> {
   let start = 0;
   let total = Infinity;
   let gen = 0;
-  let loading = false;
+  /** The generation whose page is in flight, or -1. Per generation, so a
+   *  reset while a page loads fetches the new list at once, not never. */
+  let loadingGen = -1;
   let container: HTMLElement;
   let songsSoFar: any[] = [];
   /** The first page of an unfiltered list is kept, to paint at once next time. */
@@ -381,9 +383,9 @@ async function renderLibrary(root: HTMLElement, tabArg: string): Promise<void> {
   };
 
   const more = async () => {
-    if (loading || start >= total) return;
-    loading = true;
+    if (loadingGen === gen || start >= total) return;
     const my = gen;
+    loadingGen = my;
     try {
       const from = start;
       const r = await fetchPage(from);
@@ -397,7 +399,7 @@ async function renderLibrary(root: HTMLElement, tabArg: string): Promise<void> {
     } catch (e) {
       if (my === gen) body.append(errorState("Couldn't load the library", e, () => void reset()));
     } finally {
-      loading = false;
+      if (loadingGen === my) loadingGen = -1;
     }
   };
 
@@ -471,7 +473,8 @@ async function renderGenresTab(bar: HTMLElement, body: HTMLElement): Promise<voi
   else body.append(spinner());
   filter.addEventListener("input", paint);
   const fresh = await m.musicGenres();
-  if (itemSignature(fresh) !== itemSignature(all)) {
+  // Nothing cached means the spinner is up: paint even an empty answer.
+  if (!all.length || itemSignature(fresh) !== itemSignature(all)) {
     all = fresh;
     paint();
   }

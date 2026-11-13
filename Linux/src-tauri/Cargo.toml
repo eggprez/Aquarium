@@ -50,6 +50,11 @@ dbus = "0.9"
 # would be hand-dispatched from a match on the message name.
 dbus-crossroads = "0.5"
 
+[dev-dependencies]
+# `tauri::test`'s mock runtime, for the back-end tests that need an AppHandle
+# (src/test_support.rs). Test builds only.
+tauri = { version = "2", features = ["protocol-asset", "test"] }
+
 [profile.release]
 lto = true
 codegen-units = 1
