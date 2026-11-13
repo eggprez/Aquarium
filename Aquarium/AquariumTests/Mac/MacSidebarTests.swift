@@ -71,27 +71,68 @@ final class MacSidebarTests: MacUnitTestCase {
     // MARK: Re-click
 
     func testClickThatMovedTheSelectionIsNotAReclick() {
+        var rule = SidebarClickRule()
         let now = Date()
-        XCTAssertTrue(MacSidebarRows.endsSelectingClick(awaitsTap: true, changedAt: now.addingTimeInterval(-0.1), now: now))
+        rule.selectionMoved(to: "lib-f", at: now)
+        XCTAssertFalse(rule.tapped("lib-f", isShown: true, at: now.addingTimeInterval(0.1)))
     }
 
     /// Regression: SidebarSlowClickResetsSection. A click held longer than
     /// 0.4 s on a row it was selecting counted as a re-click and threw away
     /// the pages it had come back for. Source: commit 6704c21 (first 9c6fb8c);
-    /// Views/MacSidebar.swift:56-61.
+    /// Views/MacSidebar.swift.
     func testBugSidebarSlowClickResetsSection() {
+        var rule = SidebarClickRule()
         let now = Date()
-        XCTAssertTrue(MacSidebarRows.endsSelectingClick(awaitsTap: true, changedAt: now.addingTimeInterval(-1.5), now: now),
-                      "an unhurried 1.5 s press still ends the click that selected the row")
+        rule.selectionMoved(to: "lib-f", at: now)
+        XCTAssertFalse(rule.tapped("lib-f", isShown: true, at: now.addingTimeInterval(1.5)),
+                       "an unhurried 1.5 s press still ends the click that selected the row")
+    }
+
+    /// Regression: SidebarReclickOrderDependent. The rule assumed the list's
+    /// selection always arrives before the row's tap. When the tap came
+    /// first, the selection change after it was left waiting for a tap, and
+    /// swallowed the real re-click that followed. Source: Views/MacSidebar.swift
+    /// (`SidebarClickRule`).
+    func testBugTapBeforeSelectionStillPairs() {
+        var rule = SidebarClickRule()
+        let now = Date()
+        XCTAssertFalse(rule.tapped("lib-f", isShown: false, at: now), "the selecting click's tap")
+        rule.selectionMoved(to: "lib-f", at: now.addingTimeInterval(0.05))
+        XCTAssertTrue(rule.tapped("lib-f", isShown: true, at: now.addingTimeInterval(1)),
+                      "the next click on the selected row is a re-click")
     }
 
     func testTapLongAfterAnArrowKeyMoveIsAReclick() {
+        var rule = SidebarClickRule()
         let now = Date()
-        XCTAssertFalse(MacSidebarRows.endsSelectingClick(awaitsTap: true, changedAt: now.addingTimeInterval(-30), now: now))
+        rule.selectionMoved(to: "lib-f", at: now.addingTimeInterval(-30))
+        XCTAssertTrue(rule.tapped("lib-f", isShown: true, at: now))
     }
 
     func testSecondTapOnSelectedRowIsAReclick() {
-        XCTAssertFalse(MacSidebarRows.endsSelectingClick(awaitsTap: false, changedAt: Date(), now: Date()))
+        var rule = SidebarClickRule()
+        let now = Date()
+        rule.selectionMoved(to: "lib-f", at: now)
+        XCTAssertFalse(rule.tapped("lib-f", isShown: true, at: now.addingTimeInterval(0.1)))
+        XCTAssertTrue(rule.tapped("lib-f", isShown: true, at: now.addingTimeInterval(1)))
+        XCTAssertTrue(rule.tapped("lib-f", isShown: true, at: now.addingTimeInterval(2)))
+    }
+
+    func testSelectionMovedElsewhereDoesNotSwallowAReclick() {
+        var rule = SidebarClickRule()
+        let now = Date()
+        rule.selectionMoved(to: "favorites", at: now)
+        XCTAssertTrue(rule.tapped("lib-f", isShown: true, at: now.addingTimeInterval(0.1)))
+    }
+
+    func testStaleTapDoesNotPairWithALaterArrowKeyMove() {
+        var rule = SidebarClickRule()
+        let now = Date()
+        _ = rule.tapped("lib-f", isShown: false, at: now.addingTimeInterval(-60))
+        rule.selectionMoved(to: "lib-f", at: now)
+        XCTAssertFalse(rule.tapped("lib-f", isShown: true, at: now.addingTimeInterval(0.1)),
+                       "the selection waits for its own click's tap")
     }
 
     // MARK: Badge

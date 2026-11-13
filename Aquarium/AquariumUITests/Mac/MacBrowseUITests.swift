@@ -42,9 +42,9 @@ final class MacBrowseUITests: MacUITestCase {
     /// Regression: SidebarSlowClickResetsSection (commit 6704c21) for the
     /// second half.
     func testReclickingTheSelectedRowGoesToTheTop() throws {
-        let expectation = XCTExpectedFailure.Options()
-        expectation.isStrict = false
-        XCTExpectFailure("bug (suspected): the sidebar's re-click rule depends on the order of the List's selection and the row's tap — a 0.15 s click on Films lost the title page left there; an instant click kept it but the next re-click didn't go to the top (Views/MacSidebar.swift:49-72)", options: expectation)
+        // Regression: SidebarReclickOrderDependent — the rule assumed the
+        // list's selection always arrived before the row's tap. Source:
+        // Views/MacSidebar.swift (`SidebarClickRule`).
         let fx = try fixtures()
         let film = try fx.item("film.long_direct")
         let lib = try fx.libraryId("Fixture Films")
@@ -52,15 +52,18 @@ final class MacBrowseUITests: MacUITestCase {
         openTitle(named: film.name, id: film.id)        // pushed on the Films section
         // Away and back: the click that selects Films keeps the title page.
         openSection("favorites")
-        // Clicks held as long as a person's (~0.15 s): the row's re-click
-        // rule tells the selecting click from a second one by the order the
-        // list's selection and the tap arrive in.
-        sidebarRow("lib-\(lib)").press(forDuration: 0.15)
+        // Clicks held as long as a person's (~0.15 s). Not `press(forDuration:)`:
+        // on a Mac that reaches neither the list nor the row's tap (checked
+        // 2026-11-13); `click(forDuration:thenDragTo:)` onto the same row does.
+        // A real click's tap arrives before the list's selection change.
+        let films = sidebarRow("lib-\(lib)")
+        films.waitToExist(20)
+        films.click(forDuration: 0.15, thenDragTo: films)
         XCTAssertTrue(app.element(TestID.Detail.page(film.id)).waitForExistence(timeout: 10),
                       "selecting Films again comes back to the page left open there")
         // A second click on the row already selected: back to the top.
         Thread.sleep(forTimeInterval: 1)
-        sidebarRow("lib-\(lib)").press(forDuration: 0.15)
+        films.click(forDuration: 0.15, thenDragTo: films)
         XCTAssertTrue(app.element(TestID.Detail.page(film.id)).waitToVanish(10))
         app.element(TestID.Library.page(lib)).waitToExist(10)
     }

@@ -12,15 +12,15 @@ import SwiftUI
 struct MacSidebarRows: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openWindow) private var openWindow
-    /// When the selection last moved to another row — set by the list's
-    /// selection binding (see `RootView.sidebarSelection`), which runs as the
-    /// row is pressed. See `reselected`.
-    static var selectionChangedAt = Date.distantPast {
-        didSet { selectionAwaitsTap = true }
+    /// Pairs each click with the selection change it caused, if any — see
+    /// `reselected` and `SidebarClickRule`.
+    static var clicks = SidebarClickRule()
+
+    /// Called by the list's selection binding (see
+    /// `RootView.sidebarSelection`) when the selection moves to another row.
+    static func selectionMoved(to section: AppSection) {
+        clicks.selectionMoved(to: section.id, at: Date())
     }
-    /// The selection has moved, and the tap that ends the click which moved
-    /// it hasn't arrived yet. See `reselected`.
-    private static var selectionAwaitsTap = false
 
     var body: some View {
         ForEach(MacSidebarGroup.grouped(app.sections)) { group in
@@ -48,29 +48,20 @@ struct MacSidebarRows: View {
 
     /// A click on the row already selected: back to the top of that section,
     /// as Music and Finder do. The list's selection binding isn't told about a
-    /// click that doesn't change it, so the row hears it itself. The list
-    /// selects on the way down and the tap ends on the way up, so the tap
-    /// that ends the click which moved the selection here is not a second
-    /// click — that one keeps the section's pages where they were left.
+    /// click that doesn't change it, so the row hears it itself. The click
+    /// that moved the selection here is not a second click — that one keeps
+    /// the section's pages where they were left.
     ///
-    /// Told apart by the selection having moved since the last tap, rather
-    /// than by how recently it moved: a click held for longer than the 0.4
-    /// seconds that used to be allowed — an unhurried press is about that —
-    /// arrived as a re-click and threw away the pages it had come back for.
-    /// The time is still a bound, so a selection moved with the arrow keys,
-    /// which no tap ends, doesn't swallow a real re-click made long after.
+    /// Which click moved the selection is told by pairing, not by order or
+    /// by how long the press took. The rule used to assume the list's
+    /// selection arrives first; on macOS 27 the tap does (checked
+    /// 2026-11-13), which left the selection waiting for a tap that had
+    /// already come, and it swallowed the real re-click after it. See
+    /// `SidebarClickRule`.
     private func reselected(_ section: AppSection) {
-        let endsTheSelectingClick = Self.endsSelectingClick(
-            awaitsTap: Self.selectionAwaitsTap, changedAt: Self.selectionChangedAt, now: Date())
-        Self.selectionAwaitsTap = false
-        guard app.shownSelection == section, !endsTheSelectingClick else { return }
+        let reclick = Self.clicks.tapped(section.id, isShown: app.shownSelection == section, at: Date())
+        guard reclick, app.shownSelection == section else { return }
         app.showAtTop(section)
-    }
-
-    /// Whether a tap ends the click that moved the selection (and so is not
-    /// a re-click). Static for the unit tests.
-    static func endsSelectingClick(awaitsTap: Bool, changedAt: Date, now: Date) -> Bool {
-        awaitsTap && now.timeIntervalSince(changedAt) < 10
     }
 
     /// A row's menu: the section in a window of its own, and a fresh answer
@@ -125,6 +116,53 @@ struct MacSidebarRows: View {
     static func badge(for section: AppSection, transfersToFinish: Int) -> Int {
         guard section == .downloads else { return 0 }
         return transfersToFinish
+    }
+}
+
+/// Tells a click on the selected sidebar row (a re-click: back to the top)
+/// from the click that selected it, whichever of the two events of that click
+/// — the list's selection change and the row's tap — arrives first.
+///
+/// - Selection first: it is left waiting, and the tap on the same row that
+///   follows ends that click.
+/// - Tap first (the row isn't the shown one yet): the tap is left waiting,
+///   and the selection change to that row that follows is its own click's.
+///
+/// Either half waits only a few seconds, so a selection moved with the arrow
+/// keys, which no tap ends, doesn't swallow a real re-click made long after.
+struct SidebarClickRule {
+    static let pairing: TimeInterval = 10
+
+    private var selectionAwaitingTap: (id: String, at: Date)?
+    private var tapAwaitingSelection: (id: String, at: Date)?
+
+    /// The list's selection moved to `id`.
+    mutating func selectionMoved(to id: String, at now: Date) {
+        if let tap = tapAwaitingSelection, tap.id == id, now.timeIntervalSince(tap.at) < Self.pairing {
+            // The tap of this same click came first.
+            tapAwaitingSelection = nil
+            selectionAwaitingTap = nil
+        } else {
+            tapAwaitingSelection = nil
+            selectionAwaitingTap = (id, now)
+        }
+    }
+
+    /// A tap on row `id`; `isShown` is whether that row is the one shown as
+    /// the tap arrives. True when it is a re-click.
+    mutating func tapped(_ id: String, isShown: Bool, at now: Date) -> Bool {
+        defer { selectionAwaitingTap = nil }
+        guard isShown else {
+            // The selection change of this click hasn't arrived yet.
+            tapAwaitingSelection = (id, now)
+            return false
+        }
+        tapAwaitingSelection = nil
+        if let selection = selectionAwaitingTap, selection.id == id,
+           now.timeIntervalSince(selection.at) < Self.pairing {
+            return false
+        }
+        return true
     }
 }
 

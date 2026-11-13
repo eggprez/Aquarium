@@ -345,7 +345,7 @@ struct RootView: View {
             set: { new in
                 guard let new else { return }
                 #if os(macOS)
-                if new != app.shownSelection { MacSidebarRows.selectionChangedAt = Date() }
+                if new != app.shownSelection { MacSidebarRows.selectionMoved(to: new) }
                 #endif
                 app.selection = new
             }
