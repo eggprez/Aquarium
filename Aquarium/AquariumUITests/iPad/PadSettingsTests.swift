@@ -101,8 +101,9 @@ final class PadSettingsTests: PadUITestCase {
     /// SettingsPageView … }`), while the pages they open are value links
     /// onto the path (`Route.settings`, since 346bc31: App Icon, Sidebar,
     /// Measure sync, Station mix, Custom playlist). A value pushed over a
-    /// page the path does not hold goes nowhere: the row lights and nothing
-    /// opens. Found 2026-11-13.
+    /// page the path does not hold goes nowhere: the row lit and nothing
+    /// opened. Found 2026-11-13; fixed the same day by making the first-level
+    /// rows value links too (`SettingsRoute.page`).
     func testSubPagesOpenInTheOneColumnLayout() {
         openSettings()
         XCTAssertFalse(splitList.exists, "upright: one column")
@@ -111,7 +112,6 @@ final class PadSettingsTests: PadUITestCase {
         app.button(TestID.Settings.tabBar).padTap()
         let opened = app.element(TestID.TabBarSettings.root).waitForExistence(timeout: 10)
         attachScreenshot("appearance, Sidebar tapped")
-        XCTExpectFailure("bug: upright Settings sub-pages (Sidebar, App Icon, …) don't open", strict: false)
         XCTAssertTrue(opened, "the Sidebar order page opens")
     }
 

@@ -1050,10 +1050,9 @@ private struct SettingsMapRows: View {
         if selectable {
             label().accessibilityIdentifier(TestID.Settings.pageLink(page.rawValue)).tag(page)
         } else {
-            NavigationLink {
-                SettingsPageView(page: page)
-                    .settingsPushed(page)
-            } label: {
+            // By value, as the pages these open push theirs — see
+            // `SettingsRoute.page`.
+            NavigationLink(value: Route.settings(.page(page))) {
                 label()
             }
             .accessibilityIdentifier(TestID.Settings.pageLink(page.rawValue))
@@ -1096,6 +1095,7 @@ struct SettingsRouteView: View {
 
     var body: some View {
         switch route {
+        case .page(let page): SettingsPageView(page: page).settingsPushed(page)
         case .appIcon: AppIconSettingsView()
         case .tabBar: TabBarSettingsView()
         case .syncMeasure: SyncMeasureView()
@@ -2746,7 +2746,7 @@ extension SettingsView {
 /// them (with Appearance and iCloud folded into General, and Downloads and
 /// Library copy sharing Storage); an Apple TV lists them as rows with the
 /// panel describing each. The tile colour and symbol travel with the page.
-enum SettingsPage: String, CaseIterable, Identifiable {
+enum SettingsPage: String, CaseIterable, Identifiable, Sendable, Codable {
     case account, appearance, video, audio, subtitles, music, liveTV, downloads, libraryCopy, watch, about
 
     var id: String { rawValue }

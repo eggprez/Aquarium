@@ -68,7 +68,10 @@ struct RootView: View {
                 // `-AquariumShowSettings YES`: Settings with no server signed
                 // in, for looking at it on a simulator. Debug builds only.
                 if UserDefaults.standard.bool(forKey: "AquariumShowSettings") {
-                    NavigationStack { SettingsView() }
+                    NavigationStack {
+                        SettingsView()
+                            .navigationDestination(for: Route.self) { RouteDestination(route: $0) }
+                    }
                 } else {
                     LoginView()
                         .testAnchor(TestID.Shell.signedOut)
