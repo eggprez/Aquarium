@@ -189,14 +189,15 @@ in a comment.
 - **Unit** (`TestPlans/Unit`, Mac): 285 tests, all pass (166 Mac, 3 of them new for
   `SidebarClickRule`; the rest shared).
 - **UI** (`TestPlans/Mac`, `-collect-test-diagnostics never`, `TEST_RUNNER_AQUARIUM_QA_DIR`
-  set): first full run after the fixes, 122 tests: 118 pass, 1 skip
-  (`testShelfHeadingOpensSeeAll`, no See all on the shelf), 3 failures —
-  `testAddAccountOpensTheSignInSheet` (AutoFill over Cancel; fixed in fa17510 and passing
-  since), `testClosingThePlayerWindowStopsPlayback` and
-  `testBugQualityChangeWhilePausedStaysPaused`, both from watching a session an earlier test
-  left on the server (fixed in af73c54, not yet confirmed by a UI run). The second full run
-  could not start: from 2026-11-13 ~16:00 every UI run fails with "Timed out while enabling
-  automation mode" (see the report).
+  set), 122 tests, `suite-reset.py suite-mac` before each run:
+  - first run after the fixes: 118 pass, 1 skip, 3 failures (Add Account under AutoFill; close-window
+    stop and quality-while-paused watching a session an earlier test left), fixed in fa17510,
+    af73c54 and c97090a;
+  - run 2 (automation mode without authentication): 120 pass, 1 skip, 1 failure — the downloaded
+    film's tile "not hittable" to a right-click, fixed in 815fe75;
+  - run 3: **121 pass, 0 failures, 1 skip**.
+  The skip is `MacBrowseUITests.testShelfHeadingOpensSeeAll`: the shelf it looks at has no See all
+  with the baseline fixtures.
 - No expected failures left: the four bugs (restored black player window, Escape, sidebar
   re-click, Night mode row) are fixed and their tests strict.
 
