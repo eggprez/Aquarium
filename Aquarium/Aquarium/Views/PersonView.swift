@@ -265,9 +265,18 @@ struct PersonView: View {
 
 /// Which trailer a title has, and how one that lives on the web gets opened.
 enum Trailers {
+    @MainActor
     static func has(_ item: BaseItem) -> Bool {
         guard item.kind == "Movie" || item.kind == "Series" else { return false }
-        return (item.LocalTrailerCount ?? 0) > 0 || remote(item) != nil
+        if (item.LocalTrailerCount ?? 0) > 0 { return true }
+        #if os(tvOS)
+        // A television has no browser: a remote trailer opens only in the
+        // YouTube app (`open`), so offer one only when that app answers.
+        guard let url = remote(item), youTubeID(url) != nil, let app = URL(string: "youtube://") else { return false }
+        return UIApplication.shared.canOpenURL(app)
+        #else
+        return remote(item) != nil
+        #endif
     }
 
     /// The first remote trailer with an address that can actually be opened.

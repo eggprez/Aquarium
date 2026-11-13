@@ -127,14 +127,12 @@ final class TVShellTests: TVUnitTestCase {
         // button unless the YouTube app answers. That fix
         // (claude/qa-fix-list-cb0b58) is not on this branch.
         let schemes = Bundle.main.object(forInfoDictionaryKey: "LSApplicationQueriesSchemes") as? [String] ?? []
-        XCTExpectFailure("bug: `youtube` is not in LSApplicationQueriesSchemes (Aquarium/Info.plist), so the app can't ask whether the YouTube app is there")
         XCTAssertTrue(schemes.contains("youtube"), "declared: \(schemes)")
     }
 
     func testAYouTubeOnlyTrailerIsHiddenWithoutTheYouTubeApp() {
         // Same source. The simulator has no YouTube app, so a film whose
         // only trailer is on YouTube should show no Trailer button here.
-        XCTExpectFailure("bug: Trailers.has (Views/PersonView.swift:268) offers a YouTube-only trailer on tvOS without checking the YouTube app can open it; pressing it does nothing")
         XCTAssertFalse(Trailers.has(film(remote: ["https://www.youtube.com/watch?v=yUQM7H4Swgw"])))
     }
 }
