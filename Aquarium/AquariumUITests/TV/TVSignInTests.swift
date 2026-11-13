@@ -87,10 +87,6 @@ final class TVSignInTests: TVTestCase {
         // after the press; one more press shows the selector is still there.
         Remote.press(.up)
         assertFocusPresent("the sign-in screen after a wrong password")
-        if error.label.contains("401") || error.label.contains("Server error") {
-            // Seen 2026-11-13: "Server error 401 on /Users/AuthenticateByName".
-            XCTExpectFailure("bug: a wrong password shows 'Server error 401 on /Users/AuthenticateByName' (login.status.error, LoginView) instead of saying the name or password is wrong")
-        }
         XCTAssertFalse(error.label.contains("401"), "a raw status: \(error.label)")
         // Source: master-fix-list.md "[TV] Sign-in help text runs under the
         // focused password button" — visual, recorded for the eye.
@@ -159,10 +155,6 @@ final class TVSignInTests: TVTestCase {
         let error = app.element(TestID.Login.error)
         error.waitToExist(30)
         attachScreenshot("disabled account")
-        if error.label.contains("403") || error.label.contains("Server error") {
-            // Seen 2026-11-13: "Server error 403 on /Users/AuthenticateByName".
-            XCTExpectFailure("bug: signing in as a disabled account (fx-disabled) shows 'Server error 403 on /Users/AuthenticateByName' (login.status.error, LoginView) instead of saying the account is disabled")
-        }
         XCTAssertFalse(error.label.contains("403"), "a raw status: \(error.label)")
     }
 }

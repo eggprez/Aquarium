@@ -379,7 +379,6 @@ final class TVBrowseTests: TVTestCase {
         let page = app.element(TestID.Detail.page(rated))
         waitUntil("the page or its error", timeout: 60) { error.exists || page.exists }
         attachScreenshot("blocked title")
-        XCTExpectFailure("bug: fx-kid opening a title its parental rating hides gets 'Server error 404 on /Items/<id>' and Try again (common.error.message on the title page), not words a viewer can act on")
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Server error' OR label CONTAINS '404'")).firstMatch.exists,
                        "a raw server error is shown")
     }

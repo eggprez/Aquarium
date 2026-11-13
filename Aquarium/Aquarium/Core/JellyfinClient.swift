@@ -29,8 +29,35 @@ enum APIError: LocalizedError, Sendable {
         case .identity(let m): m
         case .auth(let m): m
         case .notConfigured: "Not signed in"
-        case .server(let status, let path): "Server error \(status) on \(path)"
+        case .server(let status, let path): Self.plainWords(status: status, path: path)
         case .message(let m): m
+        }
+    }
+
+    /// The status and endpoint, for the log. What a viewer reads is
+    /// `errorDescription`: a status code and an API path mean nothing to
+    /// someone with a remote in their hand.
+    var technicalDescription: String {
+        if case .server(let status, let path) = self { return "Server error \(status) on \(path)" }
+        return errorDescription ?? "Unknown error"
+    }
+
+    /// A refused request in words a viewer can act on.
+    static func plainWords(status: Int, path: String) -> String {
+        let signingIn = path.hasSuffix("/AuthenticateByName")
+        switch status {
+        case 401 where signingIn:
+            return "That user name or password isn't right."
+        case 403 where signingIn:
+            return "This account can't sign in. It's turned off on the server, or not allowed in at this time. Ask the server's administrator."
+        case 401, 403:
+            return "This account isn't allowed to do that."
+        case 404:
+            return "This isn't available to this account, or it's no longer on the server."
+        case 500...:
+            return "The server ran into a problem. Try again in a moment."
+        default:
+            return "The server turned that request down."
         }
     }
 }
@@ -620,16 +647,22 @@ final class JellyfinClient {
             // too little to hang that on: a reverse proxy having a bad moment
             // sends them, and over plain http so can anyone on the path.
             guard await tokenIsRefused(sentToken, server: base) else {
-                throw APIError.server(status: 401, path: path.components(separatedBy: "?")[0])
+                let refused = APIError.server(status: 401, path: path.components(separatedBy: "?")[0])
+                Self.requestLog.notice("\(refused.technicalDescription, privacy: .public)")
+                throw refused
             }
             expireSession()
             throw APIError.auth("Your session has expired — please sign in again")
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw APIError.server(status: http.statusCode, path: path.components(separatedBy: "?")[0])
+            let refused = APIError.server(status: http.statusCode, path: path.components(separatedBy: "?")[0])
+            Self.requestLog.notice("\(refused.technicalDescription, privacy: .public)")
+            throw refused
         }
         return data
     }
+
+    nonisolated static let requestLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Aquarium", category: "api")
 
     /// Whether the server, asked who this token belongs to, says nobody. Any
     /// other outcome — an answer, an error, no reply — is not a refusal.
