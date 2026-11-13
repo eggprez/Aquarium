@@ -167,12 +167,18 @@ final class PlayerMacState {
             player.selectSubtitles(nil)
             return
         }
-        let options = player.subtitleOptions
-        guard !options.isEmpty else { return }
-        let next = options.first { $0.id == lastSubtitle }
+        guard let next = Self.subtitleToTurnOn(player.subtitleOptions, lastOn: lastSubtitle) else { return }
+        player.selectSubtitles(next)
+    }
+
+    /// Which track C turns on when none is: the one that was on last, else
+    /// the first that isn't forced, else the first. Nil with no tracks.
+    /// A static of its own so the choice can be unit-tested without an engine.
+    static func subtitleToTurnOn(_ options: [TrackOption], lastOn: TrackOption.ID?) -> TrackOption? {
+        guard !options.isEmpty else { return nil }
+        return options.first { $0.id == lastOn }
             ?? options.first { !$0.isForced }
             ?? options[0]
-        player.selectSubtitles(next)
     }
 }
 
@@ -362,9 +368,14 @@ struct PlayerMenuItems: View {
     /// pick — it costs the couple of seconds the server needs to build a
     /// stream with it in.
     private func trackTitle(_ option: TrackOption) -> String {
+        Self.trackTitle(option, isLocal: player.isLocal)
+    }
+
+    /// The row's words, as a static so they can be unit-tested.
+    static func trackTitle(_ option: TrackOption, isLocal: Bool) -> String {
         var title = option.isForced ? "\(option.label) (Forced)" : option.label
         // Not on a download, where picking one asks before it streams.
-        if option.needsNewStream, !player.isLocal { title += " (reopens the stream)" }
+        if option.needsNewStream, !isLocal { title += " (reopens the stream)" }
         return title
     }
 

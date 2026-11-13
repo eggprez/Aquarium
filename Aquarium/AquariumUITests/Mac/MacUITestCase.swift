@@ -23,5 +23,15 @@ class MacUITestCase: AquariumUITestCase {
         }
         try super.setUpWithError()
     }
+
+    /// Notes the sessions already on the server for `macSessions`, which
+    /// leaves them out — see there.
+    @discardableResult
+    override func launch(reset: Bool = true, signIn: Bool = true, account: QA.Account? = QA.account(),
+                         engine: String? = nil, arguments: [String] = [], environment: [String: String] = [:]) -> XCUIApplication {
+        if reset { JellyfinAPI.noteSessionsBeforeLaunch() }
+        return super.launch(reset: reset, signIn: signIn, account: account, engine: engine,
+                            arguments: arguments, environment: environment)
+    }
 }
 #endif

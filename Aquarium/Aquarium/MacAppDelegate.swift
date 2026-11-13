@@ -11,7 +11,8 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
     /// When the app last asked the front page to refresh because it had just
     /// come back to the front. Set at launch so the first activation — the
     /// launch itself, whose pages are loading anyway — doesn't count.
-    private var lastReturnRefresh = Date()
+    /// Internal rather than private so a unit test can move it back in time.
+    var lastReturnRefresh = Date()
 
     /// Coming back to the app is the moment a page's answer is most likely to
     /// be stale, and a Mac never puts an app in the background the way a phone

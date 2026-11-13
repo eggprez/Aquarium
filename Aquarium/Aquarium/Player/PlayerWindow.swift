@@ -49,16 +49,33 @@ struct PlayerWindow: View {
         // and to whatever is being typed into anywhere else — see
         // `PlaybackCommands`.
         .focusedSceneValue(\.playerWindowFocused, true)
-        .onExitCommand { leave() }
-        .onAppear {
-            // Brought back by window restoration at launch, with nothing to play.
-            if !player.isActive { dismissWindow(id: Self.id) }
-        }
+        // Escape is taken by a key monitor rather than `onExitCommand`, which
+        // only hears it from a SwiftUI view that has the keyboard: in this
+        // window nothing does (the picture and the chrome don't take focus),
+        // so the window itself was first responder and Escape never reached
+        // the handler — playback went on.
+        .background(EscapeKeyMonitor(window: window, leave: leave))
         .onChange(of: player.isActive) { _, active in
             if !active { dismissWindow(id: Self.id) }
         }
         .onChange(of: window) { _, window in
             window?.backgroundColor = .black
+            // Brought back by window restoration at launch, with nothing to
+            // play: closed as soon as there is a window to close.
+            // `dismissWindow` from `onAppear` used to do this, and during
+            // restoration it took the scene's view down but left the
+            // AppKit window up, black and titled "Player".
+            if let window, !player.isActive {
+                window.close()
+                return
+            }
+            // A full-screen window of its own, as QuickTime's is. SwiftUI
+            // makes a `Window` scene an auxiliary one — it can only join
+            // another window's full-screen Space — so F, the menu and a
+            // double-click on the picture asked for full screen and got
+            // nothing.
+            window?.collectionBehavior.remove(.fullScreenAuxiliary)
+            window?.collectionBehavior.insert(.fullScreenPrimary)
             // Full Screen (F) acts on the window from the menu bar and
             // Picture in Picture puts it away, neither of which has a view
             // to ask — see `PlayerMacState`.
@@ -110,42 +127,126 @@ struct PlayerWindow: View {
         window.contentAspectRatio = size
 
         let content = window.contentRect(forFrameRect: window.frame)
+        let maxHeight = window.screen.map { $0.visibleFrame.height - (window.frame.height - content.height) }
+        guard let resized = Self.fittedContent(content, picture: size, maxContentHeight: maxHeight) else { return }
+        window.setFrame(window.frameRect(forContentRect: resized), display: true, animate: true)
+    }
+
+    /// `fit`'s arithmetic, as a static so it can be unit-tested: the content
+    /// rect that gives `content` the picture's shape, keeping its width and
+    /// top edge unless the height would pass `maxContentHeight`. Nil when the
+    /// window is already within a point of it.
+    static func fittedContent(_ content: NSRect, picture size: CGSize, maxContentHeight: CGFloat?) -> NSRect? {
+        guard size.width > 0, size.height > 0 else { return nil }
         var width = content.width
         var height = width * size.height / size.width
-        if let visible = window.screen?.visibleFrame {
-            let chrome = window.frame.height - content.height
-            let maxHeight = visible.height - chrome
-            if height > maxHeight {
-                height = maxHeight
-                width = height * size.width / size.height
-            }
+        if let maxHeight = maxContentHeight, height > maxHeight {
+            height = maxHeight
+            width = height * size.width / size.height
         }
-        guard abs(height - content.height) > 1 || abs(width - content.width) > 1 else { return }
+        guard abs(height - content.height) > 1 || abs(width - content.width) > 1 else { return nil }
         // Pinned at the top edge, where the title bar is, so the window grows
         // or shrinks downwards rather than jumping.
-        let resized = NSRect(
+        return NSRect(
             x: content.minX,
             y: content.maxY - height,
             width: width,
             height: height
         )
-        window.setFrame(window.frameRect(forContentRect: resized), display: true, animate: true)
+    }
+}
+
+/// Escape in the player window, while nothing in it that types or has a
+/// use for Escape of its own has the keyboard: a text field (its editor), or
+/// a sheet on the window. Popovers and menus are windows and event loops of
+/// their own, so their Escape never comes past here.
+private struct EscapeKeyMonitor: NSViewRepresentable {
+    let window: NSWindow?
+    let leave: () -> Void
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.window = window
+        context.coordinator.leave = leave
+        context.coordinator.install()
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        coordinator.remove()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    @MainActor
+    final class Coordinator {
+        weak var window: NSWindow?
+        var leave: (() -> Void)?
+        private var monitor: Any?
+
+        func install() {
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+                nonisolated(unsafe) var result: NSEvent? = event
+                MainActor.assumeIsolated { result = self?.handle(event) ?? event }
+                return result
+            }
+        }
+
+        func remove() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        private func handle(_ event: NSEvent) -> NSEvent? {
+            guard let window, event.window === window,
+                  Self.isPlainEscape(keyCode: event.keyCode, modifiers: event.modifierFlags),
+                  window.attachedSheet == nil,
+                  !(window.firstResponder is NSText) else { return event }
+            leave?()
+            return nil
+        }
+
+        /// Escape with no ⌘, ⌥, ⌃ or ⇧.
+        nonisolated static func isPlainEscape(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+            keyCode == 53 && modifiers.intersection([.command, .option, .control, .shift]).isEmpty
+        }
     }
 }
 
 /// Hands the hosting `NSWindow` to SwiftUI once the view is in one.
+///
+/// Told by the view itself when it joins a window. Looking one run-loop turn
+/// after the view was made was a race: when the view wasn't in its window
+/// yet, nothing called `updateNSView` again and the window was never handed
+/// over — the player then had no window to take full screen, Escape or the
+/// picture's shape.
 struct WindowReader: NSViewRepresentable {
     @Binding var window: NSWindow?
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { window = view.window }
+        let view = ReportingView()
+        view.report = { found in
+            DispatchQueue.main.async { if window !== found { window = found } }
+        }
         return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
+        (view as? ReportingView)?.report = { found in
+            DispatchQueue.main.async { if window !== found { window = found } }
+        }
         if view.window !== window {
             DispatchQueue.main.async { window = view.window }
+        }
+    }
+
+    final class ReportingView: NSView {
+        var report: ((NSWindow?) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            report?(window)
         }
     }
 }
@@ -288,6 +389,12 @@ struct PlaybackCommands: Commands {
     /// control of the player's that has a use for it. See
     /// `playerKeysYielded`.
     private func gated(_ key: KeyEquivalent, _ modifiers: EventModifiers) -> KeyboardShortcut? {
+        Self.gatedShortcut(key, modifiers, inPlayer: inPlayer, keysYielded: keysYielded)
+    }
+
+    /// `gated`'s rule, as a static so it can be unit-tested.
+    static func gatedShortcut(_ key: KeyEquivalent, _ modifiers: EventModifiers,
+                              inPlayer: Bool?, keysYielded: Bool?) -> KeyboardShortcut? {
         guard inPlayer == true else { return nil }
         if modifiers.isEmpty, keysYielded == true { return nil }
         return KeyboardShortcut(key, modifiers: modifiers)

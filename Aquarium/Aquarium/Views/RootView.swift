@@ -353,7 +353,7 @@ struct RootView: View {
             set: { new in
                 guard let new else { return }
                 #if os(macOS)
-                if new != app.shownSelection { MacSidebarRows.selectionChangedAt = Date() }
+                if new != app.shownSelection { MacSidebarRows.selectionMoved(to: new) }
                 #endif
                 app.selection = new
             }
@@ -585,6 +585,15 @@ struct RootView: View {
         // and the field agree whichever section was showing when it was
         // typed. Recent terms drop down from the field — the Mac's place for
         // them, in front of the page rather than on it.
+        // Ahead of `.searchable`, on the view it wraps: placed after it, the
+        // handler never heard the field's Return, and the Search page never
+        // came up (checked 2026-11-13, macOS 27).
+        .onSubmit(of: .search) {
+            let term = app.sidebarSearchTerm.trimmingCharacters(in: .whitespaces)
+            guard !term.isEmpty else { return }
+            prefs.rememberSearch(term)
+            app.showSearch(term)
+        }
         .searchable(text: $app.sidebarSearchTerm, placement: .sidebar, prompt: "Search")
         .searchSuggestions {
             if app.sidebarSearchTerm.isEmpty {
@@ -594,12 +603,6 @@ struct RootView: View {
                         .searchCompletion(recent)
                 }
             }
-        }
-        .onSubmit(of: .search) {
-            let term = app.sidebarSearchTerm.trimmingCharacters(in: .whitespaces)
-            guard !term.isEmpty else { return }
-            prefs.rememberSearch(term)
-            app.showSearch(term)
         }
         .modifier(FocusSearchOnRequest())
         #endif
