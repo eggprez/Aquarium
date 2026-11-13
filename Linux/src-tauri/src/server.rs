@@ -120,7 +120,11 @@ fn str_field(v: &Value, key: &str) -> Option<String> {
 /// the fallback, and the caller is told which one answered so it can say so.
 pub async fn probe(raw: &str) -> Result<Value, String> {
     let typed = raw.trim();
-    let has_scheme = typed.starts_with("http://") || typed.starts_with("https://");
+    // Any scheme typed goes to normalize as it is, which accepts only http
+    // and https: "file:///x" is a config error, not a host called "file".
+    let has_scheme = typed.split_once("://").is_some_and(|(scheme, _)| {
+        !scheme.is_empty() && scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+    });
     let candidates: Vec<String> = if has_scheme {
         vec![normalize(typed)?]
     } else {
@@ -1128,15 +1132,11 @@ mod tests {
         }
     }
 
-    // BUG: probe() only recognises http:// and https:// as a scheme and puts
-    // "https://" in front of anything else, so "file:///etc/passwd" becomes
-    // https://file///etc/passwd and the user is told they are offline (after
-    // a DNS lookup of "file") instead of "Unsupported address scheme". No
-    // token is involved; the cost is a misleading message and a stray lookup.
     #[tokio::test]
-    #[ignore = "bug: probe() turns a typed non-http scheme into a host name and reports offline instead of a config error"]
     async fn probe_refuses_a_typed_non_http_scheme_as_a_config_error() {
         let _s = sandbox();
+        // Regression: "file:///etc/passwd" became https://file///etc/passwd,
+        // a DNS lookup of "file" and "you appear to be offline".
         for bad in ["file:///etc/passwd", "ftp://example.com/x"] {
             let e = probe(bad).await.unwrap_err();
             assert_eq!(kind_of(&e), "config", "{bad:?}: {e}");
