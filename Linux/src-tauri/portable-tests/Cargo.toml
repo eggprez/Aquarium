@@ -1,0 +1,38 @@
+# The parts of the app that need no GTK, WebKit or Wayland, compiled on their
+# own so their unit tests run on any Unix (a Mac, a container with nothing
+# installed). It builds the app's own source files by `#[path]`; there is no
+# copy. See ../../TESTING.md.
+#
+#   cargo test --manifest-path src-tauri/portable-tests/Cargo.toml
+#
+# The full crate's `cargo test` (Linux only) runs these same tests and the
+# rest; this crate exists so the logic can be tested where the app can't build.
+[package]
+name = "aquarium-portable-tests"
+# Kept equal to the app's version: jellyfin.rs reads CARGO_PKG_VERSION.
+version = "1.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "process", "time", "fs", "sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+futures-util = "0.3"
+flate2 = "1"
+dirs = "6"
+uuid = { version = "1", features = ["v4"] }
+libc = "0.2"
+
+# D-Bus needs the system libdbus, which only Linux has. Elsewhere `secret` and
+# `idle` are replaced by the doubles in stubs.rs.
+[target.'cfg(target_os = "linux")'.dependencies]
+dbus-secret-service = { version = "4", features = ["crypto-rust"] }
+dbus = "0.9"

@@ -116,7 +116,12 @@ fn broadcast_targets() -> Vec<Ipv4Addr> {
             }
             // On Linux the broadcast address lives in the union glibc names
             // `ifa_ifu` (ifu_broadaddr when IFF_BROADCAST is set).
+            #[cfg(target_os = "linux")]
             let bcast = ifa.ifa_ifu;
+            // The BSDs (and so a Mac running the unit tests) call the same
+            // slot `ifa_dstaddr`.
+            #[cfg(not(target_os = "linux"))]
+            let bcast = ifa.ifa_dstaddr;
             if bcast.is_null() || (*bcast).sa_family as libc::c_int != libc::AF_INET {
                 continue;
             }

@@ -302,17 +302,23 @@ pub fn reveal(item_ids: &[String]) -> Result<(), String> {
         return Err("Nothing on disk to show".into());
     }
     let uris: Vec<String> = targets.iter().map(|p| file_uri(p)).collect();
-    let shown = dbus::blocking::Connection::new_session().and_then(|conn| {
-        conn.with_proxy(
-            "org.freedesktop.FileManager1",
-            "/org/freedesktop/FileManager1",
-            Duration::from_secs(3),
-        )
-        .method_call::<(), _, _, _>("org.freedesktop.FileManager1", "ShowItems", (uris, ""))
-    });
-    if shown.is_ok() {
-        return Ok(());
+    #[cfg(target_os = "linux")]
+    {
+        let shown = dbus::blocking::Connection::new_session().and_then(|conn| {
+            conn.with_proxy(
+                "org.freedesktop.FileManager1",
+                "/org/freedesktop/FileManager1",
+                Duration::from_secs(3),
+            )
+            .method_call::<(), _, _, _>("org.freedesktop.FileManager1", "ShowItems", (uris, ""))
+        });
+        if shown.is_ok() {
+            return Ok(());
+        }
     }
+    // No D-Bus off Linux (the portable test build); straight to the fallback.
+    #[cfg(not(target_os = "linux"))]
+    let _ = uris;
     let folder = if targets.len() == 1 {
         let t = &targets[0];
         if t.is_dir() { t.clone() } else { t.parent().map(Path::to_path_buf).unwrap_or_default() }

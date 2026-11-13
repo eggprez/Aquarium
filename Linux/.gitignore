@@ -11,3 +11,5 @@ src-tauri/gen/
 .claude/
 *.deb
 wayland-spike/
+coverage/
+src-tauri/portable-tests/target/
