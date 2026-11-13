@@ -14,6 +14,21 @@ import os
 enum WatchTestMode {
     static let log = Logger(subsystem: "scottai.FellyJin.watchkitapp", category: "uitest")
 
+    /// `-AquariumTestNoCompanion YES` (test mode only): the watch behaves as
+    /// if its phone had no Aquarium, and fetches downloads itself. The watch
+    /// simulator reports the companion app installed even when the paired
+    /// phone has none, and a file sent by the phone never reaches a
+    /// simulated watch, so without this nothing downloads in a UI test.
+    static let noCompanionArgument = "AquariumTestNoCompanion"
+
+    static let ignoresCompanion: Bool = {
+        #if DEBUG
+        return TestRuntime.isUITest && TestLaunch.bool(noCompanionArgument) == true
+        #else
+        return false
+        #endif
+    }()
+
     /// First thing in the app's init — see `AquariumWatchApp.testMode`.
     static func prepare() {
         #if DEBUG

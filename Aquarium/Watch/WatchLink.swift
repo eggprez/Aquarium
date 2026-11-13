@@ -550,7 +550,7 @@ extension WatchLink: WCSessionDelegate {
         Task { @MainActor in
             isActivated = activationState == .activated
             isPhoneReachable = reachable
-            hasCompanion = companion
+            hasCompanion = companion && !WatchTestMode.ignoresCompanion
             if !context.isEmpty { apply(context) }
             if reachable { requestContext() }
             publishInventory(now: true)
@@ -561,7 +561,7 @@ extension WatchLink: WCSessionDelegate {
     nonisolated func sessionCompanionAppInstalledDidChange(_ session: WCSession) {
         let companion = session.isCompanionAppInstalled
         Task { @MainActor in
-            hasCompanion = companion
+            hasCompanion = companion && !WatchTestMode.ignoresCompanion
             WatchDownloads.shared.pump()
         }
     }
