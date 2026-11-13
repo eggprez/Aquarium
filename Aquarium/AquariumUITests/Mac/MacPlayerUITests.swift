@@ -131,12 +131,18 @@ final class MacPlayerUITests: MacUITestCase {
         _ = try api.macWaitForPlayback(of: film.id)
         wakePlayerControls()
         app.button(TestID.Player.playPause).tapWhenReady()   // paused, so the position holds still
-        let before = try XCTUnwrap(try api.macWaitForPlayback(of: film.id)?.positionSeconds)
+        XCTAssertTrue(try eventually(20) { try api.macSessions().first { $0.nowPlayingId == film.id }?.isPaused == true })
+        let before = try XCTUnwrap(try api.macSessions().first { $0.nowPlayingId == film.id }?.positionSeconds)
         wakePlayerControls()
         app.button(TestID.Player.skipForward).tapWhenReady()
-        XCTAssertTrue(try eventually(20) {
+        // A skip while paused isn't reported by itself; playing again
+        // reports the position at once. Within a few seconds, so it is the
+        // skip that moved it rather than ten seconds of playing.
+        wakePlayerControls()
+        app.button(TestID.Player.playPause).tapWhenReady()
+        XCTAssertTrue(try eventually(6) {
             (try api.macSessions().first { $0.nowPlayingId == film.id }?.positionSeconds ?? 0) >= before + 8
-        })
+        }, "Forward 10 Seconds moved the film")
     }
 
     /// Regression: PlayerFadeDeadButtons (the iOS fix keeps buttons live as
@@ -190,11 +196,14 @@ final class MacPlayerUITests: MacUITestCase {
         XCTAssertTrue(try eventually(20) { try api.macSessions().first { $0.nowPlayingId == film.id }?.isPaused == true })
         let before = try api.macSessions().first { $0.nowPlayingId == film.id }?.positionSeconds ?? 0
         app.typeKey(.rightArrow, modifierFlags: .command)
-        XCTAssertTrue(try eventually(20) {
-            (try api.macSessions().first { $0.nowPlayingId == film.id }?.positionSeconds ?? 0) >= before + 8
-        })
+        // A skip while paused isn't reported by itself; Space plays again
+        // and reports the position at once — within a few seconds, so it is
+        // ⌘→ that moved it rather than ten seconds of playing.
         app.typeKey(" ", modifierFlags: [])
-        XCTAssertTrue(try eventually(20) { try api.macSessions().first { $0.nowPlayingId == film.id }?.isPaused == false })
+        XCTAssertTrue(try eventually(6) {
+            guard let s = try api.macSessions().first(where: { $0.nowPlayingId == film.id }) else { return false }
+            return s.isPaused == false && (s.positionSeconds ?? 0) >= before + 8
+        }, "⌘→ skipped and Space plays again")
     }
 
     /// Regression: SpaceBarPausesWhileTypingSearch, end to end: Space typed
@@ -379,8 +388,12 @@ final class MacPlayerUITests: MacUITestCase {
         app.typeKey(" ", modifierFlags: [])
         XCTAssertTrue(try eventually(20) { try api.macSessions().first { $0.nowPlayingId == film.id }?.isPaused == true })
         chooseMenu("Playback", id: TestID.Player.menuQuality, title: "Quality")
-        let rung = app.menuItems.matching(NSPredicate(format: "title BEGINSWITH '720p'")).firstMatch
-        guard rung.waitForExistence(timeout: 5) else { dismissMenus(); throw XCTSkip("no 720p rung") }
+        let rung = app.menuItems.matching(NSPredicate(format: "title ENDSWITH '720p'")).firstMatch
+        guard rung.waitForExistence(timeout: 5) else {
+            let titles = app.menuBars.firstMatch.menuBarItems["Playback"].menuItems["Quality"].menuItems.allElementsBoundByIndex.map(\.title)
+            dismissMenus()
+            throw XCTSkip("no 720p rung; Quality offers \(titles)")
+        }
         rung.click()
         Thread.sleep(forTimeInterval: 8)
         XCTAssertEqual(try api.macSessions().first { $0.nowPlayingId == film.id }?.isPaused, true)
