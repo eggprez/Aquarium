@@ -445,15 +445,14 @@ final class WatchDownloadsTests: WatchUnitTestCase {
     /// while a cancel removes its folder at once. A cancel landing before the
     /// write — a plan that drops an automatic item the moment the mirror
     /// queued it, or a phone's cancel crossing the ask — can leave meta.json
-    /// behind, and `loadRecords` brings the cancelled item back at the next
-    /// launch. Timing-dependent, so not strict: it fails when the race is lost.
+    /// behind, and `loadRecords` brought the cancelled item back at the next
+    /// launch. Fixed by `metaGeneration`: a background write is dropped if its
+    /// item was removed after it was scheduled.
     func testACancelRightAfterQueueingLeavesNothingForTheNextLaunch() async {
         downloads.enqueue([WX.song("race")], reason: "song")
         downloads.cancel("race")
         await settle(0.5)
         let meta = WatchDownloads.folder("race").appendingPathComponent("meta.json")
-        XCTExpectFailure("suspected bug: enqueue's detached meta.json write can land after cancel removed the folder (WatchDownloads.writeMeta / removeFolder)",
-                         options: .nonStrict())
         XCTAssertFalse(FileManager.default.fileExists(atPath: meta.path), "a cancelled record would come back at launch")
     }
 

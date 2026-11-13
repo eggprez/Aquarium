@@ -230,6 +230,13 @@ final class WatchDownloads: NSObject {
     /// Bytes last passed on for each transfer, so the session's stream of
     /// reports is thinned before it reaches the main thread.
     @ObservationIgnored nonisolated private let lastReported = OSAllocatedUnfairLock(initialState: [String: Int64]())
+    /// Each item's meta.json generation, moved on by every write and every
+    /// removal of its folder, which happen under this lock. A background
+    /// write lands only if nothing has been written or removed for its item
+    /// since it was scheduled: a cancel right after queueing used to lose the
+    /// race to enqueue's detached write, leaving a meta.json that brought the
+    /// cancelled item back at the next launch.
+    private nonisolated static let metaGeneration = OSAllocatedUnfairLock(initialState: [String: Int]())
     private var tasks: [Int: String] {
         get { taskMap.withLock { $0 } }
         set { taskMap.withLock { $0 = newValue } }
@@ -419,10 +426,13 @@ final class WatchDownloads: NSObject {
             records.insert(record, at: 0)
             reindex()
         }
-        let folder = Self.folder(record.itemId)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(record) {
-            try? data.write(to: folder.appendingPathComponent("meta.json"), options: .atomic)
+        let itemId = record.itemId
+        let folder = Self.folder(itemId)
+        let data = try? JSONEncoder().encode(record)
+        Self.metaGeneration.withLock { g in
+            g[itemId, default: 0] += 1
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try? data?.write(to: folder.appendingPathComponent("meta.json"), options: .atomic)
         }
         changed()
     }
@@ -551,13 +561,24 @@ final class WatchDownloads: NSObject {
 
     /// Each record to its folder, in the background: the caller has already
     /// put them in `records`, which is what the app reads.
+    /// Each write is skipped if the item was written or removed after this
+    /// call (`metaGeneration`).
     private nonisolated static func writeMeta(_ list: [WatchRecord]) {
         let encoded: [(String, Data)] = list.compactMap { r in (try? JSONEncoder().encode(r)).map { (r.itemId, $0) } }
+        let generations: [Int] = metaGeneration.withLock { g in
+            encoded.map { itemId, _ in
+                g[itemId, default: 0] += 1
+                return g[itemId]!
+            }
+        }
         Task.detached(priority: .utility) {
-            for (itemId, data) in encoded {
+            for ((itemId, data), generation) in zip(encoded, generations) {
                 let folder = folder(itemId)
-                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                try? data.write(to: folder.appendingPathComponent("meta.json"), options: .atomic)
+                metaGeneration.withLock { g in
+                    guard g[itemId] == generation else { return }
+                    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    try? data.write(to: folder.appendingPathComponent("meta.json"), options: .atomic)
+                }
             }
         }
     }
@@ -877,7 +898,11 @@ final class WatchDownloads: NSObject {
     }
 
     private func removeFolder(_ itemId: String, quiet: Bool = false) {
-        try? FileManager.default.removeItem(at: Self.folder(itemId))
+        let folder = Self.folder(itemId)
+        Self.metaGeneration.withLock { g in
+            g[itemId, default: 0] += 1
+            try? FileManager.default.removeItem(at: folder)
+        }
         pendingItems[itemId] = nil
         liveBytes[itemId] = nil
         lastReported.withLock { $0[itemId] = nil }
