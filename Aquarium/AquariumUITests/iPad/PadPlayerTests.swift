@@ -282,6 +282,11 @@ final class PadPlayerTracksTests: PadPlayerTestCase {
         // h264_videotoolbox encoder refused to open for this file ("Error
         // while opening encoder", jf/log FFmpeg.Transcode-…f6f6e804…), and
         // the player then sat on "Loading" with no error card: see the report.
+        // Followed up the same day: the card does come. AVPlayer gives up on
+        // the failed encode after about 35 s (CoreMedia -12889), the player
+        // asks twice more (its stream-recovery budget), and the third failure
+        // puts up "This didn't play" with Try again and Try a smaller stream,
+        // about 1 min 45 s in: past the 90 s this test waits.
         showControls()
         let started = eventually(90) { self.isPlaying() }
         try XCTSkipUnless(started, "the server's encode for the new audio track never started (QA server encoder); the player showed Loading with no error")
