@@ -131,6 +131,29 @@ final class WatchLibraryTests: WatchUITestCase {
         XCTAssertTrue(covered.isEmpty, "rows under the sort button: \(covered.map(\.identifier))")
     }
 
+    /// The same report for Albums: its sort was the same bottom-bar button.
+    /// Now a row at the head of the list, like Audiobooks'.
+    func testTheAlbumsSortControlCoversNoRow() throws {
+        launchHome()
+        open(TestID.Watch.rootDoor("music"))
+        open(TestID.Watch.musicDoor("albums"))
+        app.element(TestID.Watch.albumsRoot).waitToExist()
+        let sort = app.element(TestID.Watch.albumsSort)
+        XCTAssertTrue(sort.waitForExistence(timeout: 30), "a sort control")
+        let rows = app.elements(prefix: "watch.library.album.")
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 30))
+        let covered = rows.allElementsBoundByIndex.filter { $0.isHittable && $0.frame.intersects(sort.frame) }
+        XCTAssertTrue(covered.isEmpty, "rows under the sort control: \(covered.map(\.identifier))")
+        XCTAssertTrue(sort.label.contains("Title"), sort.label)
+        sort.tap()
+        let end = Date().addingTimeInterval(30)
+        // The list empties while the new order loads, taking the row with it.
+        while !(sort.exists && sort.label.contains("Recently added")) && Date() < end { Thread.sleep(forTimeInterval: 0.3) }
+        XCTAssertTrue(sort.waitForExistence(timeout: 30))
+        XCTAssertTrue(sort.label.contains("Recently added"), sort.label)
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 30), "albums again in the new order")
+    }
+
     func testSongsList() throws {
         launchHome()
         open(TestID.Watch.rootDoor("music"))

@@ -642,6 +642,7 @@ removed; none is kept as an expected failure now.
 | `WatchClientTests.testSettingsDoesNotSayConnectedWhileTheSignInIsRefused` | master-fix-list "Connected while 401"; fixed: `JellyfinClient.signInRefused`, row reads "Sign-in expired" | pass |
 | `WatchLibraryTests.testArtistsAreTheMusicLibrarysNotTheAudiobooksAuthors` | master-fix-list (Mary Shelley); fixed: `albumArtists` asks `IncludeItemTypes=Audio` | pass |
 | `WatchLibraryTests.testTheAudiobooksSortControlCoversNoRow` | master-fix-list sort button; fixed: the sort is a row at the head of the list (strict now) | pass |
+| `WatchLibraryTests.testTheAlbumsSortControlCoversNoRow` | master-fix-list sort button (Albums half); fixed: the sort is a row at the head of the list | pass |
 | `WatchDownloadsTests.testACancelRightAfterQueueingLeavesNothingForTheNextLaunch` | found here: detached meta.json write vs cancel; fixed: `metaGeneration` orders writes and removals (strict now; 20/20 runs) | pass |
 | `WatchDownloadsTests.testThePathMonitorsWordAloneNeverTakesBackFromThePhone`, `testWithThePathMonitorDownTheWatchNeverTakesItBack` | 05ce303 (1,418 cancels); watch-network-reality | pass |
 | `WatchDownloadsTests.testAShortFileIsThrownAwayAndAskedForAgainThreeTimes` | WatchDownloads header; duo-device-download-forensics | pass |

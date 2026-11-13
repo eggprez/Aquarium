@@ -298,6 +298,21 @@ struct AlbumsView: View {
                 }
             } else {
                 StatusRow(loading: loading && albums.isEmpty, error: error, empty: !loading && albums.isEmpty && error == nil ? "No albums" : nil)
+                // A row at the head of the list, as on Audiobooks: a bottom-bar
+                // button floated over the third row and took its taps.
+                if !albums.isEmpty {
+                    Button { recentFirst.toggle() } label: {
+                        Label("Sorted by \(recentFirst ? "Recently added" : "Title")",
+                              systemImage: recentFirst ? "clock" : "textformat.abc")
+                            .font(.caption2)
+                            .foregroundStyle(WatchTheme.dim)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .listRowBackground(Color.clear)
+                    .accessibilityHint("Changes the order")
+                    .accessibilityIdentifier(TestID.Watch.albumsSort)
+                }
                 ForEach(albums) { album in
                     NavigationLink(value: WatchRoute.collection(album)) { CollectionRow(item: album) }
                         .accessibilityIdentifier(TestID.Watch.album(album.Id))
@@ -311,16 +326,6 @@ struct AlbumsView: View {
             }
         }
         .navigationTitle("Albums")
-        .toolbar {
-            if !offline {
-                ToolbarItem(placement: .bottomBar) {
-                    Button { recentFirst.toggle() } label: {
-                        Image(systemName: recentFirst ? "clock" : "textformat.abc")
-                    }
-                    .accessibilityIdentifier(TestID.Watch.albumsSort)
-                }
-            }
-        }
         .task(id: recentFirst) { albums = []; await load() }
         .testAnchor(TestID.Watch.albumsRoot)
     }
