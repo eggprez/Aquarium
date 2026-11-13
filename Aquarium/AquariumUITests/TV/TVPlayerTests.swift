@@ -446,10 +446,6 @@ final class TVPlayerTests: TVPlayerTestCase {
         closePlayer()
         waitUntil("the stop to be recorded", timeout: 20) { (try? api.tvSessions().first { $0.nowPlayingId == self.film }) == nil }
         let after = try api.userData(film).playCount
-        if after > before + 1 {
-            // Seen 2026-11-13: one viewing with two quality changes added 2.
-            XCTExpectFailure("bug: on the Apple TV a stream reopen (quality change) is reported to the server as a new playback start, adding to PlayCount (master-fix-list round 2 '[TV, Pro Max #27]'; fix-status.md has it fixed on the unmerged claude/qa-fix-list-cb0b58)")
-        }
         XCTAssertLessThanOrEqual(after, before + 1, "reopens counted as plays: \(before) → \(after)")
     }
 

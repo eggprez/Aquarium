@@ -180,6 +180,11 @@ final class PlayerModel {
     /// When the title already playing was last reopened — for a quality, a
     /// track, a recovery — or nil for a fresh start. See `handleStreamFailure`.
     var sameTitleReopenedAt: Date?
+    /// The title the server has been sent a start report for in this
+    /// viewing. A start is what adds to Jellyfin's PlayCount, so a reopen of
+    /// that same title — quality, track, recovery — reports progress
+    /// instead. See `reportStreamOpened`.
+    var startReportedItemId: String?
     /// The title whose stream failed near its end and was reopened reading
     /// only a little way ahead. See `recoverFromMissingTail`.
     var tailRetryItemId: String?

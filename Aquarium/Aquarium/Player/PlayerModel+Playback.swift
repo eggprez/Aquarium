@@ -172,6 +172,11 @@ extension PlayerModel {
             && (outgoingQuiesced ? reopensPaused : isPaused)
         let keepsStopAfter = sameSitting && autoplayCancelled
         reopensPaused = staysPaused
+        // The same viewing, already counted by the server: the reopen must
+        // not be reported as another start, or every quality, track or
+        // recovery adds a play.
+        let continuesViewing = sameSitting && !opts.live && startReportedItemId == item.Id
+        if !continuesViewing { startReportedItemId = nil }
 
         MusicPlayer.shared.yield()
         shuffleSeries = nil
@@ -328,7 +333,7 @@ extension PlayerModel {
                     }
                     await loadExtras(for: item)
                     guard generation == mine else { return }
-                    await client.reportPlaybackStart(report(paused: false))
+                    await reportStreamOpened(item, paused: false, continuesViewing: continuesViewing)
                     adaptive.begin(
                         inherited: meta.inherited, ceiling: requestedBitrate, powerCap: powerCapBitrate,
                         untouched: Quality.untouchedRung(for: src.mediaSource))
@@ -379,7 +384,7 @@ extension PlayerModel {
             }
             await loadExtras(for: item)
             guard generation == mine else { return }
-            await client.reportPlaybackStart(report(paused: staysPaused))
+            await reportStreamOpened(item, paused: staysPaused, continuesViewing: continuesViewing)
             adaptive.begin(
                 inherited: meta.inherited, ceiling: requestedBitrate, powerCap: powerCapBitrate,
                 untouched: Quality.untouchedRung(for: src.mediaSource))
@@ -404,6 +409,17 @@ extension PlayerModel {
             errorMessage = error.localizedDescription
             isBuffering = false
             isOpening = false
+        }
+    }
+
+    /// A start report is what adds to the server's PlayCount, so a stream
+    /// reopened in the middle of a viewing only says where it is.
+    private func reportStreamOpened(_ item: BaseItem, paused: Bool, continuesViewing: Bool) async {
+        if continuesViewing {
+            await client.reportPlaybackProgress(report(paused: paused))
+        } else {
+            await client.reportPlaybackStart(report(paused: paused))
+            if !isLive { startReportedItemId = item.Id }
         }
     }
 
