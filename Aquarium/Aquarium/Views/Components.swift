@@ -2608,9 +2608,10 @@ struct AppTopBar<Content: View>: View {
     var height: CGFloat = Metrics.topBar
     @ViewBuilder var content: Content
 
-    /// The way back to an iPad's collapsed sidebar — see `showSidebar`. Nil
-    /// everywhere else.
-    @Environment(\.showSidebar) private var showSidebar
+    /// The way back to an iPad's collapsed sidebar — see `SidebarToggle`.
+    /// Nil everywhere else.
+    @Environment(\.sidebarToggle) private var sidebarToggle
+    private var showSidebar: (() -> Void)? { sidebarToggle?.show }
 
     /// A foldable's inside screen held upright has a status strip deeper
     /// than a phone's and empty but for the pill in its trailing corner —
@@ -2677,8 +2678,20 @@ struct AppTopBar<Content: View>: View {
 /// detail column, which on every page that *does* have a system bar sat
 /// under the system's own toggle: two of them, one above the other. Nil when
 /// the sidebar is showing, and on anything that has no sidebar.
+///
+/// Handed down as an object whose `show` changes, not as the closure itself:
+/// a page already pushed onto the detail column's stack kept the environment
+/// it was pushed with, so a title page open when the sidebar was hidden
+/// never got the toggle, and nothing on screen brought the sidebar back.
+/// What a page reads off an observed object reaches it wherever it is.
+@MainActor
+@Observable
+final class SidebarToggle {
+    var show: (() -> Void)?
+}
+
 private struct ShowSidebarKey: EnvironmentKey {
-    static let defaultValue: (() -> Void)? = nil
+    static let defaultValue: SidebarToggle? = nil
 }
 
 /// The way back from a page a section's stack pushed: that stack's path,
@@ -2696,7 +2709,7 @@ extension EnvironmentValues {
 }
 
 extension EnvironmentValues {
-    var showSidebar: (() -> Void)? {
+    var sidebarToggle: SidebarToggle? {
         get { self[ShowSidebarKey.self] }
         set { self[ShowSidebarKey.self] = newValue }
     }

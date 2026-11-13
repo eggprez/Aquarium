@@ -293,7 +293,9 @@ struct ItemDetailView: View {
 
     #if os(iOS)
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.showSidebar) private var showSidebar
+    @Environment(\.sidebarToggle) private var sidebarToggle
+    /// The way back to a collapsed sidebar — see `SidebarToggle`.
+    private var showSidebar: (() -> Void)? { sidebarToggle?.show }
     /// What the top of the screen keeps for the clock, read from outside the
     /// scroll view that ignores it — see `body`. iPad only.
     @State private var padTopInset: CGFloat = 0

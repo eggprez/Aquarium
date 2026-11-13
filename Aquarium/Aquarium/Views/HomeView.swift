@@ -275,7 +275,9 @@ struct HomeView: View {
     /// Whether the hero has scrolled up under the bar, which is when the
     /// bar earns a surface and the wordmark.
     @State private var padScrolled = false
-    @Environment(\.showSidebar) private var showSidebar
+    @Environment(\.sidebarToggle) private var sidebarToggle
+    /// The way back to a collapsed sidebar — see `SidebarToggle`.
+    private var showSidebar: (() -> Void)? { sidebarToggle?.show }
 
     /// An iPad's Home: the hero runs up under the status bar and the bar
     /// floats over it — glass discs on the artwork, and only once the page

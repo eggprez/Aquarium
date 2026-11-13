@@ -127,15 +127,20 @@ final class PadSidebarTests: PadUITestCase {
         XCTAssertTrue(eventually(10) { !self.app.button(TestID.Sidebar.collapse).isHittable })
         // The title page's own bar should then carry the way back
         // (ItemDetailView.padBar, `showSidebar`): seen missing on a title
-        // pushed over Home, landscape, 2026-11-13.
+        // pushed over Home, landscape, 2026-11-13; fixed the same day (the
+        // pushed page is handed `SidebarToggle`).
         let toggle = app.button(TestID.Detail.showSidebar)
         let offered = toggle.waitForExistence(timeout: 10)
         attachScreenshot("title page, sidebar hidden")
-        XCTExpectFailure("bug: a title page shows no 'Show sidebar' after the sidebar is hidden", strict: false)
         XCTAssertTrue(offered, "Show sidebar in the title page's bar")
         guard offered else { return }
         toggle.padTap()
-        XCTAssertTrue(eventually(10) { self.app.button(TestID.Sidebar.collapse).isHittable },
+        // On screen rather than hittable, as the Home test above checks:
+        // over a pushed title page the sidebar comes back and its buttons
+        // take real touches (checked by hand, 2026-11-13), yet XCUITest
+        // calls every sidebar button unhittable there; its hit test lands on
+        // something of the page under the column (see `isOnScreen`).
+        XCTAssertTrue(eventually(10) { self.isOnScreen(self.app.button(TestID.Sidebar.collapse)) },
                       "the title page's own bar brings the sidebar back")
     }
 
