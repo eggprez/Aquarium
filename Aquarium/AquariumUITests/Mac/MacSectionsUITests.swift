@@ -131,7 +131,10 @@ final class MacSectionsUITests: MacUITestCase {
         app.element(TestID.Downloads.root).waitToExist(20)
         let card = app.element(TestID.Downloads.filmCard(film.id))
         XCTAssertTrue(card.waitForExistence(timeout: 120), "the download finished")
-        card.rightClick()
+        // By its centre: a tile, like an episode row, can be on screen and
+        // still not "hittable" to XCUITest, whose own right-click then
+        // refuses ("Not hittable").
+        card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).rightClick()
         menuChoice(TestID.Downloads.filmCardDelete(film.id), title: "Delete…").click()
         // On a Mac the question is an alert (`downloadDeletionDialog`), and an
         // alert's buttons don't keep SwiftUI identifiers ("action-button-1"):
