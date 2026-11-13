@@ -32,7 +32,8 @@ final class MacClientTests: MacUnitTestCase {
         q.favorites = true
         q.genre = "Test Pattern"
         _ = try await client.libraryItems(parentId: "lib-films", query: q, searchTerm: "  FX Long  ")
-        let req = try XCTUnwrap(StubURLProtocol.requests.last)
+        // The host app makes requests of its own through the stub too: find ours.
+        let req = try XCTUnwrap(StubURLProtocol.requests.last { $0.url?.query?.contains("searchTerm") == true })
         XCTAssertEqual(req.url?.path, "/Items")
         let params = query(of: req)
         XCTAssertEqual(params["userId"], [ClientStub.userId])
@@ -67,7 +68,7 @@ final class MacClientTests: MacUnitTestCase {
                   {"Type":"Intro","StartTicks":5,"EndTicks":5}]}
         """#)
         let segments = try await client.mediaSegments(itemId: id)
-        let params = query(of: StubURLProtocol.requests.last)
+        let params = query(of: StubURLProtocol.requests.last { $0.url?.path == "/MediaSegments/\(id)" })
         XCTAssertEqual(params["includeSegmentTypes"], ["Intro", "Outro"], "one parameter per type")
         XCTAssertEqual(segments.map(\.type), ["Intro", "Outro"], "an empty segment is dropped")
         XCTAssertEqual(segments[0].start, 30)
@@ -134,7 +135,7 @@ final class MacClientTests: MacUnitTestCase {
     func testAuthorizationHeaderIsASCIIOnAMac() async throws {
         StubURLProtocol.stub("/System/Info/Public", json: #"{"Id":"stub-server"}"#)
         _ = await client.checkOnline()
-        let req = try XCTUnwrap(StubURLProtocol.requests.last)
+        let req = try XCTUnwrap(StubURLProtocol.requests.last { $0.url?.path == "/System/Info/Public" })
         let header = try XCTUnwrap(req.value(forHTTPHeaderField: "Authorization"))
         XCTAssertTrue(header.unicodeScalars.allSatisfy(\.isASCII), header)
         XCTAssertTrue(header.hasPrefix("MediaBrowser "))
@@ -145,11 +146,12 @@ final class MacClientTests: MacUnitTestCase {
     func testFavoriteAndWatchedRequests() async throws {
         StubURLProtocol.stub("/UserFavoriteItems/abc", method: "POST", json: "{}")
         StubURLProtocol.stub("/UserFavoriteItems/abc", method: "DELETE", json: "{}")
+        let mine = { StubURLProtocol.requests.filter { $0.url?.path == "/UserFavoriteItems/abc" } }
         try await client.setFavorite("abc", favorite: true)
-        XCTAssertEqual(StubURLProtocol.requests.last?.httpMethod, "POST")
+        XCTAssertEqual(mine().last?.httpMethod, "POST")
         try await client.setFavorite("abc", favorite: false)
-        XCTAssertEqual(StubURLProtocol.requests.last?.httpMethod, "DELETE")
-        XCTAssertTrue(StubURLProtocol.requests.allSatisfy { $0.url?.path == "/UserFavoriteItems/abc" })
+        XCTAssertEqual(mine().last?.httpMethod, "DELETE")
+        XCTAssertEqual(query(of: mine().last)["userId"], [ClientStub.userId])
     }
 }
 #endif

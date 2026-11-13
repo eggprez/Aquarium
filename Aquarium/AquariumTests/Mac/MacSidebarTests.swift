@@ -46,7 +46,8 @@ final class MacSidebarTests: MacUnitTestCase {
     func testBugCmdNumberOutOfSidebarOrder() {
         let shuffled: [AppSection] = [.home, .liveTV, .downloads, films, .favorites, shows]
         let order = MacCommands.sidebarOrder(shuffled)
-        XCTAssertEqual(order, [.home, films, shows, .liveTV, .favorites, .downloads])
+        XCTAssertEqual(order, [.home, films, shows, .liveTV, .downloads, .favorites],
+                       "grouped under their headings; within a group, the sections' own order")
         XCTAssertEqual(order[1], films, "⌘2 is the second row the sidebar draws")
     }
 
