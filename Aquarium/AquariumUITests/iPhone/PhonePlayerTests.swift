@@ -252,9 +252,16 @@ final class PhonePlayerTests: PhonePlayerTestCase {
         let (api, film) = try play("film.long_multitrack")
         pause(strict: false)
         openPill("audio")
-        app.button(TestID.Player.audioOption("2")).tapNow(10)
-        XCTAssertTrue(eventually(timeout: 60) { (self.playState(api, film.id)["AudioStreamIndex"] as? Int) == 2 },
-                      "server reports audio \(String(describing: playState(api, film.id)["AudioStreamIndex"]))")
+        // The server remembers a person's last track per title, and since
+        // this film plays on AVFoundation an earlier run's pick of 2 comes
+        // back as the stream's own: picking it again is no change. So the
+        // pick is 2, or 3 where 2 is already playing.
+        let two = app.button(TestID.Player.audioOption("2"))
+        two.waitToExist(10)
+        let pick = two.isSelected ? 3 : 2
+        app.button(TestID.Player.audioOption(String(pick))).tapNow(10)
+        XCTAssertTrue(eventually(timeout: 60) { (self.playState(api, film.id)["AudioStreamIndex"] as? Int) == pick },
+                      "server reports audio \(String(describing: playState(api, film.id)["AudioStreamIndex"])), chose \(pick)")
     }
 
     /// Every subtitle kind on the multitrack fixture is offered: SRT, ASS,
