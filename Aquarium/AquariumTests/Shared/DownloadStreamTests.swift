@@ -231,6 +231,12 @@ final class DownloadStreamTests: DownloadTestCase {
     }
 
     func testAStreamThatFinishesIsRecordedWhereItLandedAtTheSizeItIs() async throws {
+        #if os(macOS)
+        // On a Mac AVURLAsset tells the truth about a made-up package (it
+        // will not play), so the finish is refused; the iOS simulator says
+        // yes to anything at a .movpkg address, which is what lets this run.
+        throw XCTSkip("a made-up package does not pass for a real one on the Mac")
+        #endif
         let id = newId()
         let writing = try package(bytes: 500), landed = try package(bytes: 200_000)
         seedStream(id) {
@@ -284,7 +290,9 @@ final class DownloadStreamTests: DownloadTestCase {
         manager.urlSession(Self.streams, assetDownloadTask: task, didFinishDownloadingTo: landed.url)
         end(task)
         await waitUntil("the finish is dealt with") { self.manager.record(for: id)?.status != .downloading }
-        XCTExpectFailure("bug: the one check finishStream makes of a finished stream, AVURLAsset's isPlayable, answers yes for anything at a .movpkg address — two kilobytes of junk in a plain file included — so a package that cannot play is recorded as a finished download, Aquarium/Core/Downloads.swift:2462") {
+        // Seen on the iOS simulator only: on a Mac isPlayable says no and the
+        // junk is refused, so this is not strict. Not yet checked on a device.
+        XCTExpectFailure("bug (iOS simulator; a real device unchecked): the one check finishStream makes of a finished stream, AVURLAsset's isPlayable, answers yes for anything at a .movpkg address — two kilobytes of junk in a plain file included — so a package that cannot play is recorded as a finished download, Aquarium/Core/Downloads.swift:2462", strict: false) {
             XCTAssertNotEqual(manager.record(for: id)?.status, .complete)
         }
     }
