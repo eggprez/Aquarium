@@ -705,7 +705,7 @@ private struct PanelSlider: View {
 
 // MARK: - Info
 
-private struct InfoTab: View {
+struct InfoTab: View {
     @Environment(PlayerModel.self) private var player
     let schedule: ChannelSchedule
     let artwork: InfoArtwork
@@ -996,8 +996,8 @@ private struct InfoTab: View {
             parts.append(String(year))
         }
         if let ticks = item.RunTimeTicks, ticks > 0 {
-            let minutes = Int(Double(ticks) / 600_000_000)
-            parts.append(minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m")
+            // The app's one rule: a 20 s clip is "20s", not "0m".
+            parts.append(Format.ticks(ticks))
         }
         if let rating = item.OfficialRating { parts.append(rating) }
         if let score = item.CommunityRating { parts.append("★ " + score.formatted(.number.precision(.fractionLength(1)))) }
