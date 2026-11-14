@@ -25,6 +25,10 @@ final class PhoneSettingsTests: PhoneUITestCase {
         "about": [TestID.Settings.aboutVersion],
     ]
 
+    static let titles = ["account": "Account", "appearance": "Appearance", "video": "Video", "audio": "Audio",
+                         "subtitles": "Subtitles", "music": "Music", "liveTV": "Live TV", "downloads": "Downloads",
+                         "libraryCopy": "Library copy", "about": "About", "watch": "Apple Watch"]
+
     /// Rows for settings the phone pins (cd76c6f): they must not be shown.
     static let pinned = [TestID.Settings.videoEngine, TestID.Settings.videoSkipInterval, TestID.Settings.videoHideControlsAfter,
                          TestID.Settings.videoBrightness, TestID.Settings.videoZoom, TestID.Settings.subtitlesBackground,
@@ -33,13 +37,18 @@ final class PhoneSettingsTests: PhoneUITestCase {
     private func openPage(_ page: String, file: StaticString = #filePath, line: UInt = #line) {
         let link = app.descendants(matching: .any).matching(identifier: TestID.Settings.pageLink(page)).firstMatch
         app.reveal(link)
+        clearOfTheTabBar(link)
         link.tapNow(20, file: file, line: line)
         if page == "watch" { return }   // the Apple Watch page has its own anchor (and none without a paired watch)
-        if !app.element(TestID.Settings.pageRoot(page)).waitForExistence(timeout: 6) {
+        let root = app.element(TestID.Settings.pageRoot(page))
+        let title = Self.titles[page] ?? page
+        let opened = { root.exists || self.app.navigationBars[title].exists }
+        if !eventually(timeout: 6, opened), link.exists, app.element(TestID.Settings.root).exists {
             app.reveal(link)
+            clearOfTheTabBar(link)
             link.tapNow(10, file: file, line: line)
         }
-        app.element(TestID.Settings.pageRoot(page)).waitToExist(20, file: file, line: line)
+        XCTAssertTrue(eventually(timeout: 20, opened), "Settings › \(title) did not open", file: file, line: line)
     }
 
     /// A page pushed from a settings row: its anchor, or its title in the
@@ -50,6 +59,16 @@ final class PhoneSettingsTests: PhoneUITestCase {
                 && !(self.app.element(TestID.Settings.pageRoot(page)).exists
                      && self.app.element(TestID.Settings.pageRoot(page)).frame.minX >= 0
                      && self.app.element(TestID.Settings.pageRoot(page)).frame.minX < 10)
+        }
+    }
+
+    /// On the small phone a row near the foot sits under the floating tab
+    /// bar, where a tap opens a tab: drag it up into the top part first.
+    private func clearOfTheTabBar(_ element: XCUIElement) {
+        let window = app.windows.firstMatch.frame
+        for _ in 0..<3 where element.exists && element.frame.maxY > window.height * 0.7 {
+            let start = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+            start.press(forDuration: 0.05, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)))
         }
     }
 
@@ -71,7 +90,14 @@ final class PhoneSettingsTests: PhoneUITestCase {
             }
             for row in Self.pinned where any(row).exists { XCTFail("\(page) shows pinned row \(row)") }
             attachScreenshot("settings \(page) (\(device.rawValue))")
-            goBack()
+            // Back to the list by the More tab (a second tap pops to its
+            // root), not a back button: on the Duo's front screen the system
+            // back sits in the trailing column.
+            tab("More")
+            if !app.element(TestID.Shell.more).waitForExistence(timeout: 3) { tab("More") }
+            let row = app.descendants(matching: .any).matching(identifier: TestID.Shell.moreRow("settings")).firstMatch
+            app.reveal(row)
+            row.tapNow(20)
             app.element(TestID.Settings.root).waitToExist(10)
         }
         XCTAssertTrue(missing.isEmpty, "missing rows: \(missing.joined(separator: ", "))")
