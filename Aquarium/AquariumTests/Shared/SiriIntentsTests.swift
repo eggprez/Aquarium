@@ -210,8 +210,20 @@ final class MediaItemQueryTests: XCTestCase {
         await CoreAccount.signOut()
         let found = try await query.entities(for: ["m-heat"])
         XCTAssertTrue(found.isEmpty)
+        #if os(tvOS)
+        // An Apple TV has no downloads to fall back on, so with nobody signed
+        // in a search by name has nowhere to go and says so: the client's
+        // "Not signed in", rather than an empty list.
+        do {
+            _ = try await query.entities(matching: "heat")
+            XCTFail("a search with nobody signed in gave an answer")
+        } catch {
+            guard case APIError.notConfigured = error else { return XCTFail("\(error)") }
+        }
+        #else
         let matching = try await query.entities(matching: "heat")
         XCTAssertTrue(matching.isEmpty, "no copy, no server: the downloads, of which there are none")
+        #endif
         let suggested = try await query.suggestedEntities()
         XCTAssertTrue(suggested.isEmpty)
         XCTAssertTrue(StubURLProtocol.requests.isEmpty)
