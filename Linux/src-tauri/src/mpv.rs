@@ -520,7 +520,14 @@ impl Session {
                         &mut node as *mut libmpv2_sys::mpv_node as *mut std::ffi::c_void,
                     )
                 };
-                if err == libmpv2_sys::mpv_error_MPV_ERROR_PROPERTY_FORMAT {
+                // mpv 0.37 (Ubuntu 24.04) answers a node of the wrong type for
+                // some option-backed properties (`hwdec` from a bool) with
+                // PROPERTY_ERROR instead of PROPERTY_FORMAT; retrying a
+                // non-text value as text is harmless when the error was real.
+                let mistyped = err == libmpv2_sys::mpv_error_MPV_ERROR_PROPERTY_FORMAT
+                    || (err == libmpv2_sys::mpv_error_MPV_ERROR_PROPERTY_ERROR
+                        && !value.is_string());
+                if mistyped {
                     // A node of a type the property will not take (mpv converts
                     // the obvious cases itself). Text goes through the option
                     // parser, which accepts anything the command line would.
@@ -1059,6 +1066,19 @@ mod tests {
                 "Authorization: MediaBrowser Token=\"abc\", Device=\"Linux\"",
             ),
         ] {
+            // The `load-*` switches for mpv's built-in scripts arrived over
+            // several releases (Ubuntu 24.04's 0.37 has no `load-console` or
+            // `load-select`); an mpv without the option has no such script to
+            // keep from loading, so "property not found" passes for those.
+            if name.starts_with("load-") {
+                match session.mpv.get_property::<String>(name) {
+                    Ok(got) => assert_eq!(got, want, "option {name}"),
+                    Err(libmpv2::Error::Raw(e))
+                        if e == libmpv2_sys::mpv_error_MPV_ERROR_PROPERTY_NOT_FOUND => {}
+                    Err(e) => panic!("{name}: {e}"),
+                }
+                continue;
+            }
             assert_eq!(read(name), want, "option {name}");
         }
         // The config dir is the machine's, so only its consequences are fixed:
