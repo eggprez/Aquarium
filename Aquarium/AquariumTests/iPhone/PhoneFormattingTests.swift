@@ -304,7 +304,6 @@ final class PhoneFormattingTests: PhoneUnitTestCase {
     /// the viewer can do nothing with.
     func testServerErrorDoesNotShowThePath() {
         let message = APIError.server(status: 404, path: "/Items/abc").localizedDescription
-        XCTExpectFailure("bug: APIError.server's description includes the request path")
         XCTAssertFalse(message.contains("/Items/"), message)
     }
 }

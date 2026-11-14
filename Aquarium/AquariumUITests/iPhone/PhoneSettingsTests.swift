@@ -198,7 +198,6 @@ final class PhoneSettingsTests: PhoneUITestCase {
         link.tapNow(10)
         let opened = pushed(TestID.TabBarSettings.root, title: "Tab Bar", from: "appearance")
         guard opened else {
-            XCTExpectFailure("bug: Settings sub-pages pushed by value (Route.settings) do not open on iPhone: SettingsView pushes each page with a view-destination NavigationLink (~line 1053), and the value links inside it (~1342ff) are not handled there")
             XCTFail("Tab Bar page did not open"); return
         }
         let reset = any(TestID.TabBarSettings.reset)
@@ -217,7 +216,6 @@ final class PhoneSettingsTests: PhoneUITestCase {
         link.tapNow(10)
         let opened = pushed(TestID.AppIconSettings.root, title: "App Icon", from: "appearance")
         guard opened else {
-            XCTExpectFailure("bug: Settings sub-pages pushed by value (Route.settings) do not open on iPhone: SettingsView pushes each page with a view-destination NavigationLink (~line 1053), and the value links inside it (~1342ff) are not handled there")
             XCTFail("App Icon page did not open"); return
         }
         let original = any(TestID.AppIconSettings.icon("AppIcon"))
@@ -278,7 +276,6 @@ final class PhoneSettingsTests: PhoneUITestCase {
         link.tapNow(10)
         let opened = any(TestID.Settings.stationMixPointsLeft).waitForExistence(timeout: 10) || app.navigationBars["Station mix"].exists
             || app.navigationBars["Station Mix"].exists
-        XCTExpectFailure("bug: Settings sub-pages pushed by value (Route.settings) do not open on iPhone (see testTabBarSettingsReorderAndReset)")
         XCTAssertTrue(opened, "Station mix page did not open")
     }
 

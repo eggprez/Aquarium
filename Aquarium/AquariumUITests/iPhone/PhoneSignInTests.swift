@@ -263,7 +263,6 @@ final class PhoneSignInTests: PhoneUITestCase {
         let named = text.contains(account.name)
         // Dismiss without signing out: a tap outside the popover.
         app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75)).tap()
-        XCTExpectFailure("bug R-TV30: the sign-out question reads \"\(text)\", naming the server and not the account")
         XCTAssertTrue(named, "the question should name \(account.name)")
     }
 

@@ -373,7 +373,6 @@ final class PhonePlayerTests: PhonePlayerTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(8))
         closePlayer()
         let after = try api.userData(film.id).playCount
-        XCTExpectFailure("bug R-013ead9: each stream reopen reports a new playback start")
         XCTAssertEqual(after, before, "PlayCount went \(before) → \(after)")
     }
 

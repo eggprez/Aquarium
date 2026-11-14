@@ -289,13 +289,11 @@ final class PhoneLibraryTests: PhoneUITestCase {
         let albumId = try XCTUnwrap(PhoneFixtures.photo("FX Album"))
         let album = app.buttons.matching(identifier: TestID.Item.card(albumId)).firstMatch
         guard album.waitForExistence(timeout: 20) else {
-            XCTExpectFailure("bug: photo albums are not listed in a home-videos library")
             XCTFail("FX Album not shown"); return
         }
         album.tap()
         let nested = try XCTUnwrap(PhoneFixtures.photo("Nested"))
         let opened = app.buttons.matching(identifier: TestID.Item.card(nested)).firstMatch.waitForExistence(timeout: 20)
-        XCTExpectFailure("bug R-PM4: a photo album opens an empty title page instead of its contents")
         XCTAssertTrue(opened, "FX Album should list its photos and the Nested album")
     }
 

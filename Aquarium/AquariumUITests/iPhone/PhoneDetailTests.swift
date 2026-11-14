@@ -99,9 +99,10 @@ final class PhoneDetailTests: PhoneUITestCase {
         launchHome()
         _ = try openFixture("film.versions")
         app.button(TestID.Detail.more).tapNow()
+        // The versions are a section of the quality menu, under More.
+        any(TestID.Detail.quality).tapNow(10)
         let versionChoice = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'version' OR label CONTAINS '2160p' OR label CONTAINS '480p'")).firstMatch
         let offered = versionChoice.waitForExistence(timeout: 5)
-        XCTExpectFailure("bug R-PM6: a film with three versions offers no choice of version")
         XCTAssertTrue(offered)
     }
 
