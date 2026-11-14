@@ -1365,7 +1365,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Aquarium;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = scottai.FellyJin;
-				INFOPLIST_KEY_WKRunsIndependentlyWithCompanionApp = YES;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp;
@@ -1400,7 +1400,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Aquarium;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = scottai.FellyJin;
-				INFOPLIST_KEY_WKRunsIndependentlyWithCompanionApp = YES;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = YES;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp;

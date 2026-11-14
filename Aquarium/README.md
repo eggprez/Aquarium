@@ -422,7 +422,7 @@ compiled into both the iPhone app and the watch app.
 - **The icon** is the same mark composed for a circle — `circleIcon` in
   `Tools/IconGenerator/brand.swift` — since watchOS masks every icon into one.
 
-The watch app is `WKRunsIndependentlyWithCompanionApp`: it runs, browses and
+The watch app is `WKRunsIndependentlyOfCompanionApp`: it runs, browses and
 plays with the phone switched off, as long as it has been signed in once.
 
 ## What did not carry over, and why
