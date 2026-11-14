@@ -208,7 +208,6 @@ final class PhoneLayoutTests: PhoneUITestCase {
         let card = app.element(TestID.Player.cardSubtitles)
         guard card.waitForExistence(timeout: 5), skip.exists else { return }
         let overlaps = skip.frame.insetBy(dx: 1, dy: 1).intersects(card.frame.insetBy(dx: 1, dy: 1))
-        XCTExpectFailure("bug R-SE-skip: the Skip Intro pill stays under an open card (fixed only on the QA fix branch, 722a3fa)", options: .nonStrict())
         XCTAssertFalse(overlaps, "Skip Intro \(skip.frame) overlaps the Subtitles card \(card.frame)")
     }
 }
