@@ -37,6 +37,10 @@ final class PhoneSignInTests: PhoneUITestCase {
             if !app.keyboards.firstMatch.waitForExistence(timeout: 3) { pw.tap() }
             app.typeText(password)
             let typed = (user.value as? String) == name
+            // Nor may it land anywhere: with no field focused the keys go
+            // nowhere and the name looks untouched. A SecureField's value is
+            // one bullet per character.
+            let reached = ((pw.value as? String) ?? "").count == password.count
             // On the iOS 27.0 simulator neither a tap nor the form's own focus
             // move lets XCUITest type into the SecureField, so the password
             // can land in the name: it is wiped, and the test skips. Password
@@ -48,7 +52,7 @@ final class PhoneSignInTests: PhoneUITestCase {
                 user.tapNow(5)
                 user.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: name.count + password.count + 2))
             }
-            if !typed {
+            if !typed || !reached {
                 throw XCTSkip("XCUITest cannot type into the password SecureField on this simulator; see PhoneSignInClientTests and MANUAL.md")
             }
         }
