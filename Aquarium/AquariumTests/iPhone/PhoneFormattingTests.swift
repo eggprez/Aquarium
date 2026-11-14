@@ -26,6 +26,14 @@ final class PhoneFormattingTests: PhoneUnitTestCase {
         XCTAssertEqual(Format.ticks(30 * 10_000_000), "30s")
     }
 
+    /// Seen in screenshots 2026-11-13: an audiobook with no cover (FX
+    /// Chaptered Audiobook) drew a music note on Audiobooks' shelves.
+    func testArtlessAudiobookShowsABook() {
+        XCTAssertEqual(MusicArtwork.placeholder(for: PhoneJSON.item(#"{"Id":"b","Type":"AudioBook"}"#)), "book")
+        XCTAssertEqual(MusicArtwork.placeholder(for: PhoneJSON.item(#"{"Id":"s","Type":"Audio"}"#)), "music.note")
+        XCTAssertEqual(MusicArtwork.placeholder(for: nil), "music.note")
+    }
+
     func testClock() {
         XCTAssertEqual(Format.clock(0), "0:00")
         XCTAssertEqual(Format.clock(252), "4:12")
