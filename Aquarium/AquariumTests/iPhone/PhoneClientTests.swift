@@ -292,7 +292,9 @@ final class PhoneClientStubTests: PhoneUnitTestCase {
         StubURLProtocol.stub("/Items", json: #"{"Items":[{"Id":"a","Type":"Movie","Name":"FX Long Direct Play"}],"TotalRecordCount":1}"#)
         let result = try await JellyfinClient.shared.search("FX Long")
         XCTAssertEqual(result.items.count, 1)
-        let items = queryItems(requests(to: "/Items").last)
+        // The host app asks /Items for its own rows while a stub account is
+        // signed in, so the search is picked out by its term, not by being last.
+        let items = queryItems(requests(to: "/Items").last { queryItems($0).contains { $0.name == "searchTerm" } })
         XCTAssertEqual(items.first { $0.name == "searchTerm" }?.value, "FX Long")
         XCTAssertEqual(items.first { $0.name == "Recursive" }?.value, "true")
     }
