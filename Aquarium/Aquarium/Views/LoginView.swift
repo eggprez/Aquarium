@@ -1321,6 +1321,9 @@ struct LoginView: View {
     private func useDifferentServer() {
         probe = nil
         users = []
+        // A name and password typed for the last server are not this one's.
+        username = ""
+        password = ""
         quick = nil
         quickExpired = false
         quickConnectOffered = false

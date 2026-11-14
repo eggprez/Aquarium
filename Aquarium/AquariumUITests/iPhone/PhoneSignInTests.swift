@@ -219,7 +219,6 @@ final class PhoneSignInTests: PhoneUITestCase {
         app.button(TestID.Login.connect).tapNow(20)
         app.element(TestID.Login.serverBanner).waitToExist(30)
         let value = app.textFields[TestID.Login.username].value as? String ?? ""
-        XCTExpectFailure("bug: the username typed for the last server is kept after Use a different server")
         XCTAssertTrue(value.isEmpty || value == app.textFields[TestID.Login.username].placeholderValue, "name kept: \(value)")
     }
 
