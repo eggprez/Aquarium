@@ -230,15 +230,66 @@ extension View {
     }
 
     /// Applies the user's theme choice. `auto` leaves it to the system.
+    ///
+    /// On iOS it is the window's own style, set from a view that never
+    /// changes kind. A branch per choice gave the view under it a new
+    /// identity, so changing the theme rebuilt the whole window and threw
+    /// you out of Settings onto the root page. One `preferredColorScheme`
+    /// modifier kept the identity but moved the iPad hero's first page off
+    /// its line in landscape (PadRegressionTests), so the window is told
+    /// instead.
     @ViewBuilder
     func themed(_ pref: ThemePref) -> some View {
+        #if os(iOS)
+        background(WindowInterfaceStyle(style: pref.interfaceStyle))
+        #else
         switch pref {
         case .auto: self
         case .light: self.preferredColorScheme(.light)
         case .dark: self.preferredColorScheme(.dark)
         }
+        #endif
     }
 }
+
+#if os(iOS)
+extension ThemePref {
+    var interfaceStyle: UIUserInterfaceStyle {
+        switch self {
+        case .auto: .unspecified
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
+/// Sets the style of the window it lands in: the whole window, its sheets
+/// included, follows it, and `.unspecified` hands it back to the system.
+private struct WindowInterfaceStyle: UIViewRepresentable {
+    let style: UIUserInterfaceStyle
+
+    func makeUIView(context: Context) -> Probe {
+        let view = Probe()
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
+        return view
+    }
+
+    func updateUIView(_ view: Probe, context: Context) { view.style = style }
+
+    final class Probe: UIView {
+        var style: UIUserInterfaceStyle = .unspecified { didSet { apply() } }
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            apply()
+        }
+        private func apply() {
+            guard let window, window.overrideUserInterfaceStyle != style else { return }
+            window.overrideUserInterfaceStyle = style
+        }
+    }
+}
+#endif
 
 /// A small pill of status text — the HTTPS/HTTP marker, sync state, quality.
 ///

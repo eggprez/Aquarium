@@ -163,7 +163,6 @@ final class PhoneSettingsTests: PhoneUITestCase {
         let page = app.element(TestID.Settings.pageRoot("appearance"))
         let stayed = !eventually(timeout: 4) { !page.exists }
         if !stayed {
-            XCTExpectFailure("bug: choosing a theme throws you out of Settings › Appearance back to the More list (the root view is rebuilt)")
             XCTFail("changing the theme left Settings › Appearance")
             return
         }
