@@ -132,7 +132,9 @@ struct LiveTVView: View {
             // from More this screen had none, and with the navigation bar
             // hidden no back-swipe either: re-tapping the More tab was the
             // only way out.
-            HStack(spacing: 4) {
+            // The same gap Search keeps between its back button and field:
+            // at 4 the chevron's disc all but touched the heading.
+            HStack(spacing: 10) {
                 if isPushed {
                     BarBackButton()
                 }

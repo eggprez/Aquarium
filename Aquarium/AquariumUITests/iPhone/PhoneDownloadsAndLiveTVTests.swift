@@ -245,7 +245,6 @@ final class PhoneLiveTVTests: PhoneUITestCase {
         let title = app.element(TestID.LiveTV.title)
         if title.exists && back.frame.maxY > title.frame.minY && back.frame.minY < title.frame.maxY {
             let gap = title.frame.minX - back.frame.maxX
-            XCTExpectFailure("bug R-PM15: Live TV's back button sits 4 pt from its heading", options: .nonStrict())
             XCTAssertGreaterThanOrEqual(gap, 8, "gap \(gap)")
         }
         back.tap()
