@@ -2112,6 +2112,9 @@ final class JellyfinClient {
                 throw APIError.message("The server returned a stream URL this client couldn't parse")
             }
             var stream = fullEncode ? Self.withoutStreamCopy(url) : url
+            if !fullEncode, !live, maxBitrate == nil {
+                stream = Self.copyingVideoOfUnknownBitrate(stream, source: ms)
+            }
             stream = Self.carrying(
                 audioStreamIndex: audioStreamIndex,
                 subtitleStreamIndex: subtitleStreamIndex,
@@ -2241,6 +2244,39 @@ final class JellyfinClient {
               let uri = lines[(tag + 1)...].first(where: { !$0.isEmpty && !$0.hasPrefix("#") })
         else { return nil }
         return URL(string: uri, relativeTo: master)?.absoluteURL
+    }
+
+    /// Let a remux copy a picture whose bitrate the file doesn't state.
+    ///
+    /// The server writes `VideoBitrate` (the profile's ceiling less the audio)
+    /// into every stream address, and when it starts the encode it copies the
+    /// video only if the stream's own bitrate is known and under that figure.
+    /// A Matroska file often states no per-stream bitrate, so its H.264 —
+    /// which the address itself says needs nothing but a new container — was
+    /// re-encoded instead, at the 200 Mbps ceiling, which VideoToolbox refuses
+    /// outright: the stream never started.
+    ///
+    /// Files only, and only where nothing about the picture needs work: no rung chosen (that
+    /// cap is the point of a rung), no video reason in `TranscodeReasons`, and
+    /// no subtitle burnt in. Then the figure is a cap on a copy, and without
+    /// it the copy goes ahead.
+    nonisolated static func copyingVideoOfUnknownBitrate(_ url: URL, source: MediaSource) -> URL {
+        guard let video = source.streams.first(where: { $0.type == "Video" }), video.BitRate == nil,
+              var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              var query = parts.percentEncodedQueryItems
+        else { return url }
+        func value(_ name: String) -> String? {
+            query.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.value?.removingPercentEncoding
+        }
+        guard let reasons = value("TranscodeReasons")?.split(separator: ",").map(String.init), !reasons.isEmpty
+        else { return url }
+        let pictureReasons: Set<String> = ["RefFramesNotSupported", "AnamorphicVideoNotSupported", "InterlacedVideoNotSupported"]
+        guard !reasons.contains(where: { $0.hasPrefix("Video") || pictureReasons.contains($0) }) else { return url }
+        if value("SubtitleMethod")?.lowercased() == "encode",
+           let index = value("SubtitleStreamIndex").flatMap(Int.init), index >= 0 { return url }
+        query.removeAll { $0.name.caseInsensitiveCompare("VideoBitrate") == .orderedSame }
+        parts.percentEncodedQueryItems = query
+        return parts.url ?? url
     }
 
     /// Take away the server's freedom to copy a bitstream through, so both

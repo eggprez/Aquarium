@@ -113,7 +113,6 @@ final class PhonePlayerTests: PhonePlayerTestCase {
         _ = try play("film.long_multitrack")
         showControls()
         let playing = wait(for: app.button(TestID.Player.playPause), "label == 'Pause'", timeout: 60)
-        XCTExpectFailure("bug: FX Long Remux Multitrack never leaves Loading on AVFoundation (server video encode fails)")
         XCTAssertTrue(playing, "still \(app.button(TestID.Player.playPause).label)")
     }
 

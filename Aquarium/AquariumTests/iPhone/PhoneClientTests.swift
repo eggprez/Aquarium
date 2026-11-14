@@ -55,6 +55,27 @@ final class PhoneClientURLTests: PhoneUnitTestCase {
         XCTAssertEqual(query(fixed)["SegmentContainer"], "ts")
     }
 
+    /// FX Long Remux Multitrack: an MKV whose H.264 states no bitrate. The
+    /// server copies a picture only when its bitrate is known and under the
+    /// address's VideoBitrate, so a remux (ContainerNotSupported alone) was
+    /// re-encoded at 200 Mbps, which VideoToolbox refused.
+    func testRemuxOfVideoWithNoBitrateDropsTheVideoBitrate() {
+        let unrated = PhoneJSON.videoSource(container: "mkv")
+        let remux = URL(string: "http://h/master.m3u8?VideoCodec=h264,hevc&VideoBitrate=199808000&AudioBitrate=192000&TranscodeReasons=ContainerNotSupported")!
+        let fixed = JellyfinClient.copyingVideoOfUnknownBitrate(remux, source: unrated)
+        XCTAssertNil(query(fixed)["VideoBitrate"])
+        XCTAssertEqual(query(fixed)["AudioBitrate"], "192000")
+        XCTAssertEqual(query(fixed)["TranscodeReasons"], "ContainerNotSupported")
+        // A picture that needs work keeps its ceiling.
+        let encode = URL(string: "http://h/master.m3u8?VideoBitrate=199808000&TranscodeReasons=ContainerNotSupported,VideoBitDepthNotSupported")!
+        XCTAssertEqual(JellyfinClient.copyingVideoOfUnknownBitrate(encode, source: unrated), encode)
+        let burnIn = URL(string: "http://h/master.m3u8?VideoBitrate=199808000&TranscodeReasons=ContainerNotSupported&SubtitleMethod=Encode&SubtitleStreamIndex=14")!
+        XCTAssertEqual(JellyfinClient.copyingVideoOfUnknownBitrate(burnIn, source: unrated), burnIn)
+        // A stated bitrate is the server's to compare.
+        let rated = PhoneJSON.source(#"{"Id":"s","Container":"mkv","MediaStreams":[{"Index":0,"Type":"Video","Codec":"h264","BitRate":4000000}]}"#)
+        XCTAssertEqual(JellyfinClient.copyingVideoOfUnknownBitrate(remux, source: rated), remux)
+    }
+
     func testSubtitleSegmentFixLeavesOtherStreamsAlone() {
         let url = URL(string: "http://h/main.m3u8?SubtitleStreamIndex=2&SubtitleMethod=Hls&SegmentContainer=mp4")!
         XCTAssertEqual(JellyfinClient.subtitleTimedSegments(url, source: PhoneJSON.videoSource(videoCodec: "hevc"), audioStreamIndex: nil), url,
