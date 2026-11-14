@@ -377,6 +377,25 @@ final class PhoneAudiobookTests: PhoneMusicTestCase {
         attachScreenshot("audiobooks (\(device.rawValue))")
     }
 
+    /// Seen in the Duo screenshots 2026-11-13: Authors listed every band on
+    /// the server (Abel Korzeniowski, Air, Boards of Canada) beside the two
+    /// authors. With two books libraries there is no one parent to scope by.
+    func testAuthorsAreOnlyAuthors() throws {
+        try standardOnly()
+        launchHome()
+        tab("Audiobooks")
+        app.element(TestID.Books.root).waitToExist(30)
+        let shelf = any(TestID.Books.shelf("authors"))
+        app.reveal(shelf)
+        shelf.waitToExist(20)
+        let chips = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'books.author.chip.'"))
+        XCTAssertTrue(eventually(timeout: 10) { chips.count > 0 }, "no author chips")
+        let names = chips.allElementsBoundByIndex.map(\.label)
+        XCTAssertTrue(names.contains("FX Author"), "FX Author missing: \(names)")
+        let musicians = Set(names).intersection(["FX Band", "FX Singer", "Abel Korzeniowski", "Air", "Boards of Canada"])
+        XCTAssertTrue(musicians.isEmpty, "musicians listed as authors: \(musicians.sorted())")
+    }
+
     func testBookPageListsChaptersAndResumes() throws {
         let api = try self.api
         let book = try XCTUnwrap(PhoneFixtures.book("FX Chaptered Audiobook"))

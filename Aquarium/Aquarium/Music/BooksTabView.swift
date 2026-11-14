@@ -168,7 +168,7 @@ struct BooksTabView: View {
         let parent = libraries.count == 1 ? libraries.first : nil
         async let resumeTask = client.resumeAudio(limit: 20)
         async let recentTask = client.music({ var q = JellyfinClient.MusicQuery(types: "AudioBook", sort: .recentlyAdded, limit: 16); q.parentId = parent; return q }())
-        async let authorsTask = client.albumArtists(parentId: parent, limit: 30)
+        async let authorsTask = client.albumArtists(parentId: parent, limit: 30, itemTypes: "AudioBook")
         let sort = sort
         let p = PagedItems(pageSize: 60) { start, limit in
             var q = JellyfinClient.MusicQuery(types: "AudioBook", sort: sort, startIndex: start, limit: limit)

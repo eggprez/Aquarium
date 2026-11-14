@@ -176,18 +176,19 @@ extension JellyfinClient {
     /// means by "Artists" — the other list, everyone who has ever been credited
     /// on a track, is twice as long and mostly guest features.
     ///
-    /// `songsOnly` counts artists from songs alone. An audiobook's author is
-    /// an album artist too, and Music › Artists is about the music; a music
-    /// library's `parentId` would do it only where there is one music library.
+    /// `itemTypes` counts artists from those items alone: "Audio" for
+    /// musicians, "AudioBook" for authors. An audiobook's author is an album
+    /// artist too and so is every band; a library's `parentId` separates them
+    /// only where there is one library of each kind.
     func albumArtists(
         parentId: String? = nil, startIndex: Int = 0, limit: Int = 200,
         favorites: Bool = false, searchTerm: String? = nil, sort: MusicSort = .name,
-        nameLessThan: String? = nil, songsOnly: Bool = false
+        nameLessThan: String? = nil, itemTypes: String? = nil
     ) async throws -> ItemsResponse {
         try await artists(
             path: "/Artists/AlbumArtists", parentId: parentId, startIndex: startIndex,
             limit: limit, favorites: favorites, searchTerm: searchTerm, sort: sort, nameLessThan: nameLessThan,
-            includeItemTypes: songsOnly ? "Audio" : nil
+            includeItemTypes: itemTypes
         )
     }
 

@@ -384,7 +384,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         doors += [
             ("Artists", "music.mic", { [weak self] in
                 if client.isOffline { return OfflineMusic.songs.localArtists().prefix(cap).compactMap { self?.artistItem($0) } }
-                return ((try? await client.albumArtists(limit: 400, songsOnly: true).items) ?? []).prefix(cap).compactMap { self?.artistItem($0) }
+                return ((try? await client.albumArtists(limit: 400, itemTypes: "Audio").items) ?? []).prefix(cap).compactMap { self?.artistItem($0) }
             }),
             ("Albums", "square.stack", { [weak self] in
                 if client.isOffline { return OfflineMusic.songs.localAlbums().prefix(cap).compactMap { self?.albumItem($0) } }
