@@ -16,7 +16,7 @@
     ],
     "maximumTestExecutionTimeAllowance": 1800,
     "testTimeoutsEnabled": true,
-    "uiTestingScreenshotsLifetime": "deleteOnSuccess"
+    "uiTestingScreenshotsLifetime": "keepNever"
   },
   "testTargets": [
     {
