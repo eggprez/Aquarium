@@ -285,12 +285,16 @@ final class PhoneContextMenuTests: PhoneUITestCase {
         let card = app.buttons.matching(identifier: TestID.Item.card(id)).firstMatch
         app.reveal(card)
         card.waitToExist(30)
-        // Clear of Home's top bar: a card scrolled up under it takes the
-        // press to the bar's Search button instead.
+        // Clear of Home's top bar and the floating tab bar: a card under
+        // either takes the press to the bar (Search, or a tab) instead.
         let window = app.windows.firstMatch
-        if card.frame.minY < window.frame.minY + 140 {
+        for _ in 0..<3 {
+            let mid = card.frame.midY
+            let low = window.frame.maxY - 140
+            let high = window.frame.minY + 140
+            guard mid < high || mid > low else { break }
             let middle = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
-            middle.press(forDuration: 0.05, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 220)))
+            middle.press(forDuration: 0.05, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: mid < high ? 160 : -160)))
         }
         // By its frame: a SwiftUI card can report itself not hittable while
         // it is plainly on screen (see PhoneUITestSupport).

@@ -347,7 +347,7 @@ Shortcuts, the Measure Apple TV sync camera page.
 ## Seen, not yet fixed
 
 Nothing open. Audiobooks › Authors listing music artists beside the book
-authors (seen in the Duo screenshots of 2026-11-13) was fixed in 62d25e5 and
+authors (seen in the Duo screenshots of 2026-11-13) was fixed in 7c1f59c and
 is held by `PhoneMusicTests.testAuthorsAreOnlyAuthors`.
 
 ## Last run

@@ -9,7 +9,7 @@
 	<key>WKCompanionAppBundleIdentifier</key>
 	<string>scottai.FellyJin</string>
 	<!-- The watch talks to the server itself when the phone is away. -->
-	<key>WKRunsIndependentlyWithCompanionApp</key>
+	<key>WKRunsIndependentlyOfCompanionApp</key>
 	<true/>
 	<!-- Keeps playing with the wrist down. UIBackgroundModes, not
 	     WKBackgroundModes: on watchOS the WK key only takes the workout and
