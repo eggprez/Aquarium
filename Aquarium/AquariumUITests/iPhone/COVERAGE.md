@@ -20,7 +20,8 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | Function | Test | Kind | Status |
 |---|---|---|---|
 | `Format.ticks/clock/bytes/resolutionLabel/channelLabel/mediaSummary/itemSubtitle/trackLabel/parseDate/programWindow` | PhoneFormattingTests | unit | pass |
-| `Format.ticks` under a minute | PhoneFormattingTests.testShortRuntimeReadsSeconds | unit | xfail (R-TV-30s) |
+| `Format.ticks` under a minute | PhoneFormattingTests.testShortRuntimeReadsSeconds | unit | pass (R-TV-30s) |
+| Artless audiobook placeholder is a book | PhoneFormattingTests.testArtlessAudiobookShowsABook | unit | pass |
 | `PlayerTime.format/spoken` | PhoneFormattingTests.testPlayerTime | unit | pass |
 | `Quality.choices/label/shortLabel/snapped/rungIndex/cap/smallerStream/untouchedRung` | PhoneFormattingTests (quality group) | unit | pass |
 | `DownloadQualities.named/menuLabel`, catalogue keys | PhoneFormattingTests | unit | pass |
@@ -30,18 +31,19 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | `JellyfinClient.sortBy`, `MusicSort` | PhoneFormattingTests | unit | pass |
 | `LibraryView.SortOption.tiebroken/order` | PhoneFormattingTests | unit | pass |
 | `BookProgress.isFinished/isStale/takesServer`, `VideoProgress.isFinished` | PhoneFormattingTests | unit | pass |
-| `APIError` wording | PhoneFormattingTests.testServerErrorDoesNotShowThePath | unit | xfail (R-TV-404) |
+| `APIError` wording | PhoneFormattingTests.testServerErrorDoesNotShowThePath | unit | pass (R-TV-404) |
 | `JellyfinClient.withPlaySession/withNewPlaySession/playSessionId` | PhoneClientURLTests | unit | pass |
 | `JellyfinClient.subtitleTimedSegments` | PhoneClientURLTests | unit | pass |
 | `JellyfinClient.encode/pathId/safeFileName/subtitlePath/claimsHDRItCannotCarry` | PhoneClientURLTests | unit | pass |
-| `JellyfinClient.clientVersion` | PhoneClientURLTests.testClientVersionIsTheBundleVersion | unit | xfail (R-80113a1) |
+| `JellyfinClient.clientVersion` | PhoneClientURLTests.testClientVersionIsTheBundleVersion | unit | pass (R-80113a1) |
 | `mediaSegments` (Intro and Outro asked apart) | PhoneClientStubTests | unit | pass |
 | `resolvePlayback` body (MediaSourceId with track index) | PhoneClientStubTests | unit | pass |
 | `nextUp` (cutoff, resumable, rewatching) | PhoneClientStubTests | unit | pass |
 | `seriesNextUp` (in-progress episode wins) | PhoneClientStubTests | unit | pass |
 | `removeFromNextUp`, `addToNextUp(.lastWatched)` | PhoneClientStubTests | unit | pass |
 | `search` request | PhoneClientStubTests | unit | pass |
-| `search` types (collections, people) | PhoneClientStubTests.testSearchIncludesCollectionsAndPeople | unit | xfail (R-PM34) |
+| `search` types (collections, people) | PhoneClientStubTests.testSearchIncludesCollectionsAndPeople | unit | pass (R-PM34) |
+| Remux of a picture with no stated bitrate | PhoneClientURLTests.testRemuxOfVideoWithNoBitrateDropsTheVideoBitrate | unit | pass |
 | `channels` paging | PhoneClientStubTests | unit | pass |
 | `checkOnline` | ClientStubTests (shared) | unit | pass |
 | `AppModel.push/pop`, `AppSection.id` | PhoneNavigationTests | unit | pass |
@@ -83,9 +85,9 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | Quick Connect ↔ password switch | testQuickConnectAndBackToPassword | UI | pass (17) |
 | Unreachable server | testUnreachableServerSaysSo | UI | pass (17) |
 | Use a different server | testDifferentServerGoesBackToTheAddress | UI | pass (17) |
-| Name kept after a different server | testUsernameClearedAfterDifferentServer | UI | xfail (17) (R-Duo-user) |
+| Name kept after a different server | testUsernameClearedAfterDifferentServer | UI | pass (17) (R-Duo-user) |
 | Sign out | testSignOutReturnsToTheSignInScreen | UI | pass (17) |
-| Sign-out question names the account | testSignOutQuestionNamesTheAccount | UI | xfail (17) (R-TV30) |
+| Sign-out question names the account | testSignOutQuestionNamesTheAccount | UI | skip (17): the popover's text was not in the accessibility tree on the last runs; the wording names the account in code (R-TV30) |
 | Add account, switch account | testAddSecondAccountAndSwitchBack | UI | skip |
 | Form clear of the keyboard (all sizes) | testSignInFieldsClearOfTheKeyboard | UI, layout | pass (17, SE, Pro Max, Duo) (R-SE-signin) |
 | Form fits (all sizes) | testSignInScreenFitsTheScreen | UI, layout | pass (17, SE, Pro Max, Duo) |
@@ -119,14 +121,14 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | Paging to the end | testGridPagesToTheEnd | UI | pass (17) (R-dbd3662a) |
 | A–Z strip | testLetterIndexJumps | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Shows library lists series | testShowsLibraryListsSeriesNotEpisodes | UI | pass (17) |
-| Photo album opens | testPhotoAlbumOpensItsContents | UI | xfail (17) (R-PM4) |
+| Photo album opens | testPhotoAlbumOpensItsContents | UI | pass (17) (R-PM4) |
 | Home video in Photos plays | testHomeClipInPhotosLibraryPlays | UI | pass (17) |
 | Favorites page and kinds | testFavoritesListsTheBaselineAndFiltersByKind | UI | pass (17) |
 | Favourite from a title reaches Favorites | testFavouriteFromTitleAppearsInFavorites | UI | pass (17) (R-2c20fe6) |
 | Collections | testCollectionsListAndOpen | UI | pass (17) (R-56a1825) |
 | Search: films, shows, music, unicode, empty, recents, clear | PhoneSearchTests (testSearchFindsTheFXLongTitles on all four; the rest on 17) | UI, layout | pass |
 | Search replaces the old term | testTypingAfterReturningReplacesTheOldTerm | UI | pass (17) (R-PM35) |
-| Search finds collections | testSearchFindsTheCollection | UI | xfail (17) (R-PM34) |
+| Search finds collections | testSearchFindsTheCollection | UI | pass (17) (R-PM34) |
 | Photo viewer (full-screen photo) | — | none | the app has no photo viewer on iPhone (nonVideoTypes are filtered) |
 
 ## Title pages, context menus, Next Up (PhoneDetailTests, PhoneContextMenuTests)
@@ -139,7 +141,7 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | More menu anchored to its button | testMoreMenuOpensBesideItsButton | UI, layout | pass (17, SE, Pro Max, Duo) (R-5c15003) |
 | Play at a set quality | testPlayAtASetQualityMenu | UI | pass (17) |
 | Trailer | testTrailerPlays | UI | pass (17) |
-| Versions | testVersionsCanBeChosen | UI | xfail (17) (R-PM6) |
+| Versions | testVersionsCanBeChosen | UI | pass (17) (R-PM6) |
 | Cast → person page | testCastOpensThePersonPage | UI | pass (17) |
 | More Like This | testMoreLikeThisShelf | UI | pass (17) |
 | Show page: seasons, Up next line | testShowPageListsSeasonsAndEpisodes | UI, layout | pass (17, SE, Pro Max, Duo) |
@@ -147,6 +149,7 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | Season page, specials, double episode, episode play glyph | testSeasonPageListsItsEpisodes, testSpecialsSeasonOpens, testShortShowListsTheDoubleEpisodeOnce, testEpisodePlayGlyphPlaysThatEpisode | UI | pass (17) |
 | Episode → show crumb | testEpisodePageShowsItsShowAndSeason | UI | pass (17) |
 | Episode rows fit (small phone) | testEpisodeRowsShowTheirTitles | UI, layout | pass (17, SE, Pro Max, Duo) (R-SE-rows) |
+| Episode titles drawn whole (Duo front: "Long Epi…") | testEpisodeTitlesAreNotCutShort | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Card menu: Play, from beginning, Details, Favourite, Watched, Download submenu, Go to show/season | PhoneContextMenuTests | UI, layout | pass (17, SE, Pro Max, Duo for the film menu) |
 | Remove from Next Up | testRemoveFromNextUp | UI | pass (17) (R-a9528ef) |
 | Add to Next Up (last watched, first episode, cancel) | testAddToNextUpFromLastWatched, testAddToNextUpFromTheFirstEpisode, testAddToNextUpCancel | UI | pass (17) (memory jellyfin-next-up-rules) |
@@ -169,9 +172,10 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | Sidecar and image subtitles | testSidecarSubtitlesAreOffered, testImageSubtitlesAreOffered | UI | pass (17) |
 | No phantom CC row | testNoPhantomCaptionRow | UI | pass (17) (R-5a0e2d7-cc) |
 | Quality card, pick a rung, stays paused | testQualityCardOffersAutoOriginalAndEveryRung, testPickingARungTranscodesAndStaysPaused | UI, layout | pass (17) / pass (17, SE, Pro Max, Duo) (R-B2) |
-| A reopen counts no play | testQualityChangeDoesNotCountAPlay | UI | xfail (17) (R-013ead9) |
+| A reopen counts no play | testQualityChangeDoesNotCountAPlay | UI | pass (17) (R-013ead9) |
+| Remux plays (FX Long Remux Multitrack on AVFoundation) | testMultitrackRemuxStartsPlaying | UI | pass (17) |
 | Speed | testSpeedChoices | UI | pass (17) |
-| Sleep timer; shown in the title row | testSleepTimerStartsAndCancels, testSleepTimerShownInTitleRow | UI | pass (17) / xfail (17) (R-120c435) |
+| Sleep timer; shown in the title row | testSleepTimerStartsAndCancels, testSleepTimerShownInTitleRow | UI | pass (17) (R-120c435) |
 | After this (stop after) | testStopAfterThisNotOfferedOnAFilm, testStopAfterThisOfferedOnAnEpisode | UI | pass (17) (R-d5792c6) |
 | Info panel | testInfoPanelDescribesTheStream, testInfoNamesTheAudioTrack | UI, layout | pass (17) / pass (17, SE, Pro Max, Duo) |
 | AirPlay button | testAirPlayButtonIsThere | UI | pass (17); the route picker is manual |
@@ -195,6 +199,7 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 |---|---|---|---|
 | Discover shelves, stations shelf, search field visible | testDiscoverShowsTheShelves | UI, layout | pass (17, SE, Pro Max, Duo) (R-b4d8347) |
 | Library doors (artists, albums, songs, genres, playlists, favorites) | testLibraryDoorsOpenEveryList | UI | pass (17) |
+| Artists lists no audiobook authors | testArtistsListHasNoAudiobookAuthors | UI | pass (17) |
 | Sort | testSongsSortMenu | UI | pass (17) |
 | Album with two discs | testAlbumGroupsItsDiscs | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Play a song, mini player, server hears it, Next label | testPlayingASongShowsTheMiniPlayerAndReportsIt | UI, layout | pass (17, SE, Pro Max, Duo) (R-db310b3-a11y) |
@@ -240,7 +245,7 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | Tune a channel, live timeline, info | testTuningAChannelPlaysLive | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Channel up/down | testChannelUpAndDownInThePlayer | UI | pass (17) |
 | No speed on live | testSpeedIsUnavailableOnLive | UI | pass (17) |
-| Back from More; back clear of the heading | testLiveTVFromMoreHasBack | UI, layout | xfail (17, SE, Pro Max, Duo) (R-2c20fe6-lt, R-PM15) |
+| Back from More; back clear of the heading | testLiveTVFromMoreHasBack | UI, layout | pass (17, SE, Pro Max, Duo) (R-2c20fe6-lt, R-PM15) |
 | Custom M3U/XMLTV source | PhoneM3UTests (parser); testLiveTVSourceOffersCustomPlaylist | unit, UI | pass |
 
 ## Settings (PhoneSettingsTests)
@@ -251,16 +256,16 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | Apple Watch page | testAppleWatchPageOpens | UI | pass (17) |
 | Account facts | testAccountPageNamesTheAccountAndServer | UI | pass (17) |
 | Approve Quick Connect | testApproveAQuickConnectCode | UI | pass (17) |
-| Theme | testDarkThemeTurnsTheAppDark | UI | xfail (17) |
+| Theme | testDarkThemeTurnsTheAppDark | UI | pass (17) |
 | Hide Continue Watching | testHideContinueWatchingTakesTheRowOffHome | UI | pass (17) |
-| Tab Bar page | testTabBarSettingsReorderAndReset | UI | xfail (17) (R-0c2a8e9) |
-| App Icon page | testAppIconPageListsIcons | UI | xfail (17) |
+| Tab Bar page | testTabBarSettingsReorderAndReset | UI | pass (17) (R-0c2a8e9) |
+| App Icon page | testAppIconPageListsIcons | UI | pass (17) |
 | Default quality | testDefaultQualityChoices | UI | pass (17) |
 | Autoplay next | PhonePlayerTests.testUpNextCardWithAutoplayOff | UI | pass (17) |
 | About | testAboutShowsTheVersion | UI | pass (17) |
 | Library copy delete asks | testLibraryCopyDeleteAsksFirst | UI | skip (R-074a461) |
 | Live TV source | testLiveTVSourceOffersCustomPlaylist | UI | pass (17) |
-| Station mix page | testMusicStationMixPage | UI | xfail (17) |
+| Station mix page | testMusicStationMixPage | UI | pass (17) |
 | Pages fit | testSettingsPagesFitTheScreen | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Measure Apple TV sync (camera) | — | manual | needs a camera and an Apple TV |
 | Tab bar drag to reorder | — | none | drag handles carry no identifiers (TESTING.md known gaps) |
@@ -277,7 +282,7 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | Music search drawn | testMusicSearchFieldIsDrawn | UI (Duo) | pass (Duo) |
 | Up Next card clear of the transport | testFrontScreenUpNextCardClearsTheTransport | UI (Duo) | pass (Duo) (R-PM14) |
 | Tab bar, More list, long title, landscape | PhoneLayoutTests | UI, layout (all) | pass (17, SE, Pro Max; Duo: tab pill pass, landscape skipped) |
-| Skip Intro steps aside for cards | PhoneLayoutTests.testSkipIntroStepsAsideForCards | UI, layout | xfail (17, SE, Pro Max) (R-SE-skip) |
+| Skip Intro steps aside for cards | PhoneLayoutTests.testSkipIntroStepsAsideForCards | UI, layout | pass (17, SE, Pro Max, Duo): the prompts now step aside for an open card (R-SE-skip) |
 | Inner screen, book pose, real fold, rotation on the inner screen, camera clearance | — | manual | MANUAL.md |
 
 ## Not automated, and why
@@ -308,6 +313,9 @@ Shortcuts, the Measure Apple TV sync camera page.
   downloaded at that point of the run.
 - `PhoneSettingsTests.testLibraryCopyDeleteAsksFirst` skips: the library
   copy has not been made on a fresh test-mode launch.
+- `PhonePlayerTests.testChosenAudioTrackReachesTheServer` picks track 3
+  when 2 is already playing: the server remembers the suite's last pick per
+  title, and suite-reset.py does not clear it.
 - `PhoneSettingsTests.testEveryPageOpensWithItsRows` is flaky on the SE (a
   different page fails to open each run: the tap meets the floating tab bar
   or the gap between rows) and skips there; it passes on the other three.
@@ -318,21 +326,33 @@ Shortcuts, the Measure Apple TV sync camera page.
   lands one tab to the left (tapped by its frame), stale server sessions of
   earlier launches (the live one is picked by its last check-in).
 
+## Seen, not yet fixed
+
+- Audiobooks › Authors lists music artists (Abel Korzeniowski, Air, Boards of
+  Canada…) beside the book authors: `BooksTabView` asks `albumArtists` with
+  the books library as parent, and the QA server answers with music artists
+  too. Seen in the Duo screenshots of 2026-11-13; no test yet.
+
 ## Last run
 
-2026-11-13, worktree `claude/tests-iphone`, QA server 12.2.0 at 8196,
-`Tools/run-tests.sh iphone -- -collect-test-diagnostics never` (then SE and
-Duo again after the Duo tab-pill fix, and the Settings walk on all three).
+2026-11-13/14, branch `claude/fix-iphone` (every platform's fixes plus these
+tests), QA server 12.2.0 at 8196, `Tools/run-tests.sh iphone`
+(20261113-203436), then the two standard-phone failures fixed and rerun
+(subtitle Off reported at once; context-menu card held by its frame). The
+standard phone ran in full again after the last app change (20261114-005022:
+172 pass, 2 fail); both failures were test-side (the audio pick repeating the
+track the server remembered from an earlier run, a held card under Home's top
+bar), fixed and each passed twice on rerun.
 
 | Device | Run | Passed | Expected failure | Skipped | Failed |
 |---|---|---|---|---|---|
-| iPhone 17 (standard) | 20261113-155434 | 159 | 15 | 18 | 0 |
-| iPhone SE (small) | 20261113-190118 | 44 | 4 | 144 | 0 (the Settings walk, flaky there, now skips) |
-| iPhone 18 Pro Max | 20261113-155434 | 45 | 4 | 143 | 0 |
-| iPhone Duo (front screen) | 20261113-183743 + Settings walk rerun | 50 | 3 | 139 | 0 |
+| iPhone 17 (standard) | 20261114-005022 + reruns | 174 | 0 | 183 | 0 |
+| iPhone SE (small) | 20261113-203436 | 49 | 0 | 308 | 0 |
+| iPhone 18 Pro Max | 20261113-203436 | 50 | 0 | 307 | 0 |
+| iPhone Duo (front screen) | 20261113-203436 | 54 | 0 | 303 | 0 |
 
-Skipped on SE, Pro Max and Duo are the functional tests (`standardOnly()`)
-and, on the Duo, landscape (XCUIDevice orientation does not turn its
-screens). Unit: 86 iPhone tests (82 pass, 4 expected failures) plus the
-shared ones, 205 in all on the iPhone 17 simulator, `Tools/run-tests.sh
-unit` or `xcodebuild test -scheme Aquarium -testPlan Unit`.
+The plan now runs 357 tests on each phone: the skipped count includes the
+iPad, Mac and TV classes merged into the bundle, as well as `standardOnly()`
+functional tests off the standard phone. Unit (iPhone 17, `-testPlan Unit`):
+256 tests, 223 pass, 33 skip (other platforms), 0 expected failures; the 88
+iPhone ones all pass.
