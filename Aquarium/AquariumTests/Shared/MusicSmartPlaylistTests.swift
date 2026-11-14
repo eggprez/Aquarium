@@ -204,10 +204,19 @@ final class MusicSmartPlaylistTests: XCTestCase {
         }
     }
 
-    /// What was asked about songs. The app asks `/Items` things of its own
-    /// when an account appears (Home's rows), which are not the rule's.
+    /// What the rule asked about songs. The host app is live while these run
+    /// and asks `/Items` things of its own whenever an account appears: Home's
+    /// rows, and, once the account is known to have a music library, Home's
+    /// "recently played" music row (`HomeView.loadMusic`), which is a question
+    /// about songs too. That one is told apart by its shape, which no rule
+    /// here has: played songs, newest play first, thirty of them.
     private var asked: [[String: String]] {
-        MusicServer.calls(to: "/Items").map(\.query).filter { $0["IncludeItemTypes"] == "Audio" }
+        MusicServer.calls(to: "/Items").map(\.query).filter { q in
+            guard q["IncludeItemTypes"] == "Audio" else { return false }
+            let isHomesMusicRow = q["SortBy"] == "DatePlayed,SortName" && q["Limit"] == "30"
+                && q["Filters"] == "IsPlayed" && q["Genres"] == nil && q["ArtistIds"] == nil && q["Years"] == nil
+            return !isHomesMusicRow
+        }
     }
 
     func testAPlainRuleIsOneQuestionTheServerAnswersWhole() async throws {
@@ -224,7 +233,7 @@ final class MusicSmartPlaylistTests: XCTestCase {
         }
         let songs = try await r.resolve()
         XCTAssertEqual(songs.map(\.Id), ["b", "a", "c"], "in the server's order")
-        XCTAssertEqual(asked.count, 1)
+        XCTAssertEqual(asked.count, 1, "\(asked)")
         let q = asked[0]
         XCTAssertEqual(q["IncludeItemTypes"], "Audio")
         XCTAssertEqual(q["Genres"], "Rock|Jazz")
@@ -288,7 +297,7 @@ final class MusicSmartPlaylistTests: XCTestCase {
         ]])
         let songs = try await rule { $0.addedWithinDays = 30; $0.sort = .name; $0.limit = 2 }.resolve()
         XCTAssertEqual(songs.map(\.Id), ["a", "b"], "by title, the limit applied after the filter")
-        XCTAssertEqual(asked.count, 1)
+        XCTAssertEqual(asked.count, 1, "\(asked)")
         XCTAssertEqual(asked[0]["SortBy"], "DateCreated,SortName")
         XCTAssertEqual(asked[0]["SortOrder"], "Descending")
         XCTAssertEqual(asked[0]["Limit"], "500", "the rule's own limit would cut the walk short")
