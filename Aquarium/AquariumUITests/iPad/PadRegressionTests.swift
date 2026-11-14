@@ -29,12 +29,27 @@ final class PadRegressionTests: PadUITestCase {
             let pages = app.elements(prefix: "home.hero.page.").allElementsBoundByIndex
             XCTAssertTrue(waitUntil(20, "the hero's pages") { pages.count > 0 && pages[0].frame.width > 0 })
             try XCTSkipIf(pages.count < 2, "one hero page")
-            var offsets: [CGFloat] = []
-            for page in pages {
-                let id = String(page.identifier.dropFirst("home.hero.page.".count))
-                let play = app.button(TestID.Home.heroPlay(id))
-                guard play.exists else { continue }
-                offsets.append(play.frame.minX - page.frame.minX)
+            // Measured once the layout has settled. Read straight after the
+            // window turns, the pages are still being laid out for the new
+            // width (and the carousel may be mid-turn), and a different page
+            // came out off by a different amount on each run. Two readings in
+            // a row that agree are the layout at rest; the bug this guards
+            // against is a page that stays out of line.
+            func readOffsets() -> [CGFloat] {
+                pages.compactMap { page in
+                    let id = String(page.identifier.dropFirst("home.hero.page.".count))
+                    let play = app.button(TestID.Home.heroPlay(id))
+                    return play.exists ? play.frame.minX - page.frame.minX : nil
+                }
+            }
+            var offsets = readOffsets()
+            let deadline = Date().addingTimeInterval(10)
+            while Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.75)
+                let next = readOffsets()
+                let steady = next.count == offsets.count && zip(next, offsets).allSatisfy { abs($0 - $1) < 0.5 }
+                offsets = next
+                if steady { break }
             }
             XCTAssertGreaterThanOrEqual(offsets.count, 2)
             let spread = (offsets.max() ?? 0) - (offsets.min() ?? 0)
