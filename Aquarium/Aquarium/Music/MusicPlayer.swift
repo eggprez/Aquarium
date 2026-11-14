@@ -768,7 +768,7 @@ final class MusicPlayer {
 
     /// Where to open an item: an audiobook where it was left, a song at the
     /// top, anything at the point explicitly asked for.
-    private func resumePoint(for item: BaseItem, explicit: Double?) -> Double {
+    func resumePoint(for item: BaseItem, explicit: Double?) -> Double {
         if let explicit { return max(0, explicit) }
         #if !os(tvOS)
         if let record = DownloadManager.shared.record(for: item.Id), record.status == .complete,

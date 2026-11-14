@@ -1187,6 +1187,12 @@ final class DownloadManager: NSObject {
         if record.status != .downloading { liveProgress[record.itemId] = nil }
     }
 
+    #if DEBUG
+    /// Unit tests only: a record put in the list (and its meta.json beside
+    /// its file) as if its transfer had just ended. Nothing else calls it.
+    func installForTesting(_ record: DownloadRecord) { save(record) }
+    #endif
+
     /// Where meta.json files are written. Drained before the app is put away
     /// — see `flushPersisted`.
     private nonisolated static let metaWriter = DispatchQueue(label: "Aquarium.downloads.meta", qos: .utility)
