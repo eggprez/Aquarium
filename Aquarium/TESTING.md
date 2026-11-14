@@ -30,6 +30,42 @@ Before each UI suite it runs the QA folder's `suite-reset.py suite-<name>`, whic
 puts that suite's account back to its baseline (see `FIXTURES.md` in the QA
 folder). `--no-reset` skips that.
 
+## The test runner app
+
+Double-click "Aquarium Tests.app" in the repository's top folder. It is built
+there by `Tools/TestRunner/build-app.sh` (git-ignored, so a fresh checkout runs
+the script once; `--open` opens it after, `--install` also copies it to
+/Applications). The window is written for someone who does not read code: suites are named by
+device, tests are called checks and shown as sentences (`testThemeSticks` reads
+"Theme sticks"), and the Summary page says what to do next. All of that wording
+(titles, descriptions, option help, quick picks, device names) lives in
+`Tools/TestRunner/suites.json`: keep it plain when adding to it. Tick what to
+test, press Start Testing, and checks appear one by one; each suite's page has
+its choices, and "For the technically minded" narrows a run to some classes.
+It runs `Tools/run-tests.sh` and the Linux app's commands, nothing of its own.
+
+- **The report.** When a run ends it writes `TestResults/reports/<stamp>-report.md`
+  and `.json`, and the same pair as `TestResults/latest-report.md` / `.json`:
+  what ran on which commit, every failure with its message, the end of its log
+  and its exported screenshot and element tree (`<run folder>/attachments/`),
+  skips grouped by reason, and suites that never reached their tests with the
+  compiler's errors. "Copy Report for Claude" puts the whole report on the
+  clipboard.
+- **The QA server.** The bottom of the sidebar shows whether the QA Jellyfin
+  server answers, with Start, Stop and Open (its web page). Start and Stop load
+  and unload the launch agents named in `suites.json` (`qaAgents`); the agents
+  also start the server at every login. From a shell:
+  `AquariumTestRunner --server start` or `--server stop`.
+- **What it lists** comes from `Tools/TestRunner/suites.json` (suites, their
+  commands and options) and from scanning each suite's `sources` folders for
+  test classes, so new tests appear after Reload with no change to the app.
+  Only `Tools/TestRunner/Sources/` needs a rebuild.
+- **Without the window:** `"../Aquarium Tests.app/Contents/MacOS/AquariumTestRunner" --run unit,ipad`
+  (or `--run all`) runs those suites, writes the same report, prints its path
+  and exits 0 only if everything passed.
+- The Linux suites need Node 20+ (`npm install` in `Linux/`) and Cargo; the app
+  says so when they are missing.
+
 ## What there is
 
 | Target | Kind | Runs on | Folder (synchronized: new files need no project edit) |

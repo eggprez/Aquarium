@@ -23,6 +23,7 @@
 #   --device <name>                iphone: only this test device (small|standard|promax|duo)
 #   --no-reset                     don't run the QA folder's suite-reset.py first
 #   --no-mac                       unit: skip the Mac
+#   --no-watch                     unit: skip the watch (run it alone with watchunit)
 #   --results <dir>                where results go (default Aquarium/TestResults)
 #
 # Simulators: the script uses simulators of its own, named "Aquarium Test …",
@@ -51,6 +52,7 @@ only=()
 device_filter=""
 do_reset=1
 do_mac=1
+do_watch_unit=1
 results_root="$PROJECT_DIR/TestResults"
 extra=()
 while (( $# )); do
@@ -59,6 +61,7 @@ while (( $# )); do
     --device) device_filter=$2; shift 2;;
     --no-reset) do_reset=0; shift;;
     --no-mac) do_mac=0; shift;;
+    --no-watch) do_watch_unit=0; shift;;
     --results) results_root=$2; shift 2;;
     --) shift; extra=("$@"); break;;
     *) echo "unknown option $1"; exit 2;;
@@ -157,7 +160,7 @@ do_unit() {
       run Aquarium Unit Mac "platform=macOS" "${MAC_SIGN[@]}"
     fi
   fi
-  do_watchunit
+  (( do_watch_unit )) && do_watchunit
 }
 
 do_watchunit() {
