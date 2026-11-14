@@ -285,7 +285,16 @@ final class PhoneContextMenuTests: PhoneUITestCase {
         let card = app.buttons.matching(identifier: TestID.Item.card(id)).firstMatch
         app.reveal(card)
         card.waitToExist(30)
-        card.press(forDuration: 1.2)
+        // Clear of Home's top bar: a card scrolled up under it takes the
+        // press to the bar's Search button instead.
+        let window = app.windows.firstMatch
+        if card.frame.minY < window.frame.minY + 140 {
+            let middle = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
+            middle.press(forDuration: 0.05, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 220)))
+        }
+        // By its frame: a SwiftUI card can report itself not hittable while
+        // it is plainly on screen (see PhoneUITestSupport).
+        card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 1.2)
     }
 
     func testFilmCardMenuOffersItsActions() throws {
