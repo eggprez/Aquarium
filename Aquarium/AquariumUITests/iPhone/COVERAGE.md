@@ -64,11 +64,29 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | `SubtitleCues.parse/text` | SubtitleCuesTests (shared) | unit | pass |
 | `TrackPreference` | TrackPreferenceTests (shared) | unit | pass |
 | `ServerDiscovery.accepts` | ServerDiscoveryTests (shared) | unit | pass |
-| `StationBuilder/StationEngine` ranking and re-deal | — | none | not unit-tested: needs a live pool; covered by UI station tests |
-| `DownloadManager` state machine (requeue, ghosts, stalls, judgeIdle) | — | manual | needs real background sessions (MANUAL.md) |
+| `MusicPlayer`: queue, shuffle, repeat, Play Next/Later, end of queue, sleep timer, books (chapters, resume, speed), reports to the server | MusicPlayerQueueTests, MusicPlayerBookTests, MusicPlayerPlaybackTests (shared) | unit | pass (2026-11-14) |
+| `StationEngine`, `Stations`: genre keys, mix points, ranker, deal, leanings, what the server is asked per seed, fallbacks | StationEngineTests, StationSessionTests, StationBuilderTests, MusicMixesTests (shared) | unit | pass |
+| Rediscover from downloads leaves out songs heard lately | MusicOfflineLibraryTests.testRediscoverHereIsStarredAndMostPlayedSongsNotHeardLately | unit | xfail: `OfflineMusic.item` drops `lastPlayed` (OfflineMusic.swift:566) |
+| `PlaylistStore`, smart playlist rules and store | PlaylistStoreTests, MusicSmartPlaylistTests (shared) | unit | pass |
+| `OfflineMusic`, `OfflineMusicIndex` | MusicOfflineLibraryTests, MusicOfflineIndexTests (shared) | unit | pass |
+| `DownloadManager`: queue and order, the pump, cancel vs swipe-away vs system stop, pause, retry waits and failures, stream packages, records on disk, delete, sizes and space | DownloadQueueTests, DownloadPumpTests, DownloadCancelTests, DownloadFailureTests, DownloadStreamTests, DownloadRecordTests, DownloadStoreTests, DownloadSizeTests (shared) | unit | pass, with the xfails below |
+| `needsMPV` survives a relaunch | DownloadRecordTests.testNeedsMPVSurvivesARelaunch | unit | xfail: not decoded (Downloads.swift:234) |
+| `delete()` leaves no folder behind | six tests, by `assertFolderGone` | unit | xfail (timing): races its own meta.json write (Downloads.swift:2051) |
+| `transfersToFinish` counts an item whose lookup is in flight | DownloadPumpTests.testOneAtATimeInQueueOrder | unit | xfail (Downloads.swift:3668) |
+| Junk at a `.movpkg` address is not a download; a package gone at finish does not raise | DownloadStreamTests | unit | xfail (Downloads.swift:2462, :2537; seen on the simulator) |
+| `OfflineProgress.sync`, `refreshFromServer`, a sitting | DownloadProgressSyncTests (shared) | unit | pass; two syncs at once xfail: not serialized (OfflineProgress.swift:31) |
+| `DownloadGroups`, `DownloadSubtitles`, `DownloadAudioList`, `DownloadSegments`, `DownloadItemInfo`, `DownloadSizes`, repair notes | DownloadGroupsTests, DownloadSidecarTests, DownloadSizeTests (shared) | unit | pass |
+| `DownloadManager` on real background sessions (`start`, `reconcile`, stall verdict, `judgeIdle`, `restartDemotedTransfers`) | — | manual | needs real background sessions and the clock (MANUAL.md) |
 | `OrientationLock` | — | manual | needs the hinge and real rotation (MANUAL.md) |
-| `ImageLoader`, `BlurHash` | — | none | drawing only; seen in every UI screenshot |
-| App Intents / Shortcuts / Spotlight | — | none | no headless driver for Siri/Shortcuts on the simulator |
+| `ImageLoader`: widths, outcomes, coalescing, memory and disk filing | ImageLoaderTests (shared) | unit | pass; the ten-minute 404 memory has no clock seam |
+| `BlurHash` | — | none | drawing only; seen in every UI screenshot |
+| `LibraryIndex`: sync, paging, search ranking, grids, favourites, per-account, wipe | LibraryIndexMergeTests, LibraryIndexTests (shared) | unit | pass; reading back after a relaunch is manual |
+| `StreamResolver`, `StreamDiagnosis` | StreamResolverTests, TransportStreamTests, StreamDiagnosisTests (shared) | unit | pass |
+| `IPTVSource`, `LiveTVStore` | IPTVSourceTests, LiveTVStoreTests (shared) | unit | pass |
+| `Holidays`, `ArtworkProbe`, `NowPlaying` card | HolidaysTests, ArtworkProbeTests, NowPlayingTests (shared) | unit | pass |
+| `FollowFeed`, Follow and Now Playing widget data, widget buttons | FollowSnapshotTests, FollowFeedTests, NowPlayingSnapshotTests, WidgetButtonTests (shared, iOS) | unit | pass; the drawing is manual |
+| App Intents: entities, queries, and every intent up to where a stream would start | MediaItemEntityTests, MediaItemQueryTests, LibraryIntentsTests, PlayerIntentsIdleTests, MusicIntentsTests (shared) | unit | pass |
+| Siri phrases, spoken replies, intents that start playback, Spotlight | — | manual | no headless driver for Siri/Shortcuts on the simulator |
 
 ## Sign-in and accounts (PhoneSignInTests)
 

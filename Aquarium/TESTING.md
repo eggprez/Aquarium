@@ -293,7 +293,46 @@ with its body, answers 404 to anything not stubbed, and can fail with a
 `StubURLProtocol.swift` is also compiled into `AquariumWatchTests` by a project
 exception; anything else watch tests need goes in `WatchTests/`.
 
+More support in `AquariumTests/Shared` for code the path stub does not fit:
+
+- `MusicTestSupport.swift`: `MusicServer` and `MusicLibraryStub` answer by
+  query (every music list is `/Items`); `MusicOnDevice` makes finished
+  download records backed by a WAV of silence
+  (`DownloadManager.installForTesting`, DEBUG only).
+- `CoreTestSupport.swift`: `LoopbackServer`, a real listener on 127.0.0.1 for
+  code that builds its own `URLSession` (`StreamResolver`, `StreamDiagnosis`,
+  `IPTVSource`, `ArtworkProbe`, `ImageLoader`); `RoutedStub`, a `URLProtocol`
+  for `JellyfinClient` that answers from a closure and has an `unreachable`
+  switch; `CoreAccount`, a fresh user id per test with `goOffline`/`goOnline`;
+  `CoreLibrary`, fill and wipe for the library copy.
+- `Support/DownloadHarness.swift`: `DownloadTestCase`. Signed out, the pump is
+  inert; a test `adopt`s and `finish`es transfers by hand and `run`s against
+  the stub. Seams in `Downloads.swift` (DEBUG only): `seedForTests`,
+  `setRouteForTests`, `sweepForTests`. No test starts a transfer on the real
+  background sessions.
+
+Music and download tests are wrapped in `#if !os(tvOS)`: the Apple TV has
+neither.
+
 ## Known traps
+
+- **The hosting app is live during unit tests.** Once `ClientStub` signs in, the
+  app draws its shell and makes its own requests (Home's `/Items`, the probe,
+  libraries, `OfflineProgress.sync`). So never assert on "the last request" or
+  on a path having had none: pick the request by its query. Any answered
+  request puts the client back online, so an offline test must fail every
+  request (`RoutedStub.unreachable`, `MusicServer.setOffline`). Stub
+  `/System/Info/Public` or the probe fails and the client goes offline about
+  2 s later. `AppModel.shared.libraries` holds whatever `/UserViews` an earlier
+  test stubbed.
+- **Download sweeps.** `DownloadManager` sweeps 8 s after launch and every
+  minute, and requeues a seeded `.downloading` or `.queued` record with nothing
+  running for it.
+- **`AVURLAsset.isPlayable`** answers yes for any `.movpkg` path on the
+  simulator, even junk or nothing.
+- **An `NSException` in a main-actor Task** aborts the test process with "freed
+  pointer was not the last allocation", not a failure. `try XCTUnwrap(await …)`
+  does not compile.
 
 - **Never `pkill`/`killall Aquarium`.** It kills every simulator's copy and the
   Mac's. Use `xcrun simctl terminate <udid> scottai.FellyJin`.

@@ -138,6 +138,23 @@ The suite unit-tests the snapshot and state the extensions read
   `mpv-tls-verification`); on a public certificate it plays.
 - SharePlay "Watch Together" with a FaceTime call.
 
+## What the 2026-11-14 logic tests could not reach
+
+- Music: an interruption (a call) and unplugging headphones; the lock-screen
+  and CarPlay card and its artwork; ReplayGain levelling; gapless joins on
+  streamed tracks; the lossless-on-cellular cap; a followed playlist
+  downloading its new song; a real sleep timer running out.
+- Downloads on a real phone: Wi-Fi only on actual cellular; a relaunch while
+  transfers finish in the background; a stalled transfer (three minutes of
+  silence) being restarted.
+- The library copy: Home and Search still filled after a relaunch and on an
+  offline launch.
+- Lock-screen, Control Centre, headphone and media-key commands for video.
+- Siri and Shortcuts end to end: the spoken reply and the "carry on or start
+  over" question.
+- The Follow and Now Playing widgets as drawn, and the widget's Edit picker.
+- The seasonal icon offered in Settings on a date inside its window.
+
 ## Typing a password on the sign-in form
 
 On the iOS 27.0 simulator XCUITest cannot type into the password field
