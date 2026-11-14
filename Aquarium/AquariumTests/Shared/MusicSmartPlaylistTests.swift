@@ -323,7 +323,12 @@ final class MusicSmartPlaylistTests: XCTestCase {
         let second = [song("q0", "Late match", addedDaysAgo: 2), song("q1", "Too old", addedDaysAgo: 80)]
         answerSongs([first, second])
         let songs = try await rule { $0.addedWithinDays = 30; $0.sort = .recentlyAdded; $0.limit = 500 }.resolve()
-        XCTAssertEqual(asked.map { $0["StartIndex"] }, ["0", "500"])
+        // The app asks about songs for pages of its own while an account is
+        // signed in, so the walk is the questions that match its second page
+        // in everything but where they start.
+        func rest(_ q: [String: String]) -> [String: String] { q.filter { $0.key != "StartIndex" } }
+        let later = try XCTUnwrap(asked.first { $0["StartIndex"] == "500" }, "the second page was never asked for")
+        XCTAssertEqual(asked.filter { rest($0) == rest(later) }.map { $0["StartIndex"] }, ["0", "500"])
         XCTAssertEqual(songs.count, 500)
         let all = try await rule { $0.addedWithinDays = 30; $0.sort = .name; $0.limit = 1000 }.resolve()
         XCTAssertEqual(all.count, 501)

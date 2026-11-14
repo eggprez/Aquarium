@@ -63,10 +63,10 @@ def main():
                     continue
                 for f in target.get("files", []):
                     path = f["path"]
-                    found = inside.match(path)
-                    path = found.group(1) if found else path
                     if any(part in path for part in LEFT_OUT):
                         continue
+                    found = inside.match(path)
+                    path = found.group(1) if found else path
                     functions = files.setdefault(path, {})
                     for fn in f.get("functions", []):
                         key = (fn["name"], fn["lineNumber"])
