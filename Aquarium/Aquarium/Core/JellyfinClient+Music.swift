@@ -175,14 +175,19 @@ extension JellyfinClient {
     /// Artists with an album to their name, which is the list a music library
     /// means by "Artists" — the other list, everyone who has ever been credited
     /// on a track, is twice as long and mostly guest features.
+    ///
+    /// `songsOnly` counts artists from songs alone. An audiobook's author is
+    /// an album artist too, and Music › Artists is about the music; a music
+    /// library's `parentId` would do it only where there is one music library.
     func albumArtists(
         parentId: String? = nil, startIndex: Int = 0, limit: Int = 200,
         favorites: Bool = false, searchTerm: String? = nil, sort: MusicSort = .name,
-        nameLessThan: String? = nil
+        nameLessThan: String? = nil, songsOnly: Bool = false
     ) async throws -> ItemsResponse {
         try await artists(
             path: "/Artists/AlbumArtists", parentId: parentId, startIndex: startIndex,
-            limit: limit, favorites: favorites, searchTerm: searchTerm, sort: sort, nameLessThan: nameLessThan
+            limit: limit, favorites: favorites, searchTerm: searchTerm, sort: sort, nameLessThan: nameLessThan,
+            includeItemTypes: songsOnly ? "Audio" : nil
         )
     }
 
@@ -199,7 +204,8 @@ extension JellyfinClient {
 
     private func artists(
         path: String, parentId: String?, startIndex: Int, limit: Int,
-        favorites: Bool, searchTerm: String?, sort: MusicSort, nameLessThan: String? = nil
+        favorites: Bool, searchTerm: String?, sort: MusicSort, nameLessThan: String? = nil,
+        includeItemTypes: String? = nil
     ) async throws -> ItemsResponse {
         guard let s = prefs.session else { throw APIError.notConfigured }
         var q: [URLQueryItem] = [
@@ -213,6 +219,7 @@ extension JellyfinClient {
             .init(name: "ImageTypeLimit", value: "1"),
         ]
         if let parentId { q.append(.init(name: "ParentId", value: parentId)) }
+        if let includeItemTypes { q.append(.init(name: "IncludeItemTypes", value: includeItemTypes)) }
         if favorites { q.append(.init(name: "IsFavorite", value: "true")) }
         if let searchTerm, !searchTerm.isEmpty { q.append(.init(name: "SearchTerm", value: searchTerm)) }
         if let nameLessThan { q.append(.init(name: "NameLessThan", value: nameLessThan.lowercased())) }

@@ -216,10 +216,10 @@ struct ArtistsView: View {
             let term = filter.trimmingCharacters(in: .whitespaces)
             let sort = sort
             let p = PagedItems(pageSize: 200) { start, limit in
-                try await client.albumArtists(startIndex: start, limit: limit, searchTerm: term.isEmpty ? nil : term, sort: sort)
+                try await client.albumArtists(startIndex: start, limit: limit, searchTerm: term.isEmpty ? nil : term, sort: sort, songsOnly: true)
             }
             p.countBefore = { letter in
-                try await client.albumArtists(startIndex: 0, limit: 1, searchTerm: term.isEmpty ? nil : term, sort: .name, nameLessThan: letter).total
+                try await client.albumArtists(startIndex: 0, limit: 1, searchTerm: term.isEmpty ? nil : term, sort: .name, nameLessThan: letter, songsOnly: true).total
             }
             paged = p
             await p.reload()

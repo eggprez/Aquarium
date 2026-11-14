@@ -98,7 +98,6 @@ final class PhoneMusicTests: PhoneMusicTestCase {
             app.swipeUp()
         }
         let authors = seen.filter { $0.hasPrefix("FX Author") || $0.hasPrefix("Mary Shelley") }
-        XCTExpectFailure("bug: Music › Artists lists audiobook authors (albumArtists called with no music scope)", options: .nonStrict())
         XCTAssertTrue(authors.isEmpty, "authors listed as artists: \(authors.sorted())")
     }
 
