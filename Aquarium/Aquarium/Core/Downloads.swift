@@ -4407,6 +4407,22 @@ extension DownloadManager: AVAssetDownloadDelegate {
     }
 }
 
+#if DEBUG
+// Unit tests only (AquariumTests/Shared/Download…Tests.swift): the three
+// things a test cannot bring about from outside. Nothing here does anything
+// the manager doesn't already do for itself.
+extension DownloadManager {
+    /// A record put in the way a transfer's start puts one in.
+    func seedForTests(_ record: DownloadRecord) { save(record) }
+    /// What the path monitor would say.
+    func setRouteForTests(satisfied: Bool, cellularOnly: Bool) {
+        pathChanged(satisfied: satisfied, cellularOnly: cellularOnly)
+    }
+    /// The once-a-minute stall sweep, now.
+    func sweepForTests() async { await sweepStalledTransfers() }
+}
+#endif
+
 #endif
 
 #if os(macOS)
