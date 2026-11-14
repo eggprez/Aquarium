@@ -242,6 +242,31 @@ final class PhoneDetailTests: PhoneUITestCase {
         attachScreenshot("episode rows (\(device.rawValue))")
     }
 
+    /// Seen in screenshots 2026-11-13: on the Duo's front screen an episode
+    /// row cut its title to "Long Epi…". The title is drawn whole: as wide as
+    /// it needs on one line, or wrapped onto a second.
+    func testEpisodeTitlesAreNotCutShort() throws {
+        launchHome()
+        _ = try openFixture("show.long")
+        let season1 = any(TestID.Detail.season(try XCTUnwrap(PhoneFixtures.season("show.long", 1))))
+        app.reveal(season1)
+        season1.tapNow(20)
+        let e3 = try XCTUnwrap(PhoneFixtures.episode("show.long", season: 1, number: 3))
+        let row = any(TestID.Detail.episode(e3))
+        for _ in 0..<8 where !row.exists { app.swipeUp() }
+        row.waitToExist(10)
+        app.reveal(row)
+        let title = row.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Long Episode'")).firstMatch
+        guard title.waitForExistence(timeout: 5) else { throw XCTSkip("the row's title is not its own element here") }
+        let body = UIFont.preferredFont(forTextStyle: .body)
+        let font = UIFont.systemFont(ofSize: body.pointSize, weight: .medium)
+        let needed = (title.label as NSString).size(withAttributes: [.font: font]).width
+        let frame = title.frame
+        attachScreenshot("episode title (\(device.rawValue))")
+        XCTAssertTrue(frame.width >= needed - 2 || frame.height > font.lineHeight * 1.5,
+                      "\"\(title.label)\" needs \(Int(needed)) pt on one line and has \(frame)")
+    }
+
     func testBlockedTitleForTheKidAccountShowsAnError() throws {
         try standardOnly()
         // fx-kid can't search for it, so its page is reached as the suite
