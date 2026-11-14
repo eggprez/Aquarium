@@ -447,7 +447,6 @@ final class PhoneSearchTests: PhoneUITestCase {
         launchHome()
         search("FX Collection")
         let found = app.buttons.matching(identifier: TestID.Item.card(collection)).firstMatch.waitForExistence(timeout: 20)
-        XCTExpectFailure("bug R-PM34: Search asks only for films, shows and episodes")
         XCTAssertTrue(found)
     }
 }

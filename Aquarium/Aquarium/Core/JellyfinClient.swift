@@ -1768,11 +1768,15 @@ final class JellyfinClient {
         return try await get(ItemsResponse.self, path).items
     }
 
+    /// What Search looks for unless told otherwise: titles, and the
+    /// collections and people that lead to them.
+    static let searchTypes = "Movie,Series,Episode,BoxSet,Person"
+
     func search(
         _ term: String,
         startIndex: Int = 0,
         limit: Int = 48,
-        types: String = "Movie,Series,Episode"
+        types: String = JellyfinClient.searchTypes
     ) async throws -> ItemsResponse {
         guard let s = prefs.session else { throw APIError.notConfigured }
         let q = [

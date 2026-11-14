@@ -281,8 +281,10 @@ final class PhoneClientStubTests: PhoneUnitTestCase {
     func testSearchIncludesCollectionsAndPeople() async throws {
         StubURLProtocol.stub("/Items", json: #"{"Items":[]}"#)
         _ = try await JellyfinClient.shared.search("FX")
-        let types = queryItems(requests(to: "/Items").last).first { $0.name == "IncludeItemTypes" }?.value ?? ""
-        XCTExpectFailure("bug: JellyfinClient.search defaults to Movie,Series,Episode only")
+        // The search's own request: other /Items requests (the Follow feed's
+        // favourites) can land after it.
+        let search = requests(to: "/Items").last { queryItems($0).contains { $0.name == "searchTerm" && $0.value == "FX" } }
+        let types = queryItems(search).first { $0.name == "IncludeItemTypes" }?.value ?? ""
         XCTAssertTrue(types.contains("BoxSet") && types.contains("Person"), types)
     }
 

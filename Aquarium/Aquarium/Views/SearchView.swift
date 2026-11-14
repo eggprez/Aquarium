@@ -54,7 +54,7 @@ struct SearchView: View {
         }
         var types: String {
             switch self {
-            case .all: "Movie,Series,Episode"
+            case .all: JellyfinClient.searchTypes
             case .films: "Movie"
             case .shows: "Series"
             case .episodes: "Episode"
@@ -170,7 +170,7 @@ struct SearchView: View {
                         // every prefix typed, and "b", "br", "bre" are not
                         // searches anyone wants offered back to them.
                         prefs.rememberSearch(term)
-                        app.push(.item(item.Id))
+                        app.push(Self.route(for: item))
                     } onReachEnd: {
                         Task { await loadMore() }
                     }
@@ -388,7 +388,7 @@ struct SearchView: View {
     #endif
 
     #if os(macOS)
-    /// Films, then shows, then episodes, each under its own heading, so a
+    /// Films, then shows, episodes, collections and people, each under its own heading, so a
     /// search reads the way the TV app's does rather than as one grid of
     /// everything the term touched. Paging carries on off the end of the last
     /// group.
@@ -398,6 +398,8 @@ struct SearchView: View {
             ("Films", results.filter { $0.kind == "Movie" }),
             ("Shows", results.filter { $0.kind == "Series" }),
             ("Episodes", results.filter { $0.isEpisode }),
+            ("Collections", results.filter { $0.kind == "BoxSet" }),
+            ("People", results.filter { $0.kind == "Person" }),
         ].filter { !$0.1.isEmpty }
         ForEach(Array(groups.enumerated()), id: \.element.0) { index, group in
             VStack(alignment: .leading, spacing: 8) {
@@ -426,7 +428,7 @@ struct SearchView: View {
     private func resultGrid(_ items: [BaseItem], pages: Bool) -> some View {
         MediaGrid(items: items) { item in
             prefs.rememberSearch(term)
-            app.push(.item(item.Id))
+            app.push(Self.route(for: item))
         } onReachEnd: {
             if pages { Task { await loadMore() } }
         }
@@ -590,6 +592,16 @@ struct SearchView: View {
                 guard !Task.isCancelled else { return }
             }
             await run(query)
+        }
+    }
+
+    /// Where a result leads: a collection opens as the grid of what is in
+    /// it, as it does from a library, and a person as their own page.
+    private static func route(for item: BaseItem) -> Route {
+        switch item.kind {
+        case "BoxSet": .library(id: item.Id, name: item.title, collectionType: LibraryView.boxSetType)
+        case "Person": .person(id: item.Id, name: item.title)
+        default: .item(item.Id)
         }
     }
 
