@@ -325,6 +325,16 @@ struct PlayerTransport: View {
                 .accessibilityIdentifier(TestID.Player.pictureInPicture)
             }
 
+            // A running sleep timer, where it can be seen without opening
+            // the card that set it.
+            if let left = player.sleepMinutesRemaining {
+                Label("\(left)m", systemImage: "moon.zzz.fill")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.white)
+                    .fixedSize()
+                    .accessibilityLabel("Sleep timer: stopping in \(left) minutes")
+            }
+
             moreButton
                 .panelPopover(isPresented: popover(for: .more), arrowEdge: .top) { panelPopover }
         }

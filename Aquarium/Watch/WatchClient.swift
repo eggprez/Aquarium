@@ -61,7 +61,9 @@ final class JellyfinClient {
     static let shared = JellyfinClient()
 
     nonisolated static let clientName = "Aquarium"
-    nonisolated static let clientVersion = "1.0.0"
+    /// The app's own version, as the phone reports its own, so the server's
+    /// dashboard tells one build from another.
+    nonisolated static let clientVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
     nonisolated static let nonVideoTypes = "Audio,AudioBook,Book,MusicAlbum,MusicArtist,Photo,PhotoAlbum"
     nonisolated static let log = Logger(subsystem: "scottai.FellyJin.watchkitapp", category: "client")
 

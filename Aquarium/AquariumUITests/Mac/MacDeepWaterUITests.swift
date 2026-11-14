@@ -75,6 +75,27 @@ final class MacDeepWaterUITests: MacUITestCase {
         }
     }
 
+    /// On iOS choosing a theme rebuilt the window and threw you out of
+    /// Settings (the theme modifier branched per choice). Here: the main
+    /// window keeps the title it shows, and Settings stays on General.
+    func testThemeChangeKeepsWhereYouAre() throws {
+        let film = try fixtures().item("film.long_direct")
+        launchToHome()
+        openTitle(named: film.name, id: film.id)
+        let page = app.element(TestID.Detail.page(film.id))
+        app.typeKey(",", modifierFlags: .command)
+        settingsWindow.waitToExist(20)
+        settingsWindow.toolbars.buttons["General"].tapWhenReady()
+        let theme = app.element(TestID.Settings.theme)
+        theme.tapWhenReady()
+        app.element(TestID.Settings.option(TestID.Settings.theme, "dark")).tapWhenReady()
+        attachScreenshot("settings after choosing Dark")
+        XCTAssertTrue(theme.waitForExistence(timeout: 5), "Settings left General")
+        XCTAssertTrue(page.waitForExistence(timeout: 5), "the main window left the title")
+        app.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(page.waitForExistence(timeout: 5), "the main window left the title")
+    }
+
     func testScreensInLightAndDark() throws {
         let film = try fixtures().item("film.long_direct")
         launchToHome()

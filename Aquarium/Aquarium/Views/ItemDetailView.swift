@@ -2570,6 +2570,16 @@ struct EpisodeRow: View {
     private static let detailFont: Font = .caption
     #endif
 
+    /// Two lines on a phone: beside the still and the play button a narrow
+    /// one (the Duo's front screen) had room for "Long Epi…" and no more.
+    private static var titleLines: Int {
+        #if os(iOS)
+        Metrics.phoneLayout ? 2 : 1
+        #else
+        1
+        #endif
+    }
+
     private var rowContent: some View {
         HStack(alignment: .top, spacing: 14) {
             ZStack(alignment: .bottom) {
@@ -2591,7 +2601,7 @@ struct EpisodeRow: View {
             .cardChrome(radius: 8)
 
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     if let number = episode.IndexNumber {
                         Text("\(number).")
                             .foregroundStyle(Theme.textDim)
@@ -2605,7 +2615,7 @@ struct EpisodeRow: View {
                             .foregroundStyle(Theme.accent)
                     }
                 }
-                .lineLimit(1)
+                .lineLimit(Self.titleLines)
 
                 Text(Format.ticks(episode.RunTimeTicks))
                     .font(Self.detailFont)

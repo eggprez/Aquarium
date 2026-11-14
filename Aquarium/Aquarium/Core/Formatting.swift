@@ -4,9 +4,12 @@
 import Foundation
 
 enum Format {
-    /// "2h 14m" / "48m" from Jellyfin ticks.
+    /// "2h 14m" / "48m" / "45s" from Jellyfin ticks.
     static func ticks(_ ticks: Int64?) -> String {
         guard let ticks, ticks > 0 else { return "" }
+        // Under a minute reads in seconds: a 20 s clip is not "0m", nor a
+        // 30 s one "1m". From 59.5 s it rounds to "1m".
+        if ticks < 595_000_000 { return "\(max(1, Int((Double(ticks) / 10_000_000).rounded())))s" }
         let totalMin = Int((Double(ticks) / 600_000_000).rounded())
         let h = totalMin / 60
         let m = totalMin % 60

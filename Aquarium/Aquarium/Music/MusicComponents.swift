@@ -30,12 +30,17 @@ enum MusicMetrics {
 // MARK: - Artwork
 
 /// A square piece of music artwork with the blur underneath and a note where
-/// there is nothing at all.
+/// there is nothing at all (a book, for an audiobook).
 struct MusicArtwork: View {
     let item: BaseItem?
     var width: Int = 400
     var radius: CGFloat = MusicMetrics.tileRadius
-    var placeholderSymbol: String = "music.note"
+    var placeholderSymbol: String?
+
+    /// The glyph for an item with no artwork, unless the caller names one.
+    static func placeholder(for item: BaseItem?) -> String {
+        item?.isAudiobook == true ? "book" : "music.note"
+    }
 
     var body: some View {
         ZStack {
@@ -44,7 +49,7 @@ struct MusicArtwork: View {
                 RemoteImage(url: MusicArt.url(item, width: width), blurHash: MusicArt.hash(item))
             }
             if item.flatMap({ MusicArt.url($0, width: 40) }) == nil {
-                Image(systemName: placeholderSymbol)
+                Image(systemName: placeholderSymbol ?? Self.placeholder(for: item))
                     .font(.system(size: 28, weight: .light))
                     .foregroundStyle(Theme.textDim)
             }
