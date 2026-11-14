@@ -8,6 +8,13 @@ import XCTest
 
 final class WatchClientTests: WatchUnitTestCase {
 
+    /// The server saw every watch build as "1.0.0".
+    func testClientVersionIsTheBundleVersion() {
+        let bundle = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        XCTAssertNotNil(bundle)
+        XCTAssertEqual(JellyfinClient.clientVersion, bundle)
+    }
+
     // MARK: Sign-in from the phone
 
     func testInstallSignsInAndKeepsTheTokenOutOfTheAccount() throws {
