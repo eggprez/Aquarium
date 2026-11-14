@@ -438,13 +438,21 @@ extension PlayerModel {
                 Task { await reopen(audio: audioRequest, subtitle: -1) }
             } else {
                 selectSubtitleTrack(nil)
-                if options.subtitleStreamIndex != nil { options.subtitleStreamIndex = -1 }
+                if options.subtitleStreamIndex != nil {
+                    options.subtitleStreamIndex = -1
+                    // No new stream to announce it, and a paused player
+                    // sends no progress: tell the server now.
+                    Task { await reportNow() }
+                }
             }
             return
         }
         if let av = option.avIndex {
             selectSubtitleTrack(av)
-            if let index = option.serverIndex { options.subtitleStreamIndex = index }
+            if let index = option.serverIndex, index != options.subtitleStreamIndex {
+                options.subtitleStreamIndex = index
+                Task { await reportNow() }
+            }
             return
         }
         guard let index = option.serverIndex else { return }
