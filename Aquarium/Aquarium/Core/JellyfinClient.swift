@@ -109,7 +109,9 @@ final class JellyfinClient {
     static let shared = JellyfinClient()
 
     static let clientName = "Aquarium"
-    static let clientVersion = "1.0.0"
+    /// The app's own version, as About shows it, so the server's dashboard
+    /// tells one build from another.
+    static let clientVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
 
     let prefs = Preferences.shared
 

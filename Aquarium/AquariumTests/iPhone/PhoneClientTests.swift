@@ -100,7 +100,6 @@ final class PhoneClientURLTests: PhoneUnitTestCase {
     /// branch): the server saw every build as client version "1.0.0".
     func testClientVersionIsTheBundleVersion() {
         let bundle = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        XCTExpectFailure("bug: JellyfinClient.clientVersion is hard-coded \"1.0.0\"")
         XCTAssertEqual(JellyfinClient.clientVersion, bundle)
     }
 }
