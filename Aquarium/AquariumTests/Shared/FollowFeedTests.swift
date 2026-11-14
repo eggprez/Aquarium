@@ -128,6 +128,7 @@ final class FollowFeedTests: XCTestCase {
 
     override func setUp() async throws {
         try FollowFixture.begin()
+        run = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         server = try LoopbackServer()
         let poster = CorePicture.png(width: 600, height: 900)
         server.setHandler { request in
@@ -163,6 +164,13 @@ final class FollowFeedTests: XCTestCase {
     }
 
     private let minute: Int64 = 600_000_000
+
+    /// Ids of this run's own for anything with a poster. The image loader
+    /// answers a request from a copy it already holds of the same item, image
+    /// and tag, whatever address it came from — so a second run of a test in
+    /// one process (`-test-iterations`) would otherwise be handed the first
+    /// run's picture and never ask this run's server.
+    private var run = ""
 
     func testAPartWatchedFilmSaysHowMuchIsLeft() async {
         let film = CoreItem.movie("film", name: "Heat") {
@@ -273,20 +281,21 @@ final class FollowFeedTests: XCTestCase {
     }
 
     func testPostersAreSavedSmallBesideTheSnapshotAndPrunedWithIt() async throws {
-        let film = CoreItem.movie("with-poster", name: "Heat") { $0.ImageTags = ["Primary": "tagA"] }
-        let episode = CoreItem.episode("ep1", series: "poster-show", season: "s1", s: 1, e: 1) { $0.SeriesPrimaryImageTag = "tagS" }
-        let missing = CoreItem.movie("no-poster", name: "Lost") { $0.ImageTags = ["Primary": "tagB"] }
+        let filmId = "film\(run)", showId = "show\(run)"
+        let film = CoreItem.movie(filmId, name: "Heat") { $0.ImageTags = ["Primary": "tagA"] }
+        let episode = CoreItem.episode("ep1", series: showId, season: "s1", s: 1, e: 1) { $0.SeriesPrimaryImageTag = "tagS" }
+        let missing = CoreItem.movie("no-poster\(run)", name: "Lost") { $0.ImageTags = ["Primary": "tagB"] }
         feed.update(resume: [film, episode, missing], nextUp: [])
         var entries = await written(3)
         XCTAssertEqual(entries.map(\.hasArtwork), [true, true, false], "a poster the server cannot give is no poster")
 
-        let filmPoster = try XCTUnwrap(FollowSnapshot.artworkFile(for: "with-poster"))
-        let showPoster = try XCTUnwrap(FollowSnapshot.artworkFile(for: "poster-show"))
+        let filmPoster = try XCTUnwrap(FollowSnapshot.artworkFile(for: filmId))
+        let showPoster = try XCTUnwrap(FollowSnapshot.artworkFile(for: showId))
         XCTAssertTrue(FileManager.default.fileExists(atPath: showPoster.path), "an episode's tile carries its show's poster")
         let saved = try XCTUnwrap(UIImage(data: Data(contentsOf: filmPoster)))
         XCTAssertEqual(max(saved.size.width, saved.size.height) * saved.scale, 300, "saved small: the long side at 300")
         XCTAssertEqual(saved.size.width * saved.scale, 200)
-        XCTAssertTrue(server.requests.contains { $0.path == "/Items/poster-show/Images/Primary" })
+        XCTAssertTrue(server.requests.contains { $0.path == "/Items/\(showId)/Images/Primary" })
 
         // The film drops out of Home's rows: its poster goes with it.
         feed.update(resume: [episode], nextUp: [])
@@ -294,7 +303,7 @@ final class FollowFeedTests: XCTestCase {
         XCTAssertEqual(entries.first?.hasArtwork, true)
         XCTAssertFalse(FileManager.default.fileExists(atPath: filmPoster.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: showPoster.path))
-        XCTAssertEqual(server.requests(to: "/Items/poster-show/Images/Primary").count, 1, "a poster already saved is kept, not fetched again")
+        XCTAssertEqual(server.requests(to: "/Items/\(showId)/Images/Primary").count, 1, "a poster already saved is kept, not fetched again")
     }
 
     func testALaterUpdateReplacesAnEarlierOneStillRunning() async {
@@ -307,11 +316,11 @@ final class FollowFeedTests: XCTestCase {
     }
 
     func testWipeLeavesNothingToFollow() async throws {
-        let film = CoreItem.movie("with-poster") { $0.ImageTags = ["Primary": "tagA"] }
+        let film = CoreItem.movie("film\(run)") { $0.ImageTags = ["Primary": "tagA"] }
         stubFavorites([CoreItem.movie("fav")])
         feed.update(resume: [film], nextUp: [])
         _ = await written(2)
-        let poster = try XCTUnwrap(FollowSnapshot.artworkFile(for: "with-poster"))
+        let poster = try XCTUnwrap(FollowSnapshot.artworkFile(for: "film\(run)"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: poster.path))
 
         feed.wipe()
