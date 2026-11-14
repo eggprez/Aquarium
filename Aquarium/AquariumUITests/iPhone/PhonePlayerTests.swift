@@ -412,7 +412,6 @@ final class PhonePlayerTests: PhonePlayerTestCase {
         showControls()
         let shown = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '15'")).count > 0
             || app.element(TestID.Player.title).label.contains("15")
-        XCTExpectFailure("bug R-120c435: the title row does not show the sleep timer")
         XCTAssertTrue(shown)
     }
 
