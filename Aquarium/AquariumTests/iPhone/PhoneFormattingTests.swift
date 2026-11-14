@@ -23,7 +23,6 @@ final class PhoneFormattingTests: PhoneUnitTestCase {
     /// "1m" on its title page and "0m" in Info. Under a minute should read in
     /// seconds.
     func testShortRuntimeReadsSeconds() {
-        XCTExpectFailure("bug: Format.ticks rounds anything under a minute to whole minutes (\"1m\" for 30 s)")
         XCTAssertEqual(Format.ticks(30 * 10_000_000), "30s")
     }
 
