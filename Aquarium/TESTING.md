@@ -66,6 +66,22 @@ It runs `Tools/run-tests.sh` and the Linux app's commands, nothing of its own.
 - The Linux suites need Node 20+ (`npm install` in `Linux/`) and Cargo; the app
   says so when they are missing.
 
+## Coverage
+
+Xcode records which lines ran in every `.xcresult`. `Tools/run-tests.sh` ends
+by running `Tools/coverage-report.py` on its results folder, which writes
+`coverage.md` and `coverage.json` there and adds two lines of totals to
+`summary.txt`. The runner app does the same across every suite of a run and
+puts the result at the end of its report and in `TestResults/latest-coverage.md`
+/ `.json` (the JSON lists every file and every function no test ran).
+
+- A function counts as reached when any run reached it, on any device, by a
+  unit test or a UI test. So the figure for a whole run (`all`) is the one
+  that means something; a unit-only run shows views as untested.
+- Only the app's code is counted: not the test bundles, MPVKit, the identifier
+  catalogue or the test and debug hooks.
+- By hand, over any folders: `Tools/coverage-report.py --out /tmp/cov TestResults/<run> TestResults/<other run>`.
+
 ## What there is
 
 | Target | Kind | Runs on | Folder (synchronized: new files need no project edit) |

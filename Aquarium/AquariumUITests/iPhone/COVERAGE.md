@@ -328,10 +328,9 @@ Shortcuts, the Measure Apple TV sync camera page.
 
 ## Seen, not yet fixed
 
-- Audiobooks › Authors lists music artists (Abel Korzeniowski, Air, Boards of
-  Canada…) beside the book authors: `BooksTabView` asks `albumArtists` with
-  the books library as parent, and the QA server answers with music artists
-  too. Seen in the Duo screenshots of 2026-11-13; no test yet.
+Nothing open. Audiobooks › Authors listing music artists beside the book
+authors (seen in the Duo screenshots of 2026-11-13) was fixed in 62d25e5 and
+is held by `PhoneMusicTests.testAuthorsAreOnlyAuthors`.
 
 ## Last run
 

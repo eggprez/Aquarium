@@ -254,6 +254,11 @@ case $suite in
   *) echo "unknown suite $suite"; exit 2;;
 esac
 
+# What the tests ran, file by file: coverage.md and coverage.json in the
+# results folder (the two lines of totals go in the summary too).
+python3 -I "$PROJECT_DIR/Tools/coverage-report.py" "$out" 2>/dev/null \
+  | grep -E "^- (Lines|Functions never run):" | sed 's/^- /coverage: /' >> "$summary"
+
 echo "results: $out"
 cat "$summary"
 exit $(( failures > 0 ))

@@ -55,7 +55,25 @@ enum Report {
         let folder = resultsRoot.appendingPathComponent("reports")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let name = stamp(model.sessionStart ?? Date()) + "-report"
-        let text = markdown(file)
+        var text = markdown(file)
+        // What the Apple tests ran, file by file, joined across this run's
+        // suites (Tools/coverage-report.py reads every .xcresult in the folders).
+        let folders = runs.compactMap(\.resultDir).filter { dir in
+            ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).contains { $0.hasSuffix(".xcresult") }
+        }
+        let script = root.appendingPathComponent("Aquarium/Tools/coverage-report.py").path
+        if !folders.isEmpty, FileManager.default.fileExists(atPath: script) {
+            let base = folder.appendingPathComponent(name.replacingOccurrences(of: "-report", with: "-coverage")).path
+            let coverage = await Shell.run(["python3", "-I", script, "--out", base] + folders)
+            if coverage.code == 0 {
+                text += "\n" + coverage.output
+                for ext in ["md", "json"] {
+                    let latest = resultsRoot.appendingPathComponent("latest-coverage." + ext)
+                    try? FileManager.default.removeItem(at: latest)
+                    try? FileManager.default.copyItem(at: URL(fileURLWithPath: base + "." + ext), to: latest)
+                }
+            }
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
