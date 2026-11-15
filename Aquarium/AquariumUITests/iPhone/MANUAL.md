@@ -71,17 +71,28 @@ the player is back where it was.
 
 ## Real network loss
 
-The suite's offline cases use an unreachable address; a real drop behaves
-differently (timeouts, half-finished segments).
+`PhoneOfflineTests` and `PhoneDownloadQueueTests` take the server away, slow
+it and make it refuse downloads through `Tools/qa-switch-proxy.py`; a real
+drop behaves differently (timeouts, half-finished segments), and these still
+want a person:
 
 - Wi-Fi off mid-film (direct play and transcode): the stream stalls, the
   error card offers Try again and Try a smaller stream; Try again after the
   network returns plays [R-tryAgain: open on main, `PlayerModel.retry`
   leaves a paused player paused].
-- Server unplugged while browsing: the "Offline — showing downloads" strip
-  and the offline Music/Audiobooks pages appear; Retry recovers.
-- Launch with the server unreachable: the saved Home is drawn at once
-  [8a28de9].
+- Server unplugged while browsing: the strip appears only once a request
+  fails (the tests press Home's reload to make one); check how long an idle
+  page takes to notice, and that the strip's own Retry recovers (the strip is
+  one combined element to XCUITest, so its button cannot be pressed alone).
+- A download cut mid-transfer by the network (not refused): it goes back to
+  the queue with "trying again" and its wait, five times at 5 s to 5 min,
+  before it is listed as failed. Too slow for the suite; the failed rows are
+  tested with a refusal (410) instead.
+- A transfer's "The first copy arrived incomplete" and "Waiting for the
+  server to encode the start" notes.
+- The "Delete …?" question on a phone is a popover with one button and no
+  Cancel; check that tapping outside it is an obvious enough way to say no.
+- The Downloads page's Apple Watch door and its Sync (needs a paired watch).
 - Slow link through the throttle proxy (8098 at ~2 Mbps; it hangs below
   ~2.6 Mbps, memory `qa-rproxy-low-rate-hang`): Auto steps down and the
   bitrate badge shows [5095d5e]; a direct-play file that cannot keep up says

@@ -385,6 +385,11 @@ neither.
   position 0 on stop: test resume on long titles (fixtures `film.long_*`).
 - **Throttle proxy.** Port 8098 can hang below ~2.6 Mbps and look like "Server
   offline"; tests use 8196 unless a test sets `AQUARIUM_QA_SERVER`.
+- **Switch proxy.** The iPhone download-queue, on-device music and offline
+  tests (`PhoneProxyTestCase`) sign the app in through
+  `Tools/qa-switch-proxy.py` (8177, switched by GETs on 8178: cut, slow,
+  refuse), which `run-tests.sh iphone` starts and stops; run by hand without
+  it they skip. The QA server and its 8098 proxy are never touched.
 - **Anchors.** `.testAnchor` elements only exist in test mode, and a view inside
   an element with `.accessibilityElement(children: .ignore)` or `.combine`
   hides its anchors; tag the outer element.
