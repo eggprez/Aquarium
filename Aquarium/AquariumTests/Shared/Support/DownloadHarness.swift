@@ -177,7 +177,7 @@ class DownloadTestCase: XCTestCase {
         for owed in manager.owedProgress { manager.settleOwed(owed.itemId) }
         manager.setRouteForTests(satisfied: true, cellularOnly: false)
         manager.flushPersisted()
-        // Whatever a delete left behind (see `deleteRace`), so that one
+        // Whatever a delete left behind (a write landing late), so that one
         // test's leavings are never the next one's findings. The test-mode
         // folder only: `setUp` skips outside test mode.
         let fm = FileManager.default
@@ -284,20 +284,12 @@ class DownloadTestCase: XCTestCase {
         return try? FileManager.default.contentsOfDirectory(atPath: DownloadManager.folderPath(for: id).path)
     }
 
-    static let deleteRace = "bug: delete() removes a download's folder while a meta.json write it has only just queued "
-        + "(stopTransfers marking the record cancelled, or any save a moment before) is still on its way; when the write "
-        + "lands mid-removal the folder is left behind holding meta.json until the next launch, Aquarium/Core/Downloads.swift:2051"
-
     /// The folder of a download deleted while it was unfinished has gone
-    /// with it. Not every time — see `deleteRace` — so a pass is accepted
-    /// and a failure is the known one.
+    /// with it: delete() removes it on the queue meta.json is written on, so
+    /// a write still on its way cannot land after and leave it behind.
     func assertFolderGone(_ id: String, file: StaticString = #filePath, line: UInt = #line) {
         let left = leftBehind(id)
-        let options = XCTExpectedFailure.Options()
-        options.isStrict = false
-        XCTExpectFailure(Self.deleteRace, options: options) {
-            XCTAssertNil(left, "left behind in the folder: \(left ?? [])", file: file, line: line)
-        }
+        XCTAssertNil(left, "left behind in the folder: \(left ?? [])", file: file, line: line)
     }
 
     /// The queue's item ids, front first.

@@ -224,9 +224,7 @@ final class DownloadProgressSyncTests: DownloadTestCase {
         async let second = OfflineProgress.sync()
         _ = await (first, second)
         XCTAssertEqual(manager.record(for: id)?.progressSynced, true)
-        XCTExpectFailure("bug: OfflineProgress.sync() is not kept to one at a time; two running together each read the same unsent records and each send them, so one sitting reaches the server as two stopped reports, Aquarium/Core/OfflineProgress.swift:31") {
-            XCTAssertEqual(writes, ["POST /Sessions/Playing/Stopped"])
-        }
+        XCTAssertEqual(writes, ["POST /Sessions/Playing/Stopped"], "the second sync waits for the first and sends nothing of its own")
     }
 
     // MARK: Whose account is newer

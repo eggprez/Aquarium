@@ -266,6 +266,7 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
         ownerUserId = try c.decodeIfPresent(String.self, forKey: .ownerUserId)
         verifyFailures = try c.decodeIfPresent(Int.self, forKey: .verifyFailures) ?? 0
         autoRetries = try c.decodeIfPresent(Int.self, forKey: .autoRetries) ?? 0
+        needsMPV = try c.decodeIfPresent(Bool.self, forKey: .needsMPV)
         imageURL = try c.decodeIfPresent(String.self, forKey: .imageURL)
         seasonImageURL = try c.decodeIfPresent(String.self, forKey: .seasonImageURL)
         seriesImageURL = try c.decodeIfPresent(String.self, forKey: .seriesImageURL)
@@ -2054,7 +2055,12 @@ final class DownloadManager: NSObject {
         for path in streamPaths {
             try? FileManager.default.removeItem(at: Self.hlsURL(forRelativePath: path))
         }
-        try? FileManager.default.removeItem(at: Self.folder(for: itemId))
+        // On the queue meta.json is written on, and waited for: a write still
+        // queued (cancelling the transfer just saved the record) otherwise
+        // lands while the folder is being removed and leaves it behind, with
+        // meta.json in it, to come back as a download at the next launch.
+        let folder = Self.folder(for: itemId)
+        Self.metaWriter.sync { try? FileManager.default.removeItem(at: folder) }
         DownloadArtwork.forget(itemId: itemId)
         records.removeAll { $0.itemId == itemId }
         recordsRevision &+= 1
@@ -2542,6 +2548,9 @@ final class DownloadManager: NSObject {
     /// folder and are not at risk.
     nonisolated static func keepFromPurge(_ url: URL) {
         #if os(iOS)
+        // The storage manager raises an exception, not an error, for a
+        // package that is not there.
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
         let policy = AVMutableAssetDownloadStorageManagementPolicy()
         policy.priority = .important
         policy.expirationDate = .distantFuture
@@ -2924,6 +2933,16 @@ final class DownloadManager: NSObject {
     /// music library draining it is asked every second or so.
     @concurrent
     private nonisolated static func isPlayable(_ url: URL, strict: Bool = true, audio: Bool = false) async -> Bool {
+        if !strict {
+            // A downloaded stream is a folder of segments. AVURLAsset has been
+            // seen to call anything at a .movpkg address playable, a plain
+            // file of junk and a path with nothing at it included, so what is
+            // there is looked at first.
+            var isFolder: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder), isFolder.boolValue,
+                  let inside = try? FileManager.default.contentsOfDirectory(atPath: url.path), !inside.isEmpty
+            else { return false }
+        }
         let asset = AVURLAsset(url: url)
         do {
             guard try await asset.load(.isPlayable) else { return false }

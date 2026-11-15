@@ -414,9 +414,7 @@ final class MusicOfflineLibraryTests: XCTestCase {
         XCTAssertTrue(station.profile.isOpen)
         XCTAssertTrue(station.pool.keys.contains("f1"))
         XCTAssertTrue(Set(station.pool.keys).isDisjoint(with: ["q2", "j1", "old"]), "never starred, never played")
-        XCTExpectFailure("bug: Rediscover from downloads never leaves out what was played lately: OfflineMusic.item (OfflineMusic.swift:566) does not carry the index's lastPlayed onto the song, so StationBuilder.isForgotten (Stations.swift:309, used at :351) always says yes") {
-            XCTAssertEqual(Set(station.pool.keys), ["f1"], "everything else starred or played was heard in the last six weeks")
-        }
+        XCTAssertEqual(Set(station.pool.keys), ["f1"], "everything else starred or played was heard in the last six weeks")
     }
 
     func testDeepCutsHereIsUnplayedSongsByArtistsThatAreStarredOrPlayed() throws {

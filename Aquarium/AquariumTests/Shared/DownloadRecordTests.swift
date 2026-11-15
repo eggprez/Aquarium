@@ -111,9 +111,7 @@ final class DownloadRecordTests: XCTestCase {
         var rec = record()
         rec.needsMPV = true
         let back = try JSONDecoder().decode(DownloadRecord.self, from: JSONEncoder().encode(rec))
-        XCTExpectFailure("bug: DownloadRecord.init(from:) never reads needsMPV, so it is nil after a relaunch, Aquarium/Core/Downloads.swift:234") {
-            XCTAssertEqual(back.needsMPV, true)
-        }
+        XCTAssertEqual(back.needsMPV, true, "read back from meta.json (it was never decoded, so mpv was forgotten at a relaunch)")
     }
 
     func testStatusNamesOnDisk() throws {

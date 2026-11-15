@@ -290,19 +290,15 @@ final class DownloadStreamTests: DownloadTestCase {
         manager.urlSession(Self.streams, assetDownloadTask: task, didFinishDownloadingTo: landed.url)
         end(task)
         await waitUntil("the finish is dealt with") { self.manager.record(for: id)?.status != .downloading }
-        // Seen on the iOS simulator only: on a Mac isPlayable says no and the
-        // junk is refused, so this is not strict. Not yet checked on a device.
-        XCTExpectFailure("bug (iOS simulator; a real device unchecked): the one check finishStream makes of a finished stream, AVURLAsset's isPlayable, answers yes for anything at a .movpkg address — two kilobytes of junk in a plain file included — so a package that cannot play is recorded as a finished download, Aquarium/Core/Downloads.swift:2462", strict: false) {
-            XCTAssertNotEqual(manager.record(for: id)?.status, .complete)
-        }
+        // AVURLAsset on the iOS simulator calls anything at a .movpkg address
+        // playable, so finishStream looks at what is there first.
+        XCTAssertNotEqual(manager.record(for: id)?.status, .complete)
     }
 
     func testMarkingAPackageThatHasGoneAsOneToKeepDoesNotRaise() throws {
         #if os(iOS)
-        // What `finishStream` does last. Reached with a package that has
-        // gone, because the check before it cannot tell: see the test above,
-        // and AVFoundation answers the same for an address with nothing at it.
-        XCTExpectFailure("bug: keepFromPurge hands AVAssetDownloadStorageManager a package that may not be on disk, and it raises an Objective-C exception ('No file at …') that nothing catches — so a stream whose package has gone by the time its finish is handled (isPlayable still answers yes for it) takes the app down instead of being fetched again, Aquarium/Core/Downloads.swift:2537, called from finishStream at :2516")
+        // The storage manager raises an Objective-C exception for a package
+        // that is not on disk; keepFromPurge checks before handing it one.
         DownloadManager.keepFromPurge(missingPackage().url)
         #else
         throw XCTSkip("packages are marked to keep on iOS only")

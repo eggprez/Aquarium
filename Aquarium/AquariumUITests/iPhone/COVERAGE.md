@@ -66,15 +66,15 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | `ServerDiscovery.accepts` | ServerDiscoveryTests (shared) | unit | pass |
 | `MusicPlayer`: queue, shuffle, repeat, Play Next/Later, end of queue, sleep timer, books (chapters, resume, speed), reports to the server | MusicPlayerQueueTests, MusicPlayerBookTests, MusicPlayerPlaybackTests (shared) | unit | pass (2026-11-14) |
 | `StationEngine`, `Stations`: genre keys, mix points, ranker, deal, leanings, what the server is asked per seed, fallbacks | StationEngineTests, StationSessionTests, StationBuilderTests, MusicMixesTests (shared) | unit | pass |
-| Rediscover from downloads leaves out songs heard lately | MusicOfflineLibraryTests.testRediscoverHereIsStarredAndMostPlayedSongsNotHeardLately | unit | xfail: `OfflineMusic.item` drops `lastPlayed` (OfflineMusic.swift:566) |
+| Rediscover from downloads leaves out songs heard lately | MusicOfflineLibraryTests.testRediscoverHereIsStarredAndMostPlayedSongsNotHeardLately | unit | pass (fixed 2026-11-14: downloaded songs carry their last-played date) |
 | `PlaylistStore`, smart playlist rules and store | PlaylistStoreTests, MusicSmartPlaylistTests (shared) | unit | pass |
 | `OfflineMusic`, `OfflineMusicIndex` | MusicOfflineLibraryTests, MusicOfflineIndexTests (shared) | unit | pass |
-| `DownloadManager`: queue and order, the pump, cancel vs swipe-away vs system stop, pause, retry waits and failures, stream packages, records on disk, delete, sizes and space | DownloadQueueTests, DownloadPumpTests, DownloadCancelTests, DownloadFailureTests, DownloadStreamTests, DownloadRecordTests, DownloadStoreTests, DownloadSizeTests (shared) | unit | pass, with the xfails below |
-| `needsMPV` survives a relaunch | DownloadRecordTests.testNeedsMPVSurvivesARelaunch | unit | xfail: not decoded (Downloads.swift:234) |
-| `delete()` leaves no folder behind | six tests, by `assertFolderGone` | unit | xfail (timing): races its own meta.json write (Downloads.swift:2051) |
+| `DownloadManager`: queue and order, the pump, cancel vs swipe-away vs system stop, pause, retry waits and failures, stream packages, records on disk, delete, sizes and space | DownloadQueueTests, DownloadPumpTests, DownloadCancelTests, DownloadFailureTests, DownloadStreamTests, DownloadRecordTests, DownloadStoreTests, DownloadSizeTests (shared) | unit | pass |
+| `needsMPV` survives a relaunch | DownloadRecordTests.testNeedsMPVSurvivesARelaunch | unit | pass (fixed 2026-11-14) |
+| `delete()` leaves no folder behind | six tests, by `assertFolderGone` | unit | pass (fixed 2026-11-14: the folder is removed on the meta.json queue) |
 | `transfersToFinish` counts an item whose lookup is in flight | DownloadPumpTests.testOneAtATimeInQueueOrder | unit | xfail (Downloads.swift:3668) |
-| Junk at a `.movpkg` address is not a download; a package gone at finish does not raise | DownloadStreamTests | unit | xfail (Downloads.swift:2462, :2537; seen on the simulator) |
-| `OfflineProgress.sync`, `refreshFromServer`, a sitting | DownloadProgressSyncTests (shared) | unit | pass; two syncs at once xfail: not serialized (OfflineProgress.swift:31) |
+| Junk at a `.movpkg` address is not a download; a package gone at finish does not raise | DownloadStreamTests | unit | pass (fixed 2026-11-14: the package is looked at before AVFoundation is asked) |
+| `OfflineProgress.sync`, `refreshFromServer`, a sitting | DownloadProgressSyncTests (shared) | unit | pass (two syncs at once fixed 2026-11-14: the second waits for the first) |
 | `DownloadGroups`, `DownloadSubtitles`, `DownloadAudioList`, `DownloadSegments`, `DownloadItemInfo`, `DownloadSizes`, repair notes | DownloadGroupsTests, DownloadSidecarTests, DownloadSizeTests (shared) | unit | pass |
 | `DownloadManager` on real background sessions (`start`, `reconcile`, stall verdict, `judgeIdle`, `restartDemotedTransfers`) | — | manual | needs real background sessions and the clock (MANUAL.md) |
 | `OrientationLock` | — | manual | needs the hinge and real rotation (MANUAL.md) |
