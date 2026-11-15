@@ -116,6 +116,25 @@ playback continues in the background. By hand:
 | Settings' two columns: the page heading pinned, rows never slide under a see-through bar | 6344432, 30cbbc2 |
 | Portrait episodes on a 13-inch: one across or two (design record says two) | master-fix-list "user's call" |
 
+## Playlists, smart playlists and Settings (added 2026-11-14)
+
+What `PadPlaylistTests`, `PadSmartPlaylistTests`, `PadSettingsAccountsTests` and
+`PadSettingsMoreTests` could not reach.
+
+| Check | What should happen | Why not automated |
+|---|---|---|
+| Playlists with no playlist at all | "No playlists yet" with the hint about the + | Every account on the QA server sees its public playlists, so the list is never empty |
+| Playlists while loading, and with the server refusing | A skeleton of six rows; then an error with Retry | The skeleton is up for a fraction of a second on a local server; the error needs the server to fail one request |
+| A playlist row's and a playlist song's press-and-hold menu | Rename and Delete Playlist on the row; Remove from Playlist on the song. **Open bug:** none of the three appears (the row's own menu shadows them) | Tests are in place as expected failures; check by hand once fixed |
+| A song's "…" → Add to Playlist → New Playlist… | An alert asks for the name (the album's, to start with); Create makes the playlist with the song. **Open bug:** no alert comes up | Expected failure in PadPlaylistTests; the rest of the test runs once the alert does |
+| Any toast on an iPad with the sidebar up ("Created …", "Added … to …", "Deleted …", "Refreshing Live TV…", "Signed … out of this device") | The card slides up from the foot of the page for three seconds. **Open bug:** none is drawn | Expected failures in the tests above; look once fixed, in both orientations and with the sidebar collapsed |
+| A pushed Settings page held upright (Account, Live TV, Custom playlist) | Its large title is readable above the first section. On 2026-11-14 the simulator's screenshots show an empty band there while accessibility reports the title | A colour, not a state: needs eyes, both themes |
+| Smart playlist offline | "Offline — answered from your downloads", songs from the downloads, Save as Playlist on Server off; the shelf of smart playlists on the offline Discover page | Needs downloaded music and the server out of reach |
+| Smart playlist: a rule by plays ("Played at least N times", Most played / Recently played order) | Songs with that many plays, most played first | Play counts on the suite account are not part of the baseline; the control and its sentence are tested, the answer is not |
+| A custom-playlist channel plays, with the user agent set in Settings | The stream opens; the server's log shows the user agent | The test's own HTTP server serves a playlist, a guide and a logo, not a stream |
+| A person with a biography | Born / died line, the biography cut to a few lines, Read More / Show Less | The fixture people have no biography (metadata from .nfo only) |
+| Sign-in of a second account by Quick Connect in the Add Account sheet | The code, approved elsewhere, adds the account | The password path is tested; this is the same sheet's other mode |
+
 ## Hardware-only services
 
 AirPlay (no route picker in the simulator), SharePlay in a FaceTime call,
