@@ -192,7 +192,7 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 
 ### Playlists (PadPlaylistTests, added 2026-11-14)
 
-Each test makes its own playlists, named "suite-ipad …", and deletes them on the server afterwards.
+Each test makes its own playlists, named "suite-ipad …", and deletes them on the server afterwards. Verified 2026-11-14: each of the five new classes (Person, Playlists, Smart playlists, Settings accounts, Settings more) passed alone and again together (31 tests: 21 pass, 10 expected failures on the bugs named below).
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
@@ -210,7 +210,7 @@ Each test makes its own playlists, named "suite-ipad …", and deletes them on t
 
 ### Smart playlists (PadSmartPlaylistTests, added 2026-11-14)
 
-A smart playlist is kept in the app's settings; each test makes its own through the editor.
+A smart playlist is kept in the app's settings, which every launch starts empty. The editor's tests make theirs through the editor; the tests of what a rule answers launch with the rule already saved (`-smart_playlists`). "Save as Playlist on Server" makes a real playlist, deleted afterwards, and a song made a favourite is put back.
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
