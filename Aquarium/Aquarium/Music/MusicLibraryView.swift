@@ -529,6 +529,7 @@ struct PlaylistsView: View {
     @State private var newName = ""
     @State private var isNaming = false
     @State private var renaming: BaseItem?
+    @State private var isRenaming = false
     @State private var renameText = ""
     @State private var editingSmart: SmartPlaylist?
     @State private var deleting: BaseItem?
@@ -557,6 +558,7 @@ struct PlaylistsView: View {
                                 Button {
                                     renameText = list.title
                                     renaming = list
+                                    isRenaming = true
                                 } label: {
                                     Label("Rename", systemImage: "pencil")
                                 }
@@ -662,16 +664,13 @@ struct PlaylistsView: View {
         } message: {
             Text("An empty playlist on the server. Add songs from any song's menu.")
         }
-        // The playlist is handed to the buttons (`presenting:`) rather than
-        // read back from the state: closing the alert clears the state, and
-        // the task a button starts ran after that and found nothing to act on.
-        .alert(
-            "Rename Playlist",
-            isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }),
-            presenting: renaming
-        ) { list in
+        // A flag of its own, as New Playlist has, and the playlist kept
+        // beside it. Presented off `renaming != nil`, closing the alert
+        // cleared the playlist before the task Rename starts could read it,
+        // so nothing was renamed; and on an iPad the alert would not close.
+        .alert("Rename Playlist", isPresented: $isRenaming) {
             TextField("Name", text: $renameText)
-            Button("Rename") { Task { await rename(list) } }
+            Button("Rename") { Task { await rename() } }
             Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog(
@@ -712,7 +711,8 @@ struct PlaylistsView: View {
         }
     }
 
-    private func rename(_ list: BaseItem) async {
+    private func rename() async {
+        guard let list = renaming else { return }
         let name = renameText.trimmingCharacters(in: .whitespaces)
         renaming = nil
         guard !name.isEmpty, name != list.title else { return }

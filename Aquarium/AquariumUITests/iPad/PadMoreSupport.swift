@@ -129,6 +129,29 @@ extension PadUITestCase {
         if !text.isEmpty { field.typeText(text) }
     }
 
+    /// Replaces the name an alert's field came up holding. An alert's field
+    /// has the keyboard and the caret at its end from the start, so this
+    /// only types: Delete for every character, then `text`. `replaceText`'s
+    /// tap inside the field raises the Select / Select All callout there.
+    func retype(inAlertField field: XCUIElement, with text: String, file: StaticString = #filePath, line: UInt = #line) {
+        field.waitToExist(10, file: file, line: line)
+        func focused() -> Bool { (field.value(forKey: "hasKeyboardFocus") as? Bool) ?? false }
+        XCTAssertTrue(eventually(5) { focused() }, "the alert's field has the keyboard", file: file, line: line)
+        let count = ((field.value as? String) ?? "").count
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: count) + text)
+        XCTAssertEqual(field.value as? String, text, "the field holds the new name", file: file, line: line)
+    }
+
+    /// Taps a button of an alert whose field was just retyped, at the
+    /// button's middle. After Delete keys in the field, XCUITest's own
+    /// `tap()` on the button is sent and does nothing (a finger on the
+    /// same button works: checked by hand on the simulator, 2026-11-15).
+    func tapAlertButton(_ alert: XCUIElement, _ name: String, file: StaticString = #filePath, line: UInt = #line) {
+        let button = alert.buttons[name]
+        button.waitToExist(10, file: file, line: line)
+        button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    }
+
     /// The words of every toast showing.
     func toastTexts() -> [String] {
         app.descendants(matching: .any).matching(identifier: TestID.Shell.toastText)
@@ -154,19 +177,10 @@ extension PadUITestCase {
         return false
     }
 
-    static let toastBug = "bug: toasts are not drawn in the iPad's sidebar shell: no toast card and no shell.toast.root in the element tree, and none in a screenshot taken as the action lands (ToastOverlay hung on the split view's detail column, Views/RootView.swift:532)"
-
-    /// A toast the app raises in the sidebar shell, which an iPad does not
-    /// show today: looked for, and its absence recorded as the known bug.
+    /// A toast the app raises in the sidebar shell. It is up for three
+    /// seconds, so this is called straight after the tap that raises it.
     func expectToast(containing words: String, file: StaticString = #filePath, line: UInt = #line) {
-        // An expected failure still ends a test that stops at its first
-        // failure, so that is lifted while the toast is looked for.
-        let stops = continueAfterFailure
-        continueAfterFailure = true
-        defer { continueAfterFailure = stops }
-        XCTExpectFailure(Self.toastBug) {
-            _ = waitForToast(containing: words, 5, file: file, line: line)
-        }
+        waitForToast(containing: words, 5, file: file, line: line)
     }
 
     /// Answers a confirmation dialog with its Cancel. An iPad draws the

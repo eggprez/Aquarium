@@ -611,7 +611,8 @@ struct RootView: View {
         // column's stack, an iPad drew no toast at all and never raised the
         // New Playlist prompt.
         .withMusicHosts()
-        .overlay(alignment: .bottom) { ToastOverlay() }
+        // Over the page, not the window: clear of the sidebar while it is up.
+        .overlay(alignment: .bottom) { ToastOverlay().padding(.leading, sidebarHidden ? 0 : 210) }
         #endif
         .nowPlayingSheet()
     }

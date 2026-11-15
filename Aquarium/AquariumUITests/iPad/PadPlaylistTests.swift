@@ -104,7 +104,6 @@ final class PadPlaylistTests: PadUITestCase {
         let tracks = try formats()
         let id = try api.padCreatePlaylist(name("Rename Me"), songs: [tracks[0].id, tracks[1].id])
         let renamed = name("Renamed")
-        XCTExpectFailure("bug: Rename and Delete Playlist never appear on a playlist's row: MusicListRow's own .musicContextMenu (Music/MusicComponents.swift:512) shadows the menu PlaylistsView adds, Music/MusicLibraryView.swift:557")
         launchHome()
         openPlaylistsPage()
         let row = playlistRow(id)
@@ -117,8 +116,8 @@ final class PadPlaylistTests: PadUITestCase {
         app.button(TestID.Playlists.menuRename).padTap()
         var prompt = alert("Rename Playlist")
         XCTAssertEqual(prompt.textFields.firstMatch.value as? String, name("Rename Me"), "the field starts with the name")
-        replaceText(in: prompt.textFields.firstMatch, with: renamed)
-        prompt.buttons["Cancel"].tap()
+        retype(inAlertField: prompt.textFields.firstMatch, with: renamed)
+        tapAlertButton(prompt, "Cancel")
         XCTAssertTrue(prompt.waitToVanish(10))
         XCTAssertTrue(row.label.contains("Rename Me"), "row reads \(row.label)")
         XCTAssertNotNil(try api.padPlaylist(named: name("Rename Me")))
@@ -126,8 +125,8 @@ final class PadPlaylistTests: PadUITestCase {
         contextMenu(on: row, waitingFor: TestID.Playlists.menuRename)
         app.button(TestID.Playlists.menuRename).padTap()
         prompt = alert("Rename Playlist")
-        replaceText(in: prompt.textFields.firstMatch, with: renamed)
-        prompt.buttons["Rename"].tap()
+        retype(inAlertField: prompt.textFields.firstMatch, with: renamed)
+        tapAlertButton(prompt, "Rename")
         XCTAssertTrue(waitUntil(15, "the row to take the new name") { row.label.contains(renamed) }, "row reads \(row.label)")
         XCTAssertTrue(waitUntil(15, "the new name on the server") { (try? api.padPlaylist(named: renamed))?.id == id })
         XCTAssertTrue(row.label.contains("2 songs"), "still its two songs: \(row.label)")
@@ -138,7 +137,6 @@ final class PadPlaylistTests: PadUITestCase {
         let tracks = try formats()
         let title = name("Delete Me")
         let id = try api.padCreatePlaylist(title, songs: [tracks[0].id])
-        XCTExpectFailure("bug: Rename and Delete Playlist never appear on a playlist's row: MusicListRow's own .musicContextMenu (Music/MusicComponents.swift:512) shadows the menu PlaylistsView adds, Music/MusicLibraryView.swift:557")
         launchHome()
         openPlaylistsPage()
         let row = playlistRow(id)
@@ -177,19 +175,10 @@ final class PadPlaylistTests: PadUITestCase {
         tapMenuItem(TestID.Music.menuAddToPlaylist, label: "Add to Playlist")
         tapMenuItem(TestID.Music.menuNewPlaylist, label: "New Playlist…")
         let prompt = app.alerts["New Playlist"]
-        guard prompt.waitForExistence(timeout: 10) else {
-            // Adding to an existing playlist from the same submenu works
-            // (the test below); the name is never asked for.
-            continueAfterFailure = true
-            XCTExpectFailure("bug: New Playlist… in a song's Add to Playlist menu raises no alert on an iPad, so a playlist cannot be made from a song: PlaylistPrompt.ask (Music/MusicComponents.swift:851) sets the item, PlaylistPromptHost's alert (Music/MusicTabView.swift:296) never presents") {
-                XCTFail("no New Playlist alert within 10 s of choosing New Playlist…")
-            }
-            XCTAssertNil(try api.padPlaylist(named: "FX Formats"), "and nothing was made unasked")
-            return
-        }
+        XCTAssertTrue(prompt.waitForExistence(timeout: 10), "the New Playlist alert")
         XCTAssertEqual(prompt.textFields.firstMatch.value as? String, "FX Formats", "a song's new playlist starts named for its album")
-        replaceText(in: prompt.textFields.firstMatch, with: title)
-        prompt.buttons["Create"].tap()
+        retype(inAlertField: prompt.textFields.firstMatch, with: title)
+        tapAlertButton(prompt, "Create")
         expectToast(containing: "Created \(title) with 1 song")
         let made = try XCTUnwrap(api.padPlaylist(named: title), "the playlist on the server")
         XCTAssertEqual(try api.padPlaylistEntries(made.id).map(\.songId), [song.id])
@@ -250,7 +239,6 @@ final class PadPlaylistTests: PadUITestCase {
         let api = try XCTUnwrap(server)
         let tracks = try formats()
         let id = try api.padCreatePlaylist(name("Remove One"), songs: [tracks[0].id, tracks[1].id, tracks[2].id])
-        XCTExpectFailure("bug: Remove from Playlist never appears in a song's menu on a playlist's page: SongRow's own .musicContextMenu (Music/MusicComponents.swift:425) shadows the menu PlaylistDetailView adds, Music/MusicDetails.swift:522")
         launchHome()
         openPlaylist(id)
         let song = app.button(TestID.Music.song(tracks[1].id))

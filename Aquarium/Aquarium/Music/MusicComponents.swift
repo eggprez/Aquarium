@@ -1048,22 +1048,20 @@ final class PlaylistPrompt {
     static let shared = PlaylistPrompt()
     var item: BaseItem?
     var name = ""
-    var isPresented: Bool {
-        get { item != nil }
-        set { if !newValue { item = nil } }
-    }
+    /// A flag of its own rather than `item != nil`: closing the alert must
+    /// not clear the item, which Create's task reads after the alert has gone.
+    var isPresented = false
     private init() {}
 
     func ask(for item: BaseItem) {
         name = item.isSong ? (item.Album ?? item.title) : item.title
         self.item = item
+        isPresented = true
     }
 
     /// Resolve the item to songs, make the playlist, put them in.
-    /// The item is the alert's to hand over: closing the alert clears
-    /// `item`, and a task started by its button runs after that.
-    func create(for item: BaseItem) async {
-        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+    func create() async {
+        guard let item, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         self.item = nil
         let client = JellyfinClient.shared
         var songs: [BaseItem] = []

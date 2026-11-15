@@ -304,11 +304,11 @@ private struct PlaylistPromptHost: ViewModifier {
 
     func body(content: Content) -> some View {
         @Bindable var prompt = prompt
-        content.alert("New Playlist", isPresented: $prompt.isPresented, presenting: prompt.item) { item in
+        content.alert("New Playlist", isPresented: $prompt.isPresented) {
             TextField("Name", text: $prompt.name)
-            Button("Create") { Task { await prompt.create(for: item) } }
+            Button("Create") { Task { await prompt.create() } }
             Button("Cancel", role: .cancel) {}
-        } message: { _ in
+        } message: {
             Text("Made on the server, with this in it.")
         }
     }

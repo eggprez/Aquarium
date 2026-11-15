@@ -488,10 +488,7 @@ final class PadSmartPlaylistTests: PadUITestCase {
         } else {
             XCTAssertTrue(waitUntil(20, "the FX Ambient songs added in the last year") { [self] in Set(songIdsInOrder()) == Set(expected) },
                           "rows: \(songIdsInOrder()), expected \(expected)")
-            continueAfterFailure = true
-            XCTExpectFailure("bug: a rule settled in the app sorts 'Title' by SortName, which Jellyfin prefixes with the disc and track number, so it comes out in album order where the server-answered rules sort by Name: SmartPlaylist.resolve's byName, Music/Playlists.swift:222") {
-                XCTAssertEqual(songIdsInOrder(), expected, "by title: Six Minutes before Twelve Minutes")
-            }
+            XCTAssertEqual(songIdsInOrder(), expected, "by title: Six Minutes before Twelve Minutes")
         }
     }
 

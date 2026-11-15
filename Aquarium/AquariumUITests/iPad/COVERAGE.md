@@ -192,18 +192,18 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 
 ### Playlists (PadPlaylistTests, added 2026-11-14)
 
-Each test makes its own playlists, named "suite-ipad …", and deletes them on the server afterwards. Verified 2026-11-14: each of the five new classes (Person, Playlists, Smart playlists, Settings accounts, Settings more) passed alone and again together (31 tests: 21 pass, 10 expected failures on the bugs named below).
+Each test makes its own playlists, named "suite-ipad …", and deletes them on the server afterwards. Verified 2026-11-14: each of the five new classes (Person, Playlists, Smart playlists, Settings accounts, Settings more) passed alone and again together (31 tests: 21 pass, 10 expected failures). The bugs behind those ten were fixed 2026-11-15 and the marks removed: 31 strict, 30 passed together and the Live TV settings test passed on its own rerun.
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
 | Playlists page: own and public playlists, song counts, the + | PadPlaylistTests.testPlaylistsPageListsTheAccountsAndThePublicOnes | UI | pass |
 | + → New Playlist alert (Cancel makes nothing; Create), the new playlist's page, "Empty playlist", its row on the list | PadPlaylistTests.testCreatingWithThePlusOpensTheNewEmptyPlaylist | UI | pass |
-| Rename from the row's menu (Cancel, Rename; server follows) | PadPlaylistTests.testRenameFromTheRowsMenu | UI | xfail: Rename is not in the row's menu (MusicListRow's own menu shadows it, MusicComponents.swift:512 over MusicLibraryView.swift:557) |
-| Delete Playlist from the row's menu: the confirmation, Cancel keeps it, "Delete from the server" removes it | PadPlaylistTests.testDeleteAsksFirstAndCancelKeepsThePlaylist | UI | xfail: Delete Playlist is not in the row's menu (same cause) |
-| Song "…" → Add to Playlist → New Playlist… (named for the album), the playlist made with the song | PadPlaylistTests.testASongsMenuMakesANewPlaylistWithTheSongInIt | UI | xfail: the New Playlist alert never comes up from the menu (PlaylistPromptHost, MusicTabView.swift:296) |
-| Song "…" → Add to Playlist → an existing playlist; the list's count follows | PadPlaylistTests.testASongsMenuAddsToAnExistingPlaylist | UI | pass; its toast xfail (toasts not drawn in the sidebar shell, RootView.swift:532) |
+| Rename from the row's menu (Cancel, Rename; server follows) | PadPlaylistTests.testRenameFromTheRowsMenu | UI | pass (fixed 2026-11-15) |
+| Delete Playlist from the row's menu: the confirmation, Cancel keeps it, "Delete from the server" removes it | PadPlaylistTests.testDeleteAsksFirstAndCancelKeepsThePlaylist | UI | pass (fixed 2026-11-15) |
+| Song "…" → Add to Playlist → New Playlist… (named for the album), the playlist made with the song | PadPlaylistTests.testASongsMenuMakesANewPlaylistWithTheSongInIt | UI | pass (fixed 2026-11-15) |
+| Song "…" → Add to Playlist → an existing playlist; the list's count follows | PadPlaylistTests.testASongsMenuAddsToAnExistingPlaylist | UI | pass (fixed 2026-11-15) |
 | A playlist's page: header, songs in the playlist's order, the "…" menu with Edit Songs | PadPlaylistTests.testPlaylistPageShowsItsSongsInTheirOrder | UI | pass |
-| Remove from Playlist in a song's press-and-hold menu | PadPlaylistTests.testRemoveFromPlaylistInASongsMenu | UI | xfail: not in the menu (SongRow's own menu shadows it, MusicComponents.swift:425 over MusicDetails.swift:522) |
+| Remove from Playlist in a song's press-and-hold menu | PadPlaylistTests.testRemoveFromPlaylistInASongsMenu | UI | pass (fixed 2026-11-15) |
 | Edit Songs: the editor, its status line, a row's red − and Delete, Done | PadPlaylistTests.testEditSongsRemovesASongAndDoneGoesBack | UI | pass |
 | Edit Songs: drag a row by its handle; the server's order follows | PadPlaylistTests.testEditSongsReordersByDragging | UI | pass |
 | Playlists' empty, loading and error states | — | — | not covered: every account sees the server's public playlists, so the list is never empty on the QA server; loading is a skeleton for a fraction of a second (MANUAL.md) |
@@ -220,10 +220,10 @@ A smart playlist is kept in the app's settings, which every launch starts empty.
 | Genre + year rule answers with exactly the matching fixture songs, by title | PadSmartPlaylistTests.testGenreAndYearRulePicksExactlyTheMatchingSongs | UI | pass |
 | Artist rule | PadSmartPlaylistTests.testArtistRulePicksThatArtistsSongs | UI | pass |
 | Favourites-only rule | PadSmartPlaylistTests.testFavouritesOnlyRulePicksTheFavouriteSong | UI | pass |
-| "Added in the last N days" (settled in the app against DateCreated) | PadSmartPlaylistTests.testAddedWithinRuleIsSettledAgainstTheDateAdded | UI | pass for the songs; their order xfail (sorted by SortName, i.e. track number, not title: Playlists.swift:222) |
+| "Added in the last N days" (settled in the app against DateCreated) | PadSmartPlaylistTests.testAddedWithinRuleIsSettledAgainstTheDateAdded | UI | pass (fixed 2026-11-15) |
 | A rule nothing matches: "Nothing matches", Play off, Save as Playlist on Server off | PadSmartPlaylistTests.testARuleNothingMatchesSaysSo | UI | pass |
 | Row menu: Edit Rules (the editor opens on the rule, the row follows the edit), Delete | PadSmartPlaylistTests.testRowMenuEditsTheRuleAndDeletesIt | UI | pass |
-| The rule's page menu: Edit Rules, Refresh, Save as Playlist on Server (a real playlist, opened), Delete → "Gone" | PadSmartPlaylistTests.testDetailMenuEditsRefreshesSavesToTheServerAndDeletes | UI | pass; the "Saved …" toast xfail |
+| The rule's page menu: Edit Rules, Refresh, Save as Playlist on Server (a real playlist, opened), Delete → "Gone" | PadSmartPlaylistTests.testDetailMenuEditsRefreshesSavesToTheServerAndDeletes | UI | pass (fixed 2026-11-15) |
 | Offline: answered from downloads, the shelf on the offline Discover page | — | — | not covered (needs downloaded music and the server out of reach) |
 
 ## Live TV
@@ -264,10 +264,10 @@ A smart playlist is kept in the app's settings, which every launch starts empty.
 | No engine choice on iPad | PadSettingsTests.testVideoPageHasNoEngineChoiceOnIPad | UI | pass |
 | Sign out | PadSettingsTests.testSignOutGoesToTheSignInScreen | UI | pass |
 | Add Account… sheet starts on the server in use; Cancel | PadSettingsAccountsTests.testAddAccountSheetStartsOnThisServerAndCancels | UI | pass |
-| Second account (suite-spare1) signed in; the tick on the one in use; tap to switch; swipe → Sign Out | PadSettingsAccountsTests.testSecondAccountSignsInSwitchesBackAndIsSwipedOut | UI | pass; the "Signed … out" toast xfail |
-| Sign Out of This Device from an account's press-and-hold menu | PadSettingsAccountsTests.testAnAccountNotInUseIsSignedOutFromItsMenu | UI | pass; toast xfail |
+| Second account (suite-spare1) signed in; the tick on the one in use; tap to switch; swipe → Sign Out | PadSettingsAccountsTests.testSecondAccountSignsInSwitchesBackAndIsSwipedOut | UI | pass (fixed 2026-11-15) |
+| Sign Out of This Device from an account's press-and-hold menu | PadSettingsAccountsTests.testAnAccountNotInUseIsSignedOutFromItsMenu | UI | pass (fixed 2026-11-15) |
 | Removing an account asks first | — | — | the Mac's confirmation (`settings.accounts.removeConfirm`): an iPad signs the account out at once |
-| Live TV: source switch, Custom playlist page (playlist, guide, user agent, refresh interval), artwork check (no channels yet; a line a channel), Refresh now, "Last read" line | PadSettingsMoreTests.testCustomPlaylistFieldsArtworkCheckAndLastRead | UI | pass; the "Refreshing Live TV…" toast xfail |
+| Live TV: source switch, Custom playlist page (playlist, guide, user agent, refresh interval), artwork check (no channels yet; a line a channel), Refresh now, "Last read" line | PadSettingsMoreTests.testCustomPlaylistFieldsArtworkCheckAndLastRead | UI | pass (fixed 2026-11-15) |
 | Subtitles: Forced only (a choice of the language row), kept across a relaunch | PadSettingsMoreTests.testSubtitlesForcedOnlyIsAChoiceOfTheLanguageRow | UI | pass |
 | Audio: language; no audio delay or downmix on an iPad | PadSettingsMoreTests.testAudioPageHasALanguageAndNoDelayOnAnIPad | UI | pass |
 | Station mix: preset, dials, the 20-point budget, Custom | PadSettingsMoreTests.testStationMixPresetAndDialsShareOneBudget | UI | pass |
