@@ -516,18 +516,18 @@ struct PlaylistDetailView: View {
                 }
                 ForEach(rows) { row in
                     let song = row.song
-                    SongRow(song: song, isCurrent: music.current?.Id == song.Id, isPlaying: music.isPlaying) {
+                    SongRow(
+                        song: song, isCurrent: music.current?.Id == song.Id, isPlaying: music.isPlaying,
+                        menuExtras: AnyView(
+                            Button(role: .destructive) {
+                                Task { await remove([song]) }
+                            } label: {
+                                Label("Remove from Playlist", systemImage: "minus.circle")
+                            }
+                            .accessibilityIdentifier(TestID.Playlists.removeSong)
+                        )
+                    ) {
                         music.play(songs, startingAt: row.offset, title: playlist.title)
-                    }
-                    .contextMenu {
-                        MusicItemMenu(item: song)
-                        Divider()
-                        Button(role: .destructive) {
-                            Task { await remove([song]) }
-                        } label: {
-                            Label("Remove from Playlist", systemImage: "minus.circle")
-                        }
-                        .accessibilityIdentifier(TestID.Playlists.removeSong)
                     }
                 }
             }

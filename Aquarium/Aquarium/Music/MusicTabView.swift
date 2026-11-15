@@ -195,11 +195,21 @@ extension View {
     /// the column never takes the controls with it.
     @ViewBuilder
     func withShellMusic(sidebarShowing: Bool) -> some View {
+        #if os(iOS)
+        // The prompts are on the split view itself there — see
+        // `sidebarShell` — so this is only the bar.
+        if sidebarShowing {
+            self
+        } else {
+            safeAreaInset(edge: .bottom, spacing: 0) { MiniPlayerBar() }
+        }
+        #else
         if sidebarShowing {
             withMusicHosts()
         } else {
             withMiniPlayer()
         }
+        #endif
     }
 
     /// On a navigation stack, inside the mini player and the offline strip:
@@ -294,11 +304,11 @@ private struct PlaylistPromptHost: ViewModifier {
 
     func body(content: Content) -> some View {
         @Bindable var prompt = prompt
-        content.alert("New Playlist", isPresented: $prompt.isPresented) {
+        content.alert("New Playlist", isPresented: $prompt.isPresented, presenting: prompt.item) { item in
             TextField("Name", text: $prompt.name)
-            Button("Create") { Task { await prompt.create() } }
+            Button("Create") { Task { await prompt.create(for: item) } }
             Button("Cancel", role: .cancel) {}
-        } message: {
+        } message: { _ in
             Text("Made on the server, with this in it.")
         }
     }

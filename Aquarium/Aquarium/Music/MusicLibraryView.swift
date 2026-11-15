@@ -551,23 +551,23 @@ struct PlaylistsView: View {
                     .testAnchor(TestID.Playlists.empty)
                 } else {
                     ForEach(store.playlists) { list in
-                        MusicListRow(item: list, subtitle: Self.count(list)) {
+                        MusicListRow(
+                            item: list, subtitle: Self.count(list),
+                            menuExtras: AnyView(Group {
+                                Button {
+                                    renameText = list.title
+                                    renaming = list
+                                } label: {
+                                    Label("Rename", systemImage: "pencil")
+                                }
+                                .accessibilityIdentifier(TestID.Playlists.menuRename)
+                                Button(role: .destructive) { deleting = list } label: {
+                                    Label("Delete Playlist", systemImage: "trash")
+                                }
+                                .accessibilityIdentifier(TestID.Playlists.menuDelete)
+                            })
+                        ) {
                             app.push(.music(.playlist(list.Id)))
-                        }
-                        .contextMenu {
-                            MusicItemMenu(item: list)
-                            Divider()
-                            Button {
-                                renameText = list.title
-                                renaming = list
-                            } label: {
-                                Label("Rename", systemImage: "pencil")
-                            }
-                            .accessibilityIdentifier(TestID.Playlists.menuRename)
-                            Button(role: .destructive) { deleting = list } label: {
-                                Label("Delete Playlist", systemImage: "trash")
-                            }
-                            .accessibilityIdentifier(TestID.Playlists.menuDelete)
                         }
                     }
                 }
@@ -662,21 +662,29 @@ struct PlaylistsView: View {
         } message: {
             Text("An empty playlist on the server. Add songs from any song's menu.")
         }
-        .alert("Rename Playlist", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+        // The playlist is handed to the buttons (`presenting:`) rather than
+        // read back from the state: closing the alert clears the state, and
+        // the task a button starts ran after that and found nothing to act on.
+        .alert(
+            "Rename Playlist",
+            isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }),
+            presenting: renaming
+        ) { list in
             TextField("Name", text: $renameText)
-            Button("Rename") { Task { await rename() } }
+            Button("Rename") { Task { await rename(list) } }
             Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog(
             "Delete “\(deleting?.title ?? "")”?",
             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("Delete from the server", role: .destructive) { Task { await delete() } }
+            titleVisibility: .visible,
+            presenting: deleting
+        ) { list in
+            Button("Delete from the server", role: .destructive) { Task { await delete(list) } }
                 .accessibilityIdentifier(TestID.Playlists.deleteConfirm)
             Button("Cancel", role: .cancel) {}
                 .accessibilityIdentifier(TestID.Playlists.deleteCancel)
-        } message: {
+        } message: { _ in
             Text("Every other Jellyfin client loses it too. The songs themselves stay.")
         }
         .sheet(item: $editingSmart) { list in
@@ -704,8 +712,7 @@ struct PlaylistsView: View {
         }
     }
 
-    private func rename() async {
-        guard let list = renaming else { return }
+    private func rename(_ list: BaseItem) async {
         let name = renameText.trimmingCharacters(in: .whitespaces)
         renaming = nil
         guard !name.isEmpty, name != list.title else { return }
@@ -716,8 +723,7 @@ struct PlaylistsView: View {
         }
     }
 
-    private func delete() async {
-        guard let list = deleting else { return }
+    private func delete(_ list: BaseItem) async {
         deleting = nil
         do {
             try await store.delete(list.Id)

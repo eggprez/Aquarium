@@ -372,6 +372,11 @@ struct SongRow: View {
     /// Whether this is the song playing right now.
     var isCurrent = false
     var isPlaying = false
+    /// What the page adds below the usual actions, in both of the row's
+    /// menus. Passed in rather than hung on the row with `.contextMenu`:
+    /// the row's own menu is the inner one and wins, so one added outside
+    /// never showed.
+    var menuExtras: AnyView? = nil
     var onTap: () -> Void
 
     var body: some View {
@@ -407,6 +412,10 @@ struct SongRow: View {
                 downloadedMark
                 Menu {
                     MusicItemMenu(item: song)
+                    if let menuExtras {
+                        Divider()
+                        menuExtras
+                    }
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.body.weight(.semibold))
@@ -422,7 +431,7 @@ struct SongRow: View {
         }
         .buttonStyle(RowPressStyle())
         .accessibilityIdentifier(TestID.Music.song(song.Id))
-        .musicContextMenu(song)
+        .musicContextMenu(song, extras: menuExtras)
     }
 
     @ViewBuilder
@@ -474,6 +483,8 @@ struct SongRow: View {
 struct MusicListRow: View {
     let item: BaseItem
     var subtitle: String? = nil
+    /// What the page adds below the usual actions — see `SongRow.menuExtras`.
+    var menuExtras: AnyView? = nil
     var onTap: () -> Void
 
     var body: some View {
@@ -509,7 +520,7 @@ struct MusicListRow: View {
         }
         .buttonStyle(RowPressStyle())
         .accessibilityIdentifier(TestID.Music.row(item.Id))
-        .musicContextMenu(item)
+        .musicContextMenu(item, extras: menuExtras)
     }
 }
 
@@ -765,8 +776,14 @@ struct AlbumGrid: View {
 extension View {
     /// What a song, an album, an artist, a playlist or an audiobook can do
     /// without being opened.
-    func musicContextMenu(_ item: BaseItem) -> some View {
-        contextMenu { MusicItemMenu(item: item) }
+    func musicContextMenu(_ item: BaseItem, extras: AnyView? = nil) -> some View {
+        contextMenu {
+            MusicItemMenu(item: item)
+            if let extras {
+                Divider()
+                extras
+            }
+        }
     }
 }
 
@@ -1043,8 +1060,10 @@ final class PlaylistPrompt {
     }
 
     /// Resolve the item to songs, make the playlist, put them in.
-    func create() async {
-        guard let item, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+    /// The item is the alert's to hand over: closing the alert clears
+    /// `item`, and a task started by its button runs after that.
+    func create(for item: BaseItem) async {
+        guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         self.item = nil
         let client = JellyfinClient.shared
         var songs: [BaseItem] = []

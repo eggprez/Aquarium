@@ -529,7 +529,7 @@ struct RootView: View {
                 .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 280)
             #endif
         } detail: {
-            withToasts(
+            detailChrome(
                 withOfflineStrip(
                     NavigationStack(path: stackPath(for: app.shownSelection)) {
                         SectionView(section: app.shownSelection)
@@ -606,7 +606,24 @@ struct RootView: View {
         }
         .modifier(FocusSearchOnRequest())
         #endif
+        #if os(iOS)
+        // On the split view, not on the page column inside it: hung on the
+        // column's stack, an iPad drew no toast at all and never raised the
+        // New Playlist prompt.
+        .withMusicHosts()
+        .overlay(alignment: .bottom) { ToastOverlay() }
+        #endif
         .nowPlayingSheet()
+    }
+
+    /// The toasts over the page column — on a Mac. An iPad's are on the
+    /// split view as a whole (see above).
+    private func detailChrome<Content: View>(_ content: Content) -> some View {
+        #if os(iOS)
+        content
+        #else
+        withToasts(content)
+        #endif
     }
     #endif
 
