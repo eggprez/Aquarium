@@ -169,8 +169,28 @@ do_watchunit() {
   run AquariumWatch WatchUnit Watch "id=$watch" "${SIM_SIGN[@]}"
 }
 
+# The iPhone download, on-device music and offline tests sign the app in
+# through a proxy of their own that they can slow down or cut (see
+# Tools/qa-switch-proxy.py), so the QA server itself is never touched. One
+# already answering on the control port is used and left running; one started
+# here is stopped by its pid when the suite ends.
+switch_proxy_pid=""
+start_switch_proxy() {
+  curl -s -m 2 "http://127.0.0.1:8178/state" > /dev/null 2>&1 && return 0
+  python3 -I "$PROJECT_DIR/Tools/qa-switch-proxy.py" > /dev/null 2>&1 &
+  switch_proxy_pid=$!
+  sleep 1
+  curl -s -m 2 "http://127.0.0.1:8178/state" > /dev/null 2>&1 \
+    || echo "warning: the switch proxy did not start; the tests that need it will skip"
+}
+stop_switch_proxy() {
+  [[ -n $switch_proxy_pid ]] && kill "$switch_proxy_pid" 2>/dev/null
+  switch_proxy_pid=""
+}
+
 do_iphone() {
   reset_account iphone
+  start_switch_proxy
   local -a devices
   devices=("small:Aquarium Test iPhone SE:iPhone-SE-3rd-generation:$IOS_RT"
            "standard:Aquarium Test iPhone 17:iPhone-17:$IOS_RT"
@@ -189,6 +209,7 @@ do_iphone() {
     run Aquarium iPhone "$key" "id=$udid" "${SIM_SIGN[@]}"
     xcrun simctl terminate "$udid" scottai.FellyJin 2>/dev/null
   done
+  stop_switch_proxy
 }
 
 do_ipad() {

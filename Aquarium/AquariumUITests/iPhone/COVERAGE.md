@@ -237,7 +237,7 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | Audiobooks tab, Continue Listening | testAudiobooksTabShowsContinueListening | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Book page, chapters, resume, chapter row, speed | testBookPageListsChaptersAndResumes, testChapterRowPlaysFromThere, testAudiobookSpeedMenu | UI | pass (17) / pass (17, SE, Pro Max, Duo) |
 | Multi-file book | testMultiFileBookPartsAreListed | UI | pass (17) |
-| Offline music pages, offline mix | — | manual | needs the server cut (MANUAL.md) |
+| Offline music pages, offline mix | PhoneOnDeviceMusicTests, PhoneOfflineTests (below) | UI | the pages reachable on a phone; the offline Discover and Library tabs are not (MANUAL.md) |
 | Volume slider, AirPlay from Now Playing | — | manual | system controls |
 
 ## Downloads (PhoneDownloadsTests)
@@ -252,8 +252,45 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | Pause/resume all | testPauseAndResumeAllDownloads | UI | skip |
 | No-download account | testDownloadRefusedForAccountWithoutPermission | UI | pass (17) |
 | Music door | testMusicAndAudiobookDoors | UI | skip |
-| Offline playback with progress synced later | — | manual | needs the server cut mid-run (MANUAL.md) |
+| Offline playback with progress synced later | PhoneOfflineTests.testDownloadsAndMusicWithNoServer | UI | pass (17) |
 | Swipe-away, background, demotion | — | manual | MANUAL.md |
+
+## Downloads under way, failed, and on the device (PhoneDownloadQueueTests)
+
+Signed in through the switch proxy (`Tools/qa-switch-proxy.py`, started by
+`Tools/run-tests.sh iphone`), which slows `/Download`, answers it 410, or
+cuts the server; without it these three classes skip. Standard phone only.
+
+| Function | Test | Kind | Status |
+|---|---|---|---|
+| A transfer's row (bar, "42% · a / b" moving, Cancel), the queue in order with Remove, Pause puts the running one back and Resume carries on, Cancel starts the next, Remove, Clear the queue, the Paused note with nothing waiting | testTransferQueuePauseCancelAndClear | UI | pass (17) |
+| Download All Music (counted first), a queue longer than 25 ("and N more waiting", 25 rows), the Music tab's "Downloading N songs" strip opens Downloads, Delete all asked, refused, then confirmed | testLongQueueIsCountedNotListed | UI | pass (17) |
+| Failed rows ("Server answered 410", Retry, bin), Retry all asks again, bin, Clear failed, no "all" buttons for one failure, Retry on a row once the server allows | testFailedDownloadsRetryDeleteAndClear | UI | pass (17) |
+| Summary count and size, a film's menu (Play, Mark watched / unwatched, Delete), Delete watched only once something is watched, asked, refused, confirmed | testFilmMenuAndDeleteWatched | UI | pass (17) |
+| A show's tile menu (Open, Play, Shuffle, Delete asked and refused) and its page: name, "2 seasons · 4 episodes", size, unwatched count, Play next, Shuffle, a season's menu, an episode's menu (watched, delete), Delete menu by season / watched / whole show, the page leaving with its last episode | testDownloadedShowPage | UI, layout | pass (17) |
+| One episode: no Shuffle; deleted from its row the page says "Nothing left here" | testLastEpisodeDeletedLeavesAnEmptyShowPage | UI | pass (17) |
+| Cancel in the "Delete …?" question | — | manual | on a phone it is a popover with no Cancel button; a tap outside is the no (tested as that) |
+| Retry all failed / Clear queue in the page's "…" menu, Show in Finder, the selection menus | — | — | Mac only: the phone's menu has neither |
+| "Fetching it again" and "Waiting for the server to encode" notes on a transfer | — | unit / manual | need a broken file or a slow encode (DownloadFailureTests; MANUAL.md) |
+| Apple Watch door and its Sync | — | manual | needs a paired watch |
+
+## Music and audiobooks on the device (PhoneOnDeviceMusicTests)
+
+| Function | Test | Kind | Status |
+|---|---|---|---|
+| A song's menu: Download, the row's mark while on its way, "Downloading…" opens Downloads, the Music door counts it, mark says Downloaded, Remove Download | testSongMenuDownloadsAndRemoves | UI | pass (17) |
+| An album downloaded from its "…" menu; Library › Downloaded: Recently Downloaded, stations shelf and Shuffle All from downloads, the doors (songs, albums, artists, genres, favourites, playlists) onto the on-device lists, an album's and a genre's on-device page, a song playing; the Downloads page's Music door | testDownloadedLibraryAndItsPages | UI | pass (17) |
+| A downloaded audiobook: "On this device" on its page, the badge on its cover, the Audiobooks door, Downloaded Audiobooks (play, Remove download) | testDownloadedAudiobookDoorPlayAndRemove | UI | pass (17) |
+| The older Downloaded songs page (`music.downloadedSongs.root`) for music | — | — | not reachable: only its audiobook form is routed (`MusicTabView.swift:155`) |
+
+## No server (PhoneOfflineTests)
+
+| Function | Test | Kind | Status |
+|---|---|---|---|
+| Server lost while open: the "Offline — showing downloads" strip and its countdown, the shell shrinks to Downloads and More, Downloads says nothing is downloaded, its menu is off; server back: strip gone, Home and the tabs return | testServerLostThenBackWithNothingDownloaded | UI, layout | pass (17) |
+| With a film and an album on the device: Downloads lists them, no Download All Music, the film plays, Mark watched waits (Sync shown, off) and reaches the server after; the Music door, downloaded songs listed and playing, a song's menu offers Remove and no Download | testDownloadsAndMusicWithNoServer | UI | pass (17) |
+| Opened with no server: strip, Downloads, two tabs, Settings opens; server back | testOpenedWithNoServer | UI | pass (17) |
+| The full-page "Server offline" state (`shell.offline.*`), the offline Discover / Library tabs (`music.onDevice.listenNow/library`), "No music / audiobooks on this device" | — | — | not reachable on a phone: the offline shell lists only Downloads and Settings (`AppModel.offlineSections`), and nothing listed there needs the server |
 
 ## Live TV (PhoneLiveTVTests)
 
@@ -308,8 +345,9 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 See MANUAL.md for the steps. In short: CarPlay (no XCUITest driver for
 CPTemplates), the Duo hinge and inner screen (Device Hub only), AirPlay
 and the route picker (system UI), Picture in Picture (unsupported on the
-iPhone simulator), real network loss and offline mode (the runner cannot
-cut the server; the throttle proxy hangs below 2.6 Mbps), background
+iPhone simulator), real network loss (the switch proxy cuts and slows the
+server for PhoneOfflineTests and PhoneDownloadQueueTests, but a radio going
+away mid-stream is not that), background
 downloads after swipe-away and demotion (the simulator never demotes),
 thermal state, lock screen and Live Activity buttons, pinch and edge
 gestures (XCUITest's pinch does not reach the player), SharePlay, Siri and
