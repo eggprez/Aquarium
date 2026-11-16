@@ -1112,12 +1112,12 @@ struct TransferRow: View {
             HStack {
                 Text(record.quality).font(.caption).foregroundStyle(Theme.textDim)
                 Spacer()
-                Text(progressText)
+                Text(record.progressText)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(Theme.textDim)
                     // Digits roll rather than snap as the bytes climb.
                     .contentTransition(.numericText())
-                    .animation(.default, value: progressText)
+                    .animation(.default, value: record.progressText)
                     .accessibilityIdentifier(TestID.Downloads.transferStatus(record.itemId))
             }
             // Why the same episode is downloading a second time. Without this
@@ -1155,16 +1155,6 @@ struct TransferRow: View {
     /// the row read 96% over "waiting for the server to encode the start".
     private var awaitingEncode: Bool {
         record.transport == .hls && (record.loadedFraction ?? 0) == 0 && record.receivedBytes < 512 << 10
-    }
-
-    private var progressText: String {
-        let received = Format.bytes(record.receivedBytes)
-        guard let total = record.progressTotal else { return received }
-        // The tilde is the whole disclosure: past that point the bar is full and
-        // the bytes are still climbing, and this is what says why.
-        let denominator = (total.estimated ? "~" : "") + Format.bytes(total.bytes)
-        guard let fraction = record.fraction else { return "\(received) / \(denominator)" }
-        return "\(Int(fraction * 100))% · \(received) / \(denominator)"
     }
 }
 

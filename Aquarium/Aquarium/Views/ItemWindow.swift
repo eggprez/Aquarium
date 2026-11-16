@@ -62,17 +62,10 @@ final class ItemWindowNavigator {
     }
 }
 
-private struct RouteWindowNavigatorKey: EnvironmentKey {
-    static let defaultValue: ItemWindowNavigator? = nil
-}
-
 extension EnvironmentValues {
     /// The pages of the title or library window a view is in; nil in the main
     /// window. See `AppModel.isWorkingWindow`.
-    var routeWindowNavigator: ItemWindowNavigator? {
-        get { self[RouteWindowNavigatorKey.self] }
-        set { self[RouteWindowNavigatorKey.self] = newValue }
-    }
+    @Entry var routeWindowNavigator: ItemWindowNavigator? = nil
 }
 
 extension AppModel {

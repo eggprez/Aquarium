@@ -82,21 +82,6 @@ extension JellyfinClient {
     /// for an audiobook its chapters.
     nonisolated static let musicDetailFields = musicFields + ",Overview,MediaSources,Chapters,GenreItems,Studios"
 
-    private static let musicImages = "&EnableImageTypes=Primary,Backdrop,Logo&ImageTypeLimit=1"
-
-    // MARK: - Libraries
-
-    /// The music and audiobook libraries the account can see. Jellyfin files
-    /// audiobooks under the `books` library type — the same one ebooks use —
-    /// so both spellings are taken.
-    func musicViews() async throws -> (music: [BaseItem], books: [BaseItem]) {
-        let all = try await views()
-        return (
-            music: all.filter { $0.CollectionType == "music" },
-            books: all.filter { $0.CollectionType == "books" || $0.CollectionType == "audiobooks" }
-        )
-    }
-
     // MARK: - One query for most of it
 
     /// The knobs every music list shares. Everything is optional; what is left

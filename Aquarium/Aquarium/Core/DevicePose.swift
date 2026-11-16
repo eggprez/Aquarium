@@ -384,17 +384,10 @@ final class FoldKeyboardGuard {
 
 // MARK: - Environment
 
-private struct DevicePoseKey: EnvironmentKey {
-    static let defaultValue: DevicePose = .standard
-}
-
 extension EnvironmentValues {
     /// The shape the app is in — see `DevicePose`. `.standard` everywhere the
     /// provider has not been applied, which is every platform but iOS.
-    var devicePose: DevicePose {
-        get { self[DevicePoseKey.self] }
-        set { self[DevicePoseKey.self] = newValue }
-    }
+    @Entry var devicePose: DevicePose = .standard
 }
 
 #if os(iOS)
