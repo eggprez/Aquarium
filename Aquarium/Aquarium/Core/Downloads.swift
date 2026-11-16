@@ -218,7 +218,11 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
         return self != before
     }
 
-    /// Decoded key by key, every one of them optional.
+}
+
+extension DownloadRecord {
+    /// Decoded key by key, every one of them optional. In an extension so
+    /// the memberwise initialiser is still made for us.
     ///
     /// Swift's own `init(from:)` would be shorter and is a trap here: it does
     /// *not* fall back to a property's default value when a key is missing, it
@@ -278,62 +282,15 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
         disc = try c.decodeIfPresent(Int.self, forKey: .disc)
     }
 
-    /// The memberwise initialiser, which writing one of our own above takes
-    /// away.
-    init(
-        itemId: String,
-        title: String,
-        name: String,
-        type: String? = nil,
-        series: String? = nil,
-        seriesId: String? = nil,
-        season: Int? = nil,
-        seasonId: String? = nil,
-        episode: Int? = nil,
-        year: Int? = nil,
-        runTimeTicks: Int64 = 0,
-        quality: String = "",
-        fileName: String = "",
-        transport: JellyfinClient.DownloadTransport = .file,
-        sourceURL: String = "",
-        estimatedBytes: Int64? = nil,
-        positionTicks: Int64 = 0,
-        played: Bool = false,
-        imageURL: String? = nil,
-        seasonImageURL: String? = nil,
-        seriesImageURL: String? = nil,
-        album: String? = nil,
-        albumId: String? = nil,
-        artist: String? = nil,
-        track: Int? = nil,
-        disc: Int? = nil
-    ) {
-        self.itemId = itemId
-        self.title = title
-        self.name = name
-        self.type = type
-        self.series = series
-        self.seriesId = seriesId
-        self.season = season
-        self.seasonId = seasonId
-        self.episode = episode
-        self.year = year
-        self.runTimeTicks = runTimeTicks
-        self.quality = quality
-        self.fileName = fileName
-        self.transport = transport
-        self.sourceURL = sourceURL
-        self.estimatedBytes = estimatedBytes
-        self.positionTicks = positionTicks
-        self.played = played
-        self.imageURL = imageURL
-        self.seasonImageURL = seasonImageURL
-        self.seriesImageURL = seriesImageURL
-        self.album = album
-        self.albumId = albumId
-        self.artist = artist
-        self.track = track
-        self.disc = disc
+    /// The transfer in words: "42% · 1.2 GB / ~2.9 GB". The tilde is the whole
+    /// disclosure: past that point the bar is full and the bytes are still
+    /// climbing, and this is what says why.
+    var progressText: String {
+        let received = Format.bytes(receivedBytes)
+        guard let total = progressTotal else { return received }
+        let denominator = (total.estimated ? "~" : "") + Format.bytes(total.bytes)
+        guard let fraction else { return "\(received) / \(denominator)" }
+        return "\(Int(fraction * 100))% · \(received) / \(denominator)"
     }
 
     /// How far along, against the best figure available: the length the server

@@ -614,11 +614,11 @@ struct MacTransferRow: View {
                 HStack {
                     Text(record.quality)
                     Spacer()
-                    Text(progressText)
+                    Text(record.progressText)
                         .monospacedDigit()
                         // Digits roll rather than snap as the bytes climb.
                         .contentTransition(.numericText())
-                        .animation(.default, value: progressText)
+                        .animation(.default, value: record.progressText)
                         .accessibilityIdentifier(TestID.Downloads.transferStatus(record.itemId))
                 }
                 .font(.caption)
@@ -646,16 +646,6 @@ struct MacTransferRow: View {
         .padding(.vertical, 3)
         .macHover(cornerRadius: 6, inset: 4)
         .testAnchor(TestID.Downloads.transfer(record.itemId))
-    }
-
-    private var progressText: String {
-        let received = Format.bytes(record.receivedBytes)
-        guard let total = record.progressTotal else { return received }
-        // The tilde is the whole disclosure: past that point the bar is full
-        // and the bytes are still climbing, and this is what says why.
-        let denominator = (total.estimated ? "~" : "") + Format.bytes(total.bytes)
-        guard let fraction = record.fraction else { return "\(received) / \(denominator)" }
-        return "\(Int(fraction * 100))% · \(received) / \(denominator)"
     }
 }
 

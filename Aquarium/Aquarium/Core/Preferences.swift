@@ -644,7 +644,7 @@ final class Preferences {
     /// wants the opposite — an offset that dies with the stream — but that is
     /// the rarer case, and the cost of getting it wrong is one menu entry
     /// rather than an offset silently reappearing next time. Only ever applied
-    /// where it can be: see `PlayerModel.canDelayAudio`.
+    /// where it can be: see `PlayerModel.streamCarriesDelay`.
     ///
     /// On an Apple TV this is the 60 fps delay — shows, sport and Live TV —
     /// and the one for a video whose rate isn't known; every other rate has

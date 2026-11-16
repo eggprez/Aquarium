@@ -916,13 +916,6 @@ extension PlayerModel {
         return !source.isTranscode
     }
 
-    var canDelayAudio: Bool {
-        guard isActive, !isOpening else { return false }
-        return streamCarriesDelay
-    }
-
-    var canDelayAudioLater: Bool { isActive && streamCarriesDelay }
-
     /// How far the Sync tab reaches either way on this engine.
     var audioDelayReach: Int {
         engine?.capabilities.contains(.audioDelayOnAnyStream) == true ? Self.audioDelayReach : Self.audioDelayReach / 2
@@ -946,10 +939,6 @@ extension PlayerModel {
         } else {
             rebuildForAudioDelay()
         }
-    }
-
-    func nudgeAudioDelay(by delta: Int) {
-        setAudioDelay(milliseconds: audioDelayMilliseconds + delta)
     }
 
     private func storeAudioDelay(_ seconds: Double) {

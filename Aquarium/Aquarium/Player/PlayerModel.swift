@@ -440,7 +440,6 @@ final class PlayerModel {
     /// The next title's stream, asked for before this one ends.
     var prefetched: PrefetchedNext?
     var prefetchAttempted = false
-    var preparedStream: (any PreparedStream)?
     struct PrefetchedNext {
         var itemId: String
         var source: PlaybackSource

@@ -298,15 +298,8 @@ private struct TelevisionPanelBody<Content: View>: View {
 /// Down to whichever control is nearest the tab rather than the first: while
 /// this is true every control but the first is kept from taking focus, so
 /// Down can only land there. Off a television it is never true.
-private struct PanelTabsHaveFocusKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
 private extension EnvironmentValues {
-    var panelTabsHaveFocus: Bool {
-        get { self[PanelTabsHaveFocusKey.self] }
-        set { self[PanelTabsHaveFocusKey.self] = newValue }
-    }
+    @Entry var panelTabsHaveFocus: Bool = false
 }
 
 private extension View {
@@ -328,15 +321,8 @@ private struct PanelEntryOnly: ViewModifier {
 
 /// The width a card in a row takes on a television; nil shares the row with
 /// the other cards in it.
-private struct PanelCardWidthKey: EnvironmentKey {
-    static let defaultValue: CGFloat? = 460
-}
-
 private extension EnvironmentValues {
-    var panelCardWidth: CGFloat? {
-        get { self[PanelCardWidthKey.self] }
-        set { self[PanelCardWidthKey.self] = newValue }
-    }
+    @Entry var panelCardWidth: CGFloat? = 460
 }
 
 /// The rows of a tab: a column on a phone, an iPad or a Mac; on a television

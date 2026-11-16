@@ -21,7 +21,6 @@ extension PlayerModel {
     /// How close to the end the next title's stream is asked for.
     static let prefetchLead: Double = 90
     static let streamRecoveryLimit = 2
-    static let streamRecoverySettled: TimeInterval = 90
 
     private func streamHints(for source: MediaSource?) -> [EngineTrackHint] {
         guard let source else { return [] }

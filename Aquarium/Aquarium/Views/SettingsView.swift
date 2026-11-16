@@ -2708,13 +2708,6 @@ enum SettingsCopy {
     static let about = SettingNote(
         text: "Built with AI: this app was written with AI assistance (Anthropic's Claude), directed and tested by one developer, and is shared as-is. A lightweight Jellyfin client — the Apple build of the same app that ships for Linux; the two share their behaviour but not their code."
     )
-    /// What the About panel says — on a Mac the app menu's About item, now
-    /// that the General tab no longer carries it. The version first, then the
-    /// engine, then the paragraph.
-    @MainActor
-    static var aboutLines: [String] {
-        ["Aquarium \(Bundle.appVersion) (\(Bundle.appBuild))", "Playback engine: \(PlayerModel.shared.engineDescription)", about.text]
-    }
     #if os(tvOS)
     static let playbackEngine = SettingNote(
         name: "Playback engine",

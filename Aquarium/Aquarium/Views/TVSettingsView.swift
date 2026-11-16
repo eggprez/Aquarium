@@ -656,17 +656,10 @@ struct SettingDescription: Equatable {
 /// is, and SwiftUI cannot compare one update's closure with the last, so an
 /// `@Entry` holding one invalidates every reader on every update. A box with
 /// no stored properties to compare keeps that quiet.
-private struct DescribeSettingKey: EnvironmentKey {
-    static let defaultValue: (SettingDescription, Bool) -> Void = { _, _ in }
-}
-
 extension EnvironmentValues {
     /// Called by a row as it takes focus, and as it loses it. The page
     /// supplies it.
-    var describeSetting: (SettingDescription, _ isFocused: Bool) -> Void {
-        get { self[DescribeSettingKey.self] }
-        set { self[DescribeSettingKey.self] = newValue }
-    }
+    @Entry var describeSetting: (SettingDescription, _ isFocused: Bool) -> Void = { _, _ in }
     /// The symbol of the group a row sits in, for the panel to draw.
     @Entry var settingSectionSymbol = "gearshape"
     /// The colour of that symbol: the group's page's, or the accent.

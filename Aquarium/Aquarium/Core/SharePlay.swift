@@ -59,7 +59,6 @@ final class SharePlayCoordinator: NSObject {
     private(set) var isEligible = false
 
     var isActive: Bool { session != nil }
-    var participantCount: Int { session?.activeParticipants.count ?? 0 }
 
     @ObservationIgnored private var sessionsTask: Task<Void, Never>?
     @ObservationIgnored private var sessionTasks: [Task<Void, Never>] = []

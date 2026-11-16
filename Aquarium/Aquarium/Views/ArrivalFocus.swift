@@ -17,15 +17,8 @@ final class ArrivalFocusClaim {
     var spent = false
 }
 
-private struct ArrivalFocusKey: EnvironmentKey {
-    static let defaultValue: ArrivalFocusClaim? = nil
-}
-
 extension EnvironmentValues {
-    var arrivalFocus: ArrivalFocusClaim? {
-        get { self[ArrivalFocusKey.self] }
-        set { self[ArrivalFocusKey.self] = newValue }
-    }
+    @Entry var arrivalFocus: ArrivalFocusClaim? = nil
 }
 
 extension View {
