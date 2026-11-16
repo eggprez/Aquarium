@@ -690,3 +690,41 @@ export function seerrItemHooks(item: any): HTMLElement | null {
     .catch(() => {});
   return box;
 }
+
+const likeThisKey = (kind: SeerrMediaKind, tmdbId: number): string => `seerr:like:${kind}-${tmdbId}`;
+
+/**
+ * Under "More like this" on a film's, a show's or an episode's page: what
+ * Seerr would suggest beside it that isn't in the library. An episode (or a
+ * season) asks about its show, found with `seriesOf`. `null` with no Seerr or
+ * for anything else; otherwise a box that fills itself.
+ */
+export function seerrLikeThis(item: any, seriesOf: (id: string) => Promise<any>): HTMLElement | null {
+  const subject = seerr.likeThisSubject(item);
+  if (!seerr.isConnected() || !subject) return null;
+  const box = el("div", { class: "seerr-like-this" });
+  const wanted = (found: SeerrResult[] | undefined): SeerrResult[] =>
+    (found ?? []).filter(seerr.isRequestable).slice(0, 20);
+  const signature = (list: SeerrResult[]): string =>
+    list.map((r) => `${seerr.resultKey(r)}:${r.mediaInfo?.status ?? 0}`).join(",");
+  const draw = (list: SeerrResult[]): void => {
+    clear(box);
+    const shelf = requestShelf("Like This, Not in Your Library", list, "likeThis", "Open one to request it.");
+    if (shelf) box.append(shelf);
+  };
+  void (async () => {
+    // An episode's show is looked up first; a film or a show is its own answer.
+    const tmdbId = subject.seriesId ? seerr.tmdbIdOf(await seriesOf(subject.seriesId)) : seerr.tmdbIdOf(item);
+    if (tmdbId == null) return;
+    const key = likeThisKey(subject.kind, tmdbId);
+    const cached = wanted(getCached<SeerrResult[]>(key));
+    draw(cached);
+    const found = await seerr.likeThis(subject.kind, tmdbId);
+    setCached(key, found);
+    const now = wanted(found);
+    if (document.contains(box) && signature(now) !== signature(cached)) draw(now);
+  })().catch(() => {
+    /* the page stands without it */
+  });
+  return box;
+}

@@ -108,6 +108,8 @@ the other four on the standard phone).
 | Seerr's Cache Images off: the Requests page and Settings say why there are no posters | PhoneRequestsTests.testPostersOffIsExplained | UI | new 2026-11-16 |
 | Cache Images turned on: posters refused before are asked for again (not left blank for ten minutes) | SeerrClientTests.testPostersOffFollowsCacheImages | unit | new 2026-11-16 |
 | Cancel a pending request from its page | PhoneRequestsTests.testARequestCanBeCancelled | UI | pass |
+| A film's, a show's and an episode's page end in "Like This, Not in Your Library" from Seerr (an episode asks about its show); a card opens its request page | PhoneRequestsTests.testTitlePagesOfferLikeThisFromSeerr | UI | new 2026-11-16 |
+| Like This: Seerr's recommendations, else its similar titles; a season or an episode is asked about as its show | SeerrClientTests.testLikeThisIsRecommendationsElseSimilarWithKinds, testLikeThisSubjectIsTheShowForSeasonsAndEpisodes | unit | new 2026-11-16 |
 | A show's page says seasons are missing; tick some, request them | PhoneRequestsTests.testAShowsMissingSeasonsCanBeAskedFor | UI | pass |
 | A dead Seerr session is renewed without the user | PhoneRequestsTests.testAnExpiredSessionRenewsItselfQuietly | UI | pass |
 | Settings: connect by address (http warning, no password typed), then disconnect | PhoneRequestsTests.testConnectingAndDisconnectingInSettings | UI | pass |
@@ -437,3 +439,5 @@ iPad, Mac and TV classes merged into the bundle, as well as `standardOnly()`
 functional tests off the standard phone. Unit (iPhone 17, `-testPlan Unit`):
 256 tests, 223 pass, 33 skip (other platforms), 0 expected failures; the 88
 iPhone ones all pass.
+
+Downloads: with a show and a film on the phone, the grids are headed "Shows" and "Movies" (PhoneDownloadQueueTests.testGridsAreHeadedShowsAndMovies, UI, new 2026-11-16; DownloadGroupsTests.testMoviesGridIsHeadedMovies, unit). It said "Films" before.

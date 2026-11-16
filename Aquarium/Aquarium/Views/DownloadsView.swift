@@ -248,7 +248,7 @@ struct DownloadsView: View {
                 let movies = films
 
                 if !shows.isEmpty {
-                    grid(movies.isEmpty ? "On this device" : "Shows") {
+                    grid(movies.isEmpty ? "On this device" : DownloadGroups.showsHeading) {
                         ForEach(shows) { show in
                             seriesCard(show)
                         }
@@ -257,7 +257,7 @@ struct DownloadsView: View {
                 }
 
                 if !movies.isEmpty {
-                    grid(shows.isEmpty ? "On this device" : "Films") {
+                    grid(shows.isEmpty ? "On this device" : DownloadGroups.moviesHeading) {
                         ForEach(movies) { film in
                             filmCard(film)
                         }

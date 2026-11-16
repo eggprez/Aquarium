@@ -100,6 +100,10 @@ for the same Jellyfin server), which the test Mac cannot run.
    off, expect the "No posters from Seerr" notice on Requests and Posters: Off
    in Settings; turned on, every poster fills in on the next visit to
    Requests, your requests' included.
+   On a film's, a show's, a season's and an episode's page, under More Like
+   This: "Like This, Not in Your Library", from Seerr's recommendations for
+   the title (for a season or an episode, its show's); titles already here
+   are left out.
 3. Request it. Expect "Waiting for approval" (or "On its way" for an
    auto-approved account), and the request in Seerr's own Requests page.
 4. With Seerr's "CSRF protection" turned on, repeat step 3: it must still work.
