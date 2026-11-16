@@ -61,6 +61,21 @@ Regression tests are named after their bug and cite the source in a comment.
 | Search: field, keyboard, results, Unicode, nothing found | `TVBrowseTests.testSearchFindsTheLongFixtures`, `testSearchFindsAUnicodeTitle`, `testSearchWithNoMatchSaysSo` | UI | pass |
 | Search offers no music on a TV | `TVBrowseTests.testSearchOffersNoMusicOnTheTV` | UI | pass |
 
+## Requests through Seerr (TVRequestsTests)
+
+Against the stand-in Seerr server (TESTING.md). Run 2026-11-16: 4 pass.
+
+| Function | Test | Kind | Status |
+|---|---|---|---|
+| No Requests tab without Seerr | TVRequestsTests.testNoRequestsTabWithoutSeerr | UI | pass |
+| Requests tab: a request's row reachable with the remote, opens its page with focus | TVRequestsTests.testTheRequestsTabListsRequestsAndThingsToAskFor | UI | pass |
+| A film asked for with the remote from a browse row | TVRequestsTests.testAFilmIsAskedForWithTheRemote | UI | pass |
+| Search offers what the library lacks, reachable with the remote | TVRequestsTests.testSearchOffersWhatTheLibraryLacks | UI | pass |
+| Connecting in Settings (the full-screen form and the on-screen keyboard) | — | manual | MANUAL.md |
+
+Seen, not fixed: after Request is pressed the button goes and focus moves up to
+the tab strip rather than to Cancel Request.
+
 ## Title pages
 
 | Function | Test | Kind | Status |

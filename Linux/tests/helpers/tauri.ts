@@ -21,7 +21,7 @@ const calls: Call[] = [];
 const listeners = new Map<string, Set<(e: { event: string; payload: any; id: number }) => void>>();
 
 /** Fire-and-forget commands, answered quietly unless a test overrides them. */
-const QUIET: Record<string, any> = { ui_log: null };
+const QUIET: Record<string, any> = { ui_log: null, seerr_status: { connected: false } };
 
 export const invoke = vi.fn(async (cmd: string, args?: any): Promise<any> => {
   calls.push({ cmd, args });

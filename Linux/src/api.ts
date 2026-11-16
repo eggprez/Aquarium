@@ -481,8 +481,10 @@ const ITEM_FIELDS =
   "PrimaryImageAspectRatio,Overview,Genres,MediaSources,UserData,SeriesPrimaryImage,ChildCount,RecursiveItemCount,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,ParentId";
 
 /** `ITEM_FIELDS` plus the ones only the detail page draws. `People` is a long
- *  list on a feature film, so it isn't asked for on every grid query. */
-const DETAIL_FIELDS = `${ITEM_FIELDS},People,Studios,Taglines`;
+ *  list on a feature film, so it isn't asked for on every grid query.
+ *  `ProviderIds` carries the TMDB id, which is how a Seerr server names the
+ *  same title (see `views/requests.ts`). */
+const DETAIL_FIELDS = `${ITEM_FIELDS},People,Studios,Taglines,ProviderIds`;
 
 /**
  * This client is for watching things. Libraries of these collection types get

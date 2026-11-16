@@ -740,12 +740,23 @@ pub fn accounts() -> Value {
             let is_current = a.get("key").and_then(|v| v.as_str()) == current.as_deref();
             if let Some(obj) = a.as_object_mut() {
                 obj.remove("token");
+                // A Seerr session filed here for want of a keyring.
+                obj.remove("seerr");
                 obj.insert("current".into(), json!(is_current));
             }
             a
         })
         .collect();
     json!(list)
+}
+
+/// The account in use: its key, the Jellyfin user's id and name. For what is
+/// filed per account outside this module (a Seerr session, `seerr.rs`).
+pub fn current_account() -> Option<(String, String, String)> {
+    let cfg = config::load();
+    let key = current_key(&cfg)?;
+    let user_id = str_field(&cfg, "user_id")?;
+    Some((key, user_id, str_field(&cfg, "user_name").unwrap_or_default()))
 }
 
 /// Become another of this device's accounts. Nothing is revoked: the one being
@@ -800,6 +811,8 @@ pub async fn forget_account(key: &str) -> Result<Value, String> {
     ) {
         revoked = revoke(&server, &token, &config::device_id()).await;
     }
+    // Its session on a Seerr server, if it had one, goes with it.
+    crate::seerr::sign_out(key).await;
     secret::clear_account(key);
     config::remove_account(key)?;
     Ok(json!({ "revoked": revoked }))
@@ -880,6 +893,12 @@ pub async fn logout() -> Result<Value, String> {
         if !revoked {
             parked = secret::park_pending_revocation(tok, &server, &device_id).is_ok();
         }
+    }
+
+    // The account's session on a Seerr server goes with it: ended there if
+    // Seerr can be reached, forgotten here either way.
+    if let Some(key) = current_key(&cfg) {
+        crate::seerr::sign_out(&key).await;
     }
 
     // Local teardown happens either way: the user asked to be signed out.

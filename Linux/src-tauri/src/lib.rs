@@ -17,6 +17,7 @@ mod power;
 mod prefs;
 mod progress;
 mod secret;
+mod seerr;
 mod server;
 mod theme;
 #[cfg(test)]
@@ -270,6 +271,60 @@ async fn jf_ping() -> Result<bool, String> {
 #[tauri::command]
 async fn jf_bitrate_test(size: u32) -> Result<f64, String> {
     server::bitrate_test(size).await
+}
+
+// ---------- Seerr, from this side of the IPC boundary ----------
+// The same arrangement as Jellyfin's: the webview names a path and gets a
+// status and a body back. Seerr's session cookie stays in this process (see
+// `seerr.rs`); none of these commands returns it.
+
+/// Whether this account has a Seerr server, and what may be shown of it.
+#[tauri::command(async)]
+fn seerr_status() -> Value {
+    seerr::status()
+}
+
+#[tauri::command]
+async fn seerr_probe(address: String) -> Result<Value, String> {
+    seerr::probe(&address).await
+}
+
+/// Sign in to Seerr with Quick Connect, as the Jellyfin account in use.
+#[tauri::command]
+async fn seerr_connect(server: String) -> Result<Value, String> {
+    seerr::connect(&server).await
+}
+
+/// The fallback for a Seerr with no Quick Connect. The password goes to Seerr
+/// once and is kept nowhere.
+#[tauri::command]
+async fn seerr_connect_password(server: String, username: String, password: String) -> Result<Value, String> {
+    seerr::connect_with_password(&server, &username, &password).await
+}
+
+#[tauri::command]
+async fn seerr_reconnect() -> Result<Value, String> {
+    seerr::reconnect().await
+}
+
+#[tauri::command]
+async fn seerr_disconnect() -> Result<Value, String> {
+    Ok(seerr::disconnect().await)
+}
+
+/// Bring the remembered permissions and server settings up to date.
+#[tauri::command]
+async fn seerr_refresh() -> Result<Value, String> {
+    Ok(seerr::refresh().await)
+}
+
+#[tauri::command]
+async fn seerr_request(
+    path: String,
+    method: Option<String>,
+    body: Option<Value>,
+) -> Result<Value, String> {
+    seerr::request(&path, method, body).await
 }
 
 /// Wake a live stream up before mpv is pointed at it.
@@ -1178,6 +1233,14 @@ pub fn run() {
             jf_image,
             jf_ping,
             jf_bitrate_test,
+            seerr_status,
+            seerr_probe,
+            seerr_connect,
+            seerr_connect_password,
+            seerr_reconnect,
+            seerr_disconnect,
+            seerr_refresh,
+            seerr_request,
             theme::system_color_scheme,
             player_play,
             player_stop,

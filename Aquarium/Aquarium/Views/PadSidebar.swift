@@ -230,7 +230,7 @@ struct PadSidebarGroup: Identifiable {
             switch section {
             case .home, .search: browse.append(section)
             case .liveTV: live.append(section)
-            case .favorites, .downloads: you.append(section)
+            case .favorites, .requests, .downloads: you.append(section)
             case .settings, .more: break
             default: libraries.append(section)
             }

@@ -146,6 +146,7 @@ describe("page", () => {
     expect([...root.querySelectorAll(".settings-block > h3")].map((h) => h.textContent)).toEqual([
       "Server",
       "Accounts",
+      "Requests",
       "Quick Connect",
       "Appearance",
       "Next Up",

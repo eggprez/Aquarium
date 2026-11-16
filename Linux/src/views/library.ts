@@ -11,6 +11,7 @@ import {
   type IconName,
 } from "../ui";
 import { getCached, setCached, itemSignature } from "../cache";
+import { seerrItemHooks, seerrSearchSection } from "./requests";
 
 const PAGE = 60;
 /** Placeholder cards to show while the first page of results is in flight. */
@@ -205,6 +206,12 @@ export async function renderLibrary(root: HTMLElement, libId: string): Promise<v
   const moreBtn = el("button", { class: "btn" }, ["Load more"]) as HTMLButtonElement;
   moreWrap.append(moreBtn);
   root.append(grid, moreWrap);
+  // A collection opens here rather than on a detail page, so this is where
+  // Seerr's "Missing From This Collection" row goes, under what is here.
+  if (lib?.Type === "BoxSet") {
+    const missing = seerrItemHooks(lib);
+    if (missing) root.append(missing);
+  }
 
   async function loadPage(reset = false): Promise<void> {
     // Infinite scroll can fire this repeatedly, so an in-flight page swallows
@@ -452,6 +459,10 @@ export async function renderSearch(root: HTMLElement, term: string): Promise<voi
     root.append(errorState("Search didn't go through", failure, () => void renderSearch(root, term)));
     return;
   }
+  // Search, carried on past the library: what a connected Seerr server knows
+  // by the same name that isn't here yet. Under the results, and under "No
+  // results", which is the case it exists for.
+  const elsewhere = seerrSearchSection(term);
   if (!found.length) {
     root.append(
       emptyState({
@@ -468,8 +479,10 @@ export async function renderSearch(root: HTMLElement, term: string): Promise<voi
         },
       })
     );
+    if (elsewhere) root.append(elsewhere);
     return;
   }
   root.append(results, moreWrap);
+  if (elsewhere) root.append(elsewhere);
   moreBtn.addEventListener("click", () => void loadPage());
 }

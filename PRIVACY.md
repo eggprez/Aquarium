@@ -1,6 +1,6 @@
 # Aquarium Privacy Policy
 
-_Last updated: 13 September 2026_
+_Last updated: 16 November 2026_
 
 Aquarium is a client application for Jellyfin media servers, available for
 iPhone, iPad and Apple TV. This policy describes what the app does with your
@@ -11,6 +11,8 @@ information. The short version: **Aquarium collects nothing.**
 - **Your server address, user name and session details**, so you stay signed
   in between launches.
 - **Your access token** for that server, in the device's system keychain.
+- **If you connect a Seerr server** (optional, in Settings): its address and
+  the session it gave you, in the same keychain. No password is stored.
 - **Your settings** (playback quality, subtitle preferences, theme, and so on).
 - **Downloads** you have chosen to keep for offline viewing, together with
   your playback position for them.
@@ -21,11 +23,21 @@ session and token and stops any downloads in progress) or by deleting the app.
 
 ## What the app sends, and to whom
 
-The only network peer Aquarium talks to is **the Jellyfin server you entered
-at sign-in**. It sends that server your sign-in credentials, requests for your
-library and media, and playback progress (so the server can show what you have
-watched). What that server does with this information is governed by whoever
-operates it — usually you.
+The only network peers Aquarium talks to are **the Jellyfin server you entered
+at sign-in** and, if you connect one, **the Seerr server you entered in
+Settings**. It sends the Jellyfin server your sign-in credentials, requests for
+your library and media, and playback progress (so the server can show what you
+have watched). What that server does with this information is governed by
+whoever operates it — usually you.
+
+A Seerr server takes requests for films and shows the library doesn't have.
+Aquarium signs in to it with your Jellyfin account (by approving a one-time
+Quick Connect code, or with your Jellyfin user name and password if the server
+has no Quick Connect), and sends it your searches, the requests you make, and
+requests for the posters of the titles it lists. Posters are fetched through
+the Seerr server itself, not from the film database it draws on, so no other
+party hears from your device. As with Jellyfin, what that server does with
+this information is governed by whoever operates it.
 
 If you have iCloud enabled, the app synchronises between **your own devices**:
 your settings, your server address and user name, and the addresses of any

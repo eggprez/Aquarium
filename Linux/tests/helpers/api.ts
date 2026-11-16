@@ -22,7 +22,7 @@ export const ITEM_FIELDS =
   "PrimaryImageAspectRatio,Overview,Genres,MediaSources,UserData,SeriesPrimaryImage,ChildCount,RecursiveItemCount,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,ParentId";
 
 /** What the detail page adds to it. */
-export const DETAIL_FIELDS = `${ITEM_FIELDS},People,Studios,Taglines`;
+export const DETAIL_FIELDS = `${ITEM_FIELDS},People,Studios,Taglines,ProviderIds`;
 
 export interface ParsedPath {
   route: string;

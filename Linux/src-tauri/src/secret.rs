@@ -42,6 +42,9 @@ const ACCOUNT: &str = "jellyfin-access-token";
 /// A token whose sign-out couldn't reach the server yet. Parked here so the
 /// revocation can be retried instead of silently leaving a live session behind.
 const PENDING_ACCOUNT: &str = "jellyfin-pending-revocation";
+/// A Jellyfin account's session on a Seerr server (see `seerr.rs`), one item
+/// per account: `seerr-session:<account key>`.
+const SEERR_ACCOUNT: &str = "seerr-session";
 /// The Secret Service alias for the collection we store in — on GNOME that
 /// resolves to the user's login keyring.
 const TARGET: &str = "default";
@@ -63,6 +66,9 @@ struct State {
     /// without this each of those was another keyring read, and another
     /// unlock prompt while the keyring was locked.
     pending: Option<Option<Value>>,
+    /// Seerr sessions already looked up, by account key, misses and failed
+    /// lookups included: every Seerr request reads its session from here.
+    seerr: Vec<(String, Option<String>)>,
 }
 
 /// Held across the blocking Secret Service call on purpose: a second caller
@@ -73,6 +79,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     token: None,
     backend: None,
     pending: None,
+    seerr: Vec::new(),
 });
 
 /// Test hook: forget everything cached about the keyring.
@@ -82,6 +89,7 @@ pub fn reset_for_tests() {
     s.token = None;
     s.backend = None;
     s.pending = None;
+    s.seerr.clear();
 }
 
 /// A poisoned lock here means some earlier caller panicked mid-lookup. The
@@ -383,6 +391,8 @@ fn redact_accounts(cfg: &mut Value) {
         for a in list {
             if let Some(obj) = a.as_object_mut() {
                 obj.remove("token");
+                // A Seerr session filed here for want of a keyring.
+                obj.remove("seerr");
             }
         }
     }
@@ -534,6 +544,89 @@ pub fn clear_account(key: &str) {
     let _ = crate::config::set_account_field(key, "token", Value::Null);
 }
 
+// ---------- Seerr sessions ----------
+//
+// One per Jellyfin account, beside that account's token and under the same
+// rules: the keyring first, the account's config entry when there is no
+// keyring, one D-Bus conversation at a time, and never across the IPC
+// boundary (`redact_accounts` strips the file copy; nothing returns the
+// keyring one to the webview). What is filed is one JSON blob, written and
+// read by `seerr.rs`.
+
+fn seerr_slot(key: &str) -> String {
+    format!("{SEERR_ACCOUNT}:{key}")
+}
+
+fn remember_seerr(st: &mut State, key: &str, value: Option<String>) {
+    st.seerr.retain(|(k, _)| k != key);
+    st.seerr.push((key.to_owned(), value));
+}
+
+fn seerr_in_file(key: &str) -> Option<String> {
+    crate::config::accounts()
+        .into_iter()
+        .find(|a| a.get("key").and_then(|v| v.as_str()) == Some(key))
+        .and_then(|a| a.get("seerr").and_then(|v| v.as_str()).map(str::to_owned))
+        .filter(|s| !s.is_empty())
+}
+
+/// File an account's Seerr session. With no usable keyring it goes into that
+/// account's entry in config.json, the degraded mode `store_account` has; an
+/// account with no entry has nowhere to put it, and that is an error.
+pub fn store_seerr(key: &str, blob: &str) -> Result<(), String> {
+    let mut st = state();
+    let stored = match write(&seerr_slot(key), blob) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            crate::debug_log_line(&format!(
+                "secret: keyring write for a Seerr session failed ({}) — falling back to config.json",
+                e
+            ));
+            let listed = crate::config::accounts()
+                .iter()
+                .any(|a| a.get("key").and_then(|v| v.as_str()) == Some(key));
+            if listed {
+                crate::config::set_account_field(key, "seerr", json!(blob))
+            } else {
+                Err("no saved account to file the Seerr session under".to_string())
+            }
+        }
+    };
+    if stored.is_ok() {
+        remember_seerr(&mut st, key, Some(blob.to_owned()));
+    }
+    stored
+}
+
+/// An account's Seerr session, from memory after the first lookup (a miss
+/// and a failed lookup are remembered too, for the reason `cached_token`
+/// gives), from its keyring slot or, failing that, its config entry.
+pub fn seerr_session(key: &str) -> Option<String> {
+    let mut st = state();
+    if let Some((_, known)) = st.seerr.iter().find(|(k, _)| k == key) {
+        return known.clone();
+    }
+    let found = match read(&seerr_slot(key)) {
+        Ok(Some(v)) => Some(v),
+        Ok(None) => seerr_in_file(key),
+        Err(e) => {
+            crate::debug_log_line(&format!("secret: Seerr session lookup failed: {}", e));
+            seerr_in_file(key)
+        }
+    };
+    remember_seerr(&mut st, key, found.clone());
+    found
+}
+
+pub fn clear_seerr(key: &str) {
+    let mut st = state();
+    if let Err(e) = wipe(&seerr_slot(key)) {
+        crate::debug_log_line(&format!("secret: Seerr session removal from the keyring failed: {}", e));
+    }
+    let _ = crate::config::set_account_field(key, "seerr", Value::Null);
+    remember_seerr(&mut st, key, None);
+}
+
 /// Built only by the Linux crate (D-Bus). The test sandbox points the session
 /// and system buses at a socket that doesn't exist, so everything here except
 /// the `#[ignore]`d tests exercises the no-keyring fallback. The ignored ones
@@ -567,6 +660,7 @@ mod tests {
         assert_eq!(ACCOUNT, "jellyfin-access-token");
         assert_eq!(PENDING_ACCOUNT, "jellyfin-pending-revocation");
         assert_eq!(slot("k1"), "jellyfin-access-token:k1");
+        assert_eq!(seerr_slot("k1"), "seerr-session:k1");
     }
 
     #[test]
@@ -714,6 +808,46 @@ mod tests {
         store_account("k", "acct-tok").unwrap();
         crate::config::upsert_account(json!({ "key": "k" })).unwrap();
         assert_eq!(account_token("k"), None);
+    }
+
+    // ---------- Seerr sessions ----------
+
+    #[test]
+    fn a_seerr_session_falls_back_to_its_accounts_config_entry() {
+        let _s = sandbox();
+        crate::config::upsert_account(json!({ "key": "k", "user_name": "Ann" })).unwrap();
+        store_seerr("k", "{\"cookie\":\"s%3Aone\"}").unwrap();
+        let entry = crate::config::accounts().into_iter().find(|a| a["key"] == "k").unwrap();
+        assert_eq!(entry["seerr"], json!("{\"cookie\":\"s%3Aone\"}"));
+        assert_eq!(seerr_session("k").as_deref(), Some("{\"cookie\":\"s%3Aone\"}"));
+        assert!(debug_log().contains("keyring write for a Seerr session failed"));
+        // The webview's copy of the config never carries it.
+        let seen = hydrate(crate::config::load());
+        assert!(!seen.to_string().contains("s%3Aone"), "{seen}");
+        assert_eq!(seen["accounts"][0]["user_name"], json!("Ann"));
+        clear_seerr("k");
+        assert_eq!(seerr_session("k"), None);
+        let entry = crate::config::accounts().into_iter().find(|a| a["key"] == "k").unwrap();
+        assert!(entry.get("seerr").is_none());
+        assert_eq!(entry["user_name"], json!("Ann"), "the account itself stays");
+    }
+
+    #[test]
+    fn a_seerr_session_with_nowhere_to_go_is_an_error() {
+        let _s = sandbox();
+        assert!(store_seerr("nobody", "{}").is_err());
+        assert_eq!(seerr_session("nobody"), None);
+    }
+
+    #[test]
+    fn a_seerr_lookup_is_made_once_per_account() {
+        let _s = sandbox();
+        assert_eq!(seerr_session("k"), None);
+        assert_eq!(seerr_session("k"), None);
+        assert_eq!(debug_log().matches("Seerr session lookup failed").count(), 1);
+        // Another account is its own lookup.
+        assert_eq!(seerr_session("other"), None);
+        assert_eq!(debug_log().matches("Seerr session lookup failed").count(), 2);
     }
 
     // ---------- A real Secret Service (opt-in) ----------

@@ -2326,3 +2326,86 @@ h1.page-title { font-size: var(--fs-2xl); margin-bottom: 20px; }
 /* How far through the programme on now. Static: redrawn when the panel is. */
 .pb-ch-progress { display: block; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .pb-ch-progress > span { display: block; height: 100%; background: var(--accent); }
+
+/* ---------- Requests (Seerr) ---------- */
+/* Titles that aren't in the library yet. The cards and shelves are the
+   library's own (.card, .card-row); these are only the parts that differ.
+   Nothing here animates. */
+.card-poster .badge.request-badge { left: 8px; right: auto; }
+.request-shelf-sub { font-size: var(--fs-sm); color: var(--text-dim); margin-top: 2px; }
+.request-note { font-size: var(--fs-sm); color: var(--text-dim); }
+.request-note.warn { color: var(--warn); }
+
+.request-row {
+  display: flex; gap: 14px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  align-items: center;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.request-row:hover { background: var(--bg-raised); }
+.request-row:focus-visible { border-radius: inherit; }
+.request-row > .ico { color: var(--text-dim); flex-shrink: 0; }
+.request-thumb {
+  position: relative; width: 52px; aspect-ratio: 2/3; flex-shrink: 0;
+  border-radius: 7px; overflow: hidden; background: var(--bg-hover);
+  display: grid; place-items: center;
+}
+.request-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.request-thumb .noart { font-size: var(--fs-lg); font-weight: 700; color: var(--text-dim); }
+.request-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.request-row-title { font-size: var(--fs-base); font-weight: 600; }
+.request-row-detail { font-size: var(--fs-xs); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.request-row-status { font-size: var(--fs-xs); font-weight: 600; color: var(--text-body); }
+.request-row-status.ok { color: var(--ok); }
+.request-row-status.warn { color: var(--warn); }
+
+.request-standing { font-size: var(--fs-sm); font-weight: 600; }
+.request-standing.ok { color: var(--ok); }
+.request-tagline { font-size: var(--fs-sm); font-style: italic; color: var(--text-body); }
+.request-4k { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); cursor: pointer; }
+
+.request-seasons { max-width: 780px; }
+.request-season {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0; border-radius: var(--radius);
+  background: transparent; color: var(--text);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.request-season:hover:not(:disabled) { background: var(--bg-raised); }
+.request-season:disabled { cursor: default; }
+.request-season-tick {
+  width: 22px; height: 22px; flex-shrink: 0;
+  display: grid; place-items: center;
+  border: 2px solid var(--border); border-radius: 50%;
+  color: var(--text-dim);
+}
+.request-season.chosen .request-season-tick { border-color: var(--accent-strong); background: var(--accent-strong); color: #fff; }
+.request-season:disabled .request-season-tick { border-color: transparent; }
+.request-season-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.request-season-name { font-size: var(--fs-base); }
+.request-season-line { font-size: var(--fs-xs); color: var(--text-dim); }
+
+/* "2 more seasons exist" under a show's hero. */
+.seerr-more-seasons {
+  display: flex; align-items: center; gap: 14px;
+  margin: 4px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised);
+  max-width: 780px;
+}
+.seerr-more-text { flex: 1; min-width: 0; }
+.seerr-more-title { font-size: var(--fs-sm); font-weight: 600; }
+.seerr-more-sub { font-size: var(--fs-xs); color: var(--text-dim); margin-top: 2px; }
+
+/* The connect dialog's steps, and the block in Settings. */
+.seerr-connect { display: flex; flex-direction: column; gap: 12px; }
+.seerr-connect .control.lg { width: 100%; }
+.seerr-connect-error { color: var(--danger); font-size: var(--fs-sm); margin-top: 10px; }
+.seerr-connect-error[hidden] { display: none; }
+.seerr-settings-error { color: var(--warn); }
+.seerr-settings-server, .seerr-settings-user { font-size: var(--fs-sm); color: var(--text-dim); user-select: text; }

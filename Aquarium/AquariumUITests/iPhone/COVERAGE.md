@@ -88,6 +88,30 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | App Intents: entities, queries, and every intent up to where a stream would start | MediaItemEntityTests, MediaItemQueryTests, LibraryIntentsTests, PlayerIntentsIdleTests, MusicIntentsTests (shared) | unit | pass |
 | Siri phrases, spoken replies, intents that start playback, Spotlight | — | manual | no headless driver for Siri/Shortcuts on the simulator |
 
+## Requests through Seerr (PhoneRequestsTests, SeerrClientTests, SeerrModelsTests)
+
+Against the stand-in Seerr server (`Tools/seerr-mock.py`, see TESTING.md), not
+a real one: MANUAL.md has the real-server check. Run 2026-11-16, branch
+`claude/seerr-requests`: all four phones pass (the two layout tests everywhere,
+the other four on the standard phone).
+
+| Function | Test | Kind | Status |
+|---|---|---|---|
+| `SeerrClient` sign-in: Quick Connect with no password, the password fallback, another user's or another server's session refused | SeerrClientTests | unit | pass |
+| `SeerrClient` address probe: https first, http flagged, never http after a bad certificate, not-Seerr and Plex refused | SeerrClientTests | unit | pass |
+| Seerr session kept only in the keychain slot; cookie sent to Seerr only; pictures through Seerr; CSRF token echoed | SeerrClientTests | unit | pass |
+| Seerr session run out: one quiet renewal and a retry; a real refusal not mistaken for it; "reconnect" when renewal fails | SeerrClientTests | unit | pass |
+| Request bodies, my requests, cancel, browse rows, disconnect, Jellyfin sign-out takes the Seerr session | SeerrClientTests | unit | pass |
+| `SeerrStanding`, `requestableSeasons`, permissions, quota and refusal wording, `BaseItem.tmdbId` | SeerrModelsTests | unit | pass |
+| A search with no matches offers the title, above the keyboard; its page requests it | PhoneRequestsTests.testASearchWithNoMatchesEndsInARequest | UI, all phones | pass |
+| Requests in More: rows named with their standing, browse rows, a row opens its page | PhoneRequestsTests.testRequestsSectionShowsWhatWasAskedAndThingsToAskFor | UI, all phones | pass |
+| Cancel a pending request from its page | PhoneRequestsTests.testARequestCanBeCancelled | UI | pass |
+| A show's page says seasons are missing; tick some, request them | PhoneRequestsTests.testAShowsMissingSeasonsCanBeAskedFor | UI | pass |
+| A dead Seerr session is renewed without the user | PhoneRequestsTests.testAnExpiredSessionRenewsItselfQuietly | UI | pass |
+| Settings: connect by address (http warning, no password typed), then disconnect | PhoneRequestsTests.testConnectingAndDisconnectingInSettings | UI | pass |
+| Collection page's "Missing From This Collection" | — | manual | the QA library has no collection with a TMDB id |
+| Password fallback form, 4K switch, quota line, declined and failed standings on screen | SeerrClientTests / SeerrModelsTests for the logic | unit only | pass |
+
 ## Sign-in and accounts (PhoneSignInTests)
 
 | Function | Test | Kind | Status |

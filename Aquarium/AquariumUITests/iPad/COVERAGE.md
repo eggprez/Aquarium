@@ -134,6 +134,18 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 | Grid card menu | PadContextMenuTests.testLibraryGridCardHasTheMenuToo; MANUAL.md | UI + manual | xfail (XCUITest only: a real long press gives the menu) |
 | Secondary click with a pointer | — | manual | manual |
 
+## Requests through Seerr (PadRequestsTests)
+
+Against the stand-in Seerr server (TESTING.md). The logic rows are in the
+iPhone file (the same shared unit tests run here). Run 2026-11-16: 4 pass.
+
+| Function | Test | Kind | Status |
+|---|---|---|---|
+| Sidebar gains Requests (under You) only while connected; its page beside the sidebar | PadRequestsTests.testTheSidebarGainsRequestsOnlyWhenConnected, PadShellTests.testRequestsSitsWithWhatIsYours | UI, unit | pass |
+| Search offers a title, its page requests it, Requests lists it by name | PadRequestsTests.testSearchOffersARequestAndThePageMakesIt | UI | pass |
+| A show partly in the library is not offered as missing | PadRequestsTests.testLibraryResultsStillLeadAndSeerrFollows | UI | pass |
+| A show's missing-seasons banner; a person's "Not in Your Library" row | PadRequestsTests.testAPersonsPageShowsTheRestOfTheirWork | UI | pass |
+
 ## Player
 
 | Function | Test | Kind | Status |

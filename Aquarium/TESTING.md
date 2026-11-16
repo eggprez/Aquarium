@@ -275,6 +275,34 @@ Environment for the runner (plans set `AQUARIUM_SUITE`; the rest default):
 and the `fx-*` accounts (limited, no transcode, no download, kid, language,
 disabled…) in `suite-accounts.txt`.
 
+## Requests (Seerr) and the stand-in server
+
+The Requests features talk to a Seerr server, and the QA folder has none: this
+Mac has no Node or Docker to run the real one. `Tools/seerr-mock.py` stands in.
+It answers the parts of Seerr's API the app uses, in the shapes Seerr 3.5.0's
+source gives them, and signs users in the way Seerr does, by Jellyfin Quick
+Connect against the QA Jellyfin server; what is "in the library" is read from
+that server. It is not Seerr: a pass here says the app does what Seerr's source
+says to do, and a real Seerr is still a check for `MANUAL.md`.
+
+- `Tools/run-tests.sh` starts it (127.0.0.1:8197) before a UI suite when it
+  isn't answering and leaves it running; it resets it with each suite's account.
+  By hand: `python3 -I Tools/seerr-mock.py` (`--csrf` turns on Seerr's CSRF
+  protection).
+- UI tests: `try SeerrQA.require()` in `setUp` (skips when it isn't answering,
+  and forgets earlier requests), then `launch(environment: SeerrQA.environment)`
+  so the app connects at launch through its own Quick Connect exchange
+  (`TestLaunch.seerrEnv`). `SeerrQA.requests()`, `request(as:type:tmdbId:)`,
+  `approve(_:)`, `expireSessions()`, `libraryId(_:tmdbId:)` read and steer it.
+- Unit tests: `SeerrFixture.install()` and `SeerrStub` in
+  `AquariumTests/Shared/SeerrClientTests.swift` answer for a made-up Seerr host
+  with headers (the sign-in is one `Set-Cookie`), beside `StubURLProtocol` for
+  the Jellyfin half of the exchange.
+- Its titles: the QA library's films and shows (real TMDB ids, so Sherlock is
+  partly there: 2 of 4 seasons), and a few the library lacks (The Matrix 603,
+  Inception 27205, Breaking Bad 1396…). Benedict Cumberbatch (71580) has one
+  credit that isn't in the library.
+
 ## Writing a unit test
 
 `@testable import Aquarium` (or `AquariumWatch` in `WatchTests/`). For code
