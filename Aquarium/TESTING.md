@@ -60,6 +60,15 @@ It runs `Tools/run-tests.sh` and the Linux app's commands, nothing of its own.
   commands and options) and from scanning each suite's `sources` folders for
   test classes, so new tests appear after Reload with no change to the app.
   Only `Tools/TestRunner/Sources/` needs a rebuild.
+- **Switching a suite off.** An `"off": "why, in a sentence"` on a suite in
+  `suites.json` keeps it in the list, greyed out, unable to be ticked or run
+  (by the buttons, the quick picks or `--run`), with the sentence on its page.
+  Delete the line to switch it back on. The Mac screen tests are off this way
+  while the desktop widgets on the test Mac get in their way.
+- **The walk-through.** Five pages on what the window does, shown the first
+  time it opens and again from the ? button or the Help menu
+  (`Sources/Intro.swift`). The Start Testing button also starts the QA server
+  when it is off. `--intro 2 --snapshot file.png` saves a picture of a page.
 - **Without the window:** `"../Aquarium Tests.app/Contents/MacOS/AquariumTestRunner" --run unit,ipad`
   (or `--run all`) runs those suites, writes the same report, prints its path
   and exits 0 only if everything passed.

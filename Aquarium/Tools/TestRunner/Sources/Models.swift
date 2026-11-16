@@ -27,6 +27,9 @@ struct Suite: Decodable, Identifiable, Hashable {
     var title: String
     var detail: String
     var note: String?
+    /// Set to switch the suite off without deleting it: it stays in the list,
+    /// greyed out, with this sentence saying why.
+    var off: String?
     /// An SF Symbol and a colour name for the suite's tile.
     var icon: String?
     var tint: String?

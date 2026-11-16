@@ -29,6 +29,9 @@ final class Model: ObservableObject {
     /// Starting or stopping the QA server.
     @Published var qaBusy = false
     @Published var missingTools: Set<String> = []
+    /// The walk-through, and the page it is on.
+    @Published var introShowing = false
+    @Published var introPage = 0
 
     static let shared = Model()
 
@@ -165,6 +168,27 @@ final class Model: ObservableObject {
 
     var suites: [Suite] { catalogue?.suites ?? [] }
     func suite(_ id: String?) -> Suite? { suites.first { $0.id == id } }
+    /// A suite that can be ticked and run here: not switched off in
+    /// `suites.json`, and not waiting on a tool this Mac lacks.
+    func canRun(_ suite: Suite) -> Bool {
+        suite.off == nil && !(suite.requires.map(missingTools.contains) ?? false)
+    }
+
+    /// Ticks what a quick pick names, leaving out anything that can't run here.
+    func tick(_ ids: [String]) {
+        checked = Set(ids.filter { id in suite(id).map(canRun) ?? false })
+    }
+
+    /// Roughly how long the ticked suites took last time, added up.
+    var tickedEstimate: String? {
+        let times = checked.compactMap { lastSeconds[$0] }
+        guard !times.isEmpty, times.count == checked.count else { return nil }
+        let minutes = Int((times.reduce(0, +) / 60).rounded())
+        if minutes < 2 { return "about a minute" }
+        if minutes < 90 { return "about \(minutes) minutes" }
+        return "about \(String(format: "%.1f", Double(minutes) / 60)) hours"
+    }
+
     func testCount(_ id: String) -> Int { (groups[id] ?? []).reduce(0) { $0 + $1.tests } }
 
     /// The command a suite runs with the options and classes picked now.
@@ -190,6 +214,8 @@ final class Model: ObservableObject {
     // MARK: Running
 
     func run(_ ids: [String]) {
+        // A suite switched off in suites.json never runs, however it was asked for.
+        let ids = ids.filter { suite($0)?.off == nil }
         guard !running, !ids.isEmpty, root != nil else { return }
         running = true
         stopRequested = false

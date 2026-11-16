@@ -14,17 +14,19 @@ struct SuiteDetail: View {
 
     var body: some View {
         let run = model.runs[suite.id]
-        let unavailable = suite.requires.map(model.missingTools.contains) ?? false
+        let unavailable = !model.canRun(suite)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 header(unavailable)
-                if unavailable {
+                if let off = suite.off {
+                    Callout(symbol: "nosign", tint: .gray, text: off)
+                } else if unavailable {
                     Callout(symbol: "wrench.and.screwdriver.fill", tint: .orange,
                             text: "This can't run on this Mac yet: it needs a developer tool called \(suite.requires ?? "") that isn't installed. Ask Claude to set it up if you want these checks here.")
                 } else if let note = suite.note {
                     Callout(symbol: "hand.raised.fill", tint: .orange, text: note)
                 }
-                if !(suite.options ?? []).isEmpty || !(model.groups[suite.id] ?? []).isEmpty { choices }
+                if suite.off == nil, !(suite.options ?? []).isEmpty || !(model.groups[suite.id] ?? []).isEmpty { choices }
                 if let run { results(run) }
             }
             .padding(24)
@@ -49,7 +51,7 @@ struct SuiteDetail: View {
                 Button { model.run([suite.id]) } label: { Label("Test Just This", systemImage: "play.fill") }
                     .controlSize(.large)
                     .disabled(model.running || unavailable)
-                    .help("Start testing \(suite.title) now, on its own")
+                    .help(suite.off != nil ? "Turned off for now" : "Start testing \(suite.title) now, on its own")
             }
         }
     }

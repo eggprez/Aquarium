@@ -34,7 +34,7 @@
     {
       "title": "Full check",
       "icon": "checklist",
-      "detail": "Everything on every Apple device. Takes a long time, and the Mac part takes over your screen.",
+      "detail": "Everything on every Apple device that is switched on. Takes a few hours; you can keep using your Mac while it runs.",
       "suites": [
         "unit",
         "watchunit",
@@ -240,6 +240,7 @@
       "id": "mac",
       "group": "Apple devices",
       "title": "Mac",
+      "off": "Turned off for now. These checks click around the real desktop, and the widgets on this Mac's desktop get in their way, so they report problems that aren't real. They will be switched back on once that is sorted out. The Mac app's behind-the-scenes checks still run as part of App logic.",
       "detail": "Opens the Mac app on this Mac and uses it: windows, the sidebar, menus, browsing and the player.",
       "note": "This one takes over your screen, mouse and keyboard while it runs, so leave the Mac alone until it finishes. Quit Aquarium first; it will not start while Aquarium is open.",
       "kind": "xcode",
