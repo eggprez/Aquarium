@@ -212,8 +212,16 @@ describe("the Requests page", () => {
     expect(texts(root, ".request-row-detail")).toEqual(["Show · 2008 · Seasons 1, 2", "Film · 1999 · 4K"]);
     expect(texts(root, ".request-row-status")).toEqual(["On its way", "Declined"]);
     expect(root.querySelectorAll(".request-row-status.warn").length).toBe(1);
+    // One carousel of poster cards, badged with how far each has got, and
+    // Trending straight under it.
+    const mine = root.querySelector(".request-mine")!;
+    expect(mine.querySelectorAll(".card-row").length).toBe(1);
+    expect(mine.querySelectorAll(".card-row > .request-mine-card").length).toBe(2);
+    expect(texts(mine, ".request-badge")).toEqual(["On its way", "Declined"]);
+    expect(mine.nextElementSibling!.getAttribute("data-shelf")).toBe("trending");
+    expect(root.querySelector(".request-posters-off")).toBeNull();
     // Posters come through the Seerr server's own image proxy.
-    expect(root.querySelector<HTMLImageElement>(".request-thumb img")!.src).toBe("https://seerr.test/imageproxy/tmdb/t/p/w342/bb.jpg");
+    expect(root.querySelector<HTMLImageElement>(".request-mine-card img")!.src).toBe("https://seerr.test/imageproxy/tmdb/t/p/w342/bb.jpg");
     expect([...root.querySelectorAll("img")].every((i) => i.src.startsWith("https://seerr.test/imageproxy/"))).toBe(true);
 
     // Cards: kind filled in for the one-kind rows, a badge once asked for.
@@ -235,8 +243,21 @@ describe("the Requests page", () => {
     expect(location.hash).toBe("#/item/jf-st");
     click(trending.querySelector(".card"));
     expect(location.hash).toBe("#/request/movie/27205");
-    click(root.querySelector('.request-row[data-request="2"]'));
+    click(root.querySelector('.request-mine-card[data-request="2"]'));
     expect(location.hash).toBe("#/request/tv/1396");
+  });
+
+  it("says why there are no posters while Seerr's Cache Images is off, and stops once it is on", async () => {
+    world.rows = { "/discover/trending": [{ id: 155, mediaType: "movie", title: "The Dark Knight", posterPath: "/dk.jpg" }] };
+    await boot({ settings: { ...STATUS.settings, cacheImages: false } });
+    await views.renderRequests(root);
+    const notice = root.querySelector(".request-posters-off")!;
+    expect(notice.textContent).toContain("No posters from Seerr");
+    expect(notice.textContent).toContain("Cache Images");
+    // Turned on in Seerr since: the next visit reads the setting again.
+    world.status = { ...world.status, settings: { ...STATUS.settings, cacheImages: true } };
+    await views.renderRequests(root);
+    expect(root.querySelector(".request-posters-off")).toBeNull();
   });
 
   it("says when nothing has been requested, and why when the list didn't arrive", async () => {
@@ -261,11 +282,11 @@ describe("the Requests page", () => {
 
     const again = views.renderRequests(root);
     // Before any answer: the cached page is already there.
-    const row = root.querySelector(".request-row");
+    const row = root.querySelector(".request-mine-card");
     expect(row).not.toBeNull();
     expect(texts(root, ".request-row-status")).toEqual(["Waiting for approval"]);
     await again;
-    expect(root.querySelector(".request-row")).toBe(row);
+    expect(root.querySelector(".request-mine-card")).toBe(row);
 
     // Approved since: the next visit repaints.
     world.requests[0].status = 2;
@@ -564,6 +585,22 @@ describe("Search, carried on past the library", () => {
     expect(root.querySelector(".state")!.compareDocumentPosition(shelf()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("reads Seerr's Cache Images again on each search, and asks again for posters it refused", async () => {
+    world.search[0] = { ...world.search[0], posterPath: "/m.jpg" };
+    await boot({ settings: { ...STATUS.settings, cacheImages: false } });
+    await search("matrix");
+    await waitFor(() => shelf() != null, 3000);
+    const before = shelf()!.querySelector<HTMLImageElement>('[data-seerr="movie-603"] img')!.src;
+    expect(before).toBe("https://seerr.test/imageproxy/tmdb/t/p/w342/m.jpg");
+    // Turned on in Seerr since: the next search notices, and the poster gets
+    // a fresh address so a refusal the webview remembers isn't reused.
+    world.status = { ...world.status, settings: { ...STATUS.settings, cacheImages: true } };
+    await search("matrix");
+    await waitFor(() => shelf() != null, 3000);
+    expect(seerr.postersOff()).toBe(false);
+    expect(shelf()!.querySelector<HTMLImageElement>('[data-seerr="movie-603"] img')!.src).toBe(`${before}?r=1`);
+  });
+
   it("adds it under the library's own results too", async () => {
     found = [{ Id: "m1", Type: "Movie", Name: "The Matrix Revolutions", ImageTags: {}, UserData: {} }];
     await boot();
@@ -766,7 +803,8 @@ describe("Requests in Settings", () => {
     expect(invokeCalls("seerr_connect_password")).toEqual([]);
     expect(dialogEl()).toBeNull();
     expect(lastToast()).toBe("Connected to Requests. Requests is in the sidebar.");
-    expect(rows(b)).toEqual(["Seerr server", "Signed in as", "Connection", "Session", "Disconnect"]);
+    expect(rows(b)).toEqual(["Seerr server", "Signed in as", "Connection", "Posters", "Session", "Disconnect"]);
+    expect(b.querySelector(".seerr-settings-posters")!.textContent).toBe("On");
   });
 
   it("stops to say so before signing in over plain http", async () => {
@@ -873,6 +911,13 @@ describe("Requests in Settings", () => {
     expect(b.querySelector(".seerr-settings-connection")!.classList.contains("warn")).toBe(true);
     expect(b.querySelector(".seerr-settings-session")!.textContent).toBe("Config file");
     expect(b.querySelector(".seerr-settings-session")!.classList.contains("warn")).toBe(true);
+  });
+
+  it("says posters are off while Seerr's Cache Images is", async () => {
+    const b = await block({ settings: { cacheImages: false } });
+    expect(b.querySelector(".seerr-settings-posters")!.textContent).toBe("Off");
+    expect(b.querySelector(".seerr-settings-posters")!.classList.contains("warn")).toBe(true);
+    expect(b.textContent).toContain("Cache Images");
   });
 
   it("offers Reconnect when the session has run out", async () => {

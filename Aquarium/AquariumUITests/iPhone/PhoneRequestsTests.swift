@@ -20,11 +20,15 @@ final class PhoneRequestsTests: PhoneUITestCase {
 
     func testASearchWithNoMatchesEndsInARequest() throws {
         launchConnected()
+        let settingsReads = SeerrQA.callCount("/settings/public")
         search("Matrix")
         // Not in the library, and said so; with it, what can be asked for.
         app.element(TestID.Search.empty).waitToExist(30)
         let card = app.button(TestID.Requests.card("movie-603"))
         card.waitToExist(30)
+        // Each search reads Cache Images again, so posters refused before it
+        // was turned on are asked for again.
+        XCTAssertGreaterThan(SeerrQA.callCount("/settings/public"), settingsReads, "the search read Seerr's settings again")
         assertOnScreen(card, "The Matrix's card")
         assertAboveKeyboard(card, "The Matrix's card")
         attachScreenshot("search offers a request (\(device.rawValue))")
@@ -72,17 +76,48 @@ final class PhoneRequestsTests: PhoneUITestCase {
         app.button(TestID.Requests.row(pending)).waitToExist(30)
         XCTAssertEqual(app.staticTexts[TestID.Requests.rowStatus(pending)].firstMatch.label, "Waiting for approval")
         XCTAssertEqual(app.staticTexts[TestID.Requests.rowStatus(approved)].firstMatch.label, "On its way")
-        XCTAssertTrue(app.staticTexts["The Matrix"].firstMatch.waitForExistence(timeout: 20), "rows are named, not numbered")
+        XCTAssertTrue(app.staticTexts["The Matrix"].firstMatch.waitForExistence(timeout: 20), "cards are named, not numbered")
+        XCTAssertFalse(app.element(TestID.Requests.postersOff).exists, "Cache Images is on: no warning")
+        // One carousel: the requests sit side by side, not stacked.
+        let first = app.button(TestID.Requests.row(pending)).frame
+        let second = app.button(TestID.Requests.row(approved)).frame
+        XCTAssertEqual(first.midY, second.midY, accuracy: 2, "requests share one row")
+        XCTAssertNotEqual(first.minX, second.minX, "requests sit side by side")
         attachScreenshot("requests (\(device.rawValue))")
 
+        // Trending straight under it, then the other rows.
         let trending = app.element(TestID.Requests.shelf("trending"))
         app.reveal(trending)
         XCTAssertTrue(trending.exists, "rows of things to ask for")
+        XCTAssertGreaterThan(trending.frame.minY, app.element(TestID.Requests.mine).frame.minY, "Trending is under Your Requests")
+        let popular = app.element(TestID.Requests.shelf("popularMovies"))
+        app.reveal(popular)
+        XCTAssertGreaterThan(popular.frame.minY, trending.frame.minY, "the other rows follow Trending")
 
         // A row opens the title's request page.
         app.reveal(app.button(TestID.Requests.row(pending)))
         app.button(TestID.Requests.row(pending)).tapNow(20)
         app.element(TestID.Requests.titlePage("movie-603")).waitToExist(30)
+    }
+
+    /// Seerr hands out no posters while its Cache Images is off; the page and
+    /// Settings say why instead of showing blank cards with no explanation.
+    func testPostersOffIsExplained() throws {
+        try standardOnly()
+        SeerrQA.cacheImages(false)
+        defer { SeerrQA.cacheImages(true) }
+        launchConnected()
+        moreSection("requests")
+        let notice = app.element(TestID.Requests.postersOff)
+        XCTAssertTrue(notice.waitForExistence(timeout: 30), "the page says why there are no posters")
+        assertOnScreen(notice, "the posters-off notice")
+        attachScreenshot("posters off (\(device.rawValue))")
+
+        openSettings()
+        app.button(TestID.Settings.pageLink("account")).tapNow(20)
+        let posters = app.element(TestID.Requests.settingsPosters)
+        app.reveal(posters)
+        XCTAssertTrue(posters.label.hasSuffix("Off"), posters.label)
     }
 
     func testAShowsMissingSeasonsCanBeAskedFor() throws {

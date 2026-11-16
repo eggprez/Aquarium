@@ -275,6 +275,15 @@ struct SeerrSettingsSection: View {
                     StatusPill(text: seerr.needsReconnect ? "Run out" : "Keychain", tone: seerr.needsReconnect ? .warn : .ok)
                         .accessibilityIdentifier(TestID.Requests.settingsSession)
                 }
+                LabeledContent("Posters") {
+                    StatusPill(text: seerr.postersOff ? "Off" : "On", tone: seerr.postersOff ? .warn : .ok)
+                        .accessibilityIdentifier(TestID.Requests.settingsPosters)
+                }
+                if seerr.postersOff {
+                    Text(SeerrCopy.postersOff)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.warn)
+                }
                 if seerr.needsReconnect {
                     Button("Reconnect") { Task { await reconnect() } }
                         .disabled(isWorking)
@@ -328,5 +337,7 @@ struct SeerrSettingsSection: View {
 /// The sentences Settings says about Seerr, in one place for every platform.
 enum SeerrCopy {
     static let offer = "Seerr takes requests for films and shows the library doesn't have yet. Connect one and they can be asked for from Search and from a Requests page."
+    static let postersOffTitle = "No posters from Seerr"
+    static let postersOff = "Seerr only shares posters when Cache Images is on. An admin can turn it on in Seerr's Settings, under General. Aquarium doesn't fetch them from the film database directly."
     static let kept = "Aquarium signed in to Seerr with your Jellyfin account. Only Seerr's session is kept, in the keychain beside your Jellyfin sign-in; no password is stored."
 }

@@ -208,9 +208,13 @@ alone; end it with `kill <pid>`, never MPRIS Quit. Look in `~/.local/share/aquar
     name is refused with "That server's certificate couldn't be verified…" and is not retried
     over http. With Quick Connect turned off in Jellyfin's dashboard, the dialog asks for the
     Jellyfin user name and password instead and connects with them.
-26. **Seerr: requesting.** Requests shows Your Requests and five rows of posters (they load
-    through `<seerr>/imageproxy/…`; nothing is fetched from `image.tmdb.org`: check with
-    `ss -tp` or the stand-in's `GET /__test/state` call list). Open The Matrix: Request, the toast,
+26. **Seerr: requesting.** Requests shows Your Requests as one carousel of posters, then
+    Trending and the other rows of posters (they load through `<seerr>/imageproxy/…`; nothing is
+    fetched from `image.tmdb.org`: check with `ss -tp` or the stand-in's `GET /__test/state`
+    call list). Seerr serves them only with its Cache Images setting on: `curl -X POST
+    127.0.0.1:8197/__test/images/off`, reopen Requests: the "No posters from Seerr" notice, and
+    Settings → Requests says Posters Off; `…/images/on`, reopen: the notice goes and every poster
+    loads. Open The Matrix: Request, the toast,
     "Waiting for approval", Cancel Request and its confirmation. Open a show: untick a season, the
     button counts the rest, the request names only those. `curl -X POST
     127.0.0.1:8197/__test/approve/1`, reopen the page: "On its way". `curl -X POST

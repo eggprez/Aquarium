@@ -200,6 +200,10 @@ private struct ServerSettingsPage: View {
                                     tone: connection.secure ? Theme.ok : Theme.warn,
                                     notes: [SettingNote(name: "Connection", text: SeerrCopy.kept)])
                             .accessibilityIdentifier(TestID.Requests.settingsConnection)
+                        SettingInfo("Posters", value: seerr.postersOff ? "Off" : "On",
+                                    tone: seerr.postersOff ? Theme.warn : Theme.ok,
+                                    notes: [SettingNote(name: "Posters", text: seerr.postersOff ? SeerrCopy.postersOff : "Posters come through the Seerr server.")])
+                            .accessibilityIdentifier(TestID.Requests.settingsPosters)
                         if seerr.needsReconnect {
                             SettingButton("Reconnect", notes: [SettingNote(name: "Reconnect", text: "The connection to Seerr has run out. This signs in again with your Jellyfin account.")]) {
                                 Task { try? await seerr.reconnect() }

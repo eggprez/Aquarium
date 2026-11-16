@@ -561,7 +561,22 @@ final class SeerrClient {
         }
         // Renewed in between? Keep the newer cookie.
         if let latest = connection { current.cookie = latest.cookie }
+        let postersCameOn = connection?.settings?.cacheImages != true && current.settings?.cacheImages == true
         if current != connection { store(current) }
+        if postersCameOn { await postersTurnedOn(server: current.server) }
+    }
+
+    /// Bumped when Seerr starts serving posters it refused before, so cards
+    /// already on screen ask again (`RequestPoster` is keyed on it).
+    private(set) var posterEpoch = 0
+
+    /// Cache Images has just been turned on. Every poster asked for while it
+    /// was off got a 404, which `ImageLoader` remembers for ten minutes: the
+    /// titles already seen (every one of your requests) stayed blank while
+    /// new ones filled in.
+    private func postersTurnedOn(server: String) async {
+        await ImageLoader.shared.forgetAbsent(under: server + "/imageproxy/")
+        posterEpoch += 1
     }
 
     // MARK: - Titles
@@ -736,8 +751,18 @@ final class SeerrClient {
     /// browser to TMDB unless image caching is turned on; this app doesn't,
     /// so that nothing outside the user's own servers ever sees the device.
     /// The request carries no cookie: pictures are loaded by `ImageLoader`.
+    ///
+    /// Seerr answers `/imageproxy` with a 404 unless "Cache Images" is on in
+    /// its General settings, and it is off by default. The address is still
+    /// handed out then (the setting may have been turned on since it was
+    /// last read); `postersOff` is what tells the person why there are none.
     func imageURL(_ path: String?, size: ImageSize) -> URL? {
         guard let path, path.hasPrefix("/"), let connection else { return nil }
         return URL(string: "\(connection.server)/imageproxy/tmdb/t/p/\(size.rawValue)\(path)")
     }
+
+    /// The server says "Cache Images" is off, so its image proxy refuses every
+    /// poster. Only a definite `false`: a server that didn't say is given the
+    /// benefit of the doubt.
+    var postersOff: Bool { connection?.settings?.cacheImages == false }
 }

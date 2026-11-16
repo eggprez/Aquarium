@@ -23,7 +23,6 @@ import {
   errorState,
   skeletonDetail,
   skeletonRow,
-  skeletonRows,
 } from "../ui";
 import { getCached, setCached, invalidateCache } from "../cache";
 
@@ -136,10 +135,12 @@ function slim(title: SeerrTitle): SeerrTitle {
   };
 }
 
-/** One request: its poster, what it is, and where it stands. */
-function requestRow(request: SeerrRequest, title: SeerrTitle | undefined): HTMLElement {
+/** One request in the carousel: its poster with how far it has got on it,
+ *  its name, what was asked for, and where it stands. */
+function requestTile(request: SeerrRequest, title: SeerrTitle | undefined): HTMLElement {
   const standing = seerr.standingOfRequest(request);
   const tone = standing === "available" ? " ok" : standing === "declined" || standing === "failed" ? " warn" : "";
+  const badge = seerr.STANDING_BADGE[standing];
   const name = seerr.displayTitle(title);
   const open = (): void => {
     const hash = seerr.hashForRequest(request);
@@ -148,7 +149,7 @@ function requestRow(request: SeerrRequest, title: SeerrTitle | undefined): HTMLE
   return el(
     "div",
     {
-      class: "request-row",
+      class: "card request-card request-mine-card",
       role: "button",
       tabindex: "0",
       "data-request": String(request.id),
@@ -161,24 +162,36 @@ function requestRow(request: SeerrRequest, title: SeerrTitle | undefined): HTMLE
       },
     },
     [
-      el("div", { class: "request-thumb" }, [art(seerr.imageUrl(title?.posterPath, "poster"), name || "?")]),
-      el("div", { class: "request-row-body" }, [
-        el("div", { class: "request-row-title" }, [name || " "]),
-        el("div", { class: "request-row-detail" }, [seerr.requestDetail(request, title)]),
-        el("div", { class: `request-row-status${tone}` }, [seerr.STANDING_LABEL[standing]]),
+      el("div", { class: "card-poster" }, [
+        art(seerr.imageUrl(title?.posterPath, "poster"), name || "?"),
+        badge ? el("div", { class: "badge request-badge" }, [badge]) : null,
       ]),
-      icon("chevron-right"),
+      el("div", { class: "card-title request-row-title" }, [name || " "]),
+      el("div", { class: "card-sub request-row-detail" }, [seerr.requestDetail(request, title)]),
+      el("div", { class: `card-sub request-row-status${tone}` }, [seerr.STANDING_LABEL[standing]]),
     ]
   );
 }
 
+/** Seerr's Cache Images is off, so its image proxy refuses every poster. */
+function postersOffNotice(): HTMLElement {
+  return el("div", { class: "request-posters-off", role: "note" }, [
+    el("div", { class: "request-posters-off-title" }, [seerr.POSTERS_OFF_TITLE]),
+    el("div", { class: "request-note" }, [seerr.POSTERS_OFF]),
+  ]);
+}
+
 function paintRequests(page: HTMLElement, data: RequestsData, mineError: string | null): void {
   clear(page);
+  if (seerr.postersOff()) page.append(postersOffNotice());
   const yours = el("div", { class: "section request-mine" }, [
     el("div", { class: "section-head" }, [el("h2", {}, ["Your Requests"])]),
   ]);
   if (data.mine.length) {
-    for (const request of data.mine) yours.append(requestRow(request, data.names[nameKey(request)]));
+    // One carousel, the way the rows under it are drawn.
+    yours.append(
+      scrollRow(el("div", { class: "card-row" }, data.mine.map((r) => requestTile(r, data.names[nameKey(r)]))))
+    );
   } else if (mineError) {
     yours.append(el("p", { class: "request-note request-mine-error" }, [mineError]));
   } else {
@@ -189,6 +202,7 @@ function paintRequests(page: HTMLElement, data: RequestsData, mineError: string 
     );
   }
   page.append(yours);
+  // Trending first (BROWSE_ROWS' order), then the rest.
   for (const row of seerr.BROWSE_ROWS) {
     const shelf = requestShelf(row.title, data.rows[row.key] ?? [], row.key);
     if (shelf) page.append(shelf);
@@ -223,14 +237,17 @@ export async function renderRequests(root: HTMLElement): Promise<void> {
     page.append(
       el("div", { class: "section" }, [
         el("div", { class: "section-head" }, [el("h2", {}, ["Your Requests"])]),
-        skeletonRows(3, "request-row", "request-thumb"),
       ]),
+      skeletonRow(),
       skeletonRow()
     );
   }
 
   let mine = cached?.mine ?? [];
   let mineError: string | null = null;
+  // Picks up Cache Images being turned on (or off) since the last look.
+  const wasOff = seerr.postersOff();
+  await seerr.refreshAccount();
   try {
     mine = await seerr.myRequests();
   } catch (e: any) {
@@ -278,7 +295,7 @@ export async function renderRequests(root: HTMLElement): Promise<void> {
   for (const key of Object.keys(names)) if (!wanted.has(key)) delete names[key];
   const data: RequestsData = { mine, names, rows };
   if (!mineError) setCached(REQUESTS_KEY, data);
-  if (!cached || mineError || requestsSignature(cached) !== requestsSignature(data)) {
+  if (!cached || mineError || wasOff !== seerr.postersOff() || requestsSignature(cached) !== requestsSignature(data)) {
     paintRequests(page, data, mineError);
   }
 }
@@ -587,9 +604,10 @@ export function seerrSearchSection(term: string): HTMLElement | null {
   const box = el("div", { class: "seerr-search" });
   window.setTimeout(() => {
     if (!document.contains(box)) return;
-    void seerr
-      .search(query)
-      .then((found) => {
+    // Each search reads Seerr's Cache Images again, beside the search itself,
+    // so posters it refused before it was turned on are asked for again.
+    void Promise.all([seerr.search(query), seerr.refreshAccount()])
+      .then(([found]) => {
         if (!document.contains(box)) return;
         const shelf = requestShelf("Not in Your Library", seerr.notInLibrary(found), "search", "Open one to request it.");
         if (shelf) box.append(shelf);

@@ -460,6 +460,9 @@ extension TestID {
         static let mine = "requests.mine"
         static let mineEmpty = "requests.mine.empty"
         static let mineError = "requests.mine.error"
+        /// "No posters from Seerr": its Cache Images setting is off.
+        static let postersOff = "requests.postersOff"
+        static let settingsPosters = "settings.requests.posters"
         static func row(_ id: Int) -> String { "requests.row.\(id)" }
         static func rowStatus(_ id: Int) -> String { "requests.row.status.\(id)" }
         /// A shelf of titles from Seerr, by row key ("search", "collection",

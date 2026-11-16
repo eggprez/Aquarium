@@ -44,7 +44,13 @@ struct SeerrSearchSection: View {
         // Longer than the library's own debounce: this one leaves the house.
         try? await Task.sleep(for: .milliseconds(450))
         guard !Task.isCancelled else { return }
-        guard let page = try? await seerr.search(query), !Task.isCancelled else { return }
+        // Each search reads Seerr's Cache Images again, beside the search
+        // itself: turned on since, the posters it refused are asked for again
+        // (`SeerrClient.refreshAccount`) instead of staying blank here.
+        async let refreshed: Void = seerr.refreshAccount()
+        let found = try? await seerr.search(query)
+        await refreshed
+        guard let page = found, !Task.isCancelled else { return }
         results = (page.results ?? []).filter(\.isRequestable)
         answered = query
     }

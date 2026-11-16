@@ -80,8 +80,9 @@ the security rules: Quick Connect sign-in with the app's own Jellyfin
 session, no password kept, no admin API key, session in the keychain, cookie
 to one origin, posters through Seerr only). `Aquarium/Aquarium/Views/Seerr/`
 is the screens: a "Not in Your Library" row in Search, a request page per
-title, a Requests section (your requests, then Trending / Popular /
-Upcoming), a missing-seasons banner on a show, missing films on a collection
+title, a Requests section (your requests as one carousel, then Trending /
+Popular / Upcoming; a notice when Seerr's Cache Images is off, since Seerr
+then serves no posters), a missing-seasons banner on a show, missing films on a collection
 and on a person, and Settings → Account → Requests. Linux: `Linux/src/seerr.ts`,
 `Linux/src/views/requests.ts`, `Linux/src-tauri/src/seerr.rs`.
 

@@ -2335,6 +2335,14 @@ h1.page-title { font-size: var(--fs-2xl); margin-bottom: 20px; }
 .request-shelf-sub { font-size: var(--fs-sm); color: var(--text-dim); margin-top: 2px; }
 .request-note { font-size: var(--fs-sm); color: var(--text-dim); }
 .request-note.warn { color: var(--warn); }
+.request-posters-off {
+  margin: 0 0 18px; padding: 12px 14px;
+  border-radius: var(--radius);
+  border-left: 3px solid var(--warn);
+  background: var(--bg-raised);
+}
+.request-posters-off-title { font-weight: 600; margin-bottom: 2px; }
+.request-mine-card .request-row-status { font-weight: 600; color: var(--text-body); }
 
 .request-row {
   display: flex; gap: 14px;

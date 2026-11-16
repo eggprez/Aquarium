@@ -337,6 +337,50 @@ final class SeerrClientTests: XCTestCase {
 
     func testNoPicturesWithoutAConnection() {
         XCTAssertNil(seerr.imageURL("/abc.jpg", size: .poster))
+        XCTAssertFalse(seerr.postersOff, "nothing to warn about without a connection")
+    }
+
+    /// Seerr's `/imageproxy` answers 404 while Cache Images is off (its
+    /// default), which left every poster blank with nothing said about it.
+    func testPostersOffFollowsCacheImages() async throws {
+        @Sendable func server(cacheImages: Bool) -> SeerrStub.Handler {
+            { request in
+                switch request.url?.path ?? "" {
+                case "/api/v1/settings/public":
+                    return SeerrStub.Answer(json: SeerrFixture.settings.replacingOccurrences(
+                        of: #""cacheImages":false"#, with: #""cacheImages":\#(cacheImages)"#))
+                case "/api/v1/auth/me": return SeerrStub.Answer(json: SeerrFixture.user())
+                default: return SeerrStub.Answer(status: 404)
+                }
+            }
+        }
+        try await SeerrFixture.connect(rest: server(cacheImages: false))
+        await seerr.refreshAccount()
+        XCTAssertTrue(seerr.postersOff, "Cache Images off: say so")
+
+        // Posters asked for meanwhile were refused, and remembered as missing.
+        let poster = try XCTUnwrap(seerr.imageURL("/abc.jpg", size: .poster))
+        let jellyfin = try XCTUnwrap(URL(string: "https://jellyfin.invalid/Items/x/Images/Primary"))
+        await ImageLoader.shared.rememberAbsent(poster)
+        await ImageLoader.shared.rememberAbsent(jellyfin)
+        let epoch = seerr.posterEpoch
+        await seerr.refreshAccount()
+        XCTAssertEqual(seerr.posterEpoch, epoch, "still off: nothing to ask again")
+        let stillMissing = await ImageLoader.shared.isKnownAbsent(poster)
+        XCTAssertTrue(stillMissing)
+
+        // (Straight to the stub: the fixture's router answers the settings itself.)
+        SeerrStub.route(server(cacheImages: true))
+        await seerr.refreshAccount()
+        XCTAssertFalse(seerr.postersOff, "turned on since: the warning goes")
+        XCTAssertEqual(seerr.posterEpoch, epoch + 1, "cards on screen ask again")
+        let forgotten = await ImageLoader.shared.isKnownAbsent(poster)
+        XCTAssertFalse(forgotten, "the refused posters are asked for again, not left blank for ten minutes")
+        let otherHost = await ImageLoader.shared.isKnownAbsent(jellyfin)
+        XCTAssertTrue(otherHost, "other hosts' missing pictures are left alone")
+
+        await seerr.refreshAccount()
+        XCTAssertEqual(seerr.posterEpoch, epoch + 1, "only the change itself counts")
     }
 
     func testCSRFTokenIsEchoedOnWrites() async throws {

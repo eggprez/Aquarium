@@ -11,7 +11,9 @@ from that server, so a title's availability and its Jellyfin id are real.
     python3 -I Tools/seerr-mock.py --csrf     # with Seerr's CSRF protection on
 
 Test controls (not part of Seerr):
-    POST /__test/reset        forget every request (sessions stay)
+    POST /__test/reset        forget every request (sessions stay), Cache Images back on
+    POST /__test/images/off   Cache Images off: settings say so, /imageproxy answers 404
+    POST /__test/images/on    and back on
     POST /__test/expire       forget every session (the apps must sign in again)
     POST /__test/approve/<n>  approve request n
     POST /__test/decline/<n>  decline request n
@@ -97,6 +99,9 @@ class State:
     def __init__(self, jellyfin, csrf):
         self.jf = jellyfin
         self.csrf = csrf
+        # Seerr's Settings > General > Cache Images. Off, `/imageproxy`
+        # answers 404, as the real server does.
+        self.cache_images = True
         self.lock = threading.Lock()
         self.sessions = {}      # cookie -> seerr user id
         self.users = {}         # jellyfin user id -> user dict
@@ -313,6 +318,8 @@ class Handler(BaseHTTPRequestHandler):
             del state.calls[:-400]
 
         if path.startswith("/imageproxy/"):
+            if not state.cache_images:
+                return self.refuse(404, "Image caching is disabled.")
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(PNG)))
@@ -335,7 +342,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, {
                 "initialized": True, "applicationTitle": "Seerr (QA stand-in)", "mediaServerType": 2,
                 "movie4kEnabled": False, "series4kEnabled": False, "partialRequestsEnabled": True,
-                "cacheImages": True, "mediaServerLogin": True, "localLogin": True,
+                "cacheImages": state.cache_images, "mediaServerLogin": True, "localLogin": True,
             })
         if path == "/status":
             return self.send_json(200, {"version": "3.5.0-mock", "commitTag": "mock"})
@@ -537,7 +544,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/__test/reset":
             state.requests = []
             state.calls = []
+            state.cache_images = True
             state.read_library(force=True)
+            return self.send_json(200, {"status": "ok"})
+        if path in ("/__test/images/on", "/__test/images/off"):
+            state.cache_images = path.endswith("/on")
             return self.send_json(200, {"status": "ok"})
         if path == "/__test/expire":
             state.sessions = {}

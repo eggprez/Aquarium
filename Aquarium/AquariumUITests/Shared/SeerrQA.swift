@@ -36,12 +36,21 @@ enum SeerrQA {
         (call("GET", "/__test/state") as? [String: Any])?["requests"] as? [[String: Any]] ?? []
     }
 
+    /// How many times the app has asked for `path` (below `/api/v1`) since
+    /// the last reset. The stand-in keeps the last 400 calls.
+    static func callCount(_ path: String) -> Int {
+        let calls = (call("GET", "/__test/state") as? [String: Any])?["calls"] as? [[String: Any]] ?? []
+        return calls.filter { ($0["path"] as? String) == "/api/v1" + path }.count
+    }
+
     static var sessionCount: Int {
         (call("GET", "/__test/state") as? [String: Any])?["sessions"] as? Int ?? 0
     }
 
     /// Throw every session away, as Seerr does after thirty days.
     static func expireSessions() { _ = call("POST", "/__test/expire") }
+    /// Seerr's Cache Images setting; `require()` turns it back on.
+    static func cacheImages(_ on: Bool) { _ = call("POST", "/__test/images/\(on ? "on" : "off")") }
     static func approve(_ id: Int) { _ = call("POST", "/__test/approve/\(id)") }
     static func decline(_ id: Int) { _ = call("POST", "/__test/decline/\(id)") }
 
