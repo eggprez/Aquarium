@@ -45,6 +45,7 @@ enum TestMode {
            let password = ProcessInfo.processInfo.environment[TestLaunch.passwordEnv] {
             Task { @MainActor in
                 await signIn(server: server, user: user, password: password)
+                await connectSeerr()
                 openLaunchLink()
             }
         } else {
@@ -61,6 +62,24 @@ enum TestMode {
         guard let raw = TestLaunch.env(TestLaunch.linkEnv), let url = URL(string: raw) else { return }
         log.notice("UI test mode: opening \(raw, privacy: .public)")
         AppModel.shared.handle(url, fromApp: true)
+    }
+    #endif
+
+    #if DEBUG
+    /// `TestLaunch.seerrEnv`: connect Seerr the way Settings would, with the
+    /// account just signed in.
+    @MainActor
+    private static func connectSeerr() async {
+        guard let address = TestLaunch.env(TestLaunch.seerrEnv), !address.isEmpty,
+              JellyfinClient.shared.session != nil, SeerrClient.shared.connection == nil else { return }
+        do {
+            let probe = try await SeerrClient.shared.probe(address: address)
+            try await SeerrClient.shared.connectWithQuickConnect(to: probe.server)
+            await SeerrClient.shared.refreshAccount()
+            log.notice("UI test mode: connected to Seerr at \(probe.server, privacy: .public)")
+        } catch {
+            log.error("UI test mode: Seerr connection failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
     #endif
 

@@ -200,7 +200,7 @@ struct BaseItem: Codable, Hashable, Sendable, Identifiable {
         case Album, AlbumId, AlbumPrimaryImageTag, AlbumArtist, AlbumArtists
         case ArtistItems, Artists, MediaType, HasLyrics, NormalizationGain
         case GenreItems, Chapters, PlaylistItemId, Trickplay
-        case RemoteTrailers, LocalTrailerCount, ProductionLocations
+        case RemoteTrailers, LocalTrailerCount, ProductionLocations, ProviderIds
         case type = "Type"
     }
     var Id: String = ""
@@ -293,6 +293,11 @@ struct BaseItem: Codable, Hashable, Sendable, Identifiable {
     /// YouTube addresses — and how many trailer files sit beside the film on
     /// the server. Detail endpoint only; see `JellyfinClient.trailers(for:)`.
     var RemoteTrailers: [MediaUrl]?
+    /// The title's ids elsewhere ("Tmdb", "Imdb", "Tvdb"), asked for only on
+    /// the detail page. Seerr knows titles by their TMDB id, so this is how a
+    /// library page finds its counterpart there.
+    var ProviderIds: [String: String]?
+    var tmdbId: Int? { ProviderIds?.first { $0.key.lowercased() == "tmdb" }.flatMap { Int($0.value) } }
     var LocalTrailerCount: Int?
     /// On a person, where they were born — the one thing Jellyfin files here
     /// for them. Detail endpoint only.

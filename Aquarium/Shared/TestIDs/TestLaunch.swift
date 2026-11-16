@@ -46,6 +46,11 @@ enum TestLaunch {
     static let userEnv = "AQUARIUM_TEST_USER"
     static let passwordEnv = "AQUARIUM_TEST_PASSWORD"
 
+    /// Environment: a Seerr server to connect once the launch sign-in is
+    /// done, with the app's own Quick Connect exchange (`SeerrClient`), so a
+    /// test starts with Requests set up. Skipped when already connected.
+    static let seerrEnv = "AQUARIUM_TEST_SEERR"
+
     /// `-AquariumTestEngine automatic|apple|mpv`: the player engine
     /// preference, as Settings would set it (iPhone, iPad, Mac, Apple TV).
     /// The engine policy still has the last word where it pins one (iPad).

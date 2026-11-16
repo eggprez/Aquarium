@@ -12,6 +12,7 @@ import {
   downloadPrefsChanged,
 } from "../playback";
 import { getThemePref, setThemePref, type ThemePref } from "../theme";
+import { seerrSettingsBlock } from "./seerrSettings";
 
 /**
  * One labelled setting. Every row on this page is a name, a sentence saying
@@ -395,6 +396,10 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
   };
   await drawAccounts();
   if (!document.contains(title)) return;
+
+  // Requests: a Seerr server beside this Jellyfin server, signed in to with
+  // the account in use (views/seerrSettings.ts).
+  if (s) root.append(seerrSettingsBlock());
 
   // Quick Connect, the approving side: a device signing in to this server
   // shows a code, and entering it here signs that device in as this user.

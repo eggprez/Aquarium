@@ -178,3 +178,27 @@ exercised by every test's launch, and the requests by
 Settings › Account › Add Account adds `suite-spare1` and the accounts list
 switches back. Check also that tapping the password field gives it the
 keyboard (if it does not on hardware either, that is a bug).
+
+## Requests against a real Seerr server
+
+Every automated Requests test talks to a stand-in built from Seerr 3.5.0's
+source (`Tools/seerr-mock.py`). These need a real Seerr (3.4 or later, set up
+for the same Jellyfin server), which the test Mac cannot run.
+
+1. Settings → Account → Connect to Seerr…, type the address. Expect: connected
+   with no password asked, and the Seerr rows showing the server and HTTPS.
+   In Seerr's Users page this Jellyfin user exists and shows a recent sign-in.
+2. Search for a film the library lacks: it is offered with its real poster.
+   Posters must load with Seerr's "image caching" setting both on and off (the
+   app always asks Seerr's own `/imageproxy`, never TMDB).
+3. Request it. Expect "Waiting for approval" (or "On its way" for an
+   auto-approved account), and the request in Seerr's own Requests page.
+4. With Seerr's "CSRF protection" turned on, repeat step 3: it must still work.
+5. With Jellyfin's Quick Connect turned off, connect again: the Jellyfin user
+   name and password form appears instead, and signing in with it works.
+6. Type the address of a Seerr behind a certificate the device doesn't trust:
+   expect the "certificate couldn't be verified" refusal, not a quiet http try.
+7. In Seerr, delete this user's session (or wait 30 days), then open Requests:
+   it loads without asking anything.
+8. A collection whose Jellyfin entry has a TMDB id (the QA library has none):
+   its page lists "Missing From This Collection" with the films not yet here.

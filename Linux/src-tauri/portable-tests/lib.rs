@@ -27,6 +27,8 @@ mod progress;
 #[cfg(target_os = "linux")]
 #[path = "../src/secret.rs"]
 mod secret;
+#[path = "../src/seerr.rs"]
+mod seerr;
 #[path = "../src/server.rs"]
 mod server;
 

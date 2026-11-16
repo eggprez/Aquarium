@@ -110,7 +110,22 @@ ids = {r["identifier"] for r in json.load(sys.stdin)["runtimes"] if r.get("isAva
 raise SystemExit(0 if sys.argv[1] in ids else 1)' "$1"
 }
 
+# The stand-in Seerr server the Requests tests talk to (Tools/seerr-mock.py):
+# started here when it isn't answering, and left running, like the simulators.
+# Without python3 or the QA server those tests skip.
+SEERR_MOCK=${AQUARIUM_SEERR_MOCK:-http://127.0.0.1:8197}
+start_seerr_mock() {
+  curl -s -m 3 -o /dev/null "$SEERR_MOCK/api/v1/settings/public" && return 0
+  [[ $SEERR_MOCK == http://127.0.0.1:8197 ]] || return 0
+  (AQUARIUM_QA_DIR="$QA_DIR" nohup python3 -I "$HERE/seerr-mock.py" > "$out/seerr-mock.log" 2>&1 &)
+  local tries=0
+  until curl -s -m 2 -o /dev/null "$SEERR_MOCK/api/v1/settings/public" || (( ++tries > 10 )); do sleep 1; done
+  (( tries > 10 )) && echo "warning: the Seerr stand-in didn't start (see $out/seerr-mock.log); Requests tests will skip" \
+    || echo "started the Seerr stand-in at $SEERR_MOCK"
+}
+
 reset_account() {
+  curl -s -m 3 -o /dev/null -X POST "$SEERR_MOCK/__test/reset"
   (( do_reset )) || return 0
   if [[ -f "$QA_DIR/suite-reset.py" ]]; then
     (cd "$QA_DIR" && python3 -I suite-reset.py "suite-$1" > "$out/reset-$1.log" 2>&1) \
@@ -262,6 +277,8 @@ do_watch() {
   run AquariumWatch Watch Watch46 "id=$watch" "${SIM_SIGN[@]}"
   xcrun simctl terminate "$watch" scottai.FellyJin.watchkitapp 2>/dev/null
 }
+
+case $suite in iphone|ipad|mac|tv|all) start_seerr_mock;; esac
 
 case $suite in
   unit) do_unit;;

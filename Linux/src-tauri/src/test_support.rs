@@ -127,6 +127,7 @@ pub fn sandbox() -> Sandbox {
     crate::config::reset_for_tests();
     crate::server::reset_for_tests();
     crate::secret::reset_for_tests();
+    crate::seerr::reset_for_tests();
     Sandbox { _guard: guard }
 }
 

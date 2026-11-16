@@ -166,6 +166,16 @@ in a comment.
 | Theme | `MacDeepWaterUITests.testScreensInLightAndDark` | UI | built |
 | Preferences kept apart in test mode | `MacViewOptionsTests.testWritesGoToTheTestSuiteNotTheRealDefaults`, `MacPlaybackCoreTests.testTestModeIsOnAndStateIsApart` | unit | built |
 
+## Requests through Seerr — `Views/Seerr/`
+
+Against the stand-in Seerr server (TESTING.md). Run 2026-11-16 (the class alone; the Mac screen suite as a whole is still switched off): 3 pass.
+
+| Function | Test | Kind | Status |
+|---|---|---|---|
+| Sidebar gains Requests (under You); no window of its own | MacRequestsUITests.testTheSidebarGainsRequests, MacSidebarTests.testRequestsSitsWithWhatIsYours | UI, unit | pass |
+| Sidebar search offers a title, its page requests it | MacRequestsUITests.testSearchOffersARequestAndThePageMakesIt | UI | pass |
+| Settings → Account: connect by address (http warning, no password typed) | MacRequestsUITests.testConnectingInSettings | UI | pass |
+
 ## Deep Water
 
 | Function | Test | Kind | Status |

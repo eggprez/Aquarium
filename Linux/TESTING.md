@@ -6,7 +6,7 @@ Every path here is relative to `Linux/`. Four layers:
 |---|---|---|---|
 | TypeScript unit | `tests/unit/` | any OS (Node 20+) | `npm run test:unit` (with `tests/dom`) |
 | TypeScript DOM | `tests/dom/` | any OS | `npm run test:unit` |
-| TypeScript integration | `tests/integration/` | any OS, needs the QA Jellyfin server | `npm run test:integration` |
+| TypeScript integration | `tests/integration/` | any OS, needs the QA Jellyfin server (and, for `seerr.test.ts`, the stand-in Seerr) | `npm run test:integration` |
 | Rust, platform-neutral modules | in-module `#[cfg(test)]` | any Unix | `cargo test --manifest-path src-tauri/portable-tests/Cargo.toml` |
 | Rust, whole crate | in-module `#[cfg(test)]` | Linux only (GTK, WebKitGTK, libmpv, D-Bus) | `npm run build && cd src-tauri && cargo test` |
 | End-to-end smoke | `.github/workflows/linux-tests.yml` job `smoke` | ubuntu CI under Xvfb | CI only |
@@ -34,13 +34,22 @@ best-effort smoke run.
   skips. Only the `suite-linux` account is ever written to; tests restore what they change. After a
   run, `python3 -I suite-reset.py suite-linux` in the QA folder puts the account back on its
   baseline exactly (a few things, such as last-played dates, can't be restored through the API).
+- **Stand-in Seerr.** The requests features talk to a Seerr server, and the QA folder has none, so
+  the tests use `../Aquarium/Tools/seerr-mock.py` (one stand-in for both apps, built from Seerr
+  3.5.0's source). Start it with `python3 -I ../Aquarium/Tools/seerr-mock.py`: it listens on
+  `127.0.0.1:8197` and signs users in through the QA Jellyfin on 8196, by Quick Connect, the way
+  Seerr does. `AQUARIUM_QA_SEERR` names another address. `tests/helpers/seerr-qa.ts` (TypeScript)
+  signs in to it as `suite-linux` and answers the `seerr_*` bridge commands with real requests;
+  `seerr.rs`'s `qa_tests` (Rust) drive the real back end against it. Both skip when it, or the QA
+  Jellyfin, is not running, and both `POST /__test/reset` before and after, so run them one at a
+  time. The DOM and unit tests need neither: they answer `seerr_request` in memory.
 - **Rust sandbox.** `test_support.rs` points `HOME` and the XDG folders at a temporary folder before
   any test runs and points D-Bus at a socket that does not exist, so no test can touch the real
   config, downloads or keyring. `sandbox()` serialises the tests that use them. `FakeServer` is a
   scripted local Jellyfin. Tests that need a real session bus are `#[ignore]` and run with
   `AQUARIUM_TEST_REAL_DBUS=1 cargo test -- --ignored <name>`.
 - **portable-tests.** `src-tauri/portable-tests/` compiles config, discovery, download_extras,
-  downloads, jellyfin, prefs, progress, server and test_support from the app's own source files
+  downloads, jellyfin, prefs, progress, seerr, server and test_support from the app's own source files
   (by `#[path]`), so their tests run on a Mac. On macOS `secret` and `idle` are in-memory doubles
   (`portable-tests/stubs.rs`); the real ones are tested on Linux.
 
@@ -94,6 +103,11 @@ From `npx vitest run --coverage` (all layers, QA server reachable):
 | src/views/settings.ts | 100 | 100 | 97.84 |
 | **all** | 99.96 | 99.91 | 96.62 |
 
+`src/seerr.ts`, `src/views/requests.ts` and `src/views/seerrSettings.ts` (the Seerr requests
+features, added 2026-11-16) are not in the table: they and their tests were written on a machine
+with no Node or Cargo and have not been run or measured yet. The same goes for the Rust counts
+below for `seerr` and the three new `secret` tests. Run the suites and bring both tables up to date.
+
 `public/theme-boot.js` (the legacy `fellyjin` localStorage carry-over) is tested by evaluating the
 real file in `tests/unit/theme.test.ts`; v8 coverage does not see it.
 
@@ -104,8 +118,8 @@ Test functions per module (`#[test]`/`#[tokio::test]`). "Portable" modules run o
 
 | Module | Tests | Runs |
 |---|---|---|
-| config, discovery, download_extras, downloads, jellyfin, prefs, progress, server, test_support | 226 (1 ignored) | portable and CI |
-| secret, idle | 18 (the real-keyring ones opt-in) | CI only |
+| config, discovery, download_extras, downloads, jellyfin, prefs, progress, seerr, server, test_support | 267 (1 ignored) | portable and CI |
+| secret, idle | 21 (the real-keyring ones opt-in) | CI only |
 | mpv, audio, player, surface, video_thread, render, gl, egl, wl, mpris, power, network, theme, lib, main | 167 | CI only |
 
 Rust line coverage is not measured yet. The GTK/libmpv modules' pure logic was extracted into small
@@ -183,6 +197,39 @@ alone; end it with `kill <pid>`, never MPRIS Quit. Look in `~/.local/share/aquar
 24. **Smaller stream keeps the audio track.** On FX Long Remux Multitrack pick the French track,
     then a lower quality: the transcode plays French (the stream address says
     `AudioStreamIndex=3`).
+25. **Seerr: connecting.** With `python3 -I ../Aquarium/Tools/seerr-mock.py` running (or a real
+    Seerr 3.4+ beside the Jellyfin server): Settings → Requests → Connect to Seerr…, type
+    `127.0.0.1:8197`. The dialog stops at "This connection isn't encrypted" (the stand-in is plain
+    http); Connect Anyway signs in with no password typed, a toast says where Requests is, and the
+    sidebar gains Requests. In Seahorse there is an item `seerr-session:<account>` for
+    `dev.aquarium.app`; `~/.config/aquarium/config.json` has no `connect.sid` value in it, and
+    `debug.log` has none either. Against an https Seerr the warning step is skipped. Against an
+    https address with a certificate the system does not trust (a self-signed one), a bare host
+    name is refused with "That server's certificate couldn't be verified…" and is not retried
+    over http. With Quick Connect turned off in Jellyfin's dashboard, the dialog asks for the
+    Jellyfin user name and password instead and connects with them.
+26. **Seerr: requesting.** Requests shows Your Requests and five rows of posters (they load
+    through `<seerr>/imageproxy/…`; nothing is fetched from `image.tmdb.org`: check with
+    `ss -tp` or the stand-in's `GET /__test/state` call list). Open The Matrix: Request, the toast,
+    "Waiting for approval", Cancel Request and its confirmation. Open a show: untick a season, the
+    button counts the rest, the request names only those. `curl -X POST
+    127.0.0.1:8197/__test/approve/1`, reopen the page: "On its way". `curl -X POST
+    127.0.0.1:8197/__test/expire`, then open any title: it loads (one quiet Quick Connect in the
+    stand-in's call list) and Settings still says the session is in the keyring. Stop the QA
+    Jellyfin's Quick Connect, expire again: Settings → Requests shows Session "Run out" and
+    Reconnect, and the sidebar entry goes.
+27. **Seerr: in the library.** Search for a title the library lacks: "Not in Your Library"
+    appears under "No results" about half a second after typing stops, and typing on never
+    flickers a stale row. A show with fewer seasons here than exist (the QA library has some)
+    has the "N more seasons exist" banner under its hero, and Request… opens its request page. A
+    collection with a TMDB id whose films aren't all here has "Missing From This Collection"
+    under its grid. With Seerr disconnected none of these are drawn and the pages look as before.
+28. **Seerr: leaving.** Disconnect from Seerr… asks first; afterwards the keyring item is gone,
+    the sidebar entry is gone, and the stand-in's `/__test/state` shows one session fewer.
+    Connect again, then sign out of Jellyfin (Settings → Server → Sign out): the keyring item is
+    gone and the stand-in was sent `POST /api/v1/auth/logout`. With two accounts on the device,
+    each has its own Seerr connection or none, and switching accounts switches Requests with it.
+    None of the Seerr screens runs a CSS animation that never ends (item 22).
 
 ## Function inventory
 
@@ -225,76 +272,76 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | expireSession | src/api.ts:453 | tests/unit/api-session.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via api (401) |
 | ITEM_FIELDS | src/api.ts:480 | tests/unit/api-browse.test.ts | unit | tested via every grid query |
 | DETAIL_FIELDS | src/api.ts:485 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via getItem |
-| VIDEO_COLLECTION_TYPES | src/api.ts:493 | tests/unit/api-browse.test.ts | unit | tested |
-| NON_VIDEO_ITEM_TYPES | src/api.ts:498 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via isVideoItem, getLibraryItems |
-| isVideoItem | src/api.ts:501 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getViews | src/api.ts:507 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getResume | src/api.ts:513 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
-| NEXT_UP_DAY_CHOICES | src/api.ts:532 | tests/unit/api-browse.test.ts | unit | tested |
-| nextUpDaysLabel | src/api.ts:534 | tests/unit/api-browse.test.ts | unit | tested |
-| nextUpDays | src/api.ts:545 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested via getNextUp |
-| nextUpInProgress | src/api.ts:551 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested via getNextUp |
-| nextUpRewatching | src/api.ts:555 | tests/unit/api-browse.test.ts | unit | tested via getNextUp |
-| nextUpQuery | src/api.ts:559 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via getNextUp |
-| NOT_PLAYED_DATE | src/api.ts:580 | tests/unit/api-browse.test.ts | unit | tested |
-| hasPlayedDate | src/api.ts:583 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
-| newStartsFirst | src/api.ts:598 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
-| expiredFromNextUp | src/api.ts:611 | tests/unit/api-browse.test.ts | unit | tested |
-| reportExpired | src/api.ts:624 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested via getNextUp (day limit) |
-| getNextUp | src/api.ts:640 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
-| seriesEpisodesWithUserData | src/api.ts:654 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested via removeFromNextUp, addToNextUp |
-| walked | src/api.ts:662 | tests/unit/api-browse.test.ts | unit | tested via nextUpTarget, addToNextUp |
-| nextUpTarget | src/api.ts:669 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| removeFromNextUp | src/api.ts:685 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
-| addToNextUp | src/api.ts:711 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested ("last" and "first") |
-| homeSectionFor | src/api.ts:744 | tests/unit/api-browse.test.ts | unit | tested via getHomeSections |
-| jellyfinDefaultSection | src/api.ts:767 | tests/unit/api-browse.test.ts | unit | tested via HOME_FALLBACK, getHomeSections |
-| HOME_FALLBACK | src/api.ts:771 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getHomeSections | src/api.ts:781 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getSeriesNextUp | src/api.ts:807 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getLatest | src/api.ts:824 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| foldEpisodesIntoSeries | src/api.ts:834 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via getLatest |
-| getLibraryItems | src/api.ts:875 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getFavorites | src/api.ts:903 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
-| getGenres | src/api.ts:924 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getItem | src/api.ts:933 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getSimilar | src/api.ts:942 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getSeasons | src/api.ts:950 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getEpisodes | src/api.ts:956 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getTrickplay | src/api.ts:994 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| trickplayTile | src/api.ts:1032 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested (jf_image forwarded by tests/helpers/api-qa.ts) |
-| getMediaSegments | src/api.ts:1056 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested (Intro and Outro) |
-| search | src/api.ts:1068 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getChannels | src/api.ts:1086 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getPrograms | src/api.ts:1103 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getItemsByIds | src/api.ts:1131 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| getUserDataByIds | src/api.ts:1145 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| markPlayed | src/api.ts:1151 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
-| setFavorite | src/api.ts:1158 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
-| resolveImage | src/api.ts:1173 | tests/unit/api-media.test.ts | unit | tested via imageUrl, imageHash |
-| imageUrl | src/api.ts:1190 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| imageHash | src/api.ts:1211 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| logoUrl | src/api.ts:1229 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| seriesPosterUrl | src/api.ts:1247 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| seasonPosterUrl | src/api.ts:1258 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| probeBandwidth | src/api.ts:1278 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested (jf_bitrate_test forwarded by tests/helpers/api-qa.ts) |
-| deviceProfile | src/api.ts:1298 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested via resolvePlayback (Embed, and External for text formats) |
-| resolvePlayback | src/api.ts:1339 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested (no access token in any address; External subtitles listed; audio track on a transcode) |
-| externalSubtitles | src/api.ts:1325 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested via resolvePlayback |
-| withoutApiKey | src/api.ts:1396 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested |
-| sourceWithoutApiKey | src/api.ts:1407 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested via resolvePlayback |
-| DOWNLOAD_QUALITIES | src/api.ts:1424 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested |
-| audioRate | src/api.ts:1435 | tests/unit/api-media.test.ts | unit | tested via estimateDownloadSize, buildDownload |
-| resolutionLabel | src/api.ts:1442 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via mediaSummary |
-| channelLabel | src/api.ts:1454 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via mediaSummary |
-| mediaSummary | src/api.ts:1474 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
-| estimateDownloadSize | src/api.ts:1497 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested |
-| effectiveDownloadQuality | src/api.ts:1526 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested |
-| buildDownload | src/api.ts:1542 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested (the transcode download address is built, not fetched: it would start an encode) |
-| ticksToText | src/api.ts:1576 | tests/unit/api-media.test.ts | unit | tested |
-| remainingText | src/api.ts:1589 | tests/unit/api-media.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
-| secondsToClock | src/api.ts:1595 | tests/unit/api-media.test.ts | unit | tested |
-| bytesToText | src/api.ts:1605 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| VIDEO_COLLECTION_TYPES | src/api.ts:495 | tests/unit/api-browse.test.ts | unit | tested |
+| NON_VIDEO_ITEM_TYPES | src/api.ts:500 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via isVideoItem, getLibraryItems |
+| isVideoItem | src/api.ts:503 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getViews | src/api.ts:509 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getResume | src/api.ts:515 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
+| NEXT_UP_DAY_CHOICES | src/api.ts:534 | tests/unit/api-browse.test.ts | unit | tested |
+| nextUpDaysLabel | src/api.ts:536 | tests/unit/api-browse.test.ts | unit | tested |
+| nextUpDays | src/api.ts:547 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested via getNextUp |
+| nextUpInProgress | src/api.ts:553 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested via getNextUp |
+| nextUpRewatching | src/api.ts:557 | tests/unit/api-browse.test.ts | unit | tested via getNextUp |
+| nextUpQuery | src/api.ts:561 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via getNextUp |
+| NOT_PLAYED_DATE | src/api.ts:582 | tests/unit/api-browse.test.ts | unit | tested |
+| hasPlayedDate | src/api.ts:585 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
+| newStartsFirst | src/api.ts:600 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
+| expiredFromNextUp | src/api.ts:613 | tests/unit/api-browse.test.ts | unit | tested |
+| reportExpired | src/api.ts:626 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested via getNextUp (day limit) |
+| getNextUp | src/api.ts:642 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
+| seriesEpisodesWithUserData | src/api.ts:656 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested via removeFromNextUp, addToNextUp |
+| walked | src/api.ts:664 | tests/unit/api-browse.test.ts | unit | tested via nextUpTarget, addToNextUp |
+| nextUpTarget | src/api.ts:671 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| removeFromNextUp | src/api.ts:687 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
+| addToNextUp | src/api.ts:713 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested ("last" and "first") |
+| homeSectionFor | src/api.ts:746 | tests/unit/api-browse.test.ts | unit | tested via getHomeSections |
+| jellyfinDefaultSection | src/api.ts:769 | tests/unit/api-browse.test.ts | unit | tested via HOME_FALLBACK, getHomeSections |
+| HOME_FALLBACK | src/api.ts:773 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getHomeSections | src/api.ts:783 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getSeriesNextUp | src/api.ts:809 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getLatest | src/api.ts:826 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| foldEpisodesIntoSeries | src/api.ts:836 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via getLatest |
+| getLibraryItems | src/api.ts:877 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getFavorites | src/api.ts:905 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
+| getGenres | src/api.ts:926 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getItem | src/api.ts:935 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getSimilar | src/api.ts:944 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getSeasons | src/api.ts:952 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getEpisodes | src/api.ts:958 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getTrickplay | src/api.ts:996 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| trickplayTile | src/api.ts:1034 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested (jf_image forwarded by tests/helpers/api-qa.ts) |
+| getMediaSegments | src/api.ts:1058 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested (Intro and Outro) |
+| search | src/api.ts:1070 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getChannels | src/api.ts:1088 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getPrograms | src/api.ts:1105 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getItemsByIds | src/api.ts:1133 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| getUserDataByIds | src/api.ts:1147 | tests/unit/api-browse.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| markPlayed | src/api.ts:1153 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
+| setFavorite | src/api.ts:1160 | tests/unit/api-browse.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
+| resolveImage | src/api.ts:1175 | tests/unit/api-media.test.ts | unit | tested via imageUrl, imageHash |
+| imageUrl | src/api.ts:1192 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| imageHash | src/api.ts:1213 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| logoUrl | src/api.ts:1231 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| seriesPosterUrl | src/api.ts:1249 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| seasonPosterUrl | src/api.ts:1260 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| probeBandwidth | src/api.ts:1280 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested (jf_bitrate_test forwarded by tests/helpers/api-qa.ts) |
+| deviceProfile | src/api.ts:1300 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested via resolvePlayback (Embed, and External for text formats) |
+| resolvePlayback | src/api.ts:1341 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested (no access token in any address; External subtitles listed; audio track on a transcode) |
+| externalSubtitles | src/api.ts:1327 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested via resolvePlayback |
+| withoutApiKey | src/api.ts:1398 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested |
+| sourceWithoutApiKey | src/api.ts:1409 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested via resolvePlayback |
+| DOWNLOAD_QUALITIES | src/api.ts:1426 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested |
+| audioRate | src/api.ts:1437 | tests/unit/api-media.test.ts | unit | tested via estimateDownloadSize, buildDownload |
+| resolutionLabel | src/api.ts:1444 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via mediaSummary |
+| channelLabel | src/api.ts:1456 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested via mediaSummary |
+| mediaSummary | src/api.ts:1476 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
+| estimateDownloadSize | src/api.ts:1499 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested |
+| effectiveDownloadQuality | src/api.ts:1528 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested |
+| buildDownload | src/api.ts:1544 | tests/unit/api-media.test.ts; tests/integration/api-playback.test.ts | unit, integration (QA server) | tested (the transcode download address is built, not fetched: it would start an encode) |
+| ticksToText | src/api.ts:1578 | tests/unit/api-media.test.ts | unit | tested |
+| remainingText | src/api.ts:1591 | tests/unit/api-media.test.ts; tests/integration/api-state.test.ts | unit, integration (QA server) | tested |
+| secondsToClock | src/api.ts:1597 | tests/unit/api-media.test.ts | unit | tested |
+| bytesToText | src/api.ts:1607 | tests/unit/api-media.test.ts; tests/integration/api-browse.test.ts | unit, integration (QA server) | tested |
 
 ### src/playback.ts, src/adaptive.ts, src/prefetch.ts
 
@@ -679,125 +726,125 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 
 | Function | Source | Test file | Kind | Status |
 | --- | --- | --- | --- | --- |
-| ICONS (sidebar glyphs) | src/main.ts:86 | tests/dom/main-shell.test.ts | dom | tested via paintNav |
-| fsSetBar | src/main.ts:157 | tests/dom/main-fullscreen.test.ts | dom | tested via fsPokeControls/fsArmHide |
-| userSubPos | src/main.ts:175 | tests/dom/main-fullscreen.test.ts | dom | tested via fsSetBar (sub_pos lift and restore, damaged value) |
-| fsPokeControls | src/main.ts:182 | tests/dom/main-fullscreen.test.ts | dom | tested via document mousemove, player-mouse, notes, tap |
-| fsArmHide | src/main.ts:194 | tests/dom/main-fullscreen.test.ts | dom | tested (hide after Settings interval, hover and open panel keep it up) |
-| fsPointerMoved | src/main.ts:218 | tests/dom/main-fullscreen.test.ts | dom | tested (Linux/CLAUDE.md invariant: out-of-window and repeated mousemoves ignored) |
-| setVideoFullscreen | src/main.ts:230 | tests/dom/main-fullscreen.test.ts | dom | tested via f, button, Escape, events, gestures |
-| setVideoPip | src/main.ts:284 | tests/dom/main-fullscreen.test.ts | dom | tested via p, button, ctl pip, quit prompt |
-| reflectCoverage | src/main.ts:309 | tests/dom/main-player.test.ts | dom | tested via updatePlayerBar and PiP (body.video-covered) |
-| reflectPip | src/main.ts:313 | tests/dom/main-fullscreen.test.ts | dom | tested via setVideoPip and player-pip |
-| hashOf | src/main.ts:338 | tests/dom/main-boot.test.ts | dom | tested via hashchange back trail |
-| goBack | src/main.ts:349 | tests/dom/main-boot.test.ts | dom | tested via Back button, Alt+Left, mouse button 3 |
-| atHome | src/main.ts:360 | tests/dom/main-boot.test.ts | dom | tested via back trail and next-up-changed |
-| updateBackButton | src/main.ts:365 | tests/dom/main-boot.test.ts | dom | tested via back trail |
+| ICONS (sidebar glyphs) | src/main.ts:88 | tests/dom/main-shell.test.ts | dom | tested via paintNav |
+| fsSetBar | src/main.ts:160 | tests/dom/main-fullscreen.test.ts | dom | tested via fsPokeControls/fsArmHide |
+| userSubPos | src/main.ts:178 | tests/dom/main-fullscreen.test.ts | dom | tested via fsSetBar (sub_pos lift and restore, damaged value) |
+| fsPokeControls | src/main.ts:185 | tests/dom/main-fullscreen.test.ts | dom | tested via document mousemove, player-mouse, notes, tap |
+| fsArmHide | src/main.ts:197 | tests/dom/main-fullscreen.test.ts | dom | tested (hide after Settings interval, hover and open panel keep it up) |
+| fsPointerMoved | src/main.ts:221 | tests/dom/main-fullscreen.test.ts | dom | tested (Linux/CLAUDE.md invariant: out-of-window and repeated mousemoves ignored) |
+| setVideoFullscreen | src/main.ts:233 | tests/dom/main-fullscreen.test.ts | dom | tested via f, button, Escape, events, gestures |
+| setVideoPip | src/main.ts:287 | tests/dom/main-fullscreen.test.ts | dom | tested via p, button, ctl pip, quit prompt |
+| reflectCoverage | src/main.ts:312 | tests/dom/main-player.test.ts | dom | tested via updatePlayerBar and PiP (body.video-covered) |
+| reflectPip | src/main.ts:316 | tests/dom/main-fullscreen.test.ts | dom | tested via setVideoPip and player-pip |
+| hashOf | src/main.ts:341 | tests/dom/main-boot.test.ts | dom | tested via hashchange back trail |
+| goBack | src/main.ts:352 | tests/dom/main-boot.test.ts | dom | tested via Back button, Alt+Left, mouse button 3 |
+| atHome | src/main.ts:363 | tests/dom/main-boot.test.ts | dom | tested via back trail and next-up-changed |
+| updateBackButton | src/main.ts:368 | tests/dom/main-boot.test.ts | dom | tested via back trail |
 | SERVER_PAGES | src/main.ts:371 | tests/dom/main-boot.test.ts | dom | tested via route (offline pages) |
-| renderOffline | src/main.ts:373 | tests/dom/main-boot.test.ts | dom | tested (Go to Downloads, Retry connection) |
-| highlightNav | src/main.ts:407 | tests/dom/main-shell.test.ts | dom | tested (active entry, aria-current) |
-| settleScroll | src/main.ts:425 | tests/dom/main-boot.test.ts | dom | tested via scroll memory |
-| route | src/main.ts:438 | tests/dom/main-boot.test.ts | dom | tested |
-| VIEWS_CACHE_KEY | src/main.ts:489 | tests/dom/main-shell.test.ts | dom | tested via buildNav (cache across launches) |
-| viewsSignature | src/main.ts:493 | tests/dom/main-shell.test.ts | dom | tested via buildNav (redraw only on change) |
-| buildNav | src/main.ts:497 | tests/dom/main-shell.test.ts | dom | tested (cached paint, failure, refresh) |
-| paintNav | src/main.ts:526 | tests/dom/main-shell.test.ts | dom | tested (libraries, music, books, Collections, Live TV) |
-| updateSidebarFooter | src/main.ts:594 | tests/dom/main-shell.test.ts | dom | tested |
-| updateOfflinePill | src/main.ts:629 | tests/dom/main-shell.test.ts | dom | tested via aquarium-connectivity |
-| cacheOwner | src/main.ts:635 | tests/dom/main-shell.test.ts | dom | tested via showShell/boot |
-| showShell | src/main.ts:640 | tests/dom/main-boot.test.ts | dom | tested (boot; first sign-in in main-shell.test.ts) |
-| showLogin | src/main.ts:671 | tests/dom/main-boot.test.ts | dom | tested (boot, Settings sign-out, auth expired, identity change) |
-| showAddAccount | src/main.ts:686 | tests/dom/main-shell.test.ts | dom | tested (Cancel, sign-in) |
-| enterAccount | src/main.ts:703 | tests/dom/main-shell.test.ts | dom | tested via switch and Add Account; player stop in main-fullscreen.test.ts |
-| switchToAccount | src/main.ts:712 | tests/dom/main-shell.test.ts | dom | tested (success, failure) |
-| PB_ICONS | src/main.ts:726 | tests/dom/main-player.test.ts | dom | tested via play/pause, volume and skip glyphs |
-| skipIcon | src/main.ts:782 | tests/dom/main-player.test.ts | dom | tested via syncSkipButtons |
-| syncSkipButtons | src/main.ts:789 | tests/dom/main-player.test.ts | dom | tested (interval from Settings, live change) |
-| pbButton | src/main.ts:805 | tests/dom/main-player.test.ts | dom | tested (click and error logged to ui_log) |
-| chapterNameAt | src/main.ts:843 | tests/dom/main-player.test.ts | dom | tested via scrubber readout |
-| renderChapters | src/main.ts:854 | tests/dom/main-player.test.ts | dom | tested |
-| closeBarPanel | src/main.ts:884 | tests/dom/main-panels.test.ts | dom | tested |
-| toggleBarPanel | src/main.ts:888 | tests/dom/main-panels.test.ts | dom | tested |
-| toggleQualityPicker | src/main.ts:911 | tests/dom/main-panels.test.ts | dom | tested |
-| languageName | src/main.ts:976 | tests/dom/main-panels.test.ts | dom | tested via trackLabel |
-| trackLabel | src/main.ts:989 | tests/dom/main-panels.test.ts | dom | tested |
-| toggleAudioPanel | src/main.ts:996 | tests/dom/main-panels.test.ts | dom | tested |
-| toggleSubtitlePanel | src/main.ts:1017 | tests/dom/main-panels.test.ts | dom | tested |
-| togglePlaybackPanel | src/main.ts:1050 | tests/dom/main-panels.test.ts | dom | tested |
-| togglePicturePanel | src/main.ts:1118 | tests/dom/main-panels.test.ts | dom | tested |
-| toggleEpisodePanel | src/main.ts:1218 | tests/dom/main-panels.test.ts | dom | tested (its .catch at 1330 is unreachable: getEpisodeQueue never rejects) |
-| toggleChannelsPanel | src/main.ts:1339 | tests/dom/main-panels.test.ts | dom | tested |
-| toggleSleepPanel | src/main.ts:1343 | tests/dom/main-panels.test.ts | dom | tested |
-| toggleChapterPanel | src/main.ts:1403 | tests/dom/main-panels.test.ts | dom | tested |
-| mbps | src/main.ts:1445 | tests/dom/main-panels.test.ts | dom | tested via stream info Bitrate |
-| deliveryLabel | src/main.ts:1451 | tests/dom/main-panels.test.ts | dom | tested (server-stream, local and live branches) |
-| toggleInfoPanel | src/main.ts:1469 | tests/dom/main-panels.test.ts | dom | tested |
-| queueTiles | src/main.ts:1525 | tests/dom/main-panels.test.ts | dom | tested (play, right-click remove) |
-| VOLUME_THROTTLE_MS | src/main.ts:1561 | tests/dom/main-controls.test.ts | dom | tested via buildVolume throttle |
-| setRangeFill | src/main.ts:1568 | tests/dom/main-player.test.ts | dom | tested via scrubber, volume and picture sliders |
-| volumeIcon | src/main.ts:1572 | tests/dom/main-controls.test.ts | dom | tested |
-| buildVolume | src/main.ts:1577 | tests/dom/main-controls.test.ts | dom | tested (throttle, change, pointerup, unmute) |
-| bumpVolume | src/main.ts:1626 | tests/dom/main-controls.test.ts | dom | tested via ArrowUp/ArrowDown |
-| stepSpeed | src/main.ts:1643 | tests/dom/main-controls.test.ts | dom | tested via [ and ] |
-| resetMediaExtras | src/main.ts:1668 | tests/dom/main-player.test.ts | dom | tested via new item (segments, trickplay, next available, stalls reset) |
-| trickplayTile | src/main.ts:1700 | tests/dom/main-player.test.ts | dom | tested (fetched once, failure not retried) |
-| showScrubPreview | src/main.ts:1718 | tests/dom/main-player.test.ts | dom | tested |
-| hideScrubPreview | src/main.ts:1750 | tests/dom/main-player.test.ts | dom | tested |
-| segmentAt | src/main.ts:1755 | tests/dom/main-player.test.ts | dom | tested via skip button |
-| syncSkipButton | src/main.ts:1763 | tests/dom/main-player.test.ts | dom | tested |
-| UPNEXT_LEAD | src/main.ts:1779 | tests/dom/main-controls.test.ts | dom | tested via syncUpNext |
-| syncUpNext | src/main.ts:1781 | tests/dom/main-controls.test.ts | dom | tested |
-| upNextKey | src/main.ts:1819 | tests/dom/main-controls.test.ts | dom | tested via thumbnail fetched once |
-| upNextTitle | src/main.ts:1828 | tests/dom/main-controls.test.ts | dom | tested |
-| dismissUpNext | src/main.ts:1840 | tests/dom/main-controls.test.ts | dom | tested (Not now) |
-| upNextShowing | src/main.ts:1847 | tests/dom/main-controls.test.ts | dom | tested via Enter |
-| startUpNext | src/main.ts:1851 | tests/dom/main-controls.test.ts | dom | tested (once, failure toast) |
-| playerTitleLines | src/main.ts:1868 | tests/dom/main-player.test.ts | dom | tested (episode, film, download record, channel) |
-| buildPlayerBar | src/main.ts:1894 | tests/dom/main-player.test.ts | dom | tested (every control; pointer handlers in main-fullscreen.test.ts) |
-| barNoteShowing | src/main.ts:2102 | tests/dom/main-controls.test.ts | dom | tested |
-| flashBarNote | src/main.ts:2106 | tests/dom/main-controls.test.ts | dom | tested |
-| toggleSubtitles | src/main.ts:2117 | tests/dom/main-controls.test.ts | dom | tested |
-| skipSegment | src/main.ts:2139 | tests/dom/main-player.test.ts | dom | tested via s and ctl skip |
-| skipBy | src/main.ts:2147 | tests/dom/main-controls.test.ts | dom | tested (not on live) |
-| nudgeAudioDelay | src/main.ts:2154 | tests/dom/main-controls.test.ts | dom | tested (keys, picture input, tune panel) |
-| openInfo | src/main.ts:2165 | tests/dom/main-controls.test.ts | dom | tested |
-| openPictureMenu | src/main.ts:2177 | tests/dom/main-controls.test.ts | dom | tested |
-| onPlayerInput | src/main.ts:2239 | tests/dom/main-controls.test.ts | dom | tested (keys, ctl, gestures, context) |
-| barOutOfSight | src/main.ts:2322 | tests/dom/main-fullscreen.test.ts | dom | tested |
-| updatePlayerBar | src/main.ts:2326 | tests/dom/main-player.test.ts | dom | tested |
-| syncAudioState | src/main.ts:2435 | tests/dom/main-controls.test.ts | dom | tested |
-| SEARCH_DEBOUNCE_MS | src/main.ts:2468 | tests/dom/main-shell.test.ts | dom | tested via wireSearch |
-| gotoSearch | src/main.ts:2475 | tests/dom/main-shell.test.ts | dom | tested (push once, then replace) |
-| wireSearch | src/main.ts:2486 | tests/dom/main-shell.test.ts | dom | tested |
-| isTyping | src/main.ts:2576 | tests/dom/main-shell.test.ts | dom | tested via /, ? and spatial nav |
-| wireGlobalKeys | src/main.ts:2583 | tests/dom/main-shell.test.ts | dom | tested (? sheet; Alt+Left in main-boot.test.ts) |
-| SHORTCUTS | src/main.ts:2607 | tests/dom/main-shell.test.ts | dom | tested via toggleShortcuts |
-| toggleShortcuts | src/main.ts:2661 | tests/dom/main-shell.test.ts | dom | tested (open/close/Escape, reopening after its Close button) |
-| askBeforeQuit | src/main.ts:2707 | tests/dom/main-fullscreen.test.ts | dom | tested |
-| LAST_ROUTE_KEY / RESUMABLE | src/main.ts:2748 | tests/dom/main-boot.test.ts | dom | tested via rememberRoute/lastRoute |
-| rememberRoute | src/main.ts:2753 | tests/dom/main-boot.test.ts | dom | tested |
-| lastRoute | src/main.ts:2764 | tests/dom/main-boot.test.ts | dom | tested |
-| boot | src/main.ts:2775 | tests/dom/main-boot.test.ts | dom | tested (every listener exercised across the main-*.test.ts files) |
-| stopServerRetry (in boot) | src/main.ts:2929 | tests/dom/main-shell.test.ts | dom | tested |
-| scheduleServerRetry (in boot) | src/main.ts:2937 | tests/dom/main-shell.test.ts | dom | tested (15 s, doubling, 5 min cap, network and visibility cues) |
-| row | src/views/settings.ts:21 | tests/dom/views-settings.test.ts | dom | tested via renderSettings |
-| choice | src/views/settings.ts:32 | tests/dom/views-settings.test.ts | dom | tested (save, save failure, onPicked) |
-| batteryRenderChoice | src/views/settings.ts:55 | tests/dom/views-settings.test.ts | dom | tested (old true/false configs) |
-| toggle | src/views/settings.ts:67 | tests/dom/views-settings.test.ts | dom | tested |
-| slider | src/views/settings.ts:92 | tests/dom/views-settings.test.ts | dom | tested (live apply, reset, scale) |
-| LANGUAGES | src/views/settings.ts:142 | tests/dom/views-settings.test.ts | dom | tested |
-| lastDecoder | src/views/settings.ts:172 | tests/dom/views-settings.test.ts | dom | tested (storage failure) |
-| DECODER_NAMES | src/views/settings.ts:180 | tests/dom/views-settings.test.ts | dom | tested |
-| downloadsBlock | src/views/settings.ts:192 | tests/dom/views-settings.test.ts | dom | tested |
-| renderSettings | src/views/settings.ts:220 | tests/dom/views-settings.test.ts | dom | tested (every block; stale-page guards) |
-| drawAccounts (in renderSettings) | src/views/settings.ts:336 | tests/dom/views-settings.test.ts | dom | tested |
-| qcSay / qcConfirm (in renderSettings) | src/views/settings.ts:412 | tests/dom/views-settings.test.ts | dom | tested |
-| syncLastRead (in renderSettings) | src/views/settings.ts:698 | tests/dom/views-settings.test.ts | dom | tested |
-| refreshNow (in renderSettings) | src/views/settings.ts:721 | tests/dom/views-settings.test.ts | dom | tested |
-| checkArtwork (in renderSettings) | src/views/settings.ts:741 | tests/dom/views-settings.test.ts | dom | tested |
-| syncLiveRows (in renderSettings) | src/views/settings.ts:766 | tests/dom/views-settings.test.ts | dom | tested |
-| checkSources (in renderSettings) | src/views/settings.ts:788 | tests/dom/views-settings.test.ts | dom | tested |
-| probeArtwork | src/views/settings.ts:1127 | tests/dom/views-settings.test.ts | dom | tested via Check artwork (timeout, unnamed, failures) |
+| renderOffline | src/main.ts:376 | tests/dom/main-boot.test.ts | dom | tested (Go to Downloads, Retry connection) |
+| highlightNav | src/main.ts:410 | tests/dom/main-shell.test.ts | dom | tested (active entry, aria-current) |
+| settleScroll | src/main.ts:428 | tests/dom/main-boot.test.ts | dom | tested via scroll memory |
+| route | src/main.ts:441 | tests/dom/main-boot.test.ts | dom | tested |
+| VIEWS_CACHE_KEY | src/main.ts:494 | tests/dom/main-shell.test.ts | dom | tested via buildNav (cache across launches) |
+| viewsSignature | src/main.ts:498 | tests/dom/main-shell.test.ts | dom | tested via buildNav (redraw only on change) |
+| buildNav | src/main.ts:502 | tests/dom/main-shell.test.ts | dom | tested (cached paint, failure, refresh) |
+| paintNav | src/main.ts:531 | tests/dom/main-shell.test.ts | dom | tested (libraries, music, books, Collections, Live TV) |
+| updateSidebarFooter | src/main.ts:602 | tests/dom/main-shell.test.ts | dom | tested |
+| updateOfflinePill | src/main.ts:637 | tests/dom/main-shell.test.ts | dom | tested via aquarium-connectivity |
+| cacheOwner | src/main.ts:643 | tests/dom/main-shell.test.ts | dom | tested via showShell/boot |
+| showShell | src/main.ts:648 | tests/dom/main-boot.test.ts | dom | tested (boot; first sign-in in main-shell.test.ts) |
+| showLogin | src/main.ts:682 | tests/dom/main-boot.test.ts | dom | tested (boot, Settings sign-out, auth expired, identity change) |
+| showAddAccount | src/main.ts:699 | tests/dom/main-shell.test.ts | dom | tested (Cancel, sign-in) |
+| enterAccount | src/main.ts:716 | tests/dom/main-shell.test.ts | dom | tested via switch and Add Account; player stop in main-fullscreen.test.ts |
+| switchToAccount | src/main.ts:726 | tests/dom/main-shell.test.ts | dom | tested (success, failure) |
+| PB_ICONS | src/main.ts:740 | tests/dom/main-player.test.ts | dom | tested via play/pause, volume and skip glyphs |
+| skipIcon | src/main.ts:796 | tests/dom/main-player.test.ts | dom | tested via syncSkipButtons |
+| syncSkipButtons | src/main.ts:803 | tests/dom/main-player.test.ts | dom | tested (interval from Settings, live change) |
+| pbButton | src/main.ts:819 | tests/dom/main-player.test.ts | dom | tested (click and error logged to ui_log) |
+| chapterNameAt | src/main.ts:857 | tests/dom/main-player.test.ts | dom | tested via scrubber readout |
+| renderChapters | src/main.ts:868 | tests/dom/main-player.test.ts | dom | tested |
+| closeBarPanel | src/main.ts:898 | tests/dom/main-panels.test.ts | dom | tested |
+| toggleBarPanel | src/main.ts:902 | tests/dom/main-panels.test.ts | dom | tested |
+| toggleQualityPicker | src/main.ts:925 | tests/dom/main-panels.test.ts | dom | tested |
+| languageName | src/main.ts:990 | tests/dom/main-panels.test.ts | dom | tested via trackLabel |
+| trackLabel | src/main.ts:1003 | tests/dom/main-panels.test.ts | dom | tested |
+| toggleAudioPanel | src/main.ts:1010 | tests/dom/main-panels.test.ts | dom | tested |
+| toggleSubtitlePanel | src/main.ts:1031 | tests/dom/main-panels.test.ts | dom | tested |
+| togglePlaybackPanel | src/main.ts:1064 | tests/dom/main-panels.test.ts | dom | tested |
+| togglePicturePanel | src/main.ts:1132 | tests/dom/main-panels.test.ts | dom | tested |
+| toggleEpisodePanel | src/main.ts:1232 | tests/dom/main-panels.test.ts | dom | tested (its .catch at 1330 is unreachable: getEpisodeQueue never rejects) |
+| toggleChannelsPanel | src/main.ts:1353 | tests/dom/main-panels.test.ts | dom | tested |
+| toggleSleepPanel | src/main.ts:1357 | tests/dom/main-panels.test.ts | dom | tested |
+| toggleChapterPanel | src/main.ts:1417 | tests/dom/main-panels.test.ts | dom | tested |
+| mbps | src/main.ts:1459 | tests/dom/main-panels.test.ts | dom | tested via stream info Bitrate |
+| deliveryLabel | src/main.ts:1465 | tests/dom/main-panels.test.ts | dom | tested (server-stream, local and live branches) |
+| toggleInfoPanel | src/main.ts:1483 | tests/dom/main-panels.test.ts | dom | tested |
+| queueTiles | src/main.ts:1539 | tests/dom/main-panels.test.ts | dom | tested (play, right-click remove) |
+| VOLUME_THROTTLE_MS | src/main.ts:1575 | tests/dom/main-controls.test.ts | dom | tested via buildVolume throttle |
+| setRangeFill | src/main.ts:1582 | tests/dom/main-player.test.ts | dom | tested via scrubber, volume and picture sliders |
+| volumeIcon | src/main.ts:1586 | tests/dom/main-controls.test.ts | dom | tested |
+| buildVolume | src/main.ts:1591 | tests/dom/main-controls.test.ts | dom | tested (throttle, change, pointerup, unmute) |
+| bumpVolume | src/main.ts:1640 | tests/dom/main-controls.test.ts | dom | tested via ArrowUp/ArrowDown |
+| stepSpeed | src/main.ts:1657 | tests/dom/main-controls.test.ts | dom | tested via [ and ] |
+| resetMediaExtras | src/main.ts:1682 | tests/dom/main-player.test.ts | dom | tested via new item (segments, trickplay, next available, stalls reset) |
+| trickplayTile | src/main.ts:1714 | tests/dom/main-player.test.ts | dom | tested (fetched once, failure not retried) |
+| showScrubPreview | src/main.ts:1732 | tests/dom/main-player.test.ts | dom | tested |
+| hideScrubPreview | src/main.ts:1764 | tests/dom/main-player.test.ts | dom | tested |
+| segmentAt | src/main.ts:1769 | tests/dom/main-player.test.ts | dom | tested via skip button |
+| syncSkipButton | src/main.ts:1777 | tests/dom/main-player.test.ts | dom | tested |
+| UPNEXT_LEAD | src/main.ts:1793 | tests/dom/main-controls.test.ts | dom | tested via syncUpNext |
+| syncUpNext | src/main.ts:1795 | tests/dom/main-controls.test.ts | dom | tested |
+| upNextKey | src/main.ts:1833 | tests/dom/main-controls.test.ts | dom | tested via thumbnail fetched once |
+| upNextTitle | src/main.ts:1842 | tests/dom/main-controls.test.ts | dom | tested |
+| dismissUpNext | src/main.ts:1854 | tests/dom/main-controls.test.ts | dom | tested (Not now) |
+| upNextShowing | src/main.ts:1861 | tests/dom/main-controls.test.ts | dom | tested via Enter |
+| startUpNext | src/main.ts:1865 | tests/dom/main-controls.test.ts | dom | tested (once, failure toast) |
+| playerTitleLines | src/main.ts:1882 | tests/dom/main-player.test.ts | dom | tested (episode, film, download record, channel) |
+| buildPlayerBar | src/main.ts:1908 | tests/dom/main-player.test.ts | dom | tested (every control; pointer handlers in main-fullscreen.test.ts) |
+| barNoteShowing | src/main.ts:2116 | tests/dom/main-controls.test.ts | dom | tested |
+| flashBarNote | src/main.ts:2120 | tests/dom/main-controls.test.ts | dom | tested |
+| toggleSubtitles | src/main.ts:2131 | tests/dom/main-controls.test.ts | dom | tested |
+| skipSegment | src/main.ts:2153 | tests/dom/main-player.test.ts | dom | tested via s and ctl skip |
+| skipBy | src/main.ts:2161 | tests/dom/main-controls.test.ts | dom | tested (not on live) |
+| nudgeAudioDelay | src/main.ts:2168 | tests/dom/main-controls.test.ts | dom | tested (keys, picture input, tune panel) |
+| openInfo | src/main.ts:2179 | tests/dom/main-controls.test.ts | dom | tested |
+| openPictureMenu | src/main.ts:2191 | tests/dom/main-controls.test.ts | dom | tested |
+| onPlayerInput | src/main.ts:2253 | tests/dom/main-controls.test.ts | dom | tested (keys, ctl, gestures, context) |
+| barOutOfSight | src/main.ts:2336 | tests/dom/main-fullscreen.test.ts | dom | tested |
+| updatePlayerBar | src/main.ts:2340 | tests/dom/main-player.test.ts | dom | tested |
+| syncAudioState | src/main.ts:2449 | tests/dom/main-controls.test.ts | dom | tested |
+| SEARCH_DEBOUNCE_MS | src/main.ts:2482 | tests/dom/main-shell.test.ts | dom | tested via wireSearch |
+| gotoSearch | src/main.ts:2489 | tests/dom/main-shell.test.ts | dom | tested (push once, then replace) |
+| wireSearch | src/main.ts:2500 | tests/dom/main-shell.test.ts | dom | tested |
+| isTyping | src/main.ts:2590 | tests/dom/main-shell.test.ts | dom | tested via /, ? and spatial nav |
+| wireGlobalKeys | src/main.ts:2597 | tests/dom/main-shell.test.ts | dom | tested (? sheet; Alt+Left in main-boot.test.ts) |
+| SHORTCUTS | src/main.ts:2621 | tests/dom/main-shell.test.ts | dom | tested via toggleShortcuts |
+| toggleShortcuts | src/main.ts:2675 | tests/dom/main-shell.test.ts | dom | tested (open/close/Escape, reopening after its Close button) |
+| askBeforeQuit | src/main.ts:2721 | tests/dom/main-fullscreen.test.ts | dom | tested |
+| LAST_ROUTE_KEY / RESUMABLE | src/main.ts:2762 | tests/dom/main-boot.test.ts | dom | tested via rememberRoute/lastRoute |
+| rememberRoute | src/main.ts:2767 | tests/dom/main-boot.test.ts | dom | tested |
+| lastRoute | src/main.ts:2778 | tests/dom/main-boot.test.ts | dom | tested |
+| boot | src/main.ts:2789 | tests/dom/main-boot.test.ts | dom | tested (every listener exercised across the main-*.test.ts files) |
+| stopServerRetry (in boot) | src/main.ts:2963 | tests/dom/main-shell.test.ts | dom | tested |
+| scheduleServerRetry (in boot) | src/main.ts:2971 | tests/dom/main-shell.test.ts | dom | tested (15 s, doubling, 5 min cap, network and visibility cues) |
+| row | src/views/settings.ts:22 | tests/dom/views-settings.test.ts | dom | tested via renderSettings |
+| choice | src/views/settings.ts:33 | tests/dom/views-settings.test.ts | dom | tested (save, save failure, onPicked) |
+| batteryRenderChoice | src/views/settings.ts:56 | tests/dom/views-settings.test.ts | dom | tested (old true/false configs) |
+| toggle | src/views/settings.ts:68 | tests/dom/views-settings.test.ts | dom | tested |
+| slider | src/views/settings.ts:93 | tests/dom/views-settings.test.ts | dom | tested (live apply, reset, scale) |
+| LANGUAGES | src/views/settings.ts:143 | tests/dom/views-settings.test.ts | dom | tested |
+| lastDecoder | src/views/settings.ts:173 | tests/dom/views-settings.test.ts | dom | tested (storage failure) |
+| DECODER_NAMES | src/views/settings.ts:181 | tests/dom/views-settings.test.ts | dom | tested |
+| downloadsBlock | src/views/settings.ts:193 | tests/dom/views-settings.test.ts | dom | tested |
+| renderSettings | src/views/settings.ts:221 | tests/dom/views-settings.test.ts | dom | tested (every block; stale-page guards) |
+| drawAccounts (in renderSettings) | src/views/settings.ts:337 | tests/dom/views-settings.test.ts | dom | tested |
+| qcSay / qcConfirm (in renderSettings) | src/views/settings.ts:417 | tests/dom/views-settings.test.ts | dom | tested |
+| syncLastRead (in renderSettings) | src/views/settings.ts:703 | tests/dom/views-settings.test.ts | dom | tested |
+| refreshNow (in renderSettings) | src/views/settings.ts:726 | tests/dom/views-settings.test.ts | dom | tested |
+| checkArtwork (in renderSettings) | src/views/settings.ts:746 | tests/dom/views-settings.test.ts | dom | tested |
+| syncLiveRows (in renderSettings) | src/views/settings.ts:771 | tests/dom/views-settings.test.ts | dom | tested |
+| checkSources (in renderSettings) | src/views/settings.ts:793 | tests/dom/views-settings.test.ts | dom | tested |
+| probeArtwork | src/views/settings.ts:1132 | tests/dom/views-settings.test.ts | dom | tested via Check artwork (timeout, unnamed, failures) |
 | el | src/ui.ts:9 | tests/dom/ui.test.ts | dom | tested |
 | clear | src/ui.ts:30 | tests/dom/ui.test.ts | dom | tested |
 | asButton | src/ui.ts:41 | tests/dom/ui.test.ts | dom | tested |
@@ -904,18 +951,18 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | picks (inner) | src/views/home.ts:316 | tests/dom/views-home.test.ts | dom | tested via renderHome |
 | placeFavorites (inner) | src/views/home.ts:328 | tests/dom/views-home.test.ts | dom | tested via renderHome |
 | renderHome | src/views/home.ts:406 | tests/dom/views-home.test.ts | dom | tested |
-| prefsKey | src/views/library.ts:37 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
-| loadPrefs | src/views/library.ts:39 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
-| savePrefs | src/views/library.ts:54 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
-| toggleChip | src/views/library.ts:63 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
-| renderLibrary | src/views/library.ts:81 | tests/dom/views-library.test.ts | dom | tested |
-| cacheKey (inner) | src/views/library.ts:119 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
-| clearFilters (inner) | src/views/library.ts:193 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
-| loadPage (inner) | src/views/library.ts:209 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
-| revalidateFirstPage (inner) | src/views/library.ts:299 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
-| renderSearch | src/views/library.ts:367 | tests/dom/views-library.test.ts | dom | tested |
-| paint (inner) | src/views/library.ts:395 | tests/dom/views-library.test.ts | dom | tested via renderSearch |
-| loadPage (inner) | src/views/library.ts:425 | tests/dom/views-library.test.ts | dom | tested via renderSearch |
+| prefsKey | src/views/library.ts:38 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
+| loadPrefs | src/views/library.ts:40 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
+| savePrefs | src/views/library.ts:55 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
+| toggleChip | src/views/library.ts:64 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
+| renderLibrary | src/views/library.ts:82 | tests/dom/views-library.test.ts | dom | tested |
+| cacheKey (inner) | src/views/library.ts:120 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
+| clearFilters (inner) | src/views/library.ts:194 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
+| loadPage (inner) | src/views/library.ts:216 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
+| revalidateFirstPage (inner) | src/views/library.ts:306 | tests/dom/views-library.test.ts | dom | tested via renderLibrary |
+| renderSearch | src/views/library.ts:374 | tests/dom/views-library.test.ts | dom | tested |
+| paint (inner) | src/views/library.ts:402 | tests/dom/views-library.test.ts | dom | tested via renderSearch |
+| loadPage (inner) | src/views/library.ts:432 | tests/dom/views-library.test.ts | dom | tested via renderSearch |
 | firstFrame | src/views/livetv.ts:68 | tests/dom/views-livetv.test.ts | dom | tested via tune (player-status, 15 s cap) |
 | endTuning | src/views/livetv.ts:81 | tests/dom/views-livetv.test.ts | dom | tested via tune |
 | tune | src/views/livetv.ts:88 | tests/dom/views-livetv.test.ts | dom | tested via renderLiveTv, tuneChannel |
@@ -1102,33 +1149,33 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | draw (inner) | src/views/login.ts:368 | tests/dom/views-login.test.ts | dom | tested via renderLogin |
 | start (inner) | src/views/login.ts:409 | tests/dom/views-login.test.ts | dom | tested via renderLogin |
 | poll (inner) | src/views/login.ts:430 | tests/dom/views-login.test.ts | dom | tested via renderLogin |
-| itemCacheKey | src/views/item.ts:44 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| fetchItemData | src/views/item.ts:57 | tests/dom/views-item.test.ts | dom | tested |
-| p (inner) | src/views/item.ts:60 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| itemDataSignature | src/views/item.ts:85 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| metaChips | src/views/item.ts:89 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| sourceLine | src/views/item.ts:106 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| crewLine | src/views/item.ts:112 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| names (inner) | src/views/item.ts:113 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| personCard | src/views/item.ts:123 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| detailExtras | src/views/item.ts:159 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| cast (inner) | src/views/item.ts:160 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| playButtons | src/views/item.ts:183 | tests/dom/views-item.test.ts; tests/dom/views-item-series.test.ts | dom | tested via renderItem |
-| syncWatchBtn (inner) | src/views/item.ts:279 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| attachParallax | src/views/item.ts:302 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| onScroll (inner) | src/views/item.ts:306 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| epCode | src/views/item.ts:321 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
-| firstUnplayedEpisode | src/views/item.ts:331 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
-| seriesHeroActions | src/views/item.ts:343 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
-| episodeRow | src/views/item.ts:378 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
-| play (inner) | src/views/item.ts:420 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| seasonDownloadBar | src/views/item.ts:464 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
-| seriesDownloadBar | src/views/item.ts:511 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
-| queueWholeSeries (inner) | src/views/item.ts:515 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
-| paintItem | src/views/item.ts:560 | tests/dom/views-item.test.ts; tests/dom/views-item-series.test.ts | dom | tested via renderItem |
-| toSeries (inner) | src/views/item.ts:597 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| showSeason (inner) | src/views/item.ts:654 | tests/dom/views-item.test.ts | dom | tested via renderItem |
-| renderItem | src/views/item.ts:697 | tests/dom/views-item.test.ts; tests/dom/views-item-series.test.ts | dom | tested |
+| itemCacheKey | src/views/item.ts:46 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| fetchItemData | src/views/item.ts:59 | tests/dom/views-item.test.ts | dom | tested |
+| p (inner) | src/views/item.ts:62 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| itemDataSignature | src/views/item.ts:87 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| metaChips | src/views/item.ts:93 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| sourceLine | src/views/item.ts:110 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| crewLine | src/views/item.ts:116 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| names (inner) | src/views/item.ts:117 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| personCard | src/views/item.ts:127 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| detailExtras | src/views/item.ts:163 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| cast (inner) | src/views/item.ts:164 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| playButtons | src/views/item.ts:187 | tests/dom/views-item.test.ts; tests/dom/views-item-series.test.ts | dom | tested via renderItem |
+| syncWatchBtn (inner) | src/views/item.ts:283 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| attachParallax | src/views/item.ts:306 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| onScroll (inner) | src/views/item.ts:310 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| epCode | src/views/item.ts:325 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
+| firstUnplayedEpisode | src/views/item.ts:335 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
+| seriesHeroActions | src/views/item.ts:347 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
+| episodeRow | src/views/item.ts:382 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
+| play (inner) | src/views/item.ts:424 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| seasonDownloadBar | src/views/item.ts:468 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
+| seriesDownloadBar | src/views/item.ts:515 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
+| queueWholeSeries (inner) | src/views/item.ts:519 | tests/dom/views-item-series.test.ts | dom | tested via renderItem |
+| paintItem | src/views/item.ts:564 | tests/dom/views-item.test.ts; tests/dom/views-item-series.test.ts | dom | tested via renderItem |
+| toSeries (inner) | src/views/item.ts:601 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| showSeason (inner) | src/views/item.ts:664 | tests/dom/views-item.test.ts | dom | tested via renderItem |
+| renderItem | src/views/item.ts:707 | tests/dom/views-item.test.ts; tests/dom/views-item-series.test.ts | dom | tested |
 | isEpisode | src/views/downloads.ts:55 | tests/dom/views-downloads.test.ts | dom | tested via renderDownloads |
 | completedSub | src/views/downloads.ts:59 | tests/dom/views-downloads.test.ts | dom | tested via renderDownloads |
 | dlRow | src/views/downloads.ts:70 | tests/dom/views-downloads.test.ts | dom | tested via renderDownloads |
@@ -1249,55 +1296,55 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | `jellyfin::post` | src-tauri/src/jellyfin.rs:33 | src-tauri/src/jellyfin.rs (mod tests) | unit | tested |
 | `secret::SERVICE` / `ACCOUNT` / `PENDING_ACCOUNT` / `TARGET` / `APPLICATION` | src-tauri/src/secret.rs:37 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
 | `secret::LEGACY_SERVICE` (FellyJin invariant) | src-tauri/src/secret.rs:40 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
-| `secret::State` / `STATE` | src-tauri/src/secret.rs:53 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); cache behaviour via token, backend_name, pending_revocation |
-| `secret::reset_for_tests` (cfg test) | src-tauri/src/secret.rs:80 | src-tauri/src/test_support.rs (sandbox) | needs real Linux | CI only (not run on macOS) |
-| `secret::state` | src-tauri/src/secret.rs:90 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); via every public function |
-| `secret::attrs` | src-tauri/src/secret.rs:100 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
-| `secret::search_attrs` | src-tauri/src/secret.rs:112 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
-| `secret::search_attrs_in` | src-tauri/src/secret.rs:116 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
-| `secret::label` | src-tauri/src/secret.rs:120 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
-| `secret::CONN` / `conn` | src-tauri/src/secret.rs:143 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); via with_collection |
-| `secret::with_collection` (connect failure) | src-tauri/src/secret.rs:156 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); dead-bus path via every public function |
-| `secret::with_collection` (stale-connection retry) | src-tauri/src/secret.rs:171 | none | needs real Linux | untested: needs a keyring daemon restarted mid-session |
-| `secret::read` / `read_in` | src-tauri/src/secret.rs:184 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (dead bus); success path `#[ignore]`, opt-in AQUARIUM_TEST_REAL_DBUS=1 |
-| `secret::write` | src-tauri/src/secret.rs:205 | src-tauri/src/secret.rs (writing_twice_overwrites_in_place) | needs real Linux | CI only (dead bus); overwrite-in-place `#[ignore]`, opt-in AQUARIUM_TEST_REAL_DBUS=1 |
-| `secret::wipe` / `wipe_in` | src-tauri/src/secret.rs:229 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (dead bus); success path `#[ignore]`, opt-in AQUARIUM_TEST_REAL_DBUS=1 |
-| `secret::cached_token` | src-tauri/src/secret.rs:251 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); failed-lookup caching tested; keyring-hit and adopt-on-miss branches untested (would read the user's real token item) |
-| `secret::adopt_legacy` (FellyJin invariant) | src-tauri/src/secret.rs:277 | src-tauri/src/secret.rs (a_fellyjin_item_is_adopted_and_the_old_one_removed) | needs real Linux | CI only (dead bus returns None); adoption itself `#[ignore]`, opt-in AQUARIUM_TEST_REAL_DBUS=1 |
-| `secret::keyring_get` | src-tauri/src/secret.rs:288 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); via token |
-| `secret::keyring_set` | src-tauri/src/secret.rs:292 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (failure path via store, hydrate); success path untested (would write the user's real token item) |
-| `secret::keyring_clear` | src-tauri/src/secret.rs:307 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); via clear |
-| `secret::hydrate` | src-tauri/src/secret.rs:320 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (no-keyring paths); migration into a real keyring untested |
-| `secret::dehydrate` | src-tauri/src/secret.rs:367 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
-| `secret::redact_accounts` | src-tauri/src/secret.rs:381 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); via hydrate |
-| `secret::token` | src-tauri/src/secret.rs:393 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
-| `secret::store` | src-tauri/src/secret.rs:405 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (config.json fallback) |
-| `secret::clear` | src-tauri/src/secret.rs:419 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
-| `secret::park_pending_revocation` | src-tauri/src/secret.rs:433 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (failure path); success untested |
-| `secret::pending_revocation` | src-tauri/src/secret.rs:443 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (failed lookup cached) |
-| `secret::clear_pending_revocation` | src-tauri/src/secret.rs:459 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (failed wipe) |
-| `secret::backend_name` | src-tauri/src/secret.rs:472 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
-| `secret::slot` | src-tauri/src/secret.rs:490 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
-| `secret::store_account` | src-tauri/src/secret.rs:497 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (config.json fallback) |
-| `secret::account_token` | src-tauri/src/secret.rs:513 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (config.json fallback) |
-| `secret::clear_account` | src-tauri/src/secret.rs:527 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (config.json fallback) |
+| `secret::State` / `STATE` | src-tauri/src/secret.rs:56 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); cache behaviour via token, backend_name, pending_revocation |
+| `secret::reset_for_tests` (cfg test) | src-tauri/src/secret.rs:87 | src-tauri/src/test_support.rs (sandbox) | needs real Linux | CI only (not run on macOS) |
+| `secret::state` | src-tauri/src/secret.rs:98 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); via every public function |
+| `secret::attrs` | src-tauri/src/secret.rs:108 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
+| `secret::search_attrs` | src-tauri/src/secret.rs:120 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
+| `secret::search_attrs_in` | src-tauri/src/secret.rs:124 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
+| `secret::label` | src-tauri/src/secret.rs:128 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
+| `secret::CONN` / `conn` | src-tauri/src/secret.rs:151 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); via with_collection |
+| `secret::with_collection` (connect failure) | src-tauri/src/secret.rs:164 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); dead-bus path via every public function |
+| `secret::with_collection` (stale-connection retry) | src-tauri/src/secret.rs:179 | none | needs real Linux | untested: needs a keyring daemon restarted mid-session |
+| `secret::read` / `read_in` | src-tauri/src/secret.rs:192 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (dead bus); success path `#[ignore]`, opt-in AQUARIUM_TEST_REAL_DBUS=1 |
+| `secret::write` | src-tauri/src/secret.rs:213 | src-tauri/src/secret.rs (writing_twice_overwrites_in_place) | needs real Linux | CI only (dead bus); overwrite-in-place `#[ignore]`, opt-in AQUARIUM_TEST_REAL_DBUS=1 |
+| `secret::wipe` / `wipe_in` | src-tauri/src/secret.rs:237 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (dead bus); success path `#[ignore]`, opt-in AQUARIUM_TEST_REAL_DBUS=1 |
+| `secret::cached_token` | src-tauri/src/secret.rs:259 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); failed-lookup caching tested; keyring-hit and adopt-on-miss branches untested (would read the user's real token item) |
+| `secret::adopt_legacy` (FellyJin invariant) | src-tauri/src/secret.rs:285 | src-tauri/src/secret.rs (a_fellyjin_item_is_adopted_and_the_old_one_removed) | needs real Linux | CI only (dead bus returns None); adoption itself `#[ignore]`, opt-in AQUARIUM_TEST_REAL_DBUS=1 |
+| `secret::keyring_get` | src-tauri/src/secret.rs:296 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); via token |
+| `secret::keyring_set` | src-tauri/src/secret.rs:300 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (failure path via store, hydrate); success path untested (would write the user's real token item) |
+| `secret::keyring_clear` | src-tauri/src/secret.rs:315 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); via clear |
+| `secret::hydrate` | src-tauri/src/secret.rs:328 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (no-keyring paths); migration into a real keyring untested |
+| `secret::dehydrate` | src-tauri/src/secret.rs:375 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
+| `secret::redact_accounts` | src-tauri/src/secret.rs:389 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS); via hydrate |
+| `secret::token` | src-tauri/src/secret.rs:403 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
+| `secret::store` | src-tauri/src/secret.rs:415 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (config.json fallback) |
+| `secret::clear` | src-tauri/src/secret.rs:429 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
+| `secret::park_pending_revocation` | src-tauri/src/secret.rs:443 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (failure path); success untested |
+| `secret::pending_revocation` | src-tauri/src/secret.rs:453 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (failed lookup cached) |
+| `secret::clear_pending_revocation` | src-tauri/src/secret.rs:469 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (failed wipe) |
+| `secret::backend_name` | src-tauri/src/secret.rs:482 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
+| `secret::slot` | src-tauri/src/secret.rs:500 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
+| `secret::store_account` | src-tauri/src/secret.rs:507 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (config.json fallback) |
+| `secret::account_token` | src-tauri/src/secret.rs:523 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (config.json fallback) |
+| `secret::clear_account` | src-tauri/src/secret.rs:537 | src-tauri/src/secret.rs (mod tests) | needs real Linux | CI only (config.json fallback) |
 | `idle::BUS` / `PATH` / `TIMEOUT` / `GSM_*` | src-tauri/src/idle.rs:19 | src-tauri/src/idle.rs (mod tests) | needs real Linux | CI only (not run on macOS) |
 | `idle::IdleInhibitor::new` | src-tauri/src/idle.rs:29 | src-tauri/src/idle.rs (mod tests) | needs real Linux | CI only (dead bus fails cleanly); round trip `#[ignore]`, opt-in AQUARIUM_TEST_REAL_DBUS=1 |
 | `idle::IdleInhibitor::drop` | src-tauri/src/idle.rs:39 | src-tauri/src/idle.rs (inhibitor_cycles) | needs real Linux | `#[ignore]`, opt-in AQUARIUM_TEST_REAL_DBUS=1 |
 | `idle::SuspendInhibitor::new` | src-tauri/src/idle.rs:65 | src-tauri/src/idle.rs (mod tests) | needs real Linux | CI only (dead bus fails cleanly); GNOME round trip `#[ignore]`; logind branch untested |
 | `idle::SuspendInhibitor::drop` | src-tauri/src/idle.rs:90 | src-tauri/src/idle.rs (suspend_inhibitor_round_trip) | needs real Linux | `#[ignore]`, opt-in AQUARIUM_TEST_REAL_DBUS=1 |
-| `config_load` (Tauri command: secret::hydrate(config::load())) | src-tauri/src/lib.rs:67 | none | needs real Linux | untested: lib.rs is Linux-only; both functions it calls are tested |
-| `config_save` (Tauri command: config::merge(secret::dehydrate(cfg))) | src-tauri/src/lib.rs:75 | none | needs real Linux | untested: lib.rs is Linux-only; both functions it calls are tested |
-| `app_info` (Tauri command: config::load, config::downloads_dir, secret::backend_name, jellyfin::CLIENT_VERSION) | src-tauri/src/lib.rs:168 | none | needs real Linux | untested: lib.rs is Linux-only; the functions it calls are tested |
-| `jf_discover` (Tauri command: discovery::find, 1600 ms) | src-tauri/src/lib.rs:215 | none | needs real Linux | untested: lib.rs is Linux-only; find_from is tested |
-| `download_fetch_subtitles` (Tauri command: download_extras::fetch_subtitles) | src-tauri/src/lib.rs:741 | none | needs real Linux | untested: lib.rs is Linux-only; fetch_subtitles is tested |
-| `download_update_details` (Tauri command: download_extras::update_details) | src-tauri/src/lib.rs:752 | none | needs real Linux | untested: lib.rs is Linux-only; update_details is tested |
-| `downloads_reveal` (Tauri command: download_extras::reveal) | src-tauri/src/lib.rs:763 | none | needs real Linux | untested: lib.rs is Linux-only |
-| `progress_sync` (Tauri command: config::load, secret::token, config::device_id, progress::sync) | src-tauri/src/lib.rs:794 | none | needs real Linux | untested: lib.rs is Linux-only; the functions it calls are tested |
-| `progress_store_local` (Tauri command: progress::store_local) | src-tauri/src/lib.rs:815 | none | needs real Linux | untested: lib.rs is Linux-only; store_local is tested |
-| `progress_pending` (Tauri command: progress::pending_count) | src-tauri/src/lib.rs:820 | none | needs real Linux | untested: lib.rs is Linux-only; pending_count is tested |
-| `progress_pending_ids` (Tauri command: progress::pending_item_ids) | src-tauri/src/lib.rs:825 | none | needs real Linux | untested: lib.rs is Linux-only; pending_item_ids is tested |
-| `run` (startup: config::migrate_legacy_dirs, config::harden_data_dir) | src-tauri/src/lib.rs:830 | none | needs real Linux | untested: lib.rs is Linux-only; both functions are tested |
+| `config_load` (Tauri command: secret::hydrate(config::load())) | src-tauri/src/lib.rs:68 | none | needs real Linux | untested: lib.rs is Linux-only; both functions it calls are tested |
+| `config_save` (Tauri command: config::merge(secret::dehydrate(cfg))) | src-tauri/src/lib.rs:76 | none | needs real Linux | untested: lib.rs is Linux-only; both functions it calls are tested |
+| `app_info` (Tauri command: config::load, config::downloads_dir, secret::backend_name, jellyfin::CLIENT_VERSION) | src-tauri/src/lib.rs:169 | none | needs real Linux | untested: lib.rs is Linux-only; the functions it calls are tested |
+| `jf_discover` (Tauri command: discovery::find, 1600 ms) | src-tauri/src/lib.rs:216 | none | needs real Linux | untested: lib.rs is Linux-only; find_from is tested |
+| `download_fetch_subtitles` (Tauri command: download_extras::fetch_subtitles) | src-tauri/src/lib.rs:796 | none | needs real Linux | untested: lib.rs is Linux-only; fetch_subtitles is tested |
+| `download_update_details` (Tauri command: download_extras::update_details) | src-tauri/src/lib.rs:807 | none | needs real Linux | untested: lib.rs is Linux-only; update_details is tested |
+| `downloads_reveal` (Tauri command: download_extras::reveal) | src-tauri/src/lib.rs:818 | none | needs real Linux | untested: lib.rs is Linux-only |
+| `progress_sync` (Tauri command: config::load, secret::token, config::device_id, progress::sync) | src-tauri/src/lib.rs:849 | none | needs real Linux | untested: lib.rs is Linux-only; the functions it calls are tested |
+| `progress_store_local` (Tauri command: progress::store_local) | src-tauri/src/lib.rs:870 | none | needs real Linux | untested: lib.rs is Linux-only; store_local is tested |
+| `progress_pending` (Tauri command: progress::pending_count) | src-tauri/src/lib.rs:875 | none | needs real Linux | untested: lib.rs is Linux-only; pending_count is tested |
+| `progress_pending_ids` (Tauri command: progress::pending_item_ids) | src-tauri/src/lib.rs:880 | none | needs real Linux | untested: lib.rs is Linux-only; pending_item_ids is tested |
+| `run` (startup: config::migrate_legacy_dirs, config::harden_data_dir) | src-tauri/src/lib.rs:885 | none | needs real Linux | untested: lib.rs is Linux-only; both functions are tested |
 
 ### server.rs, downloads.rs
 
@@ -1342,13 +1389,13 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | `remember_server` | src-tauri/src/server.rs:686 | src-tauri/src/server.rs `tests` | unit | tested |
 | `accounts` | src-tauri/src/server.rs:703 | src-tauri/src/server.rs `tests` | unit | tested |
 | `switch_account` | src-tauri/src/server.rs:730 | src-tauri/src/server.rs `tests` | unit | tested |
-| `forget_account` | src-tauri/src/server.rs:764 | src-tauri/src/server.rs `tests` | unit | tested |
-| `public_request` | src-tauri/src/server.rs:789 | src-tauri/src/server.rs `tests`, `qa_tests` | unit | tested |
-| `revoke` | src-tauri/src/server.rs:818 | src-tauri/src/server.rs `tests` | unit | tested via logout / forget_account / retry_pending_revocation |
-| `logout` | src-tauri/src/server.rs:842 | src-tauri/src/server.rs `tests` | unit | tested |
-| `logout` (live revocation) | src-tauri/src/server.rs:842 | src-tauri/src/server.rs `qa_tests` | integration (QA server) | tested |
-| `retry_pending_revocation` | src-tauri/src/server.rs:879 | src-tauri/src/server.rs `tests` | unit | tested |
-| `revocation_pending` | src-tauri/src/server.rs:895 | src-tauri/src/server.rs `tests` | unit | tested |
+| `forget_account` | src-tauri/src/server.rs:775 | src-tauri/src/server.rs `tests` | unit | tested |
+| `public_request` | src-tauri/src/server.rs:800 | src-tauri/src/server.rs `tests`, `qa_tests` | unit | tested |
+| `revoke` | src-tauri/src/server.rs:831 | src-tauri/src/server.rs `tests` | unit | tested via logout / forget_account / retry_pending_revocation |
+| `logout` | src-tauri/src/server.rs:855 | src-tauri/src/server.rs `tests` | unit | tested |
+| `logout` (live revocation) | src-tauri/src/server.rs:855 | src-tauri/src/server.rs `qa_tests` | integration (QA server) | tested |
+| `retry_pending_revocation` | src-tauri/src/server.rs:892 | src-tauri/src/server.rs `tests` | unit | tested |
+| `revocation_pending` | src-tauri/src/server.rs:914 | src-tauri/src/server.rs `tests` | unit | tested |
 | `DownloadRequest` (struct, serde defaults) | src-tauri/src/downloads.rs:13 | src-tauri/src/downloads.rs `tests` | unit | tested via every transfer test; its IPC deserialisation is not exercised |
 | `RUN` / `CANCEL` / `PAUSE` (consts) | src-tauri/src/downloads.rs:34 | src-tauri/src/downloads.rs `tests` | unit | tested via cancelling_throws_away_what_arrived, pausing_keeps_the_part_and_carrying_on_asks_for_the_rest_with_range |
 | `DlManager` (struct) | src-tauri/src/downloads.rs:41 | src-tauri/src/downloads.rs `tests` | unit | tested |
@@ -1651,73 +1698,277 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | main | src-tauri/src/main.rs:3 | — | needs real Linux | untested: starts the app |
 | gdk_backend_override | src-tauri/src/main.rs:16 | src-tauri/src/main.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
 | webkit_defaults | src-tauri/src/main.rs:30 | src-tauri/src/main.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
-| debug_log_line | src-tauri/src/lib.rs:33 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| now_ms | src-tauri/src/lib.rs:51 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| ui_log | src-tauri/src/lib.rs:59 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| config_load | src-tauri/src/lib.rs:67 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| config_save | src-tauri/src/lib.rs:75 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| with_user_agent | src-tauri/src/lib.rs:81 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
-| fetch_source | src-tauri/src/lib.rs:96 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
-| app_info | src-tauri/src/lib.rs:168 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| jf_probe | src-tauri/src/lib.rs:187 | src-tauri/src/server.rs | unit | tested via server::probe (thin Tauri wrapper; that module's own tests) |
-| jf_login | src-tauri/src/lib.rs:192 | src-tauri/src/server.rs | unit | tested via server::login (thin Tauri wrapper; that module's own tests) |
-| jf_logout | src-tauri/src/lib.rs:197 | src-tauri/src/server.rs | unit | tested via server::logout (thin Tauri wrapper; that module's own tests) |
-| jf_login_quick_connect | src-tauri/src/lib.rs:202 | src-tauri/src/server.rs | unit | tested via server::login_quick_connect (thin Tauri wrapper; that module's own tests) |
-| jf_public | src-tauri/src/lib.rs:209 | src-tauri/src/server.rs | unit | tested via server::public_request (thin Tauri wrapper; that module's own tests) |
-| jf_discover | src-tauri/src/lib.rs:215 | src-tauri/src/discovery.rs | unit | tested via discovery::find (thin Tauri wrapper; that module's own tests) |
-| player_get_properties | src-tauri/src/lib.rs:223 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no session) |
-| player_warm | src-tauri/src/lib.rs:232 | src-tauri/src/server.rs | unit | tested via server::warm (thin Tauri wrapper; that module's own tests) |
-| accounts_list | src-tauri/src/lib.rs:237 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| account_switch | src-tauri/src/lib.rs:242 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (unknown key) |
-| account_forget | src-tauri/src/lib.rs:247 | src-tauri/src/server.rs | unit | tested via server::forget_account (thin Tauri wrapper; that module's own tests) |
-| jf_request | src-tauri/src/lib.rs:252 | src-tauri/src/server.rs | unit | tested via server::request (thin Tauri wrapper; that module's own tests) |
-| jf_image | src-tauri/src/lib.rs:261 | src-tauri/src/server.rs | unit | tested via server::image (thin Tauri wrapper; that module's own tests) |
-| jf_ping | src-tauri/src/lib.rs:266 | src-tauri/src/server.rs | unit | tested via server::ping (thin Tauri wrapper; that module's own tests) |
-| jf_bitrate_test | src-tauri/src/lib.rs:271 | src-tauri/src/server.rs | unit | tested via server::bitrate_test (thin Tauri wrapper; that module's own tests) |
-| resolve_stream | src-tauri/src/lib.rs:291 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
-| player_play | src-tauri/src/lib.rs:371 | — | needs real Linux | untested: takes AppHandle<Wry> and needs the video surface; manual checklist |
-| audio_play | src-tauri/src/lib.rs:388 | — | needs real Linux | untested: takes AppHandle<Wry>; manual checklist |
-| audio_set_next | src-tauri/src/lib.rs:393 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no core) |
-| audio_command | src-tauri/src/lib.rs:398 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no core) |
-| audio_stop | src-tauri/src/lib.rs:403 | — | needs real Linux | untested: takes AppHandle<Wry>; manual checklist |
-| audio_status | src-tauri/src/lib.rs:409 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| audio_set_queue | src-tauri/src/lib.rs:415 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| player_stop | src-tauri/src/lib.rs:426 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no session) |
-| player_pause_toggle | src-tauri/src/lib.rs:433 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no session) |
-| player_seek | src-tauri/src/lib.rs:440 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no session) |
-| player_set_track | src-tauri/src/lib.rs:452 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no session) |
-| track_property | src-tauri/src/lib.rs:462 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
-| player_status | src-tauri/src/lib.rs:471 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| player_set_next_available | src-tauri/src/lib.rs:479 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| audio_devices | src-tauri/src/lib.rs:488 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| player_mpv_command | src-tauri/src/lib.rs:497 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no session) |
-| player_set_viewport | src-tauri/src/lib.rs:513 | — | needs real Linux | untested: takes AppHandle<Wry>; geometry tested via video_layout; manual checklist (fullscreen) |
-| player_set_pip | src-tauri/src/lib.rs:534 | — | needs real Linux | untested: takes AppHandle<Wry> and needs the surface; manual checklist (PiP) |
-| resize_video_surface | src-tauri/src/lib.rs:553 | src-tauri/src/lib.rs (mod tests) | needs real Linux | tested via video_layout (window and surface half needs a desktop) |
-| video_layout | src-tauri/src/lib.rs:591 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
-| window_size_path | src-tauri/src/lib.rs:636 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| save_window_size | src-tauri/src/lib.rs:652 | — | needs real Linux | untested: needs a GTK window; manual checklist |
-| restore_window_size | src-tauri/src/lib.rs:674 | src-tauri/src/lib.rs (mod tests) | needs real Linux | tested via clamp_window_size (GTK half needs a window); manual checklist |
-| clamp_window_size | src-tauri/src/lib.rs:699 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
-| quit_confirm | src-tauri/src/lib.rs:720 | — | needs real Linux | untested: takes AppHandle<Wry> and a window; manual checklist (quit with downloads) |
-| download_start | src-tauri/src/lib.rs:731 | src-tauri/src/DlManager.rs | unit | tested via DlManager::start (thin Tauri wrapper; that module's own tests) |
-| download_cancel | src-tauri/src/lib.rs:740 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (unknown id) |
-| download_retry | src-tauri/src/lib.rs:745 | src-tauri/src/downloads.rs | unit | tested via downloads::restart (thin Tauri wrapper; that module's own tests) |
-| download_pause | src-tauri/src/lib.rs:757 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (unknown id) |
-| downloads_sync_keep_awake | src-tauri/src/lib.rs:763 | src-tauri/src/DlManager.rs | unit | tested via DlManager::sync_keep_awake (thin Tauri wrapper; that module's own tests) |
-| network_metered | src-tauri/src/lib.rs:768 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| download_fetch_subtitles | src-tauri/src/lib.rs:773 | src-tauri/src/download_extras.rs | unit | tested via download_extras::fetch_subtitles (thin Tauri wrapper; that module's own tests) |
-| download_update_details | src-tauri/src/lib.rs:784 | src-tauri/src/download_extras.rs | unit | tested via download_extras::update_details (thin Tauri wrapper; that module's own tests) |
-| downloads_reveal | src-tauri/src/lib.rs:795 | src-tauri/src/download_extras.rs | unit | tested via download_extras::reveal (thin Tauri wrapper; that module's own tests) |
-| download_delete | src-tauri/src/lib.rs:802 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (invalid id) |
-| downloads_list | src-tauri/src/lib.rs:807 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (empty) |
-| disk_free | src-tauri/src/lib.rs:814 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| download_set_watch_state | src-tauri/src/lib.rs:819 | src-tauri/src/downloads.rs | unit | tested via downloads::set_watch_state (thin Tauri wrapper; that module's own tests) |
-| progress_sync | src-tauri/src/lib.rs:826 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (error branches) |
-| progress_store_local | src-tauri/src/lib.rs:847 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| progress_pending | src-tauri/src/lib.rs:852 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| progress_pending_ids | src-tauri/src/lib.rs:857 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
-| replay_target | src-tauri/src/lib.rs:864 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
-| test_sequence | src-tauri/src/lib.rs:875 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
-| run | src-tauri/src/lib.rs:888 | — | needs real Linux | untested: builds the app; test hooks parsed by test_sequence/replay_target; manual checklist |
-| MIN_WIDTH_CSS / MIN_HEIGHT_CSS (consts) | src-tauri/src/lib.rs:611 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (matches tauri.conf.json) |
+| debug_log_line | src-tauri/src/lib.rs:34 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| now_ms | src-tauri/src/lib.rs:52 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| ui_log | src-tauri/src/lib.rs:60 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| config_load | src-tauri/src/lib.rs:68 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| config_save | src-tauri/src/lib.rs:76 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| with_user_agent | src-tauri/src/lib.rs:82 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
+| fetch_source | src-tauri/src/lib.rs:97 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
+| app_info | src-tauri/src/lib.rs:169 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| jf_probe | src-tauri/src/lib.rs:188 | src-tauri/src/server.rs | unit | tested via server::probe (thin Tauri wrapper; that module's own tests) |
+| jf_login | src-tauri/src/lib.rs:193 | src-tauri/src/server.rs | unit | tested via server::login (thin Tauri wrapper; that module's own tests) |
+| jf_logout | src-tauri/src/lib.rs:198 | src-tauri/src/server.rs | unit | tested via server::logout (thin Tauri wrapper; that module's own tests) |
+| jf_login_quick_connect | src-tauri/src/lib.rs:203 | src-tauri/src/server.rs | unit | tested via server::login_quick_connect (thin Tauri wrapper; that module's own tests) |
+| jf_public | src-tauri/src/lib.rs:210 | src-tauri/src/server.rs | unit | tested via server::public_request (thin Tauri wrapper; that module's own tests) |
+| jf_discover | src-tauri/src/lib.rs:216 | src-tauri/src/discovery.rs | unit | tested via discovery::find (thin Tauri wrapper; that module's own tests) |
+| player_get_properties | src-tauri/src/lib.rs:224 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no session) |
+| player_warm | src-tauri/src/lib.rs:233 | src-tauri/src/server.rs | unit | tested via server::warm (thin Tauri wrapper; that module's own tests) |
+| accounts_list | src-tauri/src/lib.rs:238 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| account_switch | src-tauri/src/lib.rs:243 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (unknown key) |
+| account_forget | src-tauri/src/lib.rs:248 | src-tauri/src/server.rs | unit | tested via server::forget_account (thin Tauri wrapper; that module's own tests) |
+| jf_request | src-tauri/src/lib.rs:253 | src-tauri/src/server.rs | unit | tested via server::request (thin Tauri wrapper; that module's own tests) |
+| jf_image | src-tauri/src/lib.rs:262 | src-tauri/src/server.rs | unit | tested via server::image (thin Tauri wrapper; that module's own tests) |
+| jf_ping | src-tauri/src/lib.rs:267 | src-tauri/src/server.rs | unit | tested via server::ping (thin Tauri wrapper; that module's own tests) |
+| jf_bitrate_test | src-tauri/src/lib.rs:272 | src-tauri/src/server.rs | unit | tested via server::bitrate_test (thin Tauri wrapper; that module's own tests) |
+| resolve_stream | src-tauri/src/lib.rs:346 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
+| player_play | src-tauri/src/lib.rs:426 | — | needs real Linux | untested: takes AppHandle<Wry> and needs the video surface; manual checklist |
+| audio_play | src-tauri/src/lib.rs:443 | — | needs real Linux | untested: takes AppHandle<Wry>; manual checklist |
+| audio_set_next | src-tauri/src/lib.rs:448 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no core) |
+| audio_command | src-tauri/src/lib.rs:453 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no core) |
+| audio_stop | src-tauri/src/lib.rs:458 | — | needs real Linux | untested: takes AppHandle<Wry>; manual checklist |
+| audio_status | src-tauri/src/lib.rs:464 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| audio_set_queue | src-tauri/src/lib.rs:470 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| player_stop | src-tauri/src/lib.rs:481 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no session) |
+| player_pause_toggle | src-tauri/src/lib.rs:488 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no session) |
+| player_seek | src-tauri/src/lib.rs:495 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no session) |
+| player_set_track | src-tauri/src/lib.rs:507 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no session) |
+| track_property | src-tauri/src/lib.rs:517 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
+| player_status | src-tauri/src/lib.rs:526 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| player_set_next_available | src-tauri/src/lib.rs:534 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| audio_devices | src-tauri/src/lib.rs:543 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| player_mpv_command | src-tauri/src/lib.rs:552 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (no session) |
+| player_set_viewport | src-tauri/src/lib.rs:568 | — | needs real Linux | untested: takes AppHandle<Wry>; geometry tested via video_layout; manual checklist (fullscreen) |
+| player_set_pip | src-tauri/src/lib.rs:589 | — | needs real Linux | untested: takes AppHandle<Wry> and needs the surface; manual checklist (PiP) |
+| resize_video_surface | src-tauri/src/lib.rs:608 | src-tauri/src/lib.rs (mod tests) | needs real Linux | tested via video_layout (window and surface half needs a desktop) |
+| video_layout | src-tauri/src/lib.rs:646 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
+| window_size_path | src-tauri/src/lib.rs:691 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| save_window_size | src-tauri/src/lib.rs:707 | — | needs real Linux | untested: needs a GTK window; manual checklist |
+| restore_window_size | src-tauri/src/lib.rs:729 | src-tauri/src/lib.rs (mod tests) | needs real Linux | tested via clamp_window_size (GTK half needs a window); manual checklist |
+| clamp_window_size | src-tauri/src/lib.rs:754 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
+| quit_confirm | src-tauri/src/lib.rs:775 | — | needs real Linux | untested: takes AppHandle<Wry> and a window; manual checklist (quit with downloads) |
+| download_start | src-tauri/src/lib.rs:786 | src-tauri/src/DlManager.rs | unit | tested via DlManager::start (thin Tauri wrapper; that module's own tests) |
+| download_cancel | src-tauri/src/lib.rs:795 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (unknown id) |
+| download_retry | src-tauri/src/lib.rs:800 | src-tauri/src/downloads.rs | unit | tested via downloads::restart (thin Tauri wrapper; that module's own tests) |
+| download_pause | src-tauri/src/lib.rs:812 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (unknown id) |
+| downloads_sync_keep_awake | src-tauri/src/lib.rs:818 | src-tauri/src/DlManager.rs | unit | tested via DlManager::sync_keep_awake (thin Tauri wrapper; that module's own tests) |
+| network_metered | src-tauri/src/lib.rs:823 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| download_fetch_subtitles | src-tauri/src/lib.rs:828 | src-tauri/src/download_extras.rs | unit | tested via download_extras::fetch_subtitles (thin Tauri wrapper; that module's own tests) |
+| download_update_details | src-tauri/src/lib.rs:839 | src-tauri/src/download_extras.rs | unit | tested via download_extras::update_details (thin Tauri wrapper; that module's own tests) |
+| downloads_reveal | src-tauri/src/lib.rs:850 | src-tauri/src/download_extras.rs | unit | tested via download_extras::reveal (thin Tauri wrapper; that module's own tests) |
+| download_delete | src-tauri/src/lib.rs:857 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (invalid id) |
+| downloads_list | src-tauri/src/lib.rs:862 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (empty) |
+| disk_free | src-tauri/src/lib.rs:869 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| download_set_watch_state | src-tauri/src/lib.rs:874 | src-tauri/src/downloads.rs | unit | tested via downloads::set_watch_state (thin Tauri wrapper; that module's own tests) |
+| progress_sync | src-tauri/src/lib.rs:881 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (error branches) |
+| progress_store_local | src-tauri/src/lib.rs:902 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| progress_pending | src-tauri/src/lib.rs:907 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| progress_pending_ids | src-tauri/src/lib.rs:912 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) |
+| replay_target | src-tauri/src/lib.rs:919 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
+| test_sequence | src-tauri/src/lib.rs:930 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS); copy run on macOS in scratch |
+| run | src-tauri/src/lib.rs:943 | — | needs real Linux | untested: builds the app; test hooks parsed by test_sequence/replay_target; manual checklist |
+| MIN_WIDTH_CSS / MIN_HEIGHT_CSS (consts) | src-tauri/src/lib.rs:666 | src-tauri/src/lib.rs (mod tests) | unit | CI only (not run on macOS) (matches tauri.conf.json) |
+
+### Seerr: src/seerr.ts, src/views/requests.ts, src/views/seerrSettings.ts
+
+| Function | Source | Test file | Kind | Status |
+|---|---|---|---|---|
+| SeerrError | src/seerr.ts:65 | tests/unit/seerr.test.ts | unit | tested |
+| KINDS | src/seerr.ts:74 | tests/unit/seerr.test.ts | unit | tested via seerrError |
+| seerrError | src/seerr.ts:77 | tests/unit/seerr.test.ts | unit | tested |
+| SEERR_CHANGED | src/seerr.ts:90 | tests/unit/seerr.test.ts | unit | tested |
+| SEERR_REQUESTS_CHANGED | src/seerr.ts:92 | tests/unit/seerr.test.ts | unit | tested |
+| setStatus | src/seerr.ts:94 | tests/unit/seerr.test.ts | unit | tested via loadStatus, connect, disconnect |
+| getStatus | src/seerr.ts:102 | tests/unit/seerr.test.ts | unit | tested |
+| isConnected | src/seerr.ts:107 | tests/unit/seerr.test.ts | unit | tested |
+| needsReconnect | src/seerr.ts:111 | tests/unit/seerr.test.ts | unit | tested |
+| loadStatus | src/seerr.ts:117 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| forgetStatus | src/seerr.ts:127 | tests/unit/seerr.test.ts | unit | tested |
+| probe | src/seerr.ts:131 | tests/unit/seerr.test.ts | unit | tested |
+| connect | src/seerr.ts:141 | tests/unit/seerr.test.ts | unit | tested |
+| connectWithPassword | src/seerr.ts:151 | tests/unit/seerr.test.ts | unit | tested |
+| reconnect | src/seerr.ts:159 | tests/unit/seerr.test.ts | unit | tested |
+| disconnect | src/seerr.ts:168 | tests/unit/seerr.test.ts | unit | tested |
+| refreshAccount | src/seerr.ts:177 | tests/unit/seerr.test.ts | unit | tested |
+| call | src/seerr.ts:187 | tests/unit/seerr.test.ts | unit | tested via title, request, cancel |
+| get | src/seerr.ts:201 | tests/unit/seerr.test.ts | unit | tested via search, title |
+| KIND_NOUN | src/seerr.ts:213 | tests/unit/seerr.test.ts | unit | tested |
+| AVAILABILITY | src/seerr.ts:301 | tests/unit/seerr.test.ts | unit | tested via availability |
+| availability | src/seerr.ts:303 | tests/unit/seerr.test.ts | unit | tested |
+| REQUEST_STATUS | src/seerr.ts:309 | tests/unit/seerr.test.ts | unit | tested via requestStatus |
+| requestStatus | src/seerr.ts:311 | tests/unit/seerr.test.ts | unit | tested |
+| kindOf | src/seerr.ts:317 | tests/unit/seerr.test.ts | unit | tested |
+| requestKind | src/seerr.ts:322 | tests/unit/seerr.test.ts | unit | tested |
+| displayTitle | src/seerr.ts:326 | tests/unit/seerr.test.ts | unit | tested |
+| yearOf | src/seerr.ts:331 | tests/unit/seerr.test.ts | unit | tested |
+| resultYear | src/seerr.ts:337 | tests/unit/seerr.test.ts | unit | tested |
+| libraryItemId | src/seerr.ts:342 | tests/unit/seerr.test.ts | unit | tested |
+| isRequestable | src/seerr.ts:347 | tests/unit/seerr.test.ts | unit | tested |
+| resultKey | src/seerr.ts:352 | tests/unit/seerr.test.ts | unit | tested |
+| STANDING_LABEL | src/seerr.ts:368 | tests/unit/seerr.test.ts | unit | tested |
+| STANDING_BADGE | src/seerr.ts:379 | tests/unit/seerr.test.ts | unit | tested |
+| standingOfMedia | src/seerr.ts:390 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| standingOfRequest | src/seerr.ts:402 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| realSeasons | src/seerr.ts:419 | tests/unit/seerr.test.ts | unit | tested |
+| requestableSeasons | src/seerr.ts:425 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| standingOfSeason | src/seerr.ts:441 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| state (inner) | src/seerr.ts:442 | tests/unit/seerr.test.ts | unit | tested |
+| PERMISSION | src/seerr.ts:462 | tests/unit/seerr.test.ts | unit | tested |
+| canRequest | src/seerr.ts:474 | tests/unit/seerr.test.ts | unit | tested |
+| canRequest4K | src/seerr.ts:480 | tests/unit/seerr.test.ts | unit | tested |
+| quotaSummary | src/seerr.ts:487 | tests/unit/seerr.test.ts | unit | tested |
+| seasonList | src/seerr.ts:498 | tests/unit/seerr.test.ts | unit | tested |
+| titleFacts | src/seerr.ts:506 | tests/unit/seerr.test.ts | unit | tested |
+| genres (inner) | src/seerr.ts:519 | tests/unit/seerr.test.ts | unit | tested |
+| requestLabel | src/seerr.ts:525 | tests/unit/seerr.test.ts | unit | tested |
+| requestDetail | src/seerr.ts:533 | tests/unit/seerr.test.ts | unit | tested |
+| myPendingRequest | src/seerr.ts:551 | tests/unit/seerr.test.ts | unit | tested |
+| tmdbIdOf | src/seerr.ts:561 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| encodeQuery | src/seerr.ts:574 | tests/unit/seerr.test.ts | unit | tested |
+| results | src/seerr.ts:580 | tests/unit/seerr.test.ts | unit | tested via search, browse |
+| search | src/seerr.ts:586 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| notInLibrary | src/seerr.ts:592 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| BROWSE_ROWS | src/seerr.ts:605 | tests/unit/seerr.test.ts | unit | tested |
+| withKind | src/seerr.ts:614 | tests/unit/seerr.test.ts | unit | tested |
+| browse | src/seerr.ts:620 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| title | src/seerr.ts:625 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| collection | src/seerr.ts:632 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| sortCredits | src/seerr.ts:639 | tests/unit/seerr.test.ts | unit | tested |
+| date (inner) | src/seerr.ts:641 | tests/unit/seerr.test.ts | unit | tested |
+| credits | src/seerr.ts:651 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| list (inner) | src/seerr.ts:653 | tests/unit/seerr.test.ts | unit | tested |
+| requestsChanged | src/seerr.ts:659 | tests/unit/seerr.test.ts | unit | tested via request, cancel |
+| request | src/seerr.ts:664 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| myRequests | src/seerr.ts:685 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| cancel | src/seerr.ts:693 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| quota | src/seerr.ts:698 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| IMAGE_SIZE | src/seerr.ts:705 | tests/unit/seerr.test.ts | unit | tested |
+| imageUrl | src/seerr.ts:719 | tests/unit/seerr.test.ts; tests/integration/seerr.test.ts | unit, integration (stand-in Seerr) | tested |
+| hashFor | src/seerr.ts:727 | tests/unit/seerr.test.ts | unit | tested |
+| hashForRequest | src/seerr.ts:736 | tests/unit/seerr.test.ts | unit | tested |
+| COPY | src/seerr.ts:747 | tests/unit/seerr.test.ts | unit | tested |
+| requestCard | src/views/requests.ts:34 | tests/dom/views-requests.test.ts | dom | tested via requestShelf, renderRequests |
+| open (inner) | src/views/requests.ts:39 | tests/dom/views-requests.test.ts | dom | tested via renderRequestTitle |
+| requestShelf | src/views/requests.ts:71 | tests/dom/views-requests.test.ts | dom | tested |
+| REQUESTS_KEY | src/views/requests.ts:100 | tests/dom/views-requests.test.ts | dom | tested via renderRequests |
+| titleKey | src/views/requests.ts:101 | tests/dom/views-requests.test.ts | dom | tested via renderRequests, seerrItemHooks |
+| QUOTA_KEY | src/views/requests.ts:102 | tests/dom/views-requests.test.ts | dom | tested via renderRequestTitle |
+| requestsSignature | src/views/requests.ts:106 | tests/dom/views-requests.test.ts | dom | tested via renderRequests (no repaint when unchanged) |
+| card (inner) | src/views/requests.ts:107 | tests/dom/views-requests.test.ts | dom | tested via renderRequestTitle |
+| nameKey | src/views/requests.ts:122 | tests/dom/views-requests.test.ts | dom | tested via renderRequests |
+| slim | src/views/requests.ts:128 | tests/dom/views-requests.test.ts | dom | tested via renderRequests |
+| requestRow | src/views/requests.ts:140 | tests/dom/views-requests.test.ts | dom | tested via renderRequests |
+| open (inner) | src/views/requests.ts:144 | tests/dom/views-requests.test.ts | dom | tested via renderRequestTitle |
+| paintRequests | src/views/requests.ts:175 | tests/dom/views-requests.test.ts | dom | tested via renderRequests |
+| renderRequests | src/views/requests.ts:198 | tests/dom/views-requests.test.ts | dom | tested |
+| parseRequestRoute | src/views/requests.ts:289 | tests/dom/views-requests.test.ts | dom | tested |
+| renderRequestTitle | src/views/requests.ts:300 | tests/dom/views-requests.test.ts | dom | tested |
+| paint (inner) | src/views/requests.ts:323 | tests/dom/views-requests.test.ts | dom | tested via renderRequestTitle |
+| load (inner) | src/views/requests.ts:490 | tests/dom/views-requests.test.ts | dom | tested via renderRequestTitle |
+| send (inner) | src/views/requests.ts:520 | tests/dom/views-requests.test.ts | dom | tested via renderRequestTitle |
+| cancelMine (inner) | src/views/requests.ts:544 | tests/dom/views-requests.test.ts | dom | tested via renderRequestTitle |
+| SEERR_SEARCH_DEBOUNCE_MS | src/views/requests.ts:572 | tests/dom/views-requests.test.ts | dom | tested via seerrSearchSection (nothing asked before it has passed) |
+| seerrSearchSection | src/views/requests.ts:584 | tests/dom/views-requests.test.ts | dom | tested |
+| collectionKey | src/views/requests.ts:606 | tests/dom/views-requests.test.ts | dom | tested via seerrItemHooks |
+| moreSeasons | src/views/requests.ts:609 | tests/dom/views-requests.test.ts | dom | tested via seerrItemHooks |
+| seerrItemHooks | src/views/requests.ts:632 | tests/dom/views-requests.test.ts | dom | tested |
+| draw (inner) | src/views/requests.ts:657 | tests/dom/views-requests.test.ts | dom | tested via renderRequestTitle |
+| row | src/views/seerrSettings.ts:13 | tests/dom/views-requests.test.ts | dom | tested via seerrSettingsBlock |
+| openSeerrConnect | src/views/seerrSettings.ts:30 | tests/dom/views-requests.test.ts | dom | tested |
+| say (inner) | src/views/seerrSettings.ts:38 | tests/dom/views-requests.test.ts | dom | tested via openSeerrConnect |
+| buttons (inner) | src/views/seerrSettings.ts:46 | tests/dom/views-requests.test.ts | dom | tested via openSeerrConnect |
+| finish (inner) | src/views/seerrSettings.ts:56 | tests/dom/views-requests.test.ts | dom | tested via openSeerrConnect |
+| signIn (inner) | src/views/seerrSettings.ts:64 | tests/dom/views-requests.test.ts | dom | tested via openSeerrConnect |
+| look (inner) | src/views/seerrSettings.ts:79 | tests/dom/views-requests.test.ts | dom | tested via openSeerrConnect |
+| signInAnyway (inner) | src/views/seerrSettings.ts:103 | tests/dom/views-requests.test.ts | dom | tested via openSeerrConnect |
+| draw (inner) | src/views/seerrSettings.ts:110 | tests/dom/views-requests.test.ts | dom | tested via openSeerrConnect |
+| seerrSettingsBlock | src/views/seerrSettings.ts:218 | tests/dom/views-requests.test.ts | dom | tested |
+| draw (inner) | src/views/seerrSettings.ts:223 | tests/dom/views-requests.test.ts | dom | tested via seerrSettingsBlock |
+| route: `requests`, `request` cases; `ICONS.requests`; the Requests entry in paintNav | src/main.ts | tests/dom/main-requests.test.ts | dom | tested |
+| `aquarium-seerr-changed` / `aquarium-seerr-requests-changed` listeners (boot) | src/main.ts | tests/dom/main-requests.test.ts | dom | tested |
+| showShell → seerr.loadStatus; showLogin / enterAccount → seerr.forgetStatus | src/main.ts | tests/dom/main-requests.test.ts | dom | tested (enterAccount's call untested: it needs a second account) |
+| renderSearch → seerrSearchSection | src/views/library.ts | tests/dom/views-requests.test.ts | dom | tested |
+| renderLibrary → seerrItemHooks (a collection's grid) | src/views/library.ts | none | dom | untested: seerrItemHooks itself is tested with a BoxSet; the call from the grid page is on the manual checklist (item 27) |
+| paintItem → seerrItemHooks; itemDataSignature (TMDB id) | src/views/item.ts | tests/dom/views-requests.test.ts | dom | tested |
+| renderSettings → seerrSettingsBlock | src/views/settings.ts | tests/dom/views-settings.test.ts | dom | tested via "draws every block in order" |
+
+### Seerr: src-tauri/src/seerr.rs and what it added to secret.rs, server.rs, lib.rs
+
+| Function | Source | Test file | Kind | Status |
+|---|---|---|---|---|
+| `REQUEST_TIMEOUT` | src-tauri/src/seerr.rs:42 | src-tauri/src/seerr.rs `tests` | unit | untested: a 20 s timeout; no test waits that long |
+| `PROBE_TIMEOUT` | src-tauri/src/seerr.rs:43 | src-tauri/src/seerr.rs `tests` | unit | untested: a 5 s timeout |
+| `LOGOUT_TIMEOUT` | src-tauri/src/seerr.rs:45 | src-tauri/src/seerr.rs `tests` | unit | untested: a 5 s timeout |
+| `QUICK_CONNECT_UNAVAILABLE` | src-tauri/src/seerr.rs:47 | src-tauri/src/seerr.rs `tests` | unit | tested via an_older_seerr_falls_back_to_the_password_which_is_not_kept |
+| `NEEDS_RECONNECT` | src-tauri/src/seerr.rs:49 | src-tauri/src/seerr.rs `tests` | unit | tested via when_renewal_fails_settings_is_told_to_reconnect |
+| `err` | src-tauri/src/seerr.rs:51 | src-tauri/src/seerr.rs `tests` | unit | tested via every error-kind assertion |
+| `account` | src-tauri/src/seerr.rs:83 | src-tauri/src/seerr.rs `tests` | unit | tested via connecting_needs_a_jellyfin_session |
+| `read` | src-tauri/src/seerr.rs:88 | src-tauri/src/seerr.rs `tests` | unit | tested via status, request |
+| `current` | src-tauri/src/seerr.rs:92 | src-tauri/src/seerr.rs `tests` | unit | tested via connecting_needs_a_jellyfin_session |
+| `store` | src-tauri/src/seerr.rs:98 | src-tauri/src/seerr.rs `tests` | unit | tested via a_seerr_that_cannot_be_reached_says_where |
+| `RECONNECT` | src-tauri/src/seerr.rs:117 | src-tauri/src/seerr.rs `tests` | unit | tested via when_renewal_fails_settings_is_told_to_reconnect |
+| `needs_reconnect` | src-tauri/src/seerr.rs:119 | src-tauri/src/seerr.rs `tests` | unit | tested via status |
+| `set_needs_reconnect` | src-tauri/src/seerr.rs:123 | src-tauri/src/seerr.rs `tests` | unit | tested via when_renewal_fails_settings_is_told_to_reconnect |
+| `reset_for_tests` | src-tauri/src/seerr.rs:134 | src-tauri/src/seerr.rs `tests` | unit | tested via sandbox() in every test |
+| `host` | src-tauri/src/seerr.rs:140 | src-tauri/src/seerr.rs `tests` | unit | tested via quick_connect_signs_in_without_a_password |
+| `status` | src-tauri/src/seerr.rs:146 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `HTTP` | src-tauri/src/seerr.rs:165 | src-tauri/src/seerr.rs `tests` | unit | tested via http |
+| `same_origin` | src-tauri/src/seerr.rs:167 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `http` | src-tauri/src/seerr.rs:175 | src-tauri/src/seerr.rs `tests` | unit | tested via a_redirect_to_another_origin_is_not_followed |
+| `CSRF` | src-tauri/src/seerr.rs:206 | src-tauri/src/seerr.rs `tests` | unit | tested via a_csrf_token_is_echoed_on_writes |
+| `csrf_for` | src-tauri/src/seerr.rs:208 | src-tauri/src/seerr.rs `tests` | unit | tested via a_csrf_token_is_echoed_on_writes |
+| `remember_csrf` | src-tauri/src/seerr.rs:216 | src-tauri/src/seerr.rs `tests` | unit | tested via a_csrf_token_is_echoed_on_writes |
+| `forget_csrf` | src-tauri/src/seerr.rs:236 | src-tauri/src/seerr.rs `tests` | unit | tested via disconnect_tells_seerr_and_forgets |
+| `cookie_pair` | src-tauri/src/seerr.rs:241 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `percent_decode` | src-tauri/src/seerr.rs:252 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `hex` | src-tauri/src/seerr.rs:253 | src-tauri/src/seerr.rs `tests` | unit | tested via percent_decode |
+| `names_a_certificate` | src-tauri/src/seerr.rs:281 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `is_certificate_failure` | src-tauri/src/seerr.rs:285 | src-tauri/src/seerr.rs `tests` | unit | untested: needs a TLS server with a bad certificate (manual checklist item 25); names_a_certificate, which decides, is tested |
+| `json` | src-tauri/src/seerr.rs:303 | src-tauri/src/seerr.rs `tests` | unit | tested via request |
+| `cookie` | src-tauri/src/seerr.rs:310 | src-tauri/src/seerr.rs `tests` | unit | tested via connect |
+| `send` | src-tauri/src/seerr.rs:325 | src-tauri/src/seerr.rs `tests` | unit | tested via probe, connect, request |
+| `plain_words` | src-tauri/src/seerr.rs:396 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `unreachable` | src-tauri/src/seerr.rs:428 | src-tauri/src/seerr.rs `tests` | unit | tested via a_seerr_that_cannot_be_reached_says_where |
+| `session_is_gone` | src-tauri/src/seerr.rs:433 | src-tauri/src/seerr.rs `tests` | unit | tested via a_real_refusal_is_not_mistaken_for_a_dead_session |
+| `call` | src-tauri/src/seerr.rs:443 | src-tauri/src/seerr.rs `tests` | unit | tested via request (renewal, refusal, unreachable) |
+| `allowed` | src-tauri/src/seerr.rs:467 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `id` | src-tauri/src/seerr.rs:468 | src-tauri/src/seerr.rs `tests` | unit | tested via allowed |
+| `request` | src-tauri/src/seerr.rs:493 | src-tauri/src/seerr.rs `tests` | unit | tested; stand-in Seerr in `qa_tests` |
+| `candidates` | src-tauri/src/seerr.rs:506 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `public_settings` | src-tauri/src/seerr.rs:523 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `probe` | src-tauri/src/seerr.rs:546 | src-tauri/src/seerr.rs `tests` | unit | tested; stand-in Seerr in `qa_tests` |
+| `bare` | src-tauri/src/seerr.rs:608 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `user_name` | src-tauri/src/seerr.rs:613 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `connection_from` | src-tauri/src/seerr.rs:623 | src-tauri/src/seerr.rs `tests` | unit | tested via connect, connect_with_password |
+| `quick_connect` | src-tauri/src/seerr.rs:671 | src-tauri/src/seerr.rs `tests` | unit | tested via connect, renew |
+| `keep` | src-tauri/src/seerr.rs:720 | src-tauri/src/seerr.rs `tests` | unit | tested via connect (the failure branch needs a keyring that refuses a write and no saved account: untested) |
+| `signed_in` | src-tauri/src/seerr.rs:731 | src-tauri/src/seerr.rs `tests` | unit | tested via connecting_needs_a_jellyfin_session |
+| `usable` | src-tauri/src/seerr.rs:735 | src-tauri/src/seerr.rs `tests` | unit | tested via connect |
+| `jellyfin_quick_connect_on` | src-tauri/src/seerr.rs:741 | src-tauri/src/seerr.rs `tests` | unit | tested via quick_connect_turned_off_in_jellyfin_goes_to_the_password_without_asking_seerr |
+| `connect` | src-tauri/src/seerr.rs:750 | src-tauri/src/seerr.rs `tests` | unit | tested; stand-in Seerr in `qa_tests` |
+| `connect_with_password` | src-tauri/src/seerr.rs:763 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `RENEWALS` | src-tauri/src/seerr.rs:786 | src-tauri/src/seerr.rs `tests` | unit | tested via requests_that_find_the_session_gone_together_share_one_renewal |
+| `renewal_lock` | src-tauri/src/seerr.rs:788 | src-tauri/src/seerr.rs `tests` | unit | tested via requests_that_find_the_session_gone_together_share_one_renewal |
+| `renew` | src-tauri/src/seerr.rs:795 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `reconnect` | src-tauri/src/seerr.rs:818 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `refresh` | src-tauri/src/seerr.rs:828 | src-tauri/src/seerr.rs `tests` | unit | tested |
+| `forget` | src-tauri/src/seerr.rs:866 | src-tauri/src/seerr.rs `tests` | unit | tested via disconnect, sign_out |
+| `sign_out` | src-tauri/src/seerr.rs:876 | src-tauri/src/seerr.rs `tests` | unit | tested via disconnect, server::logout |
+| `disconnect` | src-tauri/src/seerr.rs:884 | src-tauri/src/seerr.rs `tests` | unit | tested; stand-in Seerr in `qa_tests` |
+| `SEERR_ACCOUNT` | src-tauri/src/secret.rs:47 | src-tauri/src/secret.rs `tests` | unit | tested via items_keep_the_attributes_the_keyring_crate_wrote |
+| `seerr_slot` | src-tauri/src/secret.rs:556 | src-tauri/src/secret.rs `tests` | unit | tested |
+| `remember_seerr` | src-tauri/src/secret.rs:560 | src-tauri/src/secret.rs `tests` | unit | tested via a_seerr_lookup_is_made_once_per_account |
+| `seerr_in_file` | src-tauri/src/secret.rs:565 | src-tauri/src/secret.rs `tests` | unit | tested via a_seerr_session_falls_back_to_its_accounts_config_entry |
+| `store_seerr` | src-tauri/src/secret.rs:576 | src-tauri/src/secret.rs `tests` | unit | CI only (not run on macOS): the config.json fallback; the keyring path is on the manual checklist (item 25) |
+| `seerr_session` | src-tauri/src/secret.rs:604 | src-tauri/src/secret.rs `tests` | unit | CI only (not run on macOS) |
+| `clear_seerr` | src-tauri/src/secret.rs:621 | src-tauri/src/secret.rs `tests` | unit | CI only (not run on macOS) |
+| `current_account` | src-tauri/src/server.rs:755 | src-tauri/src/seerr.rs `tests` | unit | tested via the_session_stays_on_this_side_of_the_ipc_boundary |
+| `logout`, `forget_account` → seerr::sign_out; `accounts` strips `seerr` | src-tauri/src/server.rs | src-tauri/src/seerr.rs `tests` | unit | tested via signing_out_of_jellyfin_takes_the_seerr_session_with_it, the_session_stays_on_this_side_of_the_ipc_boundary (forget_account's call untested) |
+| `seerr_status` (Tauri command: seerr::status) | src-tauri/src/lib.rs:283 | none | needs real Linux | untested: lib.rs is Linux-only; seerr::status is tested |
+| `seerr_probe` (Tauri command: seerr::probe) | src-tauri/src/lib.rs:288 | none | needs real Linux | untested: lib.rs is Linux-only; seerr::probe is tested |
+| `seerr_connect` (Tauri command: seerr::connect) | src-tauri/src/lib.rs:294 | none | needs real Linux | untested: lib.rs is Linux-only; seerr::connect is tested |
+| `seerr_connect_password` (Tauri command: seerr::connect_with_password) | src-tauri/src/lib.rs:301 | none | needs real Linux | untested: lib.rs is Linux-only; seerr::connect_with_password is tested |
+| `seerr_reconnect` (Tauri command: seerr::reconnect) | src-tauri/src/lib.rs:306 | none | needs real Linux | untested: lib.rs is Linux-only; seerr::reconnect is tested |
+| `seerr_disconnect` (Tauri command: seerr::disconnect) | src-tauri/src/lib.rs:311 | none | needs real Linux | untested: lib.rs is Linux-only; seerr::disconnect is tested |
+| `seerr_refresh` (Tauri command: seerr::refresh) | src-tauri/src/lib.rs:317 | none | needs real Linux | untested: lib.rs is Linux-only; seerr::refresh is tested |
+| `seerr_request` (Tauri command: seerr::request) | src-tauri/src/lib.rs:322 | none | needs real Linux | untested: lib.rs is Linux-only; seerr::request is tested |

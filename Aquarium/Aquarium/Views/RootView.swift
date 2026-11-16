@@ -828,6 +828,8 @@ struct RouteDestination: View {
             #else
             EmptyView()
             #endif
+        case .request(let kind, let tmdbId):
+            RequestTitleView(kind: kind, tmdbId: tmdbId)
         }
     }
 }
@@ -917,6 +919,8 @@ struct SectionView: View {
                     message: "Collections made in Jellyfin show up here."
                 )
             }
+        case .requests:
+            RequestsView()
         case .liveTV:
             LiveTVView()
         case .search:

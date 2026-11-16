@@ -1091,6 +1091,7 @@ final class JellyfinClient {
             _ = try? await request("/Sessions/Logout", method: "POST", server: account.server, token: token, countsForOffline: false)
         }
         Keychain.delete(server: account.server, userId: account.userId)
+        SeerrClient.forget(account)
         prefs.forgetAccount(account)
     }
 
@@ -1119,6 +1120,7 @@ final class JellyfinClient {
                 revoked = false
             }
             Keychain.delete(server: s.server, userId: s.userId)
+            SeerrClient.forget(s)
             tokenCache = nil
             prefs.forgetAccount(s)
         }
@@ -1141,6 +1143,8 @@ final class JellyfinClient {
     private func expireSession() {
         guard let s = prefs.session else { return }
         Keychain.delete(server: s.server, userId: s.userId)
+        // The Seerr session was signed in with this Jellyfin one; it goes too.
+        SeerrClient.forget(s)
         tokenCache = nil
         prefs.forgetAccount(s)
         LibraryIndex.shared.wipe()
@@ -1166,7 +1170,7 @@ final class JellyfinClient {
     /// `Trickplay` too, so the player can take the scrubbing thumbnails'
     /// description from the item it already fetched instead of asking for the
     /// whole item a second time. See `trickplayInfo(for:)`.
-    private static let detailFields = itemFields + ",People,Studios,Taglines,Trickplay,RemoteTrailers,LocalTrailerCount,ProductionLocations"
+    private static let detailFields = itemFields + ",People,Studios,Taglines,Trickplay,RemoteTrailers,LocalTrailerCount,ProductionLocations,ProviderIds"
 
     /// `itemFields` without `MediaSources`, for queries that only fill grids
     /// and shelves.

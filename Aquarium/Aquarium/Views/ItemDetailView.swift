@@ -725,6 +725,9 @@ struct ItemDetailView: View {
         if item.isSeries { seasonsSection }
         if item.isSeason { episodesSection }
         #endif
+        // What Seerr adds, where one is connected: seasons or films this
+        // title has that the library doesn't.
+        SeerrItemHooks(item: item)
         castSection(item)
         MediaShelf(title: "More Like This", items: similar) { app.push(.item($0.Id)) }
             .testAnchor(TestID.Detail.moreLikeThis)
@@ -2326,6 +2329,7 @@ struct ItemDetailView: View {
             // A task superseded by another item's must not write over it.
             guard !Task.isCancelled else { return }
             item = loaded
+            SeerrClient.shared.warm(for: loaded)
             // The rest side by side, not one after another: none of them
             // depends on another, and the page waited on their sum. More Like
             // This is left alone on a reload of the same title — after playback

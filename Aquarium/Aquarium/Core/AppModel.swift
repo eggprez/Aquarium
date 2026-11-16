@@ -36,6 +36,9 @@ enum Route: Hashable, Sendable, Codable {
     /// A page a Settings page opens — the app icon, the sidebar's order.
     /// See `SettingsRoute`.
     case settings(SettingsRoute)
+    /// A film or a show that isn't in the library, by its TMDB id: the page
+    /// that asks Seerr for it. See `RequestTitleView`.
+    case request(kind: SeerrMediaKind, tmdbId: Int)
 }
 
 /// The pages Settings pushes on a phone or an iPad.
@@ -116,6 +119,9 @@ enum AppSection: Hashable, Identifiable, Sendable, Codable {
     /// films and shows put in it. Only where the server has the view, which
     /// it makes once anything has been put in a collection.
     case collections
+    /// What has been asked of Seerr, and things worth asking for. Only while
+    /// a Seerr server is connected (`SeerrClient`).
+    case requests
     case liveTV
     case downloads
     case search
@@ -134,6 +140,7 @@ enum AppSection: Hashable, Identifiable, Sendable, Codable {
         case .library(let id, _, _): "lib-\(id)"
         case .favorites: "favorites"
         case .collections: "collections"
+        case .requests: "requests"
         case .liveTV: "livetv"
         case .downloads: "downloads"
         case .search: "search"
@@ -151,6 +158,7 @@ enum AppSection: Hashable, Identifiable, Sendable, Codable {
         case .library(_, let name, _): name
         case .favorites: "Favorites"
         case .collections: "Collections"
+        case .requests: "Requests"
         case .liveTV: "Live TV"
         case .downloads: "Downloads"
         case .search: "Search"
@@ -192,6 +200,7 @@ enum AppSection: Hashable, Identifiable, Sendable, Codable {
             }
         case .favorites: "star"
         case .collections: "square.stack"
+        case .requests: "plus.rectangle.on.rectangle"
         case .liveTV:
             #if os(macOS)
             "play.tv"
@@ -633,6 +642,10 @@ final class AppModel {
     var sections: [AppSection] {
         #if os(tvOS)
         var out: [AppSection] = [.home, .libraries, .search]
+        // A sixth entry, and only for a household that set Seerr up: asking
+        // for something is a destination on a television, where Search is
+        // the only other way to it.
+        if SeerrClient.shared.isConnected { out.append(.requests) }
         if hasLiveTV { out.append(.liveTV) }
         out.append(.settings)
         return out
@@ -795,6 +808,9 @@ final class AppModel {
         // in More, and anyone who wants it in the bar can move it there in
         // Settings → Tab Bar.
         if hasCollections { out.append(.collections) }
+        // Like Collections, never in the default bar: on a phone it starts
+        // in More.
+        if SeerrClient.shared.isConnected { out.append(.requests) }
         if hasLiveTV { out.append(.liveTV) }
         out.append(.downloads)
         return out
@@ -1763,6 +1779,9 @@ final class AppModel {
 
     func signOut() async {
         stopSessionActivity()
+        // While the Jellyfin session still exists: Seerr is told its own
+        // session is over, rather than only forgetting it here.
+        await SeerrClient.shared.disconnect()
         let revoked = await client.logout()
         clearSessionState()
         if !revoked {

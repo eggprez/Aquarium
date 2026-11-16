@@ -142,6 +142,7 @@ private struct ServerSettingsPage: View {
     @State private var isSigningOut = false
     @State private var confirmSignOut = false
     @State private var chosenAccount: SavedSession?
+    @State private var isConnectingSeerr = false
 
     var body: some View {
         SettingsColumns(title: "Account", intro: SettingsView.intro(.account)) {
@@ -190,6 +191,33 @@ private struct ServerSettingsPage: View {
                     }
                     .accessibilityIdentifier(TestID.Settings.addAccount)
                 }
+                SettingGroup("Requests", symbol: "plus.rectangle.on.rectangle") {
+                    let seerr = SeerrClient.shared
+                    if let connection = seerr.connection {
+                        SettingInfo("Seerr server", value: connection.host, notes: [SettingNote(name: "Seerr server", text: SeerrCopy.kept)])
+                            .accessibilityIdentifier(TestID.Requests.settingsServer)
+                        SettingInfo("Connection", value: connection.secure ? "HTTPS" : "HTTP",
+                                    tone: connection.secure ? Theme.ok : Theme.warn,
+                                    notes: [SettingNote(name: "Connection", text: SeerrCopy.kept)])
+                            .accessibilityIdentifier(TestID.Requests.settingsConnection)
+                        if seerr.needsReconnect {
+                            SettingButton("Reconnect", notes: [SettingNote(name: "Reconnect", text: "The connection to Seerr has run out. This signs in again with your Jellyfin account.")]) {
+                                Task { try? await seerr.reconnect() }
+                            }
+                            .accessibilityIdentifier(TestID.Requests.settingsReconnect)
+                        }
+                        SettingButton("Disconnect from Seerr", role: .destructive,
+                                      notes: [SettingNote(name: "Disconnect", text: "Requests you have already made stay on the server. This Apple TV stops showing them until you connect again.")]) {
+                            Task { await seerr.disconnect() }
+                        }
+                        .accessibilityIdentifier(TestID.Requests.settingsDisconnect)
+                    } else {
+                        SettingButton("Connect to Seerr…", notes: [SettingNote(name: "Connect to Seerr", text: SeerrCopy.offer)]) {
+                            isConnectingSeerr = true
+                        }
+                        .accessibilityIdentifier(TestID.Requests.settingsConnect)
+                    }
+                }
                 SettingGroup("", page: .account) {
                     SettingButton(isSigningOut ? "Signing out…" : "Sign out", role: .destructive,
                                   notes: [Copy.signOut]) {
@@ -201,6 +229,7 @@ private struct ServerSettingsPage: View {
             }
         }
         .testAnchor(TestID.Settings.pageRoot(SettingsPage.account.rawValue))
+        .fullScreenCover(isPresented: $isConnectingSeerr) { SeerrConnectView() }
         .confirmationDialog(client.session?.signOutQuestion ?? "Sign out?",
                             isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) {

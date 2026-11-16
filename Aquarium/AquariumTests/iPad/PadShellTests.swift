@@ -17,6 +17,12 @@ final class PadSidebarGroupTests: PadUnitTestCase {
         [.home, .music, .books, films, shows, .favorites, .collections, .liveTV, .downloads, .settings]
     }
 
+    func testRequestsSitsWithWhatIsYours() {
+        let groups = PadSidebarGroup.grouped([.home, .favorites, .requests, .downloads, .settings])
+        XCTAssertEqual(groups.last?.title, "You")
+        XCTAssertEqual(groups.last?.sections, [.favorites, .requests, .downloads])
+    }
+
     func testFourGroupsInOrder() {
         let groups = PadSidebarGroup.grouped(everything)
         XCTAssertEqual(groups.map(\.title), ["Browse", "Libraries", "Live", "You"])

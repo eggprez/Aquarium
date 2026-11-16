@@ -444,3 +444,71 @@ extension TestID {
         static let spacePromptCancel = "downloads.spacePrompt.cancel"
     }
 }
+
+// MARK: - Requests (Seerr)
+//
+// Keys used here:
+// - a title Seerr knows: "<movie|tv>-<TMDB id>" (`SeerrResult.id`).
+// - a request: Seerr's own request number.
+// - a browse row: `SeerrClient.BrowseRow.rawValue`.
+
+extension TestID {
+    enum Requests {
+        /// The Requests section.
+        static let root = "requests.root"
+        static let notConnected = "requests.notConnected"
+        static let mine = "requests.mine"
+        static let mineEmpty = "requests.mine.empty"
+        static let mineError = "requests.mine.error"
+        static func row(_ id: Int) -> String { "requests.row.\(id)" }
+        static func rowStatus(_ id: Int) -> String { "requests.row.status.\(id)" }
+        /// A shelf of titles from Seerr, by row key ("search", "collection",
+        /// "person", or a browse row).
+        static func shelf(_ key: String) -> String { "requests.shelf.\(key)" }
+        static func card(_ key: String) -> String { "requests.card.\(key)" }
+        static func cardBadge(_ key: String) -> String { "requests.card.badge.\(key)" }
+
+        // A title's request page.
+        static let titleRoot = "requests.title.root"
+        static func titlePage(_ key: String) -> String { "requests.title.page.\(key)" }
+        static let titleName = "requests.title.name"
+        static let titleStanding = "requests.title.standing"
+        static let titleRequest = "requests.title.request"
+        static let titleCancel = "requests.title.cancel"
+        /// The dialog's own "Cancel Request".
+        static let titleCancelConfirm = "requests.title.cancel.confirm"
+        static let titleOpenInLibrary = "requests.title.openInLibrary"
+        static let titleQuota = "requests.title.quota"
+        static let title4K = "requests.title.4k"
+        static let titleNotAllowed = "requests.title.notAllowed"
+        static let titleError = "requests.title.error"
+        static let titleLoading = "requests.title.loading"
+        static func titleSeason(_ number: Int) -> String { "requests.title.season.\(number)" }
+
+        // What library pages gain.
+        static let detailSeasons = "detail.requests.seasons"
+        static let detailSeasonsButton = "detail.requests.seasons.request"
+
+        // Settings.
+        static let settingsConnect = "settings.requests.connect"
+        static let settingsServer = "settings.requests.server"
+        static let settingsUser = "settings.requests.user"
+        static let settingsConnection = "settings.requests.connection"
+        static let settingsSession = "settings.requests.session"
+        static let settingsDisconnect = "settings.requests.disconnect"
+        static let settingsReconnect = "settings.requests.reconnect"
+
+        // The connect sheet.
+        static let connectRoot = "requests.connect.root"
+        static let connectAddress = "requests.connect.address"
+        static let connectContinue = "requests.connect.continue"
+        static let connectCancel = "requests.connect.cancel"
+        static let connectError = "requests.connect.error"
+        static let connectBusy = "requests.connect.busy"
+        static let connectInsecure = "requests.connect.insecure"
+        static let connectAnyway = "requests.connect.anyway"
+        static let connectUsername = "requests.connect.username"
+        static let connectPassword = "requests.connect.password"
+        static let connectSignIn = "requests.connect.signIn"
+    }
+}

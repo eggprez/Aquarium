@@ -123,6 +123,7 @@ const VIEW_MODULES = [
   "../../src/views/livetv",
   "../../src/views/downloads",
   "../../src/views/settings",
+  "../../src/views/requests",
   "../../src/views/music",
   "../../src/views/books",
   "../../src/views/musicPlayer",
@@ -141,6 +142,8 @@ export interface ViewStubs {
   settings: ReturnType<typeof vi.fn>;
   music: ReturnType<typeof vi.fn>;
   books: ReturnType<typeof vi.fn>;
+  requests: ReturnType<typeof vi.fn>;
+  request: ReturnType<typeof vi.fn>;
   musicPlayer: ReturnType<typeof vi.fn>;
 }
 
@@ -166,6 +169,8 @@ function stubViews(): ViewStubs {
     settings: page("settings"),
     music: page("music"),
     books: page("books"),
+    requests: page("requests"),
+    request: page("request"),
     musicPlayer: vi.fn(async () => {}),
   };
   vi.doMock("../../src/views/home", () => ({ renderHome: stubs.home }));
@@ -180,6 +185,7 @@ function stubViews(): ViewStubs {
   vi.doMock("../../src/views/settings", () => ({ renderSettings: stubs.settings }));
   vi.doMock("../../src/views/music", () => ({ renderMusic: stubs.music }));
   vi.doMock("../../src/views/books", () => ({ renderBooks: stubs.books }));
+  vi.doMock("../../src/views/requests", () => ({ renderRequests: stubs.requests, renderRequestTitle: stubs.request }));
   vi.doMock("../../src/views/musicPlayer", () => ({ wireMusicPlayer: stubs.musicPlayer }));
   return stubs;
 }

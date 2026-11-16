@@ -37,6 +37,7 @@ pub mod secret {
             for a in list {
                 if let Some(obj) = a.as_object_mut() {
                     obj.remove("token");
+                    obj.remove("seerr");
                 }
             }
         }
@@ -94,6 +95,19 @@ pub mod secret {
 
     pub fn clear_account(key: &str) {
         with(|m| m.remove(&format!("{ACCOUNT}:{key}")));
+    }
+
+    pub fn store_seerr(key: &str, blob: &str) -> Result<(), String> {
+        with(|m| m.insert(format!("seerr-session:{key}"), blob.into()));
+        Ok(())
+    }
+
+    pub fn seerr_session(key: &str) -> Option<String> {
+        with(|m| m.get(&format!("seerr-session:{key}")).cloned())
+    }
+
+    pub fn clear_seerr(key: &str) {
+        with(|m| m.remove(&format!("seerr-session:{key}")));
     }
 }
 

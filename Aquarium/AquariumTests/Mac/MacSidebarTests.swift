@@ -23,6 +23,12 @@ final class MacSidebarTests: MacUnitTestCase {
         XCTAssertEqual(groups[3].sections, [.favorites, .downloads])
     }
 
+    func testRequestsSitsWithWhatIsYours() {
+        let groups = MacSidebarGroup.grouped([.home, films, .favorites, .requests, .downloads])
+        XCTAssertEqual(groups.last?.sections, [.favorites, .requests, .downloads])
+        XCTAssertNil(MacSidebarRows.windowRoute(for: .requests))
+    }
+
     func testEmptyGroupsAreDropped() {
         let groups = MacSidebarGroup.grouped([.home, films])
         XCTAssertEqual(groups.map(\.title), [nil, "Libraries"])

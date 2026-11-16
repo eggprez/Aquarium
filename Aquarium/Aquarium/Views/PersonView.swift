@@ -61,6 +61,9 @@ struct PersonView: View {
                         .testAnchor(TestID.Person.shows)
                     #endif
                 }
+                // The rest of what they made, where a Seerr server is
+                // connected to ask it of.
+                SeerrPersonHook(person: person)
             }
             .padding(.top, 12)
             .padding(.bottom, 32)
@@ -258,7 +261,10 @@ struct PersonView: View {
             guard !Task.isCancelled else { return }
             self.error = error.localizedDescription
         }
-        if let found = await who, !Task.isCancelled { person = found }
+        if let found = await who, !Task.isCancelled {
+            person = found
+            SeerrClient.shared.warm(for: found)
+        }
     }
 }
 

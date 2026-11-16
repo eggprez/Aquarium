@@ -171,6 +171,7 @@ struct SettingsView: View {
                 serverSection
                 if client.session != nil {
                     AccountsSection()
+                    SeerrSettingsSection()
                     QuickConnectApproveSection()
                 }
             }
@@ -1284,6 +1285,7 @@ private struct AccountSettingsPage: View {
             }
 
             if client.session != nil {
+                SeerrSettingsSection()
                 QuickConnectApproveSection()
                 Section {
                     Button(role: .destructive) {

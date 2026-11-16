@@ -127,6 +127,10 @@ struct SearchView: View {
                     ErrorState(error: error) { schedule(immediate: true) }
                         .testAnchor(TestID.Search.error)
                 } else if results.isEmpty, music.isEmpty {
+                    // Not here, but it may be somewhere it can be asked for.
+                    // Above the empty state, which is tall: under it the
+                    // row sat behind a phone's keyboard.
+                    SeerrSearchSection(term: term)
                     EmptyState(
                         symbol: "magnifyingglass",
                         title: "No matches",
@@ -178,6 +182,7 @@ struct SearchView: View {
                     .testAnchor(TestID.Search.results)
                     }
                     #endif
+                    SeerrSearchSection(term: term)
                 }
             }
             .padding(.top, 8)

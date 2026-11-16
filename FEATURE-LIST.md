@@ -66,3 +66,32 @@ Songs, and asks for up to 500 albums rather than 100. The on-device artist
 page in `Aquarium/Aquarium/Music/OnDeviceViews.swift` does the same; its
 genre page keeps the shelf. Appears On, About and Similar Artists follow,
 unchanged.
+
+## Requests
+
+### Asking for films and shows through Seerr
+
+**Wanted:** Seerr fully part of the app, not a web page inside it, and held
+to the same security as the Jellyfin connection.
+
+**Built 2026-11-16** (branch `claude/seerr-requests`), Apple app and Linux
+app. `Aquarium/Aquarium/Core/Seerr/` is the client (its header comment has
+the security rules: Quick Connect sign-in with the app's own Jellyfin
+session, no password kept, no admin API key, session in the keychain, cookie
+to one origin, posters through Seerr only). `Aquarium/Aquarium/Views/Seerr/`
+is the screens: a "Not in Your Library" row in Search, a request page per
+title, a Requests section (your requests, then Trending / Popular /
+Upcoming), a missing-seasons banner on a show, missing films on a collection
+and on a person, and Settings → Account → Requests. Linux: `Linux/src/seerr.ts`,
+`Linux/src/views/requests.ts`, `Linux/src-tauri/src/seerr.rs`.
+
+**To do:**
+
+- Check against a real Seerr server (the tests use a stand-in; see
+  `Aquarium/TESTING.md` and each platform's `MANUAL.md`).
+- Build and run the Linux side on the Linux machine: it was written on a Mac
+  with no Node or Cargo and has never been compiled.
+- Not built, by choice: approving or declining as an administrator, reporting
+  a problem with a title, a Home row of requests, notifications, the Watch.
+- Apple TV: after Request is pressed, focus goes to the tab strip instead of
+  Cancel Request.
