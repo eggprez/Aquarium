@@ -72,6 +72,8 @@ struct RequestPoster: View {
 
     var body: some View {
         RemoteImage(url: SeerrClient.shared.imageURL(path, size: .poster))
+            // Asked again once Seerr starts serving posters it refused.
+            .id(SeerrClient.shared.posterEpoch)
             .aspectRatio(2.0 / 3.0, contentMode: .fit)
             .overlay {
                 if path == nil {

@@ -176,12 +176,19 @@ export async function disconnect(): Promise<void> {
 /** Bring the remembered permissions and server settings up to date. Quiet. */
 export async function refreshAccount(): Promise<void> {
   if (!status.connected) return;
+  const wasOn = status.settings?.cacheImages === true;
   try {
     setStatus(await invoke<SeerrStatus>("seerr_refresh"));
   } catch {
     /* what is remembered stands */
   }
+  if (!wasOn && status.connected && status.settings?.cacheImages === true) posterEpoch += 1;
 }
+
+/** Bumped when Seerr's Cache Images comes on. Poster addresses carry it, so
+ *  the webview asks again for pictures it was refused (and may remember
+ *  refusing) instead of leaving them blank. Seerr's proxy ignores the query. */
+let posterEpoch = 0;
 
 /** One Seerr API call. `path` is below `/api/v1` and already query-encoded. */
 async function call(path: string, method = "GET", body: any = null): Promise<{ status: number; body: any }> {
@@ -719,9 +726,20 @@ export const IMAGE_SIZE = { poster: "w342", posterLarge: "w500", backdrop: "w128
  * posters: the session cookie lives in Rust and never in the webview, so the
  * request carries none.
  */
+export const POSTERS_OFF_TITLE = "No posters from Seerr";
+export const POSTERS_OFF =
+  "Seerr only shares posters when Cache Images is on. An admin can turn it on in Seerr's Settings, under General. Aquarium doesn't fetch them from the film database directly.";
+
+/** The server says Cache Images is off, so its `/imageproxy` answers 404 to
+ *  every poster (Seerr's default). Only a definite `false` counts. */
+export function postersOff(): boolean {
+  return status.connected === true && status.settings?.cacheImages === false;
+}
+
 export function imageUrl(path: string | null | undefined, size: keyof typeof IMAGE_SIZE = "poster"): string | null {
   if (!path || !path.startsWith("/") || !status.connected || !status.server) return null;
-  return `${status.server}/imageproxy/tmdb/t/p/${IMAGE_SIZE[size]}${path}`;
+  const url = `${status.server}/imageproxy/tmdb/t/p/${IMAGE_SIZE[size]}${path}`;
+  return posterEpoch ? `${url}?r=${posterEpoch}` : url;
 }
 
 /** Where a title Seerr named opens: the library's own page when it is already

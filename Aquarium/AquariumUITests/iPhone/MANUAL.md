@@ -189,8 +189,12 @@ for the same Jellyfin server), which the test Mac cannot run.
    with no password asked, and the Seerr rows showing the server and HTTPS.
    In Seerr's Users page this Jellyfin user exists and shows a recent sign-in.
 2. Search for a film the library lacks: it is offered with its real poster.
-   Posters must load with Seerr's "image caching" setting both on and off (the
-   app always asks Seerr's own `/imageproxy`, never TMDB).
+   Seerr serves posters only with its "Cache Images" setting on (its
+   `/imageproxy` answers 404 otherwise, and the app never asks TMDB). With it
+   off, expect the "No posters from Seerr" notice on Requests and Posters: Off
+   in Settings. Turn it on, then pull to refresh Requests or run a new
+   search: every poster fills in, your requests' and the search row's (seen 2026-11-16 on a real server: the ones
+   already seen stayed blank until this was fixed).
 3. Request it. Expect "Waiting for approval" (or "On its way" for an
    auto-approved account), and the request in Seerr's own Requests page.
 4. With Seerr's "CSRF protection" turned on, repeat step 3: it must still work.

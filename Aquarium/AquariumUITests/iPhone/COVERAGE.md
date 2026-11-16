@@ -103,8 +103,10 @@ the other four on the standard phone).
 | Seerr session run out: one quiet renewal and a retry; a real refusal not mistaken for it; "reconnect" when renewal fails | SeerrClientTests | unit | pass |
 | Request bodies, my requests, cancel, browse rows, disconnect, Jellyfin sign-out takes the Seerr session | SeerrClientTests | unit | pass |
 | `SeerrStanding`, `requestableSeasons`, permissions, quota and refusal wording, `BaseItem.tmdbId` | SeerrModelsTests | unit | pass |
-| A search with no matches offers the title, above the keyboard; its page requests it | PhoneRequestsTests.testASearchWithNoMatchesEndsInARequest | UI, all phones | pass |
-| Requests in More: rows named with their standing, browse rows, a row opens its page | PhoneRequestsTests.testRequestsSectionShowsWhatWasAskedAndThingsToAskFor | UI, all phones | pass |
+| A search with no matches offers the title, above the keyboard; its page requests it; each search reads Cache Images again | PhoneRequestsTests.testASearchWithNoMatchesEndsInARequest | UI, all phones | changed 2026-11-16 |
+| Requests in More: your requests as one carousel of named cards with their standing, Trending under it then the other rows, a card opens its page | PhoneRequestsTests.testRequestsSectionShowsWhatWasAskedAndThingsToAskFor | UI, all phones | changed 2026-11-16 |
+| Seerr's Cache Images off: the Requests page and Settings say why there are no posters | PhoneRequestsTests.testPostersOffIsExplained | UI | new 2026-11-16 |
+| Cache Images turned on: posters refused before are asked for again (not left blank for ten minutes) | SeerrClientTests.testPostersOffFollowsCacheImages | unit | new 2026-11-16 |
 | Cancel a pending request from its page | PhoneRequestsTests.testARequestCanBeCancelled | UI | pass |
 | A show's page says seasons are missing; tick some, request them | PhoneRequestsTests.testAShowsMissingSeasonsCanBeAskedFor | UI | pass |
 | A dead Seerr session is renewed without the user | PhoneRequestsTests.testAnExpiredSessionRenewsItselfQuietly | UI | pass |

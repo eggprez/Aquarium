@@ -275,8 +275,7 @@ actor ImageLoader {
             // download's artwork landing — and costs nothing to look for.
             // Bounded: a long session on a library with many missing logos
             // would otherwise keep every one of them.
-            if knownAbsent.count >= 2_000 { knownAbsent.removeAll() }
-            knownAbsent[url] = Date()
+            rememberAbsent(url)
         }
         return fetched.outcome
     }
@@ -656,6 +655,22 @@ actor ImageLoader {
     func forget(_ url: URL) {
         cache.removeObject(forKey: url as NSURL)
     }
+
+    /// Every address under `prefix` that was remembered as having no picture
+    /// is asked again next time. For a host that has just started serving
+    /// pictures it refused before (Seerr's Cache Images turned on).
+    func forgetAbsent(under prefix: String) {
+        knownAbsent = knownAbsent.filter { !$0.key.absoluteString.hasPrefix(prefix) }
+    }
+
+    /// The host answered `url` with no picture.
+    func rememberAbsent(_ url: URL) {
+        if knownAbsent.count >= 2_000 { knownAbsent.removeAll() }
+        knownAbsent[url] = Date()
+    }
+
+    /// Whether `url` is being remembered as having no picture.
+    func isKnownAbsent(_ url: URL) -> Bool { knownAbsent[url] != nil }
 
     func purge() {
         cache.removeAllObjects()

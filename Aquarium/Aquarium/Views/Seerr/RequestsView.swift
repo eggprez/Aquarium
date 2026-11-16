@@ -1,5 +1,6 @@
-//  The Requests section: what this account has asked for and how far each
-//  request has got, then rows of things worth asking for.
+//  The Requests section: one carousel of what this account has asked for and
+//  how far each request has got, then rows of things worth asking for,
+//  Trending first.
 
 import SwiftUI
 
@@ -33,6 +34,7 @@ struct RequestsView: View {
                     )
                     .testAnchor(TestID.Requests.notConnected)
                 } else {
+                    if seerr.postersOff { postersOffNotice }
                     yours
                     ForEach(SeerrClient.BrowseRow.allCases) { row in
                         RequestShelf(title: row.title, results: rows[row] ?? [], key: row.rawValue)
@@ -56,17 +58,18 @@ struct RequestsView: View {
 
     // MARK: - Your requests
 
+    /// What this account has asked for, as one carousel of posters, each
+    /// with where its request stands.
     @ViewBuilder
     private var yours: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
             Text("Your Requests")
                 .font(headingFont)
                 .foregroundStyle(Theme.text)
                 .accessibilityAddTraits(.isHeader)
                 .padding(.horizontal, Metrics.gutter)
-                .padding(.bottom, 4)
             if isLoading, mine.isEmpty {
-                SkeletonList(count: 3)
+                SkeletonList(count: 1)
             } else if let error, mine.isEmpty {
                 Text(error)
                     .font(.subheadline)
@@ -80,22 +83,52 @@ struct RequestsView: View {
                     .padding(.horizontal, Metrics.gutter)
                     .accessibilityIdentifier(TestID.Requests.mineEmpty)
             } else {
-                ForEach(mine) { request in
-                    Button {
-                        open(request)
-                    } label: {
-                        RequestRow(request: request, title: names[request.id])
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, Metrics.gutter)
-                            .contentShape(Rectangle())
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: Metrics.rowSpacing) {
+                        ForEach(mine) { request in
+                            Button {
+                                open(request)
+                            } label: {
+                                RequestCard(request: request, title: names[request.id])
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PosterButtonStyle())
+                            .accessibilityIdentifier(TestID.Requests.row(request.id))
+                            #if os(macOS)
+                            .help(names[request.id]?.displayTitle ?? "")
+                            #endif
+                        }
                     }
-                    .rowButtonStyle()
-                    .accessibilityIdentifier(TestID.Requests.row(request.id))
+                    .padding(.horizontal, Metrics.gutter)
+                    .padding(.vertical, Metrics.shelfCardPadding)
                 }
+                .focusRegion()
             }
         }
-        .focusRegion()
         .testAnchor(TestID.Requests.mine)
+    }
+
+    /// Seerr's Cache Images is off, so every poster on this page is blank.
+    private var postersOffNotice: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(Theme.warn)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(SeerrCopy.postersOffTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+                Text(SeerrCopy.postersOff)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.warn.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, Metrics.gutter)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.Requests.postersOff)
     }
 
     private var headingFont: Font {
@@ -123,6 +156,8 @@ struct RequestsView: View {
         guard seerr.isConnected else { return }
         isLoading = true
         defer { isLoading = false }
+        // Picks up Cache Images being turned on (or off) since the last look.
+        await seerr.refreshAccount()
         do {
             let page = try await seerr.myRequests()
             guard !Task.isCancelled else { return }
@@ -148,46 +183,45 @@ struct RequestsView: View {
     }
 }
 
-/// One request: its poster, what it is, and where it stands.
-private struct RequestRow: View {
+/// One request in the carousel: its poster with where it stands on it, its
+/// name, and what was asked for.
+private struct RequestCard: View {
     let request: SeerrRequest
     let title: SeerrTitle?
+    var width: CGFloat? = Metrics.posterWidth
 
     private var standing: SeerrStanding { SeerrStanding(request: request) }
 
-    private var thumb: CGFloat {
-        #if os(tvOS)
-        90
-        #else
-        52
-        #endif
-    }
-
     var body: some View {
-        HStack(spacing: 14) {
-            RequestPoster(path: title?.posterPath, title: "")
-                .frame(width: thumb)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: Metrics.cardTextSpacing) {
+            RequestPoster(path: title?.posterPath, title: title?.displayTitle ?? "")
+                .frame(width: width)
+                .cardChrome()
+                .overlay(alignment: .topLeading) {
+                    if let badge = standing.badge {
+                        StandingBadge(text: badge, symbol: standing.symbol)
+                            .padding(6)
+                    }
+                }
+                .artworkFocus()
+            VStack(alignment: .leading, spacing: 1) {
                 Text(title?.displayTitle ?? " ")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Theme.text)
-                    .lineLimit(2)
-                Text(detail)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.textDim)
+                    .font(titleFont.weight(.semibold))
                     .lineLimit(1)
-                Label(standing.label, systemImage: standing.symbol)
-                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.text)
+                Text(detail)
+                    .font(subtitleFont)
+                    .lineLimit(1)
+                    .foregroundStyle(Theme.textDim)
+                Text(standing.label)
+                    .font(subtitleFont.weight(.semibold))
+                    .lineLimit(1)
                     .foregroundStyle(tone)
                     .accessibilityIdentifier(TestID.Requests.rowStatus(request.id))
             }
-            Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Theme.textDim)
-                .hiddenOnTV()
+            .frame(maxWidth: width ?? .infinity, alignment: .leading)
         }
+        .accessibilityElement(children: .contain)
     }
 
     private var tone: Color {
@@ -199,15 +233,32 @@ private struct RequestRow: View {
     }
 
     private var detail: String {
-        var parts: [String] = [request.kind == .tv ? "Show" : "Film"]
+        var parts: [String] = []
         if let year = title?.year { parts.append(year) }
+        parts.append(request.kind == .tv ? "Show" : "Film")
         if request.kind == .tv {
             let numbers = (request.seasons ?? []).compactMap(\.seasonNumber).sorted()
             if !numbers.isEmpty {
-                parts.append("Season\(numbers.count == 1 ? "" : "s") " + numbers.map(String.init).joined(separator: ", "))
+                parts.append(numbers.map { "S\($0)" }.joined(separator: ", "))
             }
         }
         if request.is4k == true { parts.append("4K") }
         return parts.joined(separator: " · ")
+    }
+
+    private var titleFont: Font {
+        #if os(macOS)
+        .callout
+        #else
+        .subheadline
+        #endif
+    }
+
+    private var subtitleFont: Font {
+        #if os(macOS)
+        .subheadline
+        #else
+        .caption
+        #endif
     }
 }

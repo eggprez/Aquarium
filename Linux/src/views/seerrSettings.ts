@@ -247,6 +247,13 @@ export function seerrSettingsBlock(): HTMLElement {
         el("span", { class: `sync-pill seerr-settings-connection${st.secure ? " ok" : " warn"}` }, [st.secure ? "HTTPS" : "HTTP"])
       ),
       row(
+        "Posters",
+        seerr.postersOff() ? seerr.POSTERS_OFF : "Posters come through the Seerr server.",
+        el("span", { class: `sync-pill seerr-settings-posters${seerr.postersOff() ? " warn" : " ok"}` }, [
+          seerr.postersOff() ? "Off" : "On",
+        ])
+      ),
+      row(
         "Session",
         out ? "The connection to Seerr has run out." : inKeyring ? seerr.COPY.kept : seerr.COPY.keptInFile,
         el("span", { class: `sync-pill seerr-settings-session${out || !inKeyring ? " warn" : " ok"}` }, [
