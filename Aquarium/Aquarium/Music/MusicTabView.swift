@@ -235,16 +235,9 @@ extension View {
 /// player. So the stack says where the bars begin and each page makes up the
 /// difference itself. Measured rather than assumed, so where the inset does
 /// come through the difference is nothing and nothing is added twice.
-private struct BottomChromeTopKey: EnvironmentKey {
-    static let defaultValue: CGFloat? = nil
-}
-
 extension EnvironmentValues {
     /// Read by `LetterIndexBar` too, which sizes itself down to the bars.
-    var bottomChromeTop: CGFloat? {
-        get { self[BottomChromeTopKey.self] }
-        set { self[BottomChromeTopKey.self] = newValue }
-    }
+    @Entry var bottomChromeTop: CGFloat? = nil
 }
 
 private struct MeasuresBottomChrome: ViewModifier {

@@ -960,15 +960,8 @@ struct MediaShelf: View {
 /// heading and its See All all carry it (see `TestID.Common.shelf`). Set by
 /// the page that draws the shelf; a shelf given none falls back to its
 /// heading. Read by nothing but the identifiers.
-private struct TestShelfKey: EnvironmentKey {
-    static let defaultValue: String? = nil
-}
-
 extension EnvironmentValues {
-    var testShelfKey: String? {
-        get { self[TestShelfKey.self] }
-        set { self[TestShelfKey.self] = newValue }
-    }
+    @Entry var testShelfKey: String? = nil
 }
 
 extension View {
@@ -1067,15 +1060,8 @@ private extension View {
 /// The namespace poster tiles and the pages they open share, so a page can
 /// zoom out of the tile that opened it. Set once by RootView; nil on tvOS,
 /// where the transition is not offered.
-private struct PosterZoomNamespaceKey: EnvironmentKey {
-    static let defaultValue: Namespace.ID? = nil
-}
-
 extension EnvironmentValues {
-    var posterZoomNamespace: Namespace.ID? {
-        get { self[PosterZoomNamespaceKey.self] }
-        set { self[PosterZoomNamespaceKey.self] = newValue }
-    }
+    @Entry var posterZoomNamespace: Namespace.ID? = nil
 }
 
 extension View {
@@ -1352,22 +1338,9 @@ extension View {
         #endif
     }
 
-    /// Artwork that the selector can land on — a poster, a still, a library
-    /// tile. The television's focus ring, and the Mac's hover ring; nothing
-    /// on a phone, where a finger needs no selector drawn for it.
-    @ViewBuilder
-    func posterFocus(radius: CGFloat = Theme.cornerRadius) -> some View {
-        #if os(tvOS)
-        modifier(PosterFocus(radius: radius))
-        #elseif os(macOS)
-        modifier(PosterHover(radius: radius))
-        #else
-        self
-        #endif
-    }
-
-    /// `posterFocus` for the artwork inside a `PosterCard`, whose Mac hover
-    /// is drawn round the whole tile instead — see `macTileState`.
+    /// The television's focus ring for the artwork inside a `PosterCard`.
+    /// On a Mac the hover is drawn round the whole tile instead — see
+    /// `macTileState`.
     @ViewBuilder
     func artworkFocus(radius: CGFloat = Theme.cornerRadius) -> some View {
         #if os(tvOS)
@@ -2690,29 +2663,15 @@ final class SidebarToggle {
     var show: (() -> Void)?
 }
 
-private struct ShowSidebarKey: EnvironmentKey {
-    static let defaultValue: SidebarToggle? = nil
-}
-
 /// The way back from a page a section's stack pushed: that stack's path,
 /// one shorter. Handed down by `RootView` with each stack; nil in a page
 /// shown any other way, where `BarBackButton` uses `dismiss`.
-private struct PopPageKey: EnvironmentKey {
-    static let defaultValue: (() -> Void)? = nil
+extension EnvironmentValues {
+    @Entry var popPage: (() -> Void)? = nil
 }
 
 extension EnvironmentValues {
-    var popPage: (() -> Void)? {
-        get { self[PopPageKey.self] }
-        set { self[PopPageKey.self] = newValue }
-    }
-}
-
-extension EnvironmentValues {
-    var sidebarToggle: SidebarToggle? {
-        get { self[ShowSidebarKey.self] }
-        set { self[ShowSidebarKey.self] = newValue }
-    }
+    @Entry var sidebarToggle: SidebarToggle? = nil
 }
 
 /// The toggle itself, drawn the way the system draws the one it stands in for.

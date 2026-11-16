@@ -305,7 +305,6 @@ final class SyncBeepDetector {
     private let coefficient: Float
     private var pending: [Float] = []
     private var pendingTime: Double?
-    private var samplesIn = 0
 
     private struct Reading {
         let center: Double

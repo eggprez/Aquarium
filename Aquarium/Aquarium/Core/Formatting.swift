@@ -159,15 +159,6 @@ enum Format {
         df.dateStyle = .none
         return df
     }()
-
-    /// How far through the current programme we are, for the channel row's bar.
-    static func programProgress(_ p: CurrentProgram) -> Double? {
-        guard let start = parseDate(p.StartDate), let end = parseDate(p.EndDate) else { return nil }
-        let total = end.timeIntervalSince(start)
-        guard total > 0 else { return nil }
-        let done = Date().timeIntervalSince(start) / total
-        return min(max(done, 0), 1)
-    }
 }
 
 
