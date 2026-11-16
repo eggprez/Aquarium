@@ -73,6 +73,15 @@ final class ArtworkProbeTests: XCTestCase {
         XCTAssertEqual(request?.headers["accept"]?.contains("image/svg+xml"), true)
     }
 
+    /// The server's own channels, still in the store just after the source
+    /// changes to a custom playlist, are not the playlist's to report on.
+    func testOnlyThePlaylistsChannelsAreChecked() {
+        let fromServer = channel("Server", logo: nil)
+        let fromPlaylist = CoreItem.make("iptv-0-pad.one", "TvChannel", name: "Pad One")
+        XCTAssertEqual(ArtworkProbe.playlistChannels([fromServer, fromPlaylist]).map(\.title), ["Pad One"])
+        XCTAssertTrue(ArtworkProbe.playlistChannels([fromServer]).isEmpty)
+    }
+
     func testOnlyASampleIsProbed() async {
         let many = (0..<12).map { channel("C\($0)", logo: "\(server.base)/logos/good.png?c=\($0)") }
         let byDefault = await ArtworkProbe.run(channels: many)

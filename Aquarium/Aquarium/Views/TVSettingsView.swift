@@ -1200,7 +1200,7 @@ private struct TVArtworkProbe: View {
             isRunning = false
             hasRun = true
         }
-        results = await ArtworkProbe.run(channels: LiveTVStore.shared.channels)
+        results = await ArtworkProbe.run(channels: ArtworkProbe.playlistChannels(LiveTVStore.shared.channels))
     }
 }
 #endif
