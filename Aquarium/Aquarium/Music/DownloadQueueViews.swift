@@ -55,6 +55,7 @@ struct DownloadQueueBanner: View {
             .padding(.vertical, 6)
             .background(Theme.background)
             .accessibilityHint("Opens Downloads")
+            .accessibilityIdentifier(books ? TestID.Books.downloadBanner : TestID.Music.downloadBanner)
         }
     }
 
@@ -77,6 +78,7 @@ struct DownloadStateMark: View {
                 .font(.caption)
                 .foregroundStyle(Theme.textDim)
                 .accessibilityLabel("Downloaded")
+                .accessibilityIdentifier(TestID.Music.downloadMark(itemId))
         } else if let state = downloads.transferState(of: itemId) {
             switch state {
             case .downloading:
@@ -85,11 +87,13 @@ struct DownloadStateMark: View {
                     .foregroundStyle(Theme.accent)
                     .symbolEffect(.pulse, options: .repeating)
                     .accessibilityLabel("Downloading")
+                    .accessibilityIdentifier(TestID.Music.downloadMark(itemId))
             case .queued:
                 Image(systemName: "clock")
                     .font(.caption)
                     .foregroundStyle(Theme.textDim)
                     .accessibilityLabel("Waiting to download")
+                    .accessibilityIdentifier(TestID.Music.downloadMark(itemId))
             }
         }
     }
@@ -108,6 +112,7 @@ struct DownloadStateLine: View {
             Label("On this device", systemImage: "arrow.down.circle.fill")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.textDim)
+                .accessibilityIdentifier(TestID.Music.downloadLine(itemId))
         } else if let state = downloads.transferState(of: itemId) {
             Button {
                 app.show(.downloads)
@@ -123,6 +128,7 @@ struct DownloadStateLine: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier(TestID.Music.downloadLine(itemId))
         }
     }
 }
@@ -143,6 +149,7 @@ struct DownloadStateBadge: View {
                 .background(symbol.tint, in: Circle())
                 .padding(6)
                 .accessibilityLabel(symbol.label)
+                .accessibilityIdentifier(TestID.Music.downloadBadge(itemId))
         }
     }
 

@@ -54,6 +54,7 @@ struct LetterIndexBar: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Index")
             .accessibilityHint("Drag to jump to a letter")
+            .accessibilityIdentifier(TestID.Common.letterIndex)
     }
 
     private var strip: some View {

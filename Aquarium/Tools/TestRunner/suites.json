@@ -1,0 +1,341 @@
+{
+  "resultsDir": "Aquarium/TestResults",
+  "qaServer": "http://127.0.0.1:8196",
+  "qaAgents": [
+    "com.aquarium.qa-jellyfin",
+    "com.aquarium.qa-proxy"
+  ],
+  "runNames": {
+    "Unit-iPhone17": "iPhone",
+    "Unit-AppleTV": "Apple TV",
+    "Unit-Mac": "This Mac",
+    "WatchUnit-Watch": "Apple Watch",
+    "iPhone-small": "iPhone SE",
+    "iPhone-standard": "iPhone 17",
+    "iPhone-promax": "iPhone 18 Pro Max",
+    "iPhone-duo": "iPhone Duo",
+    "iPad-iPadAir11": "iPad Air",
+    "TV-AppleTV": "Apple TV",
+    "Watch-Watch46": "Apple Watch",
+    "Mac-Mac": "This Mac",
+    "vitest": "Linux app",
+    "cargo": "Linux app"
+  },
+  "presets": [
+    {
+      "title": "Quick check",
+      "icon": "hare.fill",
+      "detail": "Only the fast behind-the-scenes checks. Nothing opens on screen. A few minutes.",
+      "suites": [
+        "unit",
+        "watchunit"
+      ]
+    },
+    {
+      "title": "Full check",
+      "icon": "checklist",
+      "detail": "Everything on every Apple device. Takes a long time, and the Mac part takes over your screen.",
+      "suites": [
+        "unit",
+        "watchunit",
+        "iphone",
+        "ipad",
+        "tv",
+        "watch",
+        "mac"
+      ]
+    }
+  ],
+  "suites": [
+    {
+      "id": "unit",
+      "group": "Apple devices",
+      "title": "App logic",
+      "detail": "Quick behind-the-scenes checks of how the app thinks: picking video quality, what plays next, subtitles and so on. Nothing is tapped on screen. Runs on a test iPhone, a test Apple TV and this Mac.",
+      "kind": "xcode",
+      "cwd": "Aquarium",
+      "command": [
+        "Tools/run-tests.sh",
+        "unit",
+        "--no-watch"
+      ],
+      "sources": [
+        {
+          "path": "Aquarium/AquariumTests",
+          "target": "AquariumTests"
+        }
+      ],
+      "options": [
+        {
+          "id": "nomac",
+          "title": "Leave out this Mac",
+          "flag": "--no-mac",
+          "help": "Skips the Mac part, for example while you are using Aquarium on this Mac."
+        }
+      ],
+      "icon": "gearshape.2.fill",
+      "tint": "indigo"
+    },
+    {
+      "id": "watchunit",
+      "group": "Apple devices",
+      "title": "Watch logic",
+      "detail": "The same kind of quick behind-the-scenes checks, for the Apple Watch app.",
+      "kind": "xcode",
+      "cwd": "Aquarium",
+      "command": [
+        "Tools/run-tests.sh",
+        "watchunit"
+      ],
+      "sources": [
+        {
+          "path": "Aquarium/WatchTests",
+          "target": "AquariumWatchTests"
+        }
+      ],
+      "icon": "gearshape.fill",
+      "tint": "indigo"
+    },
+    {
+      "id": "iphone",
+      "group": "Apple devices",
+      "title": "iPhone",
+      "detail": "Opens the app on test iPhones and uses it the way a person would: signing in, browsing, opening titles, playing video, changing settings. Runs on four sizes of iPhone, one after another.",
+      "kind": "xcode",
+      "cwd": "Aquarium",
+      "command": [
+        "Tools/run-tests.sh",
+        "iphone"
+      ],
+      "sources": [
+        {
+          "path": "Aquarium/AquariumUITests/iPhone",
+          "target": "AquariumUITests"
+        }
+      ],
+      "options": [
+        {
+          "id": "device",
+          "title": "Which iPhone",
+          "flag": "--device",
+          "choices": [
+            {
+              "title": "All four sizes",
+              "value": ""
+            },
+            {
+              "title": "iPhone SE (smallest)",
+              "value": "small"
+            },
+            {
+              "title": "iPhone 17",
+              "value": "standard"
+            },
+            {
+              "title": "iPhone 18 Pro Max (largest)",
+              "value": "promax"
+            },
+            {
+              "title": "iPhone Duo (folding)",
+              "value": "duo"
+            }
+          ],
+          "help": "All four takes about four times as long as one."
+        },
+        {
+          "id": "noreset",
+          "title": "Skip tidying the test account first",
+          "flag": "--no-reset",
+          "help": "Each run normally starts by putting its test account back to a known state. Skipping that is a little quicker, but leftovers from the last run can cause false alarms."
+        }
+      ],
+      "icon": "iphone",
+      "tint": "blue"
+    },
+    {
+      "id": "ipad",
+      "group": "Apple devices",
+      "title": "iPad",
+      "detail": "Opens the app on a test iPad and uses it the way a person would: the sidebar, libraries, search, the player, downloads and settings.",
+      "kind": "xcode",
+      "cwd": "Aquarium",
+      "command": [
+        "Tools/run-tests.sh",
+        "ipad"
+      ],
+      "sources": [
+        {
+          "path": "Aquarium/AquariumUITests/iPad",
+          "target": "AquariumUITests"
+        }
+      ],
+      "options": [
+        {
+          "id": "noreset",
+          "title": "Skip tidying the test account first",
+          "flag": "--no-reset",
+          "help": "Each run normally starts by putting its test account back to a known state. Skipping that is a little quicker, but leftovers from the last run can cause false alarms."
+        }
+      ],
+      "icon": "ipad",
+      "tint": "teal"
+    },
+    {
+      "id": "tv",
+      "group": "Apple devices",
+      "title": "Apple TV",
+      "detail": "Opens the app on a test Apple TV and drives it with the remote: moving focus, browsing, playing, Live TV and settings.",
+      "kind": "xcode",
+      "cwd": "Aquarium",
+      "command": [
+        "Tools/run-tests.sh",
+        "tv"
+      ],
+      "sources": [
+        {
+          "path": "Aquarium/AquariumUITests/TV",
+          "target": "AquariumUITests"
+        }
+      ],
+      "options": [
+        {
+          "id": "noreset",
+          "title": "Skip tidying the test account first",
+          "flag": "--no-reset",
+          "help": "Each run normally starts by putting its test account back to a known state. Skipping that is a little quicker, but leftovers from the last run can cause false alarms."
+        }
+      ],
+      "icon": "appletv.fill",
+      "tint": "purple"
+    },
+    {
+      "id": "watch",
+      "group": "Apple devices",
+      "title": "Apple Watch",
+      "detail": "Opens the watch app on a test Apple Watch and uses it: Home, the library, playback and downloads.",
+      "kind": "xcode",
+      "cwd": "Aquarium",
+      "command": [
+        "Tools/run-tests.sh",
+        "watch"
+      ],
+      "sources": [
+        {
+          "path": "Aquarium/WatchUITests",
+          "target": "AquariumWatchUITests"
+        }
+      ],
+      "options": [
+        {
+          "id": "noreset",
+          "title": "Skip tidying the test account first",
+          "flag": "--no-reset",
+          "help": "Each run normally starts by putting its test account back to a known state. Skipping that is a little quicker, but leftovers from the last run can cause false alarms."
+        }
+      ],
+      "icon": "applewatch",
+      "tint": "pink"
+    },
+    {
+      "id": "mac",
+      "group": "Apple devices",
+      "title": "Mac",
+      "detail": "Opens the Mac app on this Mac and uses it: windows, the sidebar, menus, browsing and the player.",
+      "note": "This one takes over your screen, mouse and keyboard while it runs, so leave the Mac alone until it finishes. Quit Aquarium first; it will not start while Aquarium is open.",
+      "kind": "xcode",
+      "cwd": "Aquarium",
+      "command": [
+        "Tools/run-tests.sh",
+        "mac"
+      ],
+      "sources": [
+        {
+          "path": "Aquarium/AquariumUITests/Mac",
+          "target": "AquariumUITests"
+        }
+      ],
+      "options": [
+        {
+          "id": "noreset",
+          "title": "Skip tidying the test account first",
+          "flag": "--no-reset",
+          "help": "Each run normally starts by putting its test account back to a known state. Skipping that is a little quicker, but leftovers from the last run can cause false alarms."
+        }
+      ],
+      "icon": "laptopcomputer",
+      "tint": "orange"
+    },
+    {
+      "id": "linux-unit",
+      "group": "Linux",
+      "title": "Linux app logic",
+      "detail": "Quick behind-the-scenes checks of the Linux app's screens and logic.",
+      "kind": "vitest",
+      "cwd": "Linux",
+      "command": [
+        "npx",
+        "vitest",
+        "run"
+      ],
+      "requires": "node",
+      "paths": [
+        "tests/unit",
+        "tests/dom"
+      ],
+      "sources": [
+        {
+          "path": "Linux/tests/unit"
+        },
+        {
+          "path": "Linux/tests/dom"
+        }
+      ],
+      "icon": "shippingbox.fill",
+      "tint": "green",
+      "note": "Needs developer tools that are not on every Mac. If it says it can't run here, that is why; these checks also run automatically online."
+    },
+    {
+      "id": "linux-integration",
+      "group": "Linux",
+      "title": "Linux app and server",
+      "detail": "Checks that the Linux app talks to the test server correctly.",
+      "kind": "vitest",
+      "cwd": "Linux",
+      "command": [
+        "npx",
+        "vitest",
+        "run"
+      ],
+      "requires": "node",
+      "paths": [
+        "tests/integration"
+      ],
+      "sources": [
+        {
+          "path": "Linux/tests/integration"
+        }
+      ],
+      "icon": "network",
+      "tint": "green",
+      "note": "Needs developer tools that are not on every Mac. If it says it can't run here, that is why; these checks also run automatically online."
+    },
+    {
+      "id": "linux-rust",
+      "group": "Linux",
+      "title": "Linux app core",
+      "detail": "Checks of the Linux app's core: downloads, settings and the server connection.",
+      "kind": "cargo",
+      "cwd": "Linux",
+      "requires": "cargo",
+      "command": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "src-tauri/portable-tests/Cargo.toml"
+      ],
+      "icon": "cpu",
+      "tint": "green",
+      "note": "Needs developer tools that are not on every Mac. If it says it can't run here, that is why; these checks also run automatically online."
+    }
+  ]
+}

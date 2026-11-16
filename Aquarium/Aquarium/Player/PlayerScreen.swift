@@ -72,6 +72,7 @@ struct PlayerScreen: View {
             if !player.pictureIsStale {
                 SubtitleFileOverlay()
                     .ignoresSafeArea()
+                    .testAnchor(TestID.Player.subtitleOverlay)
             }
             #endif
             #if os(tvOS)
@@ -230,6 +231,7 @@ struct PlayerScreen: View {
         // Playback menu has, in the place a Mac user asks for them.
         .contextMenu { PlayerContextMenu(player: player) }
         #endif
+        .testAnchor(TestID.Player.root)
     }
 }
 
@@ -419,9 +421,12 @@ private struct StreamSwitchPrompt: ViewModifier {
         ) { request in
             if offline {
                 Button("OK", role: .cancel) {}
+                    .accessibilityIdentifier(TestID.Player.streamSwitchOK)
             } else {
                 Button("Stream") { Task { await player.confirmStreamSwitch(request) } }
+                    .accessibilityIdentifier(TestID.Player.streamSwitchConfirm)
                 Button("Keep Download", role: .cancel) {}
+                    .accessibilityIdentifier(TestID.Player.streamSwitchKeepDownload)
             }
         } message: { request in
             if offline {

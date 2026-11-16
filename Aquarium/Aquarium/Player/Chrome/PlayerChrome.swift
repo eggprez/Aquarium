@@ -401,6 +401,7 @@ struct PlayerChrome: View {
 
             if chrome.holdingDoubleSpeed {
                 HoldSpeedBadge()
+                    .testAnchor(TestID.Player.hudDoubleSpeed)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .padding(.top, compact ? 64 : 88)
                     .transition(.opacity)
@@ -549,9 +550,12 @@ struct PlayerChrome: View {
     /// and Up Next sit above the bottom band when it is up and at the foot of
     /// the picture when it isn't.
     /// On a television the prompts step aside for the panel and for a scrub
-    /// waiting on its click, since a click is what they answer to.
+    /// waiting on its click, since a click is what they answer to. Elsewhere
+    /// they step aside for an open card, which otherwise drew over Skip Intro
+    /// and left half a button showing under it.
     private var promptsMayShow: Bool {
-        !(PlayerMetrics.television && (chrome.panelOpen || chrome.scrub != nil))
+        if PlayerMetrics.television { return !(chrome.panelOpen || chrome.scrub != nil) }
+        return !chrome.menuOpen
     }
 
     @ViewBuilder
@@ -568,6 +572,7 @@ struct PlayerChrome: View {
                 ProgressView()
                     .controlSize(.large)
                     .tint(.white)
+                    .accessibilityIdentifier(TestID.Player.buffering)
                     .padding(34)
                     .playerGlass(cornerRadius: 30)
                     .allowsHitTesting(false)

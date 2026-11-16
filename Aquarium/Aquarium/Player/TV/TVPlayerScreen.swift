@@ -29,6 +29,96 @@
 
 import SwiftUI
 
+/// The driver's decisions, as plain functions of what it knows, so the remote
+/// mapping can be unit tested without a player on screen. `PlayerRemoteDriver`
+/// below asks these and does what they say; nothing here touches the player.
+enum RemoteRules {
+    /// What Menu does, first match wins: the panel away, the error card
+    /// closed, out of a scrub, back to the return point, autoplay off, the
+    /// bar away, and only then out of the player.
+    enum MenuStep: Equatable {
+        case closePanel, stopOnError, cancelScrub, returnToPoint, cancelAutoplay, hideControls, stop
+    }
+
+    static func menuStep(
+        panelOpen: Bool, hasError: Bool, scrubbing: Bool, hasReturnPoint: Bool,
+        upNextShowing: Bool, controlsVisible: Bool, paused: Bool
+    ) -> MenuStep {
+        if panelOpen { return .closePanel }
+        if hasError { return .stopOnError }
+        if scrubbing { return .cancelScrub }
+        if hasReturnPoint { return .returnToPoint }
+        if upNextShowing { return .cancelAutoplay }
+        if controlsVisible, !paused { return .hideControls }
+        return .stop
+    }
+
+    /// What a click in the centre does.
+    enum SelectStep: Equatable { case commitScrub, playNextNow, skipSegment, togglePlayPause }
+
+    static func selectStep(scrubbing: Bool, upNextShowing: Bool, segmentActive: Bool) -> SelectStep {
+        if scrubbing { return .commitScrub }
+        if upNextShowing { return .playNextNow }
+        if segmentActive { return .skipSegment }
+        return .togglePlayPause
+    }
+
+    /// What a click on the bottom edge does.
+    enum DownStep: Equatable { case previousChannel, keepScrub, openPanel }
+
+    static func downStep(isLive: Bool, scrubbing: Bool) -> DownStep {
+        if isLive { return .previousChannel }
+        if scrubbing { return .keepScrub }
+        return .openPanel
+    }
+
+    /// A finished swipe on the touch surface with no scrub under way: a
+    /// mostly vertical one of more than 60 points opens the panel (down) or
+    /// puts the bar away (up).
+    enum Swipe: Equatable { case down, up, none }
+
+    static func swipe(_ translation: CGPoint) -> Swipe {
+        let vertical = abs(translation.y) > abs(translation.x) * 1.3
+        if vertical, translation.y > 60 { return .down }
+        if vertical, translation.y < -60 { return .up }
+        return .none
+    }
+
+    /// Whether a moving finger starts a scrub: paused only, and a short swipe
+    /// that is mostly sideways.
+    static func startsScrub(_ translation: CGPoint, paused: Bool, canScrub: Bool) -> Bool {
+        let x = abs(translation.x), y = abs(translation.y)
+        return paused && x > 24 && x > y && canScrub
+    }
+
+    /// A swipe up from the panel's tabs, which puts the panel away.
+    static func isPanelSwipeUp(_ translation: CGPoint) -> Bool {
+        translation.y < -60 && abs(translation.y) > abs(translation.x) * 1.3
+    }
+
+    /// A full swipe across the touch surface moves an eighth of the item,
+    /// never less than a minute.
+    static func secondsPerPoint(duration: Double) -> Double { max(duration / 8, 60) / 1000 }
+
+    /// A scrub position kept inside the item, short of its last second.
+    static func clamp(_ seconds: Double, duration: Double) -> Double {
+        min(max(0, seconds), max(0, duration - 1))
+    }
+
+    /// Whether the scrub can move at all.
+    static func canScrub(isLive: Bool, duration: Double, isOpening: Bool) -> Bool {
+        !isLive && duration > 0 && !isOpening
+    }
+
+    /// The tab a swipe or press down opens on: Sync over the sync clip, whose
+    /// picture says a swipe down adjusts the sync; Info everywhere else.
+    static func openingTab(isSyncTest: Bool) -> PlayerTab { isSyncTest ? .sync : .info }
+
+    /// A jump that moved the playhead more than a second leaves a point for
+    /// Menu to go back to.
+    static func leavesReturnPoint(from origin: Double, to seconds: Double) -> Bool { abs(seconds - origin) > 1 }
+}
+
 /// Applied to the chrome by `PlayerChrome`: `RemoteInput` behind it, and the
 /// play/pause and exit commands on it, so a Menu press with the panel open
 /// reaches the panel's own handler first.
@@ -87,13 +177,15 @@ struct PlayerRemoteDriver: ViewModifier {
             onInteract()
 
         case .select:
-            if let scrub = chrome.scrub {
-                commit(scrub)
-            } else if player.shouldShowUpNext {
+            switch RemoteRules.selectStep(scrubbing: chrome.scrub != nil, upNextShowing: player.shouldShowUpNext,
+                                          segmentActive: player.activeSegment != nil) {
+            case .commitScrub:
+                if let scrub = chrome.scrub { commit(scrub) }
+            case .playNextNow:
                 Task { await player.playNextNow() }
-            } else if player.activeSegment != nil {
+            case .skipSegment:
                 player.skipSegment()
-            } else {
+            case .togglePlayPause:
                 player.togglePlayPause()
                 onInteract()
             }
@@ -108,23 +200,30 @@ struct PlayerRemoteDriver: ViewModifier {
             }
 
         case .menu:
-            if chrome.panelOpen {
+            switch RemoteRules.menuStep(
+                panelOpen: chrome.panelOpen, hasError: player.errorMessage != nil, scrubbing: chrome.scrub != nil,
+                hasReturnPoint: chrome.returnPoint != nil, upNextShowing: player.shouldShowUpNext,
+                controlsVisible: chrome.controlsVisible, paused: player.isPaused
+            ) {
+            case .closePanel:
                 chrome.panel = nil
-            } else if player.errorMessage != nil {
+            case .stopOnError:
                 player.stop(reason: "error card")
-            } else if chrome.scrub != nil {
+            case .cancelScrub:
                 chrome.scrub = nil
                 onInteract()
-            } else if let point = chrome.returnPoint {
+            case .returnToPoint:
                 // Undo the jump: back to where the playhead was before it.
-                chrome.returnPoint = nil
-                player.seek(to: point)
+                if let point = chrome.returnPoint {
+                    chrome.returnPoint = nil
+                    player.seek(to: point)
+                }
                 onInteract()
-            } else if player.shouldShowUpNext {
+            case .cancelAutoplay:
                 player.cancelAutoplay()
-            } else if chrome.controlsVisible, !player.isPaused {
+            case .hideControls:
                 onHide()
-            } else {
+            case .stop:
                 player.stop(reason: "menu")
             }
 
@@ -150,8 +249,7 @@ struct PlayerRemoteDriver: ViewModifier {
                 // Paused only, and a short swipe that is mostly sideways.
                 // Playing, nothing: the film was too easy to throw with a
                 // swipe meant for something else, and the edge clicks skip.
-                let x = abs(translation.x), y = abs(translation.y)
-                guard player.isPaused, x > 24 && x > y, canScrub else { return }
+                guard RemoteRules.startsScrub(translation, paused: player.isPaused, canScrub: canScrub) else { return }
                 chrome.scrub = player.position
                 scrubAnchor = player.position
                 scrubOrigin = player.position
@@ -167,11 +265,10 @@ struct PlayerRemoteDriver: ViewModifier {
                 scrubAnchor = chrome.scrub ?? player.position
                 return
             }
-            let vertical = abs(translation.y) > abs(translation.x) * 1.3
-            if vertical, translation.y > 60 {
-                chrome.panel = openingTab
-            } else if vertical, translation.y < -60 {
-                onHide()
+            switch RemoteRules.swipe(translation) {
+            case .down: chrome.panel = openingTab
+            case .up: onHide()
+            case .none: break
             }
         }
     }
@@ -192,15 +289,16 @@ struct PlayerRemoteDriver: ViewModifier {
             if player.isLive { player.switchChannel(by: 1) }
             onInteract()
         case .down:
-            if player.isLive {
+            switch RemoteRules.downStep(isLive: player.isLive, scrubbing: chrome.scrub != nil) {
+            case .previousChannel:
                 player.switchChannel(by: -1)
                 onInteract()
-            } else if chrome.scrub != nil {
+            case .keepScrub:
                 // Not over a scrub waiting for its click, as a swipe down
                 // isn't either: the panel would cover the knob, and the
                 // scrub would still be armed once it was put away.
                 onInteract()
-            } else {
+            case .openPanel:
                 chrome.panel = openingTab
             }
         @unknown default:
@@ -210,21 +308,23 @@ struct PlayerRemoteDriver: ViewModifier {
 
     /// The tab a swipe or press down opens on. The sync test's picture says
     /// a swipe down adjusts the sync, so there it is Sync rather than Info.
-    private var openingTab: PlayerTab { player.isSyncTest ? .sync : .info }
+    private var openingTab: PlayerTab { RemoteRules.openingTab(isSyncTest: player.isSyncTest) }
 
-    private var canScrub: Bool { !player.isLive && player.duration > 0 && !player.isOpening }
+    private var canScrub: Bool {
+        RemoteRules.canScrub(isLive: player.isLive, duration: player.duration, isOpening: player.isOpening)
+    }
 
     /// A full swipe across the touch surface moves an eighth of the item,
     /// never less than a minute. It was a quarter, which overshot: a
     /// two-hour film moved half an hour for one swipe.
-    private var secondsPerPoint: Double { max(player.duration / 8, 60) / 1000 }
+    private var secondsPerPoint: Double { RemoteRules.secondsPerPoint(duration: player.duration) }
 
     private func clamp(_ seconds: Double) -> Double {
-        min(max(0, seconds), max(0, player.duration - 1))
+        RemoteRules.clamp(seconds, duration: player.duration)
     }
 
     private func commit(_ seconds: Double) {
-        if abs(seconds - scrubOrigin) > 1 { chrome.returnPoint = scrubOrigin }
+        if RemoteRules.leavesReturnPoint(from: scrubOrigin, to: seconds) { chrome.returnPoint = scrubOrigin }
         player.seek(to: seconds)
         chrome.scrub = nil
         onInteract()

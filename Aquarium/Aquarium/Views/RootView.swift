@@ -27,7 +27,7 @@ struct RootView: View {
     /// the navigation bar, and the pages that hide that bar — Home, a title,
     /// Live TV — hide the toggle with it, stranding the sidebar with no way
     /// back. Driving visibility ourselves lets those pages draw a toggle of
-    /// their own — see `showSidebar`.
+    /// their own — see `SidebarToggle`.
     @State private var sidebarVisibility: NavigationSplitViewVisibility = .all
     #if os(iOS)
     /// The trailing safe-area inset of the tab shell: a foldable's status
@@ -42,6 +42,11 @@ struct RootView: View {
     /// draws, the music bar coming back across the page) ever knew. See
     /// `onChange` in `sidebarShell`.
     @State private var sidebarHidden = false
+    #if os(iOS)
+    /// What the pages without a navigation bar read to draw a toggle of
+    /// their own — see `SidebarToggle`.
+    @State private var sidebarToggle = SidebarToggle()
+    #endif
 
     var body: some View {
         Group {
@@ -54,24 +59,31 @@ struct RootView: View {
                     // left it, until something happened to reload it.
                     shell
                         .id(client.session?.accountKey)
+                        .testAnchor(TestID.Shell.root)
                 } else {
                     // The saved Home and library list being read off disk —
                     // see `AppModel.launchSettled`. A few milliseconds, so
                     // nothing is drawn over the background: a spinner would
                     // only flash.
                     Color.clear
+                        .testAnchor(TestID.Shell.launching)
                 }
             } else {
                 #if DEBUG
                 // `-AquariumShowSettings YES`: Settings with no server signed
                 // in, for looking at it on a simulator. Debug builds only.
                 if UserDefaults.standard.bool(forKey: "AquariumShowSettings") {
-                    NavigationStack { SettingsView() }
+                    NavigationStack {
+                        SettingsView()
+                            .navigationDestination(for: Route.self) { RouteDestination(route: $0) }
+                    }
                 } else {
                     LoginView()
+                        .testAnchor(TestID.Shell.signedOut)
                 }
                 #else
                 LoginView()
+                    .testAnchor(TestID.Shell.signedOut)
                 #endif
             }
         }
@@ -187,8 +199,10 @@ struct RootView: View {
                         Text("Switching to \(next.userName)…")
                             .font(.headline)
                             .foregroundStyle(Theme.text)
+                            .accessibilityIdentifier(TestID.Shell.switchingAccountText)
                     }
                 }
+                .testAnchor(TestID.Shell.switchingAccount)
                 .transition(.opacity)
             }
         }
@@ -339,7 +353,7 @@ struct RootView: View {
             set: { new in
                 guard let new else { return }
                 #if os(macOS)
-                if new != app.shownSelection { MacSidebarRows.selectionChangedAt = Date() }
+                if new != app.shownSelection { MacSidebarRows.selectionMoved(to: new) }
                 #endif
                 app.selection = new
             }
@@ -482,7 +496,10 @@ struct RootView: View {
                     }
                 )
                 .focusRegion()
-                .tabItem { Label(section.title, systemImage: section.symbol) }
+                .tabItem {
+                    Label(section.title, systemImage: section.symbol)
+                        .accessibilityIdentifier(TestID.Tab.item(section.id))
+                }
                 .tag(section)
             }
         }
@@ -500,6 +517,7 @@ struct RootView: View {
             .navigationTitle("Aquarium")
             .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 280)
             .safeAreaInset(edge: .bottom) { SidebarFooter() }
+            .testAnchor(TestID.Sidebar.root)
             #else
             // The app's own column — see `PadSidebar`. Its header stands in
             // for the navigation bar, toggle included. Left to itself an
@@ -511,12 +529,22 @@ struct RootView: View {
                 .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 280)
             #endif
         } detail: {
-            withToasts(
+            detailChrome(
                 withOfflineStrip(
                     NavigationStack(path: stackPath(for: app.shownSelection)) {
                         SectionView(section: app.shownSelection)
                             .clearsBottomChrome()
-                            .navigationDestination(for: Route.self) { destination($0).clearsBottomChrome() }
+                            .navigationDestination(for: Route.self) { route in
+                                destination(route)
+                                    .clearsBottomChrome()
+                                    #if os(iOS)
+                                    // Handed to each pushed page itself: the
+                                    // value set on the column below never
+                                    // reached a page the stack pushed, so a
+                                    // title page drew no toggle.
+                                    .environment(\.sidebarToggle, sidebarToggle)
+                                    #endif
+                            }
                     }
                     // A stack per section, not one stack handed each
                     // section's path in turn — see `stackPath`.
@@ -535,7 +563,7 @@ struct RootView: View {
             // page has the system's toggle in its bar, so this is handed down
             // rather than floated over the column, which drew a second toggle
             // under the system's on all of those.
-            .environment(\.showSidebar, showSidebarAction)
+            .environment(\.sidebarToggle, sidebarToggle)
             #endif
         }
         // An explicit value is the column going or coming; `.automatic` is
@@ -547,6 +575,9 @@ struct RootView: View {
             default: break
             }
         }
+        #if os(iOS)
+        .onChange(of: sidebarHidden, initial: true) { _, _ in sidebarToggle.show = showSidebarAction }
+        #endif
         #if os(macOS)
         // Search is the field at the top of the sidebar, as in Music, rather
         // than a row in it. Typing there and pressing Return shows the Search
@@ -554,24 +585,46 @@ struct RootView: View {
         // and the field agree whichever section was showing when it was
         // typed. Recent terms drop down from the field — the Mac's place for
         // them, in front of the page rather than on it.
-        .searchable(text: $app.sidebarSearchTerm, placement: .sidebar, prompt: "Search")
-        .searchSuggestions {
-            if app.sidebarSearchTerm.isEmpty {
-                ForEach(prefs.recentSearches, id: \.self) { recent in
-                    Label(recent, systemImage: "clock.arrow.circlepath")
-                        .searchCompletion(recent)
-                }
-            }
-        }
+        // Ahead of `.searchable`, on the view it wraps: placed after it, the
+        // handler never heard the field's Return, and the Search page never
+        // came up (checked 2026-11-13, macOS 27).
         .onSubmit(of: .search) {
             let term = app.sidebarSearchTerm.trimmingCharacters(in: .whitespaces)
             guard !term.isEmpty else { return }
             prefs.rememberSearch(term)
             app.showSearch(term)
         }
+        .searchable(text: $app.sidebarSearchTerm, placement: .sidebar, prompt: "Search")
+        .searchSuggestions {
+            if app.sidebarSearchTerm.isEmpty {
+                ForEach(prefs.recentSearches, id: \.self) { recent in
+                    Label(recent, systemImage: "clock.arrow.circlepath")
+                        .accessibilityIdentifier(TestID.Sidebar.searchSuggestion(TestID.key(recent)))
+                        .searchCompletion(recent)
+                }
+            }
+        }
         .modifier(FocusSearchOnRequest())
         #endif
+        #if os(iOS)
+        // On the split view, not on the page column inside it: hung on the
+        // column's stack, an iPad drew no toast at all and never raised the
+        // New Playlist prompt.
+        .withMusicHosts()
+        // Over the page, not the window: clear of the sidebar while it is up.
+        .overlay(alignment: .bottom) { ToastOverlay().padding(.leading, sidebarHidden ? 0 : 210) }
+        #endif
         .nowPlayingSheet()
+    }
+
+    /// The toasts over the page column — on a Mac. An iPad's are on the
+    /// split view as a whole (see above).
+    private func detailChrome<Content: View>(_ content: Content) -> some View {
+        #if os(iOS)
+        content
+        #else
+        withToasts(content)
+        #endif
     }
     #endif
 
@@ -581,7 +634,7 @@ struct RootView: View {
     /// The app's appearance, for the tent cover — see `playerBinding`'s cover.
     @Environment(\.colorScheme) private var colorScheme
 
-    /// Brings the sidebar back, while it is collapsed — see `showSidebar`.
+    /// Brings the sidebar back, while it is collapsed — see `SidebarToggle`.
     private var showSidebarAction: (() -> Void)? {
         guard sidebarHidden else { return nil }
         return { sidebarVisibility = .all }
@@ -688,7 +741,10 @@ struct RootView: View {
                 TabView(selection: app.shownSelectionBinding) {
                     ForEach(app.tabSections) { section in
                         tabPage(section)
-                            .tabItem { Label(section.title, systemImage: section.symbol) }
+                            .tabItem {
+                                Label(section.title, systemImage: section.symbol)
+                                    .accessibilityIdentifier(TestID.Tab.item(section.id))
+                            }
                             .tag(section)
                     }
                 }
@@ -825,6 +881,7 @@ struct SectionView: View {
         #if !os(macOS)
         .background(Theme.background)
         #endif
+        .testAnchor(TestID.Shell.section(section.id))
     }
 
     @ViewBuilder
@@ -895,12 +952,14 @@ struct MoreView: View {
                     Label(section.title, systemImage: section.symbol)
                         .foregroundStyle(Theme.text)
                 }
+                .accessibilityIdentifier(TestID.Shell.moreRow(section.id))
                 .listRowBackground(Theme.raised)
             }
         }
         .scrollContentBackground(.hidden)
         .background(Theme.background)
         .navigationTitle("More")
+        .testAnchor(TestID.Shell.more)
     }
 }
 #endif
@@ -979,6 +1038,7 @@ struct SidebarFooter: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Settings")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier(TestID.Sidebar.settings)
     }
     #endif
 
@@ -998,6 +1058,7 @@ struct SidebarFooter: View {
             Text(text(running: running, pending: pending))
                 .font(.caption)
                 .foregroundStyle(Theme.textDim)
+                .accessibilityIdentifier(TestID.Sidebar.status)
         }
         #if os(macOS)
         // Under the account's name in `MacSidebarFooter`, which draws the rule.

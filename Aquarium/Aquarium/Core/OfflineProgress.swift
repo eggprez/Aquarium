@@ -29,9 +29,26 @@ enum OfflineProgress {
         DownloadManager.shared.pendingSyncCount
     }
 
+    /// The sync under way, if there is one. The shell syncs at launch and on
+    /// every return to the app, the player as it closes, and the Downloads
+    /// page has a button: two running together each read the same unsent
+    /// records and each sent them, so one sitting reached the server twice.
+    /// A second caller waits for the first and takes its answer.
+    @MainActor private static var running: Task<Result, Never>?
+
     @discardableResult
     @MainActor
     static func sync() async -> Result {
+        if let running { return await running.value }
+        let task = Task { @MainActor in await syncOnce() }
+        running = task
+        let result = await task.value
+        running = nil
+        return result
+    }
+
+    @MainActor
+    private static func syncOnce() async -> Result {
         let client = JellyfinClient.shared
         guard client.isSignedIn else { return Result(synced: 0, failed: 0) }
         let manager = DownloadManager.shared

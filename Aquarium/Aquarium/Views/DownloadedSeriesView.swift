@@ -51,6 +51,7 @@ struct DownloadedSeriesView: View {
                     title: "Nothing left here",
                     message: "Every episode of this show has been deleted from this device."
                 )
+                .testAnchor(TestID.Downloads.seriesEmpty)
             }
         }
         .navigationTitle(show?.title ?? "Downloads")
@@ -58,6 +59,7 @@ struct DownloadedSeriesView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .paletteBar()
+        .testAnchor(TestID.Downloads.seriesRoot)
         .downloadDeletionDialog($pendingDeletion) { ids in
             let n = downloads.delete(ids)
             app.toast("Deleted \(n) episode\(n == 1 ? "" : "s")", tone: .ok)
@@ -81,16 +83,20 @@ struct DownloadedSeriesView: View {
                     Text(show.title)
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(Theme.text)
+                        .accessibilityIdentifier(TestID.Downloads.seriesTitle)
                     Text(show.subtitle)
                         .font(.subheadline)
                         .foregroundStyle(Theme.textDim)
+                        .accessibilityIdentifier(TestID.Downloads.seriesSubtitle)
                     Text(Format.bytes(show.bytes))
                         .font(.caption)
                         .foregroundStyle(Theme.textDim)
+                        .accessibilityIdentifier(TestID.Downloads.seriesSize)
                     if show.unwatched > 0 {
                         Text("\(show.unwatched) unwatched")
                             .font(.caption)
                             .foregroundStyle(Theme.accent)
+                            .accessibilityIdentifier(TestID.Downloads.seriesUnwatched)
                     }
                 }
                 Spacer(minLength: 0)
@@ -110,6 +116,7 @@ struct DownloadedSeriesView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.accentStrong)
+                    .accessibilityIdentifier(TestID.Downloads.seriesPlay)
                 }
 
                 if show.records.count > 1 {
@@ -119,6 +126,7 @@ struct DownloadedSeriesView: View {
                         Label("Shuffle", systemImage: "shuffle")
                     }
                     .buttonStyle(.bordered)
+                    .accessibilityIdentifier(TestID.Downloads.seriesShuffle)
                 }
 
                 Menu {
@@ -128,6 +136,7 @@ struct DownloadedSeriesView: View {
                         } label: {
                             Label("Delete \(season.title) · \(season.records.count)", systemImage: "rectangle.stack")
                         }
+                        .accessibilityIdentifier(TestID.Downloads.seriesDeleteSeason(season.id))
                     }
                     let watched = show.records.filter(\.played)
                     if !watched.isEmpty {
@@ -141,6 +150,7 @@ struct DownloadedSeriesView: View {
                         } label: {
                             Label("Delete watched · \(watched.count)", systemImage: "checkmark.circle")
                         }
+                        .accessibilityIdentifier(TestID.Downloads.seriesDeleteWatched)
                     }
                     Divider()
                     Button(role: .destructive) {
@@ -148,11 +158,13 @@ struct DownloadedSeriesView: View {
                     } label: {
                         Label("Delete the whole show", systemImage: "trash")
                     }
+                    .accessibilityIdentifier(TestID.Downloads.seriesDeleteAll)
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
                 .buttonStyle(.bordered)
                 .tint(Theme.danger)
+                .accessibilityIdentifier(TestID.Downloads.seriesDeleteMenu)
             }
             .lineLimit(1)
             .minimumScaleFactor(0.7)
@@ -191,6 +203,7 @@ struct DownloadedSeriesView: View {
                         } label: {
                             Label("Play", systemImage: "play.fill")
                         }
+                        .accessibilityIdentifier(TestID.Downloads.seasonPlay(season.id))
                     }
                     if season.records.count > 1 {
                         Button {
@@ -198,17 +211,20 @@ struct DownloadedSeriesView: View {
                         } label: {
                             Label("Shuffle this season", systemImage: "shuffle")
                         }
+                        .accessibilityIdentifier(TestID.Downloads.seasonShuffle(season.id))
                     }
                     Button(role: .destructive) {
                         pendingDeletion = .season(season, show: show.title)
                     } label: {
                         Label("Delete this season", systemImage: "trash")
                     }
+                    .accessibilityIdentifier(TestID.Downloads.seasonDelete(season.id))
                 } label: {
                     Label("Season options", systemImage: "ellipsis.circle")
                         .labelStyle(.iconOnly)
                         .font(.title3)
                 }
+                .accessibilityIdentifier(TestID.Downloads.seasonMenu(season.id))
             }
 
             ForEach(season.records) { record in
@@ -222,6 +238,7 @@ struct DownloadedSeriesView: View {
             }
         }
         .padding(.horizontal, Metrics.gutter)
+        .testAnchor(TestID.Downloads.season(season.id))
     }
     #endif
 }

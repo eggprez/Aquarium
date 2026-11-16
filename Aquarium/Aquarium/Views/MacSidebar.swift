@@ -12,15 +12,15 @@ import SwiftUI
 struct MacSidebarRows: View {
     @Environment(AppModel.self) private var app
     @Environment(\.openWindow) private var openWindow
-    /// When the selection last moved to another row — set by the list's
-    /// selection binding (see `RootView.sidebarSelection`), which runs as the
-    /// row is pressed. See `reselected`.
-    static var selectionChangedAt = Date.distantPast {
-        didSet { selectionAwaitsTap = true }
+    /// Pairs each click with the selection change it caused, if any — see
+    /// `reselected` and `SidebarClickRule`.
+    static var clicks = SidebarClickRule()
+
+    /// Called by the list's selection binding (see
+    /// `RootView.sidebarSelection`) when the selection moves to another row.
+    static func selectionMoved(to section: AppSection) {
+        clicks.selectionMoved(to: section.id, at: Date())
     }
-    /// The selection has moved, and the tap that ends the click which moved
-    /// it hasn't arrived yet. See `reselected`.
-    private static var selectionAwaitsTap = false
 
     var body: some View {
         ForEach(MacSidebarGroup.grouped(app.sections)) { group in
@@ -39,6 +39,7 @@ struct MacSidebarRows: View {
                 // The whole name, for a library whose name the sidebar's
                 // width cuts short.
                 .help(section.title)
+                .accessibilityIdentifier(TestID.Sidebar.row(section.id))
                 .tag(section)
                 .contextMenu { menu(for: section) }
                 .simultaneousGesture(TapGesture().onEnded { reselected(section) })
@@ -47,22 +48,19 @@ struct MacSidebarRows: View {
 
     /// A click on the row already selected: back to the top of that section,
     /// as Music and Finder do. The list's selection binding isn't told about a
-    /// click that doesn't change it, so the row hears it itself. The list
-    /// selects on the way down and the tap ends on the way up, so the tap
-    /// that ends the click which moved the selection here is not a second
-    /// click — that one keeps the section's pages where they were left.
+    /// click that doesn't change it, so the row hears it itself. The click
+    /// that moved the selection here is not a second click — that one keeps
+    /// the section's pages where they were left.
     ///
-    /// Told apart by the selection having moved since the last tap, rather
-    /// than by how recently it moved: a click held for longer than the 0.4
-    /// seconds that used to be allowed — an unhurried press is about that —
-    /// arrived as a re-click and threw away the pages it had come back for.
-    /// The time is still a bound, so a selection moved with the arrow keys,
-    /// which no tap ends, doesn't swallow a real re-click made long after.
+    /// Which click moved the selection is told by pairing, not by order or
+    /// by how long the press took. The rule used to assume the list's
+    /// selection arrives first; on macOS 27 the tap does (checked
+    /// 2026-11-13), which left the selection waiting for a tap that had
+    /// already come, and it swallowed the real re-click after it. See
+    /// `SidebarClickRule`.
     private func reselected(_ section: AppSection) {
-        let endsTheSelectingClick = Self.selectionAwaitsTap
-            && Date().timeIntervalSince(Self.selectionChangedAt) < 10
-        Self.selectionAwaitsTap = false
-        guard app.shownSelection == section, !endsTheSelectingClick else { return }
+        let reclick = Self.clicks.tapped(section.id, isShown: app.shownSelection == section, at: Date())
+        guard reclick, app.shownSelection == section else { return }
         app.showAtTop(section)
     }
 
@@ -73,8 +71,9 @@ struct MacSidebarRows: View {
     /// guide, and Downloads is the device's queue.
     @ViewBuilder
     private func menu(for section: AppSection) -> some View {
-        if let route = windowRoute(for: section) {
+        if let route = Self.windowRoute(for: section) {
             Button("Open in New Window") { openWindow(id: RouteWindow.id, value: route) }
+                .accessibilityIdentifier(TestID.Sidebar.rowOpenInNewWindow(section.id))
         }
         switch section {
         case .library, .libraries, .favorites, .collections, .home:
@@ -85,18 +84,21 @@ struct MacSidebarRows: View {
                 // so it is brought up to date along with the page.
                 Task { await LibraryIndex.shared.sync(force: true) }
             }
+            .accessibilityIdentifier(TestID.Sidebar.rowRefresh(section.id))
         case .liveTV:
             Button("Refresh Guide") {
                 app.selection = section
                 MacCommandRequests.shared.refresh += 1
                 Task { await LiveTVStore.shared.refresh() }
             }
+            .accessibilityIdentifier(TestID.Sidebar.rowRefresh(section.id))
         default:
             EmptyView()
         }
     }
 
-    private func windowRoute(for section: AppSection) -> Route? {
+    /// Static for the unit tests.
+    static func windowRoute(for section: AppSection) -> Route? {
         switch section {
         case .library(let id, let name, let type): .library(id: id, name: name, collectionType: type)
         case .favorites, .libraries, .collections: .section(section)
@@ -107,8 +109,60 @@ struct MacSidebarRows: View {
     /// Transfers still to finish, on Downloads — the count the Dock icon shows
     /// too. Zero draws no badge.
     private func badge(for section: AppSection) -> Int {
+        Self.badge(for: section, transfersToFinish: DownloadManager.shared.transfersToFinish)
+    }
+
+    /// Static for the unit tests.
+    static func badge(for section: AppSection, transfersToFinish: Int) -> Int {
         guard section == .downloads else { return 0 }
-        return DownloadManager.shared.transfersToFinish
+        return transfersToFinish
+    }
+}
+
+/// Tells a click on the selected sidebar row (a re-click: back to the top)
+/// from the click that selected it, whichever of the two events of that click
+/// — the list's selection change and the row's tap — arrives first.
+///
+/// - Selection first: it is left waiting, and the tap on the same row that
+///   follows ends that click.
+/// - Tap first (the row isn't the shown one yet): the tap is left waiting,
+///   and the selection change to that row that follows is its own click's.
+///
+/// Either half waits only a few seconds, so a selection moved with the arrow
+/// keys, which no tap ends, doesn't swallow a real re-click made long after.
+struct SidebarClickRule {
+    static let pairing: TimeInterval = 10
+
+    private var selectionAwaitingTap: (id: String, at: Date)?
+    private var tapAwaitingSelection: (id: String, at: Date)?
+
+    /// The list's selection moved to `id`.
+    mutating func selectionMoved(to id: String, at now: Date) {
+        if let tap = tapAwaitingSelection, tap.id == id, now.timeIntervalSince(tap.at) < Self.pairing {
+            // The tap of this same click came first.
+            tapAwaitingSelection = nil
+            selectionAwaitingTap = nil
+        } else {
+            tapAwaitingSelection = nil
+            selectionAwaitingTap = (id, now)
+        }
+    }
+
+    /// A tap on row `id`; `isShown` is whether that row is the one shown as
+    /// the tap arrives. True when it is a re-click.
+    mutating func tapped(_ id: String, isShown: Bool, at now: Date) -> Bool {
+        defer { selectionAwaitingTap = nil }
+        guard isShown else {
+            // The selection change of this click hasn't arrived yet.
+            tapAwaitingSelection = (id, now)
+            return false
+        }
+        tapAwaitingSelection = nil
+        if let selection = selectionAwaitingTap, selection.id == id,
+           now.timeIntervalSince(selection.at) < Self.pairing {
+            return false
+        }
+        return true
     }
 }
 
@@ -173,12 +227,14 @@ struct MacSidebarFooter<Status: View>: View {
         }
         .animation(.easeOut(duration: 0.2), value: player.isActive)
         .confirmationDialog(
-            "Sign out of \(client.session?.server ?? "this server")?",
+            client.session?.signOutQuestion ?? "Sign out?",
             isPresented: $confirmSignOut,
             titleVisibility: .visible
         ) {
             Button("Sign Out", role: .destructive) { Task { await app.signOut() } }
+                .accessibilityIdentifier(TestID.Shell.signOutConfirm)
             Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(TestID.Shell.signOutCancel)
         }
     }
 
@@ -199,6 +255,7 @@ struct MacSidebarFooter<Status: View>: View {
                     .font(.caption.weight(.medium))
                     .lineLimit(1)
                     .help(player.title)
+                    .accessibilityIdentifier(TestID.Sidebar.nowPlayingTitle)
             }
             Spacer(minLength: 4)
             Button {
@@ -209,6 +266,7 @@ struct MacSidebarFooter<Status: View>: View {
             }
             .buttonStyle(.borderless)
             .help(player.isPaused ? "Play" : "Pause")
+            .accessibilityIdentifier(TestID.Sidebar.nowPlayingPlayPause)
         }
         .padding(8)
         // A quaternary fill rather than a painted card: on the sidebar's
@@ -223,6 +281,7 @@ struct MacSidebarFooter<Status: View>: View {
             openWindow(id: PlayerWindow.id)
         }
         .help("Show the Player")
+        .testAnchor(TestID.Sidebar.nowPlaying)
     }
 
     @ViewBuilder
@@ -255,14 +314,18 @@ struct MacSidebarFooter<Status: View>: View {
                             }
                         }
                         .disabled(isCurrent || app.switchingTo != nil)
+                        .accessibilityIdentifier(TestID.Sidebar.accountMenuSwitch(saved.accountKey))
                     }
                 }
             }
             Button("Add Account…") { app.isAddingAccount = true }
+                .accessibilityIdentifier(TestID.Sidebar.accountMenuAdd)
             Divider()
             SettingsLink { Text("Settings…") }
+                .accessibilityIdentifier(TestID.Sidebar.accountMenuSettings)
             Divider()
             Button("Sign Out…") { confirmSignOut = true }
+                .accessibilityIdentifier(TestID.Sidebar.accountMenuSignOut)
         } label: {
             HStack(spacing: 8) {
                 if let session = client.session {
@@ -289,6 +352,7 @@ struct MacSidebarFooter<Status: View>: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .help("Account, Settings and Sign Out")
+        .accessibilityIdentifier(TestID.Sidebar.accountMenu)
     }
 
     private func host(_ server: String) -> String {

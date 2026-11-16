@@ -204,6 +204,10 @@ struct LibraryView: View {
         switch resolvedCollectionType {
         case "movies": "Movie"
         case "tvshows": "Series"
+        // Clips and the albums of photos. Not the server's raw folders: a
+        // recursive list finds the library's own folder on disk as one,
+        // a second copy of the whole library under its directory's name.
+        case "homevideos": "Video,PhotoAlbum"
         // The Collections view lists the collections themselves; anything
         // else under it is what is inside them, a level down.
         case "boxsets": "BoxSet"
@@ -332,6 +336,8 @@ struct LibraryView: View {
             activeSearchTerm = ""
             #endif
         }
+        .testAnchor(TestID.Library.root)
+        .testAnchor(TestID.Library.page(parentId))
     }
 
     @ViewBuilder
@@ -345,9 +351,11 @@ struct LibraryView: View {
                 ProgressView()
                     .controlSize(.regular)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier(TestID.Library.loading)
             } else if let error, items.isEmpty {
                 ErrorState(error: error) { Task { await reload() } }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .testAnchor(TestID.Library.error)
             } else if items.isEmpty {
                 emptyState
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -402,8 +410,10 @@ struct LibraryView: View {
                     // The grid this is about to become, rather than a spinner
                     // in the middle of an empty screen.
                     SkeletonGrid(count: 12)
+                        .testAnchor(TestID.Library.loading)
                 } else if let error, items.isEmpty {
                     ErrorState(error: error) { Task { await reload() } }
+                        .testAnchor(TestID.Library.error)
                 } else if items.isEmpty {
                     emptyState
                 } else {
@@ -415,6 +425,7 @@ struct LibraryView: View {
                         selection: gridSelection,
                         revision: listRevision
                     )
+                    .testAnchor(TestID.Library.grid)
                     #if os(macOS)
                     // The header above the grid already says how many.
                     Color.clear.frame(height: 24)
@@ -425,11 +436,13 @@ struct LibraryView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 4)
                         .padding(.bottom, 24)
+                        .accessibilityIdentifier(TestID.Library.count)
                     #endif
                 }
             }
             .padding(.top, 8)
         }
+        .focusOnArrival()
     }
 
     #if os(iOS)
@@ -502,6 +515,7 @@ struct LibraryView: View {
             }
         } else {
             EmptyState(symbol: "film.stack", title: "Nothing Here", message: emptyMessage)
+                .testAnchor(TestID.Library.empty)
         }
         #else
         EmptyState(
@@ -512,6 +526,7 @@ struct LibraryView: View {
         ) {
             clearFilters()
         }
+        .testAnchor(TestID.Library.empty)
         #endif
     }
 
@@ -603,6 +618,7 @@ struct LibraryView: View {
                 ProgressView()
                     .controlSize(.small)
                     .help("Loading…")
+                    .accessibilityIdentifier(TestID.Library.paging)
             }
         }
         if !selection.isEmpty {
@@ -612,11 +628,16 @@ struct LibraryView: View {
         }
         ToolbarItem(placement: .primaryAction) {
             Picker("View", selection: $layout) {
-                Label("Grid", systemImage: "square.grid.2x2").tag(LibraryLayout.grid)
-                Label("List", systemImage: "list.bullet").tag(LibraryLayout.list)
+                Label("Grid", systemImage: "square.grid.2x2")
+                    .accessibilityIdentifier(TestID.Library.layout(LibraryLayout.grid.rawValue))
+                    .tag(LibraryLayout.grid)
+                Label("List", systemImage: "list.bullet")
+                    .accessibilityIdentifier(TestID.Library.layout(LibraryLayout.list.rawValue))
+                    .tag(LibraryLayout.list)
             }
             .pickerStyle(.segmented)
             .help("Show as posters or as a list")
+            .accessibilityIdentifier(TestID.Library.layoutPicker)
         }
         if layout == .grid {
             // The ends are buttons of our own rather than the slider's value
@@ -645,6 +666,7 @@ struct LibraryView: View {
                 .foregroundStyle(.secondary)
                 .disabled(!MacViewOptions.shared.canShrink)
                 .help("Smaller (⌘-)")
+                .accessibilityIdentifier(TestID.Library.thumbnailSmaller)
             }
             ToolbarItem(placement: .primaryAction) {
                 Slider(value: thumbnailSize, in: MacViewOptions.range) {
@@ -653,6 +675,7 @@ struct LibraryView: View {
                 .labelsHidden()
                 .frame(width: 100)
                 .help("Thumbnail Size")
+                .accessibilityIdentifier(TestID.Library.thumbnailSize)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button { MacViewOptions.shared.bigger() } label: {
@@ -667,6 +690,7 @@ struct LibraryView: View {
                 .foregroundStyle(.secondary)
                 .disabled(!MacViewOptions.shared.canGrow)
                 .help("Bigger (⌘=)")
+                .accessibilityIdentifier(TestID.Library.thumbnailBigger)
             }
         }
     }
@@ -682,6 +706,7 @@ struct LibraryView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .fixedSize()
+                    .accessibilityIdentifier(TestID.Library.count)
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 filterChips
@@ -698,6 +723,7 @@ struct LibraryView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 0.5)
         }
+        .testAnchor(TestID.Library.filters)
     }
     #endif
 
@@ -706,6 +732,7 @@ struct LibraryView: View {
             filterChips
                 .padding(.horizontal, Metrics.gutter)
         }
+        .testAnchor(TestID.Library.filters)
     }
 
     #if os(iOS)
@@ -719,6 +746,7 @@ struct LibraryView: View {
                     .foregroundStyle(Theme.textDim)
                     .lineLimit(1)
                     .fixedSize()
+                    .accessibilityIdentifier(TestID.Library.count)
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 filterChips
@@ -735,6 +763,7 @@ struct LibraryView: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 0.5)
         }
+        .testAnchor(TestID.Library.filters)
     }
 
     private var padSearchField: some View {
@@ -747,6 +776,7 @@ struct LibraryView: View {
                 .textFieldStyle(.plain)
                 .submitLabel(.search)
                 .autocorrectionDisabled()
+                .accessibilityIdentifier(TestID.Library.searchField)
             if !searchTerm.isEmpty {
                 Button {
                     searchTerm = ""
@@ -756,6 +786,7 @@ struct LibraryView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear search")
+                .accessibilityIdentifier(TestID.Library.searchClear)
             }
         }
         .padding(.horizontal, 12)
@@ -780,45 +811,53 @@ struct LibraryView: View {
             HStack(spacing: 10) {
                 Menu {
                     Picker("Sort", selection: $sort) {
-                        ForEach(SortOption.allCases) { Text($0.label).tag($0) }
+                        ForEach(SortOption.allCases) { Text($0.label).accessibilityIdentifier(TestID.Library.sortOption($0.rawValue)).tag($0) }
                     }
+                    .accessibilityIdentifier(TestID.Library.sortPicker)
                     #if os(macOS)
                     // The list view's columns reverse a sort too; the chip
                     // offers the same, where the toolbar's menu used to.
                     Divider()
                     Toggle("Reverse Order", isOn: $reversed)
                         .disabled(sort == .random)
+                        .accessibilityIdentifier(TestID.Library.sortReverse)
                     #endif
                 } label: {
                     chip(label: "Sort: \(sort.label)", symbol: "arrow.up.arrow.down", active: false)
                 }
                 .macMenuAsLabel()
                 .help("Sort by \(sort.label.lowercased())")
+                .accessibilityIdentifier(TestID.Library.sortMenu)
 
                 Button { unwatchedOnly.toggle() } label: {
                     chip(label: "Unwatched", symbol: "eye.slash", active: unwatchedOnly)
                 }
                 .chipButtonStyle()
                 .help("Show only what you haven't watched")
+                .accessibilityIdentifier(TestID.Library.filterUnwatched)
 
                 Button { favouritesOnly.toggle() } label: {
                     chip(label: "Favorites", symbol: "star", active: favouritesOnly)
                 }
                 .chipButtonStyle()
                 .help("Show only favorites")
+                .accessibilityIdentifier(TestID.Library.filterFavorites)
 
                 if !genres.isEmpty {
                     Menu {
                         Button("All genres") { genre = nil }
+                            .accessibilityIdentifier(TestID.Library.genreAll)
                         Divider()
                         ForEach(genres, id: \.self) { name in
                             Button(name) { genre = name }
+                                .accessibilityIdentifier(TestID.Library.genre(name))
                         }
                     } label: {
                         chip(label: genre ?? "Genre", symbol: "tag", active: genre != nil)
                     }
                     .macMenuAsLabel()
                     .help("Filter by genre")
+                    .accessibilityIdentifier(TestID.Library.genreMenu)
                 }
             }
     }

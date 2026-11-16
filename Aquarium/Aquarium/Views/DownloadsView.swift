@@ -98,6 +98,7 @@ struct DownloadsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 summary
+                    .testAnchor(TestID.Downloads.summary)
 
                 // Paused with nothing waiting — the system's own stop button
                 // does this. Resume is in the card above; this says why
@@ -108,6 +109,7 @@ struct DownloadsView: View {
                             .font(.caption)
                             .foregroundStyle(Theme.textDim)
                     }
+                    .testAnchor(TestID.Downloads.pausedSection)
                 }
 
                 if !running.isEmpty {
@@ -118,6 +120,7 @@ struct DownloadsView: View {
                             }
                         }
                     }
+                    .testAnchor(TestID.Downloads.downloadingSection)
                 }
 
                 if !downloads.queue.isEmpty {
@@ -146,12 +149,15 @@ struct DownloadsView: View {
                                     .buttonStyle(.plain)
                                     .font(.caption)
                                     .foregroundStyle(Theme.danger)
+                                    .accessibilityIdentifier(TestID.Downloads.queuedRemove(entry.itemId))
                             }
+                            .testAnchor(TestID.Downloads.queued(entry.itemId))
                         }
                         if downloads.queue.count > Self.listPreview {
                             Text("and \((downloads.queue.count - Self.listPreview).formatted()) more waiting")
                                 .font(.caption)
                                 .foregroundStyle(Theme.textDim)
+                                .accessibilityIdentifier(TestID.Downloads.queueMore)
                         }
                         // Pause and Resume are in the card at the top, where
                         // they stay put: under this list they moved every time
@@ -164,7 +170,9 @@ struct DownloadsView: View {
                         .foregroundStyle(Theme.danger)
                         .font(.caption)
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier(TestID.Downloads.queueClear)
                     }
+                    .testAnchor(TestID.Downloads.queueSection)
                 }
 
                 if !failed.isEmpty {
@@ -176,10 +184,12 @@ struct DownloadsView: View {
                                     Text(record.errorMessage ?? "Transfer stopped")
                                         .font(.caption)
                                         .foregroundStyle(Theme.danger)
+                                        .accessibilityIdentifier(TestID.Downloads.failedMessage(record.itemId))
                                 }
                                 Spacer()
                                 Button("Retry") { downloads.retry(record.itemId) }
                                     .buttonStyle(.bordered)
+                                    .accessibilityIdentifier(TestID.Downloads.failedRetry(record.itemId))
                                 Button {
                                     downloads.delete(record.itemId)
                                 } label: {
@@ -187,12 +197,15 @@ struct DownloadsView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .foregroundStyle(Theme.danger)
+                                .accessibilityIdentifier(TestID.Downloads.failedDelete(record.itemId))
                             }
+                            .testAnchor(TestID.Downloads.failed(record.itemId))
                         }
                         if failed.count > Self.listPreview {
                             Text("and \((failed.count - Self.listPreview).formatted()) more")
                                 .font(.caption)
                                 .foregroundStyle(Theme.textDim)
+                                .accessibilityIdentifier(TestID.Downloads.failedMore)
                         }
                         if failed.count > 1 {
                             HStack(spacing: 10) {
@@ -201,15 +214,18 @@ struct DownloadsView: View {
                                     app.toast("Queued \(n) retr\(n == 1 ? "y" : "ies")", tone: .ok)
                                 }
                                 .buttonStyle(.bordered)
+                                .accessibilityIdentifier(TestID.Downloads.failedRetryAll)
                                 Button("Clear failed", role: .destructive) {
                                     let ids = failed.map(\.itemId)
                                     let n = downloads.delete(ids)
                                     app.toast("Removed \(n) failed download\(n == 1 ? "" : "s")", tone: .ok)
                                 }
                                 .buttonStyle(.bordered)
+                                .accessibilityIdentifier(TestID.Downloads.failedClear)
                             }
                         }
                     }
+                    .testAnchor(TestID.Downloads.failedSection)
                 }
 
                 if completeCount == 0, running.isEmpty, downloads.queue.isEmpty, failed.isEmpty {
@@ -218,6 +234,7 @@ struct DownloadsView: View {
                         title: "Nothing downloaded",
                         message: "Anything you download from a detail page is kept on this device and plays without a server — including when you're offline."
                     )
+                    .testAnchor(TestID.Downloads.empty)
                 }
 
                 #if os(iOS)
@@ -236,6 +253,7 @@ struct DownloadsView: View {
                             seriesCard(show)
                         }
                     }
+                    .testAnchor(TestID.Downloads.showsSection)
                 }
 
                 if !movies.isEmpty {
@@ -244,12 +262,14 @@ struct DownloadsView: View {
                             filmCard(film)
                         }
                     }
+                    .testAnchor(TestID.Downloads.filmsSection)
                 }
             }
             .padding(.vertical, 16)
         }
         .navigationTitle("Downloads")
         .paletteBar()
+        .testAnchor(TestID.Downloads.root)
         #if os(iOS)
         .alert(
             allMusicPlan?.title ?? "",
@@ -305,23 +325,28 @@ struct DownloadsView: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { tileWidth = $0 }
         }
         .buttonStyle(PosterButtonStyle())
+        .accessibilityIdentifier(TestID.Downloads.showCard(show.id))
         .contextMenu {
             Button { app.push(.downloadedSeries(show.id)) } label: {
                 Label("Open", systemImage: "chevron.right")
             }
+            .accessibilityIdentifier(TestID.Downloads.showCardOpen(show.id))
             if let start = show.resumePoint {
                 Button { player.playLocal(start) } label: {
                     Label("Play", systemImage: "play.fill")
                 }
+                .accessibilityIdentifier(TestID.Downloads.showCardPlay(show.id))
             }
             if show.records.count > 1 {
                 Button { player.startShuffle(show.records) } label: {
                     Label("Shuffle", systemImage: "shuffle")
                 }
+                .accessibilityIdentifier(TestID.Downloads.showCardShuffle(show.id))
             }
             Button(role: .destructive) { deletingShow = show.id } label: {
                 Label("Delete this show", systemImage: "trash")
             }
+            .accessibilityIdentifier(TestID.Downloads.showCardDelete(show.id))
         } preview: {
             card.lifted(width: tileWidth).poster
         }
@@ -350,10 +375,12 @@ struct DownloadsView: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { tileWidth = $0 }
         }
         .buttonStyle(PosterButtonStyle())
+        .accessibilityIdentifier(TestID.Downloads.filmCard(film.itemId))
         .contextMenu {
             Button { player.playLocal(film) } label: {
                 Label("Play", systemImage: "play.fill")
             }
+            .accessibilityIdentifier(TestID.Downloads.filmCardPlay(film.itemId))
             Button {
                 downloads.setPlayed(film.itemId, played: !film.played)
             } label: {
@@ -362,9 +389,11 @@ struct DownloadsView: View {
                     systemImage: film.played ? "arrow.uturn.backward.circle" : "checkmark.circle"
                 )
             }
+            .accessibilityIdentifier(TestID.Downloads.filmCardToggleWatched(film.itemId))
             Button(role: .destructive) { downloads.delete(film.itemId) } label: {
                 Label("Delete download", systemImage: "trash")
             }
+            .accessibilityIdentifier(TestID.Downloads.filmCardDelete(film.itemId))
         } preview: {
             card.lifted(width: tileWidth).poster
         }
@@ -393,6 +422,7 @@ struct DownloadsView: View {
                         detail: "\(songs.formatted()) song\(songs == 1 ? "" : "s")",
                         route: .downloaded
                     )
+                    .accessibilityIdentifier(TestID.Downloads.musicDoor)
                 }
                 if books > 0 {
                     audioDoor(
@@ -400,6 +430,7 @@ struct DownloadsView: View {
                         detail: "\(books.formatted()) audiobook\(books == 1 ? "" : "s")",
                         route: .downloadedBooks
                     )
+                    .accessibilityIdentifier(TestID.Downloads.audiobooksDoor)
                 }
             }
             .padding(.horizontal, Metrics.gutter)
@@ -426,6 +457,7 @@ struct DownloadsView: View {
                             Text("Apple Watch").font(.body.weight(.medium)).foregroundStyle(Theme.text)
                             Text(watchDetail(link))
                                 .font(.caption).foregroundStyle(Theme.textDim)
+                                .accessibilityIdentifier(TestID.Downloads.watchDetail)
                         }
                         Spacer(minLength: 4)
                         Image(systemName: "chevron.right")
@@ -435,6 +467,7 @@ struct DownloadsView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier(TestID.Downloads.watchDoor)
                 Button {
                     link.syncNow()
                     app.toast("Checking the watch against what it should have", tone: .ok)
@@ -445,6 +478,7 @@ struct DownloadsView: View {
                 }
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Sync the watch now")
+                .accessibilityIdentifier(TestID.Downloads.watchSync)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -506,10 +540,12 @@ struct DownloadsView: View {
                     Text("\(completeCount.formatted()) item\(completeCount == 1 ? "" : "s") on this device")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Theme.text)
+                        .accessibilityIdentifier(TestID.Downloads.itemCount)
                     Text(Format.bytes(downloads.totalBytesOnDisk)
                         + (freeSpace.map { " · \(Format.bytes($0)) free" } ?? ""))
                         .font(.caption)
                         .foregroundStyle(Theme.textDim)
+                        .accessibilityIdentifier(TestID.Downloads.storage)
                 }
                 Spacer()
                 if downloads.pendingSyncCount > 0 {
@@ -529,6 +565,7 @@ struct DownloadsView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(isSyncing || client.isOffline)
+                    .accessibilityIdentifier(TestID.Downloads.sync)
                 }
                 pauseButton
                 manageMenu
@@ -544,6 +581,7 @@ struct DownloadsView: View {
                         .font(.caption)
                         .foregroundStyle(Theme.textDim)
                 }
+                .testAnchor(TestID.Downloads.musicSweep)
             }
             #endif
 
@@ -553,11 +591,12 @@ struct DownloadsView: View {
                     .font(.caption)
                     .foregroundStyle(Theme.textDim)
                 Picker("", selection: $prefs.downloadConcurrency) {
-                    ForEach(1...Preferences.maxDownloadConcurrency, id: \.self) { Text("\($0)").tag($0) }
+                    ForEach(1...Preferences.maxDownloadConcurrency, id: \.self) { Text("\($0)").accessibilityIdentifier(TestID.Downloads.concurrency($0)).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(maxWidth: 260)
+                .accessibilityIdentifier(TestID.Downloads.concurrencyPicker)
             }
 
             Toggle(isOn: $prefs.transcodesOneAtATime) {
@@ -582,6 +621,7 @@ struct DownloadsView: View {
                 }
             }
             .tint(Theme.accent)
+            .accessibilityIdentifier(TestID.Downloads.transcodeOneAtATime)
 
             #if os(iOS)
             Toggle(isOn: $prefs.downloadsKeepAwake) {
@@ -602,6 +642,7 @@ struct DownloadsView: View {
                 }
             }
             .tint(Theme.accent)
+            .accessibilityIdentifier(TestID.Downloads.keepAwake)
             #endif
         }
         .padding(Metrics.gutter)
@@ -640,6 +681,7 @@ struct DownloadsView: View {
             }
             .buttonStyle(.bordered)
             .tint(downloads.isPaused ? Theme.accent : nil)
+            .accessibilityIdentifier(TestID.Downloads.pause)
         }
     }
 
@@ -659,6 +701,7 @@ struct DownloadsView: View {
                     Label("Download All Music", systemImage: "music.note.list")
                 }
                 .disabled(musicSweep != nil)
+                .accessibilityIdentifier(TestID.Downloads.manageDownloadAllMusic)
                 Divider()
             }
             #endif
@@ -673,6 +716,7 @@ struct DownloadsView: View {
                 } label: {
                     Label("Delete watched · \(watched.count)", systemImage: "checkmark.circle")
                 }
+                .accessibilityIdentifier(TestID.Downloads.manageDeleteWatched)
             }
             if !downloads.records.isEmpty {
                 Button(role: .destructive) {
@@ -687,6 +731,7 @@ struct DownloadsView: View {
                 } label: {
                     Label("Delete all downloads", systemImage: "trash")
                 }
+                .accessibilityIdentifier(TestID.Downloads.manageDeleteAll)
             }
         } label: {
             Label("Manage downloads", systemImage: "ellipsis.circle")
@@ -694,6 +739,7 @@ struct DownloadsView: View {
                 .font(.title3)
         }
         .disabled(downloads.records.isEmpty && !offersAllMusic)
+        .accessibilityIdentifier(TestID.Downloads.manageMenu)
         // On the menu rather than the page, so the popover points at the
         // button that asked for it.
         .downloadDeletionDialog($pendingDeletion) { ids in
@@ -878,7 +924,9 @@ extension View {
                 onConfirm(deletion.ids)
                 pending.wrappedValue = nil
             }
+            .accessibilityIdentifier(TestID.Downloads.deletionConfirm)
             Button("Cancel", role: .cancel) { pending.wrappedValue = nil }
+                .accessibilityIdentifier(TestID.Downloads.deletionCancel)
         } message: { deletion in
             Text(deletion.message)
         }
@@ -1050,13 +1098,16 @@ struct TransferRow: View {
                     .buttonStyle(.plain)
                     .font(.caption)
                     .foregroundStyle(Theme.danger)
+                    .accessibilityIdentifier(TestID.Downloads.transferCancel(record.itemId))
             }
             if let fraction = record.fraction {
                 ProgressView(value: fraction)
                     .progressViewStyle(.linear)
                     .tint(Theme.accent)
+                    .accessibilityIdentifier(TestID.Downloads.transferProgress(record.itemId))
             } else {
                 IndeterminateBar()
+                    .accessibilityIdentifier(TestID.Downloads.transferProgress(record.itemId))
             }
             HStack {
                 Text(record.quality).font(.caption).foregroundStyle(Theme.textDim)
@@ -1067,6 +1118,7 @@ struct TransferRow: View {
                     // Digits roll rather than snap as the bytes climb.
                     .contentTransition(.numericText())
                     .animation(.default, value: progressText)
+                    .accessibilityIdentifier(TestID.Downloads.transferStatus(record.itemId))
             }
             // Why the same episode is downloading a second time. Without this
             // the transfer restarts from nothing for no stated reason, which
@@ -1079,6 +1131,7 @@ struct TransferRow: View {
                 )
                 .font(.caption)
                 .foregroundStyle(Theme.warn)
+                .accessibilityIdentifier(TestID.Downloads.transferNote(record.itemId))
             } else if awaitingEncode {
                 // A transcode at 0% is the server encoding, not the app
                 // stuck: Jellyfin starts ffmpeg on the first request and the
@@ -1089,8 +1142,10 @@ struct TransferRow: View {
                 Label("Waiting for the server to encode the start — this can take a minute", systemImage: "hourglass")
                     .font(.caption)
                     .foregroundStyle(Theme.textDim)
+                    .accessibilityIdentifier(TestID.Downloads.transferNote(record.itemId))
             }
         }
+        .testAnchor(TestID.Downloads.transfer(record.itemId))
     }
 
     /// A stream with no segment yet: the only bytes are its playlists. By
@@ -1212,12 +1267,14 @@ struct DownloadedRow: View {
             .buttonStyle(.borderless)
             .help("Play")
             .accessibilityLabel("Play \(displayTitle)")
+            .accessibilityIdentifier(TestID.Downloads.rowPlay(record.itemId))
             .opacity(isHovering ? 1 : 0)
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .macHover(cornerRadius: 6, inset: 4)
+        .testAnchor(TestID.Downloads.row(record.itemId))
     }
     #else
     var body: some View {
@@ -1239,6 +1296,7 @@ struct DownloadedRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Options for \(displayTitle)")
+            .accessibilityIdentifier(TestID.Downloads.rowMenu(record.itemId))
         }
     }
 
@@ -1275,12 +1333,14 @@ struct DownloadedRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier(TestID.Downloads.row(record.itemId))
         .contextMenu { rowActions }
     }
 
     @ViewBuilder
     private var rowActions: some View {
         Button { onPlay() } label: { Label("Play", systemImage: "play.fill") }
+            .accessibilityIdentifier(TestID.Downloads.rowPlay(record.itemId))
         Button {
             onToggleWatched()
         } label: {
@@ -1289,9 +1349,11 @@ struct DownloadedRow: View {
                 systemImage: record.played ? "arrow.uturn.backward.circle" : "checkmark.circle"
             )
         }
+        .accessibilityIdentifier(TestID.Downloads.rowToggleWatched(record.itemId))
         Button(role: .destructive, action: onDelete) {
             Label("Delete this episode", systemImage: "trash")
         }
+        .accessibilityIdentifier(TestID.Downloads.rowDelete(record.itemId))
     }
     #endif
 }

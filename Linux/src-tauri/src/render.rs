@@ -227,3 +227,49 @@ impl Drop for RenderCtx {
         // `_mpv` drops after this, which is the order mpv documents.
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// The update thunk calls the boxed closure mpv was handed, and a null
+    /// context (none installed) is a no-op rather than a crash.
+    #[test]
+    fn the_update_thunk_calls_the_installed_callback() {
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        let cb: *mut Box<dyn Fn() + Send> = Box::into_raw(Box::new(Box::new(|| {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+        })));
+        unsafe {
+            update_thunk(std::ptr::null_mut());
+            update_thunk(cb as *mut c_void);
+            update_thunk(cb as *mut c_void);
+            drop(Box::from_raw(cb));
+        }
+        assert_eq!(CALLS.load(Ordering::SeqCst), 2);
+    }
+
+    /// mpv asks by plain GL name; the answer is libepoxy's, and a name that
+    /// isn't UTF-8 is simply not found.
+    #[test]
+    fn get_proc_address_goes_through_epoxy() {
+        let name = std::ffi::CString::new("glNoSuchFunctionAnywhere").unwrap();
+        assert!(unsafe { get_proc_address(std::ptr::null_mut(), name.as_ptr()) }.is_null());
+        let bad = [0xffu8, 0xfe, 0];
+        assert!(unsafe { get_proc_address(std::ptr::null_mut(), bad.as_ptr() as *const c_char) }.is_null());
+        let clear = std::ffi::CString::new("glClear").unwrap();
+        assert_eq!(
+            unsafe { get_proc_address(std::ptr::null_mut(), clear.as_ptr()) },
+            crate::gl::proc_addr("glClear")
+        );
+    }
+
+    #[test]
+    fn update_frame_is_mpvs_flag() {
+        assert_eq!(
+            RenderCtx::UPDATE_FRAME,
+            libmpv2_sys::mpv_render_update_flag_MPV_RENDER_UPDATE_FRAME as u64
+        );
+    }
+}

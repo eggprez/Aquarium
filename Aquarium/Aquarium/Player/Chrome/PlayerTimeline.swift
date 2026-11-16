@@ -99,6 +99,7 @@ struct PlayerTimeline: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Timeline")
         .accessibilityValue("\(PlayerTime.spoken(player.position)) of \(PlayerTime.spoken(player.duration))")
+        .accessibilityIdentifier(TestID.Player.scrubber)
         .accessibilityAdjustableAction { direction in
             switch direction {
             case .increment: player.seek(by: Double(prefs.skipInterval))
@@ -237,6 +238,7 @@ struct LivePlayerTimeline: View {
             }
             .opacity(programme == nil ? 0.4 : 1)
             .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(TestID.Player.liveTimeline)
         }
         .padding(.vertical, PlayerMetrics.television ? 0 : 8)
     }

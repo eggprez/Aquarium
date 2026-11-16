@@ -97,7 +97,7 @@ final class OfflineMusicIndex {
     }
 
     private nonisolated static var file: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = AppDirectory.url(.applicationSupportDirectory)
             // the pre-Aquarium name, kept so what is already on disk is found
             .appendingPathComponent("FellyJin", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -563,6 +563,12 @@ enum OfflineMusic {
         DownloadManager.shared.records.contains { $0.type == "Audio" && $0.status == .complete }
     }
 
+    private static let playedStamp: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
     private static func item(_ record: DownloadRecord, facts: SongFacts?) -> BaseItem {
         var item = record.asItem
         guard let facts else { return item }
@@ -576,6 +582,10 @@ enum OfflineMusic {
         data.IsFavorite = facts.favorite
         data.PlayCount = facts.playCount
         data.Played = facts.playCount > 0 || record.played
+        // When it was last heard, the way the server would say it: Rediscover
+        // leaves out what was played lately by reading this, and without it
+        // every downloaded song counted as forgotten.
+        if let heard = facts.lastPlayed { data.LastPlayedDate = Self.playedStamp.string(from: heard) }
         item.UserData = data
         item.HasLyrics = facts.hasLyrics
         return item

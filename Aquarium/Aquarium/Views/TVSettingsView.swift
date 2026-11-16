@@ -41,49 +41,65 @@ struct SettingsView: View {
                 SettingLink(Self.row(.account), value: SettingsSummary.account(client), page: .account, isFirst: true) {
                     ServerSettingsPage()
                 }
+                .accessibilityIdentifier(TestID.Settings.pageLink(SettingsPage.account.rawValue))
             }
 
             SettingGroup("Playing", symbol: "play.rectangle") {
                 SettingLink(Self.row(.video), value: SettingsSummary.video(prefs), page: .video) {
                     VideoSettingsPage()
                 }
+                .accessibilityIdentifier(TestID.Settings.pageLink(SettingsPage.video.rawValue))
                 SettingLink(Self.row(.audio), value: audioSummary, page: .audio) {
                     AudioSettingsPage()
                 }
+                .accessibilityIdentifier(TestID.Settings.pageLink(SettingsPage.audio.rawValue))
                 SettingLink(Self.row(.subtitles), value: SettingsSummary.subtitles(prefs), page: .subtitles) {
                     SubtitleSettingsPage()
                 }
+                .accessibilityIdentifier(TestID.Settings.pageLink(SettingsPage.subtitles.rawValue))
                 if app.hasAudio {
                     SettingLink(Self.row(.music), page: .music) {
                         MusicSettingsPage()
                     }
+                    .accessibilityIdentifier(TestID.Settings.pageLink(SettingsPage.music.rawValue))
                 }
                 SettingLink(Self.row(.liveTV), value: SettingsSummary.liveTV(prefs), page: .liveTV) {
                     LiveTVSettingsPage()
                 }
+                .accessibilityIdentifier(TestID.Settings.pageLink(SettingsPage.liveTV.rawValue))
             }
 
             SettingGroup("General", symbol: "gearshape") {
                 SettingLink(Self.row(.libraryCopy), value: SettingsSummary.libraryCopy(prefs), page: .libraryCopy) {
                     LibraryCopySettingsPage()
                 }
+                .accessibilityIdentifier(TestID.Settings.pageLink(SettingsPage.libraryCopy.rawValue))
                 SettingToggle(Copy.hideContinueWatching, isOn: $prefs.hidesContinueWatching)
+                    .accessibilityIdentifier(TestID.Settings.hideContinueWatching)
                 SettingToggle(Copy.clearAbandoned, isOn: $prefs.clearsAbandonedEpisodes)
+                    .accessibilityIdentifier(TestID.Settings.clearAbandoned)
                 SettingChoice(Copy.nextUpDays, selection: $prefs.nextUpDays,
                               options: Preferences.nextUpDayChoices.map { ($0, Preferences.nextUpDaysLabel($0)) })
+                .accessibilityIdentifier(TestID.Settings.nextUpDays)
                 SettingToggle(Copy.nextUpInProgress, isOn: $prefs.nextUpIncludesInProgress)
+                    .accessibilityIdentifier(TestID.Settings.nextUpInProgress)
                 SettingToggle(Copy.nextUpRewatching, isOn: $prefs.nextUpRewatching)
+                    .accessibilityIdentifier(TestID.Settings.nextUpRewatching)
                 if prefs.cloudIsAvailable {
                     SettingToggle(Copy.cloudSync, isOn: $prefs.syncsAcrossDevices)
+                        .accessibilityIdentifier(TestID.Settings.cloudSync)
                 } else {
                     SettingInfo(Copy.cloudSync.name ?? "", value: "Unavailable", tone: Theme.warn,
                                 notes: [Copy.cloudUnavailable, Copy.cloudSync])
+                    .accessibilityIdentifier(TestID.Settings.cloudUnavailable)
                 }
                 SettingLink(Self.row(.about), value: Bundle.appVersion, page: .about) {
                     AboutSettingsPage()
                 }
+                .accessibilityIdentifier(TestID.Settings.pageLink(SettingsPage.about.rawValue))
             }
         }
+        .testAnchor(TestID.Settings.root)
     }
 
     /// "Stereo" when downmixing, and nothing otherwise. The delays are not
@@ -132,19 +148,26 @@ private struct ServerSettingsPage: View {
             SettingGroup(nil, page: .account) {
                 if let session = client.session {
                     SettingInfo("Signed in as", value: session.userName, notes: [Copy.signedInAs], isFirst: true)
+                        .accessibilityIdentifier(TestID.Settings.accountSignedInAs)
                     SettingInfo("Server", value: session.server, notes: [Copy.server])
+                        .accessibilityIdentifier(TestID.Settings.accountServer)
                     SettingInfo("Connection", value: session.secure ? "HTTPS" : "HTTP",
                                 tone: session.secure ? Theme.ok : Theme.warn,
                                 notes: [Copy.connection(secure: session.secure)])
+                    .accessibilityIdentifier(TestID.Settings.accountConnection)
                     SettingInfo("Server identity", value: session.serverId != nil ? "Pinned" : "Unpinned",
                                 tone: session.serverId != nil ? Theme.ok : Theme.warn,
                                 notes: [Copy.identity(pinned: session.serverId != nil)])
+                    .accessibilityIdentifier(TestID.Settings.accountIdentity)
                     SettingInfo("Access token", value: "Keychain", tone: Theme.ok, notes: [Copy.accessToken])
+                        .accessibilityIdentifier(TestID.Settings.accountAccessToken)
                     SettingInfo("Status", value: client.isOffline ? "Offline" : "Connected",
                                 tone: client.isOffline ? Theme.warn : Theme.ok,
                                 notes: [Copy.status])
+                    .accessibilityIdentifier(TestID.Settings.accountStatus)
                 } else {
                     SettingInfo("Server", value: "Not connected", notes: [Copy.server], isFirst: true)
+                        .accessibilityIdentifier(TestID.Settings.accountNotConnected)
                 }
             }
             if client.session != nil {
@@ -160,10 +183,12 @@ private struct ServerSettingsPage: View {
                         }
                         .buttonStyle(SettingRowStyle())
                         .disabled(app.switchingTo != nil)
+                        .accessibilityIdentifier(TestID.Settings.account(account.accountKey))
                     }
                     SettingButton("Add Account…", notes: [Copy.addAccount]) {
                         app.isAddingAccount = true
                     }
+                    .accessibilityIdentifier(TestID.Settings.addAccount)
                 }
                 SettingGroup("", page: .account) {
                     SettingButton(isSigningOut ? "Signing out…" : "Sign out", role: .destructive,
@@ -171,10 +196,12 @@ private struct ServerSettingsPage: View {
                         confirmSignOut = true
                     }
                     .disabled(isSigningOut)
+                    .accessibilityIdentifier(TestID.Settings.signOut)
                 }
             }
         }
-        .confirmationDialog("Sign out of \(client.session?.server ?? "this server")?",
+        .testAnchor(TestID.Settings.pageRoot(SettingsPage.account.rawValue))
+        .confirmationDialog(client.session?.signOutQuestion ?? "Sign out?",
                             isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) {
                 Task {
@@ -183,7 +210,9 @@ private struct ServerSettingsPage: View {
                     isSigningOut = false
                 }
             }
+            .accessibilityIdentifier(TestID.Settings.signOutConfirm)
             Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(TestID.Settings.signOutCancel)
         }
         // One press offers both things a remote can't reach by swiping.
         .confirmationDialog(
@@ -195,11 +224,14 @@ private struct ServerSettingsPage: View {
                 Button("Switch to \(account.userName)") {
                     Task { await app.switchAccount(to: account) }
                 }
+                .accessibilityIdentifier(TestID.Settings.accountSwitch(account.accountKey))
                 Button("Sign Out of This Apple TV", role: .destructive) {
                     Task { await app.remove(account) }
                 }
+                .accessibilityIdentifier(TestID.Settings.accountRemove(account.accountKey))
             }
             Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(TestID.TVSettings.accountActionsCancel)
         }
     }
 }
@@ -214,6 +246,7 @@ private struct VideoSettingsPage: View {
             SettingGroup(nil, page: .video) {
                 SettingChoice(Copy.defaultQuality, selection: SettingsView.bitrateBinding,
                               options: Quality.choices.map { ($0.maxBitrate, $0.label) }, isFirst: true)
+                .accessibilityIdentifier(TestID.Settings.videoQuality)
                 // No "Adapt quality automatically" here: the Apple TV's mpv
                 // player never steps a stream down by itself, so the switch
                 // would do nothing. Quality is changed by hand from the
@@ -226,24 +259,34 @@ private struct VideoSettingsPage: View {
             SettingGroup("Picture", page: .video) {
                 SettingChoice(Copy.framing, selection: $prefs.fillScreen,
                               options: [(false, "Fit — show the whole frame"), (true, "Fill — crop to the screen")])
+                .accessibilityIdentifier(TestID.Settings.videoFraming)
                 SettingChoice(Copy.pictureBrightness, selection: $prefs.pictureBrightness,
                               options: Self.adjustmentOptions(prefs.pictureBrightness))
+                .accessibilityIdentifier(TestID.Settings.videoBrightness)
                 SettingChoice(Copy.pictureContrast, selection: $prefs.pictureContrast,
                               options: Self.adjustmentOptions(prefs.pictureContrast))
+                .accessibilityIdentifier(TestID.Settings.videoContrast)
                 SettingChoice(Copy.pictureSaturation, selection: $prefs.pictureSaturation,
                               options: Self.adjustmentOptions(prefs.pictureSaturation))
+                .accessibilityIdentifier(TestID.Settings.videoSaturation)
                 SettingChoice(Copy.pictureGamma, selection: $prefs.pictureGamma,
                               options: Self.adjustmentOptions(prefs.pictureGamma))
+                .accessibilityIdentifier(TestID.Settings.videoGamma)
                 SettingChoice(Copy.pictureZoom, selection: $prefs.pictureZoom,
                               options: Self.zoomOptions(prefs.pictureZoom))
+                .accessibilityIdentifier(TestID.Settings.videoZoom)
                 SettingChoice(Copy.aspectOverride, selection: $prefs.aspectOverride,
                               options: Preferences.aspectChoices.map { ($0.ratio, $0.label) })
+                .accessibilityIdentifier(TestID.Settings.videoAspect)
                 SettingButton(Copy.resetPicture.name ?? "", notes: [Copy.resetPicture]) {
                     prefs.resetPicture()
                 }
                 .disabled(!prefs.pictureIsAdjusted)
-                SettingChoice(Copy.nightMode, selection: $prefs.nightMode,
-                              options: [(false, "Off"), (true, "On — quiet dialogue up, loud passages down")])
+                .accessibilityIdentifier(TestID.Settings.videoResetPicture)
+                // No Night mode row: AVPlayer has no night mode, and
+                // MPVKit's FFmpeg has no audio compressor (MPVEngine
+                // `nightModeFilter`), so on a television the setting could
+                // only ever say On and change nothing.
             }
             .onChange(of: prefs.nightMode) { _, _ in player.applyNightMode() }
             .onChange(of: prefs.fillScreen) { _, _ in player.applyFraming() }
@@ -252,13 +295,17 @@ private struct VideoSettingsPage: View {
             .onChange(of: prefs.aspectOverride) { _, _ in player.applyFraming() }
             SettingGroup("Playing", page: .video) {
                 SettingToggle(Copy.resume, isOn: $prefs.resumePlayback)
+                    .accessibilityIdentifier(TestID.Settings.videoResume)
                 SettingToggle(Copy.autoplayNext, isOn: $prefs.autoplayNext)
+                    .accessibilityIdentifier(TestID.Settings.videoAutoplayNext)
             }
             SettingGroup("Language", page: .video) {
                 SettingChoice(SettingsView.audioLanguageRow, selection: $prefs.audioLanguage,
                               options: SettingsView.audioLanguageOptions)
+                .accessibilityIdentifier(TestID.Settings.audioLanguage)
             }
         }
+        .testAnchor(TestID.Settings.pageRoot(SettingsPage.video.rawValue))
     }
 }
 
@@ -302,6 +349,7 @@ private struct AudioSettingsPage: View {
                                   notes: [note], isFirst: rate == PlayerModel.DelayRate.presets.first) {
                         pendingTest = rate
                     }
+                    .accessibilityIdentifier(TestID.TVSettings.audioDelay(rate.fps))
                 }
             }
             // A rate with no clip — 48, 120 — still gets a delay of its own
@@ -309,8 +357,10 @@ private struct AudioSettingsPage: View {
             // it just isn't listed here.
             SettingGroup("Output", page: .audio) {
                 SettingToggle(Copy.downmix, isOn: $prefs.stereoDownmix)
+                    .accessibilityIdentifier(TestID.Settings.audioDownmix)
             }
         }
+        .testAnchor(TestID.Settings.pageRoot(SettingsPage.audio.rawValue))
         // The clip flashes the whole screen once a second, which is the
         // kind of picture a photosensitive viewer needs to be told about
         // before it starts — every time, since whoever is holding the
@@ -321,7 +371,9 @@ private struct AudioSettingsPage: View {
             Button("Play the test") {
                 Task { await player.playSyncTest(rate) }
             }
+            .accessibilityIdentifier(TestID.TVSettings.syncTestPlay)
             Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(TestID.TVSettings.syncTestCancel)
         } message: { _ in
             Text("The sync test fills the screen with a bright flash about once a second for as long as it plays. If you or anyone watching is sensitive to flashing light, don't play it.")
         }
@@ -354,17 +406,22 @@ private struct SubtitleSettingsPage: View {
             SettingGroup(nil, page: .subtitles) {
                 SettingChoice(SettingsView.subtitleLanguageRow, selection: $prefs.subtitleLanguage,
                               options: SettingsView.subtitleLanguageOptions, isFirst: true)
+                .accessibilityIdentifier(TestID.Settings.subtitlesLanguage)
                 SettingToggle(Copy.forcedOnly, isOn: $prefs.forcedSubtitlesOnly, also: [Copy.trackMemory])
+                    .accessibilityIdentifier(TestID.Settings.subtitlesForcedOnly)
             }
             SettingGroup("Appearance", page: .subtitles) {
                 // tvOS has no slider a remote can drive; the same range as a
                 // set of steps is what the platform actually offers.
                 SettingChoice(Copy.subtitleSize, selection: $prefs.subtitleSize,
                               options: subtitleSizeOptions)
+                .accessibilityIdentifier(TestID.Settings.subtitlesSize)
                 SettingChoice(Copy.subtitleBackground, selection: $prefs.subtitleBackground,
                               options: SubtitleBackground.allCases.map { ($0, $0.label) })
+                .accessibilityIdentifier(TestID.Settings.subtitlesBackground)
             }
         }
+        .testAnchor(TestID.Settings.pageRoot(SettingsPage.subtitles.rawValue))
         .onChange(of: prefs.subtitleSize) { _, _ in player.refreshSubtitleStyling() }
         .onChange(of: prefs.subtitleBackground) { _, _ in player.refreshSubtitleStyling() }
     }
@@ -378,15 +435,20 @@ private struct MusicSettingsPage: View {
         SettingsColumns(title: "Music", intro: SettingsView.intro(.music)) {
             SettingGroup(nil, page: .music) {
                 SettingToggle(Copy.musicAutoplay, isOn: $prefs.musicAutoplay, isFirst: true)
+                    .accessibilityIdentifier(TestID.Settings.musicAutoplay)
                 SettingToggle(Copy.normalizeVolume, isOn: $prefs.normalizeVolume)
+                    .accessibilityIdentifier(TestID.Settings.musicNormalizeVolume)
             }
             SettingGroup("Stations", page: .music) {
                 SettingToggle(Copy.musicRomanize, isOn: $prefs.musicRomanizeNames)
+                    .accessibilityIdentifier(TestID.Settings.musicRomanize)
                 SettingLink(Copy.stationMix, value: prefs.mixPoints.presetName) {
                     StationMixSettingsPage()
                 }
+                .accessibilityIdentifier(TestID.Settings.musicStationMix)
             }
         }
+        .testAnchor(TestID.Settings.pageRoot(SettingsPage.music.rawValue))
     }
 }
 
@@ -400,15 +462,20 @@ private struct LiveTVSettingsPage: View {
             SettingGroup(nil, page: .liveTV) {
                 SettingChoice(Copy.liveTVSource, selection: $prefs.liveTVSource,
                               options: LiveTVSource.allCases.map { ($0, $0.label) }, isFirst: true)
+                .accessibilityIdentifier(TestID.Settings.liveTVSource)
             }
 
             if prefs.liveTVSource == .custom {
                 SettingGroup("Playlist", symbol: "list.bullet.rectangle") {
                     SettingTextEntry(Copy.iptvPlaylist, text: $prefs.iptvPlaylistURL)
+                        .accessibilityIdentifier(TestID.Settings.liveTVPlaylistURL)
                     SettingTextEntry(Copy.iptvGuide, text: $prefs.iptvGuideURL)
+                        .accessibilityIdentifier(TestID.Settings.liveTVGuideURL)
                     SettingTextEntry(Copy.iptvUserAgent, text: $prefs.iptvUserAgent, emptyValue: "Default")
+                        .accessibilityIdentifier(TestID.Settings.liveTVUserAgent)
                     SettingChoice(Copy.iptvRefresh, selection: $prefs.iptvRefreshMinutes,
                                   options: SettingsView.iptvRefreshChoices.map { ($0.minutes, $0.label) })
+                    .accessibilityIdentifier(TestID.Settings.liveTVRefreshInterval)
                 }
             }
 
@@ -417,11 +484,13 @@ private struct LiveTVSettingsPage: View {
                     prefs.liveTVRefreshToken += 1
                     app.toast("Refreshing Live TV…", tone: .info)
                 }
+                .accessibilityIdentifier(TestID.Settings.liveTVRefreshNow)
                 if prefs.liveTVSource == .custom {
                     TVArtworkProbe()
                 }
             }
         }
+        .testAnchor(TestID.Settings.pageRoot(SettingsPage.liveTV.rawValue))
     }
 }
 
@@ -442,8 +511,10 @@ private struct StationMixSettingsPage: View {
         )) {
             SettingGroup(nil, symbol: Self.symbol) {
                 SettingChoice(Copy.mixPreset, selection: preset, options: presets, isFirst: true)
+                    .accessibilityIdentifier(TestID.Settings.stationMixPreset)
                 SettingInfo("Points left", value: "\(points.remaining) of \(MixPoints.budget)",
                             notes: [SettingNote(text: Copy.mixPointsLeft(points)), Copy.stationMix])
+                .accessibilityIdentifier(TestID.Settings.stationMixPointsLeft)
             }
             SettingGroup("Points", symbol: Self.symbol) {
                 ForEach(MixPoints.Dial.allCases) { dial in
@@ -452,9 +523,11 @@ private struct StationMixSettingsPage: View {
                         options: (0...(points[dial] + points.remaining)).map { ($0, "\($0)") },
                         also: coverage.note(for: dial).map { [SettingNote(text: $0)] } ?? []
                     )
+                    .accessibilityIdentifier(TestID.Settings.stationMixDial(dial.rawValue))
                 }
             }
         }
+        .testAnchor(TestID.Settings.pageRoot("stationMix"))
     }
 
     private var preset: Binding<String> {
@@ -483,23 +556,29 @@ private struct LibraryCopySettingsPage: View {
         )) {
             SettingGroup(nil, page: .libraryCopy) {
                 SettingToggle(Copy.libraryCopy, isOn: $prefs.keepsLibraryCopy, isFirst: true)
+                    .accessibilityIdentifier(TestID.Settings.libraryCopyKeep)
             }
             if prefs.keepsLibraryCopy {
                 SettingGroup("", page: .libraryCopy) {
                     SettingInfo("Status", value: LibraryCopyText.status(index), notes: [Copy.libraryCopyStatus])
+                        .accessibilityIdentifier(TestID.Settings.libraryCopyStatus)
                     SettingInfo("Saved", value: LibraryCopyText.contents(index), notes: [Copy.libraryCopyContents])
+                        .accessibilityIdentifier(TestID.Settings.libraryCopyContents)
                 }
                 SettingGroup("", page: .libraryCopy) {
                     SettingButton(Copy.syncNow.name ?? "", notes: [Copy.syncNow]) {
                         Task { await LibraryIndex.shared.sync(force: true) }
                     }
                     .disabled(index.isSyncing)
+                    .accessibilityIdentifier(TestID.Settings.libraryCopySyncNow)
                     SettingButton(Copy.deleteCopy.name ?? "", role: .destructive, notes: [Copy.deleteCopy]) {
                         LibraryIndex.shared.wipe()
                     }
+                    .accessibilityIdentifier(TestID.Settings.libraryCopyDelete)
                 }
             }
         }
+        .testAnchor(TestID.Settings.pageRoot(SettingsPage.libraryCopy.rawValue))
         .onChange(of: prefs.keepsLibraryCopy) { _, on in LibraryIndex.shared.setEnabled(on) }
     }
 }
@@ -512,9 +591,12 @@ private struct AboutSettingsPage: View {
             SettingGroup(nil, page: .about) {
                 SettingInfo("Aquarium", value: "\(Bundle.appVersion) (\(Bundle.appBuild))",
                             notes: [Copy.about], isFirst: true)
+                .accessibilityIdentifier(TestID.Settings.aboutVersion)
                 SettingInfo("Playback engine", value: "mpv", notes: [Copy.playbackEngine])
+                    .accessibilityIdentifier(TestID.Settings.aboutEngine)
             }
         }
+        .testAnchor(TestID.Settings.pageRoot(SettingsPage.about.rawValue))
     }
 }
 
@@ -610,6 +692,7 @@ private struct SettingsColumns<Rows: View>: View {
         HStack(alignment: .top, spacing: 70) {
             SettingDetailPanel(description: described ?? intro)
                 .frame(width: 560)
+                .testAnchor(TestID.TVSettings.panel)
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -621,6 +704,7 @@ private struct SettingsColumns<Rows: View>: View {
                                 .foregroundStyle(Theme.text)
                                 .padding(.horizontal, 28)
                                 .padding(.top, 20)
+                                .accessibilityIdentifier(TestID.TVSettings.pageTitle)
                         }
                         rows
                     }
@@ -679,6 +763,7 @@ private struct SettingDetailPanel: View {
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(Theme.text)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(TestID.TVSettings.panelTitle)
 
             ForEach(description.paragraphs, id: \.self) { paragraph in
                 Text(paragraph)
@@ -996,6 +1081,7 @@ private struct SettingChoiceList<Value: Hashable>: View {
         HStack(alignment: .top, spacing: 70) {
             SettingDetailPanel(description: description)
                 .frame(width: 560)
+                .testAnchor(TestID.TVSettings.panel)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
@@ -1008,6 +1094,7 @@ private struct SettingChoiceList<Value: Hashable>: View {
                         }
                         .buttonStyle(SettingRowStyle())
                         .focused($focused, equals: index)
+                        .accessibilityIdentifier(TestID.TVSettings.choiceOption(String(describing: option.value)))
                     }
                 }
                 .padding(.horizontal, 24)
@@ -1018,6 +1105,7 @@ private struct SettingChoiceList<Value: Hashable>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Theme.background.ignoresSafeArea())
         .defaultFocus($focused, options.firstIndex { $0.value == selection } ?? 0)
+        .testAnchor(TestID.TVSettings.choiceList)
     }
 }
 
@@ -1052,8 +1140,11 @@ private struct SettingTextEntry: View {
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .accessibilityIdentifier(TestID.TVSettings.textEntryField)
             Button("Save") { text = draft.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .accessibilityIdentifier(TestID.TVSettings.textEntrySave)
             Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(TestID.TVSettings.textEntryCancel)
         }
     }
 }
@@ -1088,12 +1179,14 @@ private struct TVArtworkProbe: View {
             }
             .buttonStyle(SettingRowStyle())
             .disabled(isRunning)
+            .accessibilityIdentifier(TestID.Settings.liveTVArtworkCheck)
 
             if hasRun, results.isEmpty {
                 Text(SettingsView.noChannelsYet)
                     .font(.caption)
                     .foregroundStyle(Theme.textDim)
                     .padding(.horizontal, 28)
+                    .accessibilityIdentifier(TestID.Settings.liveTVArtworkEmpty)
             }
 
             ForEach(results) { ArtworkProbeResultView(result: $0) }
@@ -1107,7 +1200,7 @@ private struct TVArtworkProbe: View {
             isRunning = false
             hasRun = true
         }
-        results = await ArtworkProbe.run(channels: LiveTVStore.shared.channels)
+        results = await ArtworkProbe.run(channels: ArtworkProbe.playlistChannels(LiveTVStore.shared.channels))
     }
 }
 #endif

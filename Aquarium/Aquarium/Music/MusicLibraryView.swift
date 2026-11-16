@@ -43,6 +43,7 @@ struct MusicLibraryView: View {
                         .padding(.horizontal, Metrics.gutter)
                         .padding(.top, 24)
                         .padding(.bottom, 12)
+                        .accessibilityIdentifier(TestID.Music.shelfTitle("recently-added"))
                     AlbumGrid(items: recent, pendingCount: recent.isEmpty && isLoading ? 6 : 0) {
                         app.push(.music(.album($0.Id)))
                     }
@@ -52,6 +53,7 @@ struct MusicLibraryView: View {
         }
         .task { await load() }
         .refreshable { await load() }
+        .testAnchor(TestID.Music.library)
     }
 
     private func load() async {
@@ -161,11 +163,13 @@ struct SortMenu: View {
     var body: some View {
         Menu {
             Picker("Sort", selection: $sort) {
-                ForEach(choices) { Text($0.label).tag($0) }
+                ForEach(choices) { Text($0.label).accessibilityIdentifier(TestID.Music.sortOption($0.rawValue)).tag($0) }
             }
+            .accessibilityIdentifier(TestID.Music.sortPicker)
         } label: {
             Label("Sort", systemImage: "arrow.up.arrow.down")
         }
+        .accessibilityIdentifier(TestID.Music.sortMenu)
     }
 }
 
@@ -182,10 +186,13 @@ struct ArtistsView: View {
             if let paged {
                 if paged.isLoading, paged.items.isEmpty {
                     SkeletonList(count: 12)
+                        .testAnchor(TestID.Music.loading)
                 } else if let error = paged.error, paged.items.isEmpty {
                     ErrorState(error: error) { Task { await paged.reload() } }
+                        .testAnchor(TestID.Music.error)
                 } else if paged.items.isEmpty {
                     EmptyState(symbol: "music.mic", title: "No artists", message: "Nothing matches.")
+                        .testAnchor(TestID.Music.empty)
                 } else {
                     LazyVStack(spacing: 0) {
                         ForEach(paged.items) { artist in
@@ -195,7 +202,7 @@ struct ArtistsView: View {
                             .id(artist.Id)
                             .onAppear { if artist.Id == paged.items.last?.Id { Task { await paged.loadMore() } } }
                         }
-                        if paged.isLoading { ProgressView().padding() }
+                        if paged.isLoading { ProgressView().accessibilityIdentifier(TestID.Music.loadingMore).padding() }
                     }
                     .padding(.vertical, 8)
                 }
@@ -209,14 +216,15 @@ struct ArtistsView: View {
             let term = filter.trimmingCharacters(in: .whitespaces)
             let sort = sort
             let p = PagedItems(pageSize: 200) { start, limit in
-                try await client.albumArtists(startIndex: start, limit: limit, searchTerm: term.isEmpty ? nil : term, sort: sort)
+                try await client.albumArtists(startIndex: start, limit: limit, searchTerm: term.isEmpty ? nil : term, sort: sort, itemTypes: "Audio")
             }
             p.countBefore = { letter in
-                try await client.albumArtists(startIndex: 0, limit: 1, searchTerm: term.isEmpty ? nil : term, sort: .name, nameLessThan: letter).total
+                try await client.albumArtists(startIndex: 0, limit: 1, searchTerm: term.isEmpty ? nil : term, sort: .name, nameLessThan: letter, itemTypes: "Audio").total
             }
             paged = p
             await p.reload()
         }
+        .testAnchor(TestID.Music.artists)
     }
 
     static func subtitle(_ artist: BaseItem) -> String? {
@@ -242,10 +250,13 @@ struct AlbumsView: View {
                 if paged.isLoading, paged.items.isEmpty {
                     AlbumGrid(items: [], pendingCount: 8) { _ in }
                         .padding(.top, 12)
+                        .testAnchor(TestID.Music.loading)
                 } else if let error = paged.error, paged.items.isEmpty {
                     ErrorState(error: error) { Task { await paged.reload() } }
+                        .testAnchor(TestID.Music.error)
                 } else if paged.items.isEmpty {
                     EmptyState(symbol: "square.stack", title: "No albums", message: "Nothing matches.")
+                        .testAnchor(TestID.Music.empty)
                 } else {
                     AlbumGrid(items: paged.items, pendingCount: paged.isLoading ? 4 : 0) {
                         app.push(.music(.album($0.Id)))
@@ -281,6 +292,7 @@ struct AlbumsView: View {
             paged = p
             await p.reload()
         }
+        .testAnchor(mode == .all ? TestID.Music.albums : TestID.Music.recentlyAdded)
     }
 }
 
@@ -298,10 +310,13 @@ struct SongsView: View {
             if let paged {
                 if paged.isLoading, paged.items.isEmpty {
                     SkeletonList(count: 14)
+                        .testAnchor(TestID.Music.loading)
                 } else if let error = paged.error, paged.items.isEmpty {
                     ErrorState(error: error) { Task { await paged.reload() } }
+                        .testAnchor(TestID.Music.error)
                 } else if paged.items.isEmpty {
                     EmptyState(symbol: "music.note", title: "No songs", message: "Nothing matches.")
+                        .testAnchor(TestID.Music.empty)
                 } else {
                     LazyVStack(spacing: 0) {
                         PlayShuffleBar {
@@ -317,7 +332,7 @@ struct SongsView: View {
                             .id(song.Id)
                             .onAppear { if song.Id == paged.items.last?.Id { Task { await paged.loadMore() } } }
                         }
-                        if paged.isLoading { ProgressView().padding() }
+                        if paged.isLoading { ProgressView().accessibilityIdentifier(TestID.Music.loadingMore).padding() }
                     }
                     .padding(.vertical, 8)
                 }
@@ -340,6 +355,7 @@ struct SongsView: View {
             paged = p
             await p.reload()
         }
+        .testAnchor(TestID.Music.songs)
     }
 }
 
@@ -397,10 +413,13 @@ struct SongListView: View {
         ScrollView {
             if isLoading, songs.isEmpty {
                 SkeletonList(count: 12)
+                    .testAnchor(TestID.Music.loading)
             } else if let error, songs.isEmpty {
                 ErrorState(error: error) { Task { await load() } }
+                    .testAnchor(TestID.Music.error)
             } else if songs.isEmpty {
                 EmptyState(symbol: "music.note", title: "Nothing here yet", message: "Play a few things and this fills in.")
+                    .testAnchor(TestID.Music.empty)
             } else {
                 LazyVStack(spacing: 0) {
                     PlayShuffleBar {
@@ -422,6 +441,7 @@ struct SongListView: View {
         .paletteBar()
         .task { await load() }
         .reloadWhenItemsChange { await load() }
+        .testAnchor(TestID.Music.songList)
     }
 
     private func load() async {
@@ -470,10 +490,13 @@ struct GenresView: View {
         ScrollView {
             if isLoading, genres.isEmpty {
                 AlbumGrid(items: [], pendingCount: 8) { _ in }.padding(.top, 12)
+                    .testAnchor(TestID.Music.loading)
             } else if let error, genres.isEmpty {
                 ErrorState(error: error) { Task { await load() } }
+                    .testAnchor(TestID.Music.error)
             } else if shown.isEmpty {
                 EmptyState(symbol: "guitars", title: "No genres", message: "Nothing matches.")
+                    .testAnchor(TestID.Music.empty)
             } else {
                 AlbumGrid(items: shown, subtitleFor: { _ in "Genre" }) {
                     app.push(.music(.genre(id: $0.Id, name: $0.title)))
@@ -485,6 +508,7 @@ struct GenresView: View {
         .paletteBar()
         .searchable(text: $filter, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Filter genres")
         .task { await load() }
+        .testAnchor(TestID.Music.genres)
     }
 
     private func load() async {
@@ -505,6 +529,7 @@ struct PlaylistsView: View {
     @State private var newName = ""
     @State private var isNaming = false
     @State private var renaming: BaseItem?
+    @State private var isRenaming = false
     @State private var renameText = ""
     @State private var editingSmart: SmartPlaylist?
     @State private var deleting: BaseItem?
@@ -514,31 +539,37 @@ struct PlaylistsView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if store.isLoading, store.playlists.isEmpty {
                     SkeletonList(count: 6)
+                        .testAnchor(TestID.Playlists.loading)
                 } else if let error = store.lastError, store.playlists.isEmpty {
                     ErrorState(error: error) { Task { await store.refresh() } }
+                        .testAnchor(TestID.Playlists.error)
                 } else if store.playlists.isEmpty {
                     EmptyState(
                         symbol: "music.note.list",
                         title: "No playlists yet",
                         message: "Make one with the + above, or press and hold any song and choose Add to Playlist."
                     )
+                    .testAnchor(TestID.Playlists.empty)
                 } else {
                     ForEach(store.playlists) { list in
-                        MusicListRow(item: list, subtitle: Self.count(list)) {
+                        MusicListRow(
+                            item: list, subtitle: Self.count(list),
+                            menuExtras: AnyView(Group {
+                                Button {
+                                    renameText = list.title
+                                    renaming = list
+                                    isRenaming = true
+                                } label: {
+                                    Label("Rename", systemImage: "pencil")
+                                }
+                                .accessibilityIdentifier(TestID.Playlists.menuRename)
+                                Button(role: .destructive) { deleting = list } label: {
+                                    Label("Delete Playlist", systemImage: "trash")
+                                }
+                                .accessibilityIdentifier(TestID.Playlists.menuDelete)
+                            })
+                        ) {
                             app.push(.music(.playlist(list.Id)))
-                        }
-                        .contextMenu {
-                            MusicItemMenu(item: list)
-                            Divider()
-                            Button {
-                                renameText = list.title
-                                renaming = list
-                            } label: {
-                                Label("Rename", systemImage: "pencil")
-                            }
-                            Button(role: .destructive) { deleting = list } label: {
-                                Label("Delete Playlist", systemImage: "trash")
-                            }
                         }
                     }
                 }
@@ -548,6 +579,7 @@ struct PlaylistsView: View {
                         Text("Smart Playlists")
                             .font(.title3.weight(.bold))
                             .foregroundStyle(Theme.text)
+                            .accessibilityIdentifier(TestID.SmartPlaylists.heading)
                         Spacer()
                         Button {
                             editingSmart = SmartPlaylist()
@@ -557,6 +589,7 @@ struct PlaylistsView: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(Theme.accent)
+                        .accessibilityIdentifier(TestID.SmartPlaylists.new)
                     }
                     Text("Rules, answered from the library every time they're opened. Kept on your devices, not the server.")
                         .font(.caption)
@@ -572,6 +605,7 @@ struct PlaylistsView: View {
                         .foregroundStyle(Theme.textDim)
                         .padding(.horizontal, Metrics.gutter)
                         .padding(.vertical, 12)
+                        .accessibilityIdentifier(TestID.SmartPlaylists.listEmpty)
                 } else {
                     ForEach(smart.playlists) { list in
                         Button {
@@ -597,9 +631,12 @@ struct PlaylistsView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier(TestID.SmartPlaylists.row(list.id.uuidString))
                         .contextMenu {
                             Button { editingSmart = list } label: { Label("Edit Rules", systemImage: "slider.horizontal.3") }
+                                .accessibilityIdentifier(TestID.SmartPlaylists.menuEdit)
                             Button(role: .destructive) { smart.delete(list.id) } label: { Label("Delete", systemImage: "trash") }
+                                .accessibilityIdentifier(TestID.SmartPlaylists.menuDelete)
                         }
                     }
                 }
@@ -616,6 +653,7 @@ struct PlaylistsView: View {
             } label: {
                 Image(systemName: "plus")
             }
+            .accessibilityIdentifier(TestID.Playlists.new)
         }
         .task { await store.ensureLoaded() }
         .refreshable { await store.refresh() }
@@ -626,7 +664,11 @@ struct PlaylistsView: View {
         } message: {
             Text("An empty playlist on the server. Add songs from any song's menu.")
         }
-        .alert("Rename Playlist", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+        // A flag of its own, as New Playlist has, and the playlist kept
+        // beside it. Presented off `renaming != nil`, closing the alert
+        // cleared the playlist before the task Rename starts could read it,
+        // so nothing was renamed; and on an iPad the alert would not close.
+        .alert("Rename Playlist", isPresented: $isRenaming) {
             TextField("Name", text: $renameText)
             Button("Rename") { Task { await rename() } }
             Button("Cancel", role: .cancel) {}
@@ -634,11 +676,14 @@ struct PlaylistsView: View {
         .confirmationDialog(
             "Delete “\(deleting?.title ?? "")”?",
             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("Delete from the server", role: .destructive) { Task { await delete() } }
+            titleVisibility: .visible,
+            presenting: deleting
+        ) { list in
+            Button("Delete from the server", role: .destructive) { Task { await delete(list) } }
+                .accessibilityIdentifier(TestID.Playlists.deleteConfirm)
             Button("Cancel", role: .cancel) {}
-        } message: {
+                .accessibilityIdentifier(TestID.Playlists.deleteCancel)
+        } message: { _ in
             Text("Every other Jellyfin client loses it too. The songs themselves stay.")
         }
         .sheet(item: $editingSmart) { list in
@@ -646,6 +691,7 @@ struct PlaylistsView: View {
                 smart.upsert(saved)
             }
         }
+        .testAnchor(TestID.Playlists.root)
     }
 
     static func count(_ list: BaseItem) -> String? {
@@ -677,8 +723,7 @@ struct PlaylistsView: View {
         }
     }
 
-    private func delete() async {
-        guard let list = deleting else { return }
+    private func delete(_ list: BaseItem) async {
         deleting = nil
         do {
             try await store.delete(list.Id)
@@ -702,10 +747,13 @@ struct AudiobooksView: View {
             if let paged {
                 if paged.isLoading, paged.items.isEmpty {
                     AlbumGrid(items: [], pendingCount: 6) { _ in }.padding(.top, 12)
+                        .testAnchor(TestID.Books.loading)
                 } else if let error = paged.error, paged.items.isEmpty {
                     ErrorState(error: error) { Task { await paged.reload() } }
+                        .testAnchor(TestID.Books.error)
                 } else if paged.items.isEmpty {
                     EmptyState(symbol: "book", title: "No audiobooks", message: "Nothing matches.")
+                        .testAnchor(TestID.Books.empty)
                 } else {
                     AlbumGrid(items: paged.items, pendingCount: paged.isLoading ? 2 : 0, subtitleFor: { $0.AlbumArtist ?? $0.artistLine }) {
                         app.push(.music(.audiobook($0.Id)))
@@ -731,6 +779,7 @@ struct AudiobooksView: View {
             paged = p
             await p.reload()
         }
+        .testAnchor(TestID.Books.list)
     }
 }
 
@@ -749,8 +798,10 @@ struct MusicFavoritesView: View {
         ScrollView {
             if isLoading, albums.isEmpty, artists.isEmpty, songs.isEmpty {
                 VStack(alignment: .leading, spacing: Metrics.shelfSpacing) { SkeletonShelf(squareWidth: MusicMetrics.tileWidth); SkeletonShelf(squareWidth: MusicMetrics.tileWidth) }.padding(.top, 12)
+                    .testAnchor(TestID.Music.loading)
             } else if albums.isEmpty, artists.isEmpty, songs.isEmpty {
                 EmptyState(symbol: "star", title: "No favorites yet", message: "Press and hold anything in your music to star it.")
+                    .testAnchor(TestID.Music.empty)
             } else {
                 LazyVStack(alignment: .leading, spacing: Metrics.shelfSpacing) {
                     ArtistShelf(title: "Artists", items: artists) { app.push(.music(.artist($0.Id))) }
@@ -771,6 +822,7 @@ struct MusicFavoritesView: View {
                                 }
                             }
                         }
+                        .testAnchor(TestID.Music.shelf("songs"))
                     }
                 }
                 .padding(.vertical, 12)
@@ -780,6 +832,7 @@ struct MusicFavoritesView: View {
         .paletteBar()
         .task { await load() }
         .reloadWhenItemsChange { await load() }
+        .testAnchor(TestID.Music.favorites)
     }
 
     private func load() async {
@@ -833,6 +886,7 @@ struct DownloadedMusicView: View {
                         ? "Press and hold an audiobook and choose Download. It then plays here with no server at all."
                         : "Press and hold a song or an album and choose Download. It then plays here with no server at all."
                 )
+                .testAnchor(books ? TestID.Books.empty : TestID.Music.empty)
             } else {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     if !books {
@@ -859,6 +913,7 @@ struct DownloadedMusicView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .foregroundStyle(Theme.accent)
+                                .accessibilityIdentifier(TestID.Music.downloadedAlbumPlay(album.id))
                             }
                             .padding(.horizontal, Metrics.gutter)
                             .contextMenu {
@@ -868,6 +923,7 @@ struct DownloadedMusicView: View {
                                 } label: {
                                     Label("Remove download", systemImage: "trash")
                                 }
+                                .accessibilityIdentifier(TestID.Music.downloadedAlbumRemove)
                             }
                             ForEach(album.tracks) { record in
                                 let item = record.asItem
@@ -880,6 +936,7 @@ struct DownloadedMusicView: View {
                                 }
                             }
                         }
+                        .testAnchor(TestID.Music.downloadedAlbum(album.id))
                     }
                 }
                 .padding(.vertical, 12)
@@ -887,6 +944,7 @@ struct DownloadedMusicView: View {
         }
         .navigationTitle(books ? "Downloaded Audiobooks" : "Downloaded")
         .paletteBar()
+        .testAnchor(books ? TestID.Books.downloaded : TestID.Music.downloadedSongs)
     }
 }
 

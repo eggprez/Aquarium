@@ -140,6 +140,7 @@ struct PlayerFoldPanel: View {
         .preferredColorScheme(.dark)
         .sensoryFeedback(.impact(weight: .medium), trigger: skips)
         .task(id: seasonKey) { await loadSeason() }
+        .testAnchor(TestID.Player.foldPanel)
     }
 
     /// The trailing column the cluster stands in: room for play/pause
@@ -154,12 +155,14 @@ struct PlayerFoldPanel: View {
                 header
                 if player.upNextCount > 0 {
                     upNext
+                        .testAnchor(TestID.Player.foldUpNext)
                 }
                 if !player.chapters.isEmpty {
                     chapters
                 }
                 if !episodes.isEmpty {
                     season
+                        .testAnchor(TestID.Player.foldSeason)
                 }
             }
             .padding(.leading, Metrics.gutter)
@@ -185,6 +188,7 @@ struct PlayerFoldPanel: View {
                 Spacer(minLength: 0)
                 if store.isLoading {
                     ProgressView().frame(maxWidth: .infinity)
+                        .accessibilityIdentifier(TestID.Player.foldGuideLoading)
                 }
                 Spacer(minLength: 0)
             } else {
@@ -193,6 +197,7 @@ struct PlayerFoldPanel: View {
             }
         }
         .task { await LiveTVStore.shared.ensureLoaded() }
+        .testAnchor(TestID.Player.foldGuide)
     }
 
     // MARK: - Prompts
@@ -243,6 +248,7 @@ struct PlayerFoldPanel: View {
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.Player.foldTitle)
     }
 
     @ViewBuilder
@@ -297,6 +303,7 @@ struct PlayerFoldPanel: View {
                         .buttonStyle(PlayerPillStyle())
                         .accessibilityLabel("\(chapter.title), \(PlayerTime.spoken(chapter.start))")
                         .accessibilityAddTraits(current ? [.isSelected] : [])
+                        .accessibilityIdentifier(TestID.Player.foldChapter(chapter.id))
                     }
                 }
                 .padding(.vertical, 2)
@@ -324,6 +331,7 @@ struct PlayerFoldPanel: View {
                     } leading: {
                         still(entry)
                     }
+                    .accessibilityIdentifier(TestID.Player.upNextItem(entry.Id))
                 }
             } else {
                 ForEach(player.upNextList, id: \.Id) { entry in
@@ -334,11 +342,13 @@ struct PlayerFoldPanel: View {
                     } leading: {
                         still(entry)
                     }
+                    .accessibilityIdentifier(TestID.Player.upNextItem(entry.Id))
                 }
                 ForEach(player.upNextLocal, id: \.itemId) { record in
                     PanelRow(title: record.title, detail: "On this device") {
                         player.playLocal(record, keepShuffle: true)
                     }
+                    .accessibilityIdentifier(TestID.Player.upNextItem(record.itemId))
                 }
             }
         }

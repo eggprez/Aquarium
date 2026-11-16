@@ -415,6 +415,7 @@ struct PosterCard: View {
         // a tile is a thing you select, and a ring around the picture alone
         // leaves the name looking like it belongs to the tile above.
         .macTileState(isSelected: isSelected)
+        .testAnchor(TestID.Item.card(item.Id))
     }
 
     #if os(iOS)
@@ -752,6 +753,9 @@ struct MediaShelf: View {
 
     @Environment(AppModel.self) private var app
     @Environment(\.posterZoomNamespace) private var zoomNamespace
+    /// The row key UI tests find this shelf by — see `testShelfKey`.
+    @Environment(\.testShelfKey) private var testShelfKey
+    private var shelfKey: String { testShelfKey ?? TestID.key(title) }
     #if os(macOS)
     /// The shelf's own width, measured from the heading row, which spans it.
     @State private var shelfWidth: CGFloat = 0
@@ -769,6 +773,7 @@ struct MediaShelf: View {
                     Spacer()
                     if let seeAll {
                         SeeAllButton(action: seeAll)
+                            .accessibilityIdentifier(TestID.Common.shelfSeeAll(shelfKey))
                     }
                 }
                 .padding(.horizontal, Metrics.gutter)
@@ -779,6 +784,7 @@ struct MediaShelf: View {
                 scroller
                     .focusRegion()
             }
+            .testAnchor(TestID.Common.shelf(shelfKey))
         }
     }
 
@@ -807,17 +813,20 @@ struct MediaShelf: View {
             .animation(.easeOut(duration: 0.12), value: isHoveringTitle)
             .help("See all of \(title)")
             .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier(TestID.Common.shelfHeadingLink(shelfKey))
         } else {
             Text(title)
                 .font(titleFont)
                 .foregroundStyle(Theme.text)
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier(TestID.Common.shelfTitle(shelfKey))
         }
         #else
         Text(title)
             .font(titleFont)
             .foregroundStyle(Theme.text)
             .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier(TestID.Common.shelfTitle(shelfKey))
         #endif
     }
 
@@ -840,6 +849,8 @@ struct MediaShelf: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PosterButtonStyle())
+        .arrivalFocusCard(isFirst: item.Id == items.first?.Id)
+        .accessibilityIdentifier(TestID.Item.card(item.Id))
         .posterZoomSource("\(title)/\(item.Id)", in: zoomNamespace)
         .itemContextMenu(item, allowsOpen: menuOpensDetails, removesFromNextUp: menuRemovesFromNextUp)
         #if os(macOS)
@@ -880,11 +891,13 @@ struct MediaShelf: View {
         .scrollPosition(id: $scrolledID)
         .overlay(alignment: .leading) {
             ShelfPagingButton(direction: .back) { page(by: -layout.count) }
+                .accessibilityIdentifier(TestID.Common.shelfPrevious(shelfKey))
                 .padding(.leading, 4)
                 .opacity(isHovering && canPage(by: -1) ? 1 : 0)
         }
         .overlay(alignment: .trailing) {
             ShelfPagingButton(direction: .forward) { page(by: layout.count) }
+                .accessibilityIdentifier(TestID.Common.shelfNext(shelfKey))
                 .padding(.trailing, 4)
                 .opacity(isHovering && canPage(by: layout.count) ? 1 : 0)
         }
@@ -940,6 +953,28 @@ struct MediaShelf: View {
         #else
         return .title3.weight(.semibold)
         #endif
+    }
+}
+
+/// The row key a `MediaShelf` names itself by for UI tests: its anchor, its
+/// heading and its See All all carry it (see `TestID.Common.shelf`). Set by
+/// the page that draws the shelf; a shelf given none falls back to its
+/// heading. Read by nothing but the identifiers.
+private struct TestShelfKey: EnvironmentKey {
+    static let defaultValue: String? = nil
+}
+
+extension EnvironmentValues {
+    var testShelfKey: String? {
+        get { self[TestShelfKey.self] }
+        set { self[TestShelfKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Names the shelves inside for UI tests — see `TestShelfKey`.
+    func testShelfKey(_ key: String) -> some View {
+        environment(\.testShelfKey, key)
     }
 }
 
@@ -1648,6 +1683,7 @@ struct SkeletonHero: View {
                 .padding(.bottom, 38)
             }
             .accessibilityHidden(true)
+            .testAnchor(TestID.Common.skeletonHero)
     }
 
     /// The shape of the button that is coming: a capsule the height of a
@@ -1696,6 +1732,7 @@ struct SkeletonShelf: View {
             #endif
         }
         .accessibilityHidden(true)
+        .testAnchor(TestID.Common.skeletonShelf)
     }
 
     #if os(macOS)
@@ -1741,6 +1778,7 @@ struct SkeletonList: View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(0..<count, id: \.self) { _ in SkeletonListRow() }
         }
+        .testAnchor(TestID.Common.skeletonList)
     }
 }
 
@@ -1772,6 +1810,7 @@ struct SkeletonGrid: View {
             }
         }
         .padding(.horizontal, Metrics.gutter)
+        .testAnchor(TestID.Common.skeletonGrid)
     }
 }
 
@@ -1896,6 +1935,7 @@ struct MediaGrid: View {
         }
         #endif
         .focusRegion()
+        .testAnchor(TestID.Common.grid)
     }
 
     #if os(macOS)
@@ -1989,6 +2029,8 @@ struct MediaGrid: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(PosterButtonStyle())
+        .arrivalFocusCard(isFirst: item.Id == items.first?.Id)
+        .accessibilityIdentifier(TestID.Item.card(item.Id))
         .posterZoomSource("grid/\(item.Id)", in: zoomNamespace)
         .itemContextMenu(item)
     }
@@ -2114,20 +2156,24 @@ struct EmptyState: View {
         // The system's own empty page, which every Mac app shows.
         ContentUnavailableView {
             Label(title, systemImage: symbol)
+                .accessibilityIdentifier(TestID.Common.emptyStateTitle)
         } description: {
             Text(message)
         } actions: {
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
+                    .accessibilityIdentifier(TestID.Common.emptyStateAction)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 240)
+        .testAnchor(TestID.Common.emptyState)
         #else
         VStack(spacing: 10) {
             Image(systemName: symbol)
                 .font(.system(size: StateSize.glyph(34)))
                 .foregroundStyle(Theme.textDim)
             Text(title).font(.headline).foregroundStyle(Theme.text)
+                .accessibilityIdentifier(TestID.Common.emptyStateTitle)
             Text(message)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
@@ -2136,11 +2182,13 @@ struct EmptyState: View {
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .appButtonStyle()
+                    .accessibilityIdentifier(TestID.Common.emptyStateAction)
                     .padding(.top, 6)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 240)
         .padding(Metrics.gutter)
+        .testAnchor(TestID.Common.emptyState)
         #endif
     }
 }
@@ -2156,13 +2204,16 @@ struct ErrorState: View {
             Label(title, systemImage: "exclamationmark.triangle")
         } description: {
             Text(error)
+                .accessibilityIdentifier(TestID.Common.errorStateMessage)
         } actions: {
             if let retry {
                 Button("Try Again", action: retry)
                     .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier(TestID.Common.errorStateRetry)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 240)
+        .testAnchor(TestID.Common.errorState)
         #else
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
@@ -2174,13 +2225,16 @@ struct ErrorState: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textDim)
                 .frame(maxWidth: StateSize.textWidth(460))
+                .accessibilityIdentifier(TestID.Common.errorStateMessage)
             if let retry {
                 Button("Try again", action: retry)
                     .appButtonStyle(prominent: true)
+                    .accessibilityIdentifier(TestID.Common.errorStateRetry)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 240)
         .padding(Metrics.gutter)
+        .testAnchor(TestID.Common.errorState)
         #endif
     }
 }
@@ -2204,6 +2258,7 @@ struct OfflineState: View {
         #if os(macOS)
         ContentUnavailableView {
             Label("Server Offline", systemImage: "wifi.slash")
+                .accessibilityIdentifier(TestID.Shell.offlineScreenTitle)
         } description: {
             Text(Self.message)
         } actions: {
@@ -2211,18 +2266,22 @@ struct OfflineState: View {
                 if let onDownloads {
                     Button("Go to Downloads", action: onDownloads)
                         .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier(TestID.Shell.offlineScreenDownloads)
                 }
                 Button(checking ? "Checking…" : "Retry Connection", action: retry)
                     .disabled(checking)
+                    .accessibilityIdentifier(TestID.Shell.offlineScreenRetry)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .testAnchor(TestID.Shell.offlineScreen)
         #else
         VStack(spacing: 14) {
             Image(systemName: "wifi.slash")
                 .font(.system(size: StateSize.glyph(34)))
                 .foregroundStyle(Theme.warn)
             Text("Server offline").font(.title2.weight(.semibold))
+                .accessibilityIdentifier(TestID.Shell.offlineScreenTitle)
             Text(Self.message)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
@@ -2232,14 +2291,17 @@ struct OfflineState: View {
                 if let onDownloads {
                     Button("Go to Downloads", action: onDownloads)
                         .appButtonStyle(prominent: true)
+                        .accessibilityIdentifier(TestID.Shell.offlineScreenDownloads)
                 }
                 Button(checking ? "Checking…" : "Retry connection", action: retry)
                     .appButtonStyle()
                     .disabled(checking)
+                    .accessibilityIdentifier(TestID.Shell.offlineScreenRetry)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Metrics.gutter)
+        .testAnchor(TestID.Shell.offlineScreen)
         #endif
     }
 
@@ -2282,6 +2344,7 @@ struct OfflineStrip: View {
         }
         .stripChrome()
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.Shell.offlineBanner)
     }
 
     @ViewBuilder
@@ -2370,6 +2433,7 @@ struct ToastOverlay: View {
             Spacer()
             ForEach(shown) { toast in
                 ToastCard(toast: toast, dismiss: { dismiss(toast) }, hover: { hover($0, toast) })
+                    .testAnchor(TestID.Shell.toast(shown.firstIndex(of: toast) ?? 0))
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -2377,6 +2441,7 @@ struct ToastOverlay: View {
         .padding(.horizontal, 20)
         .animation(.spring(duration: 0.3), value: shown)
         .allowsHitTesting(!shown.isEmpty)
+        .testAnchor(TestID.Shell.toasts)
         #if os(macOS)
         // Escape takes the newest one down.
         .onExitCommand {
@@ -2438,6 +2503,7 @@ private struct ToastCard: View {
                 .font(.subheadline)
                 .foregroundStyle(Theme.text)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(TestID.Shell.toastText)
             #if os(macOS)
             Spacer(minLength: 0)
             Button(action: dismiss) {
@@ -2450,6 +2516,7 @@ private struct ToastCard: View {
             .buttonStyle(.plain)
             .help("Dismiss")
             .accessibilityLabel("Dismiss")
+            .accessibilityIdentifier(TestID.Shell.toastDismiss)
             .opacity(isHovering ? 1 : 0)
             #endif
         }
@@ -2512,6 +2579,7 @@ struct BrandMark: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Aquarium")
         .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier(TestID.Common.brand)
     }
 }
 
@@ -2540,9 +2608,10 @@ struct AppTopBar<Content: View>: View {
     var height: CGFloat = Metrics.topBar
     @ViewBuilder var content: Content
 
-    /// The way back to an iPad's collapsed sidebar — see `showSidebar`. Nil
-    /// everywhere else.
-    @Environment(\.showSidebar) private var showSidebar
+    /// The way back to an iPad's collapsed sidebar — see `SidebarToggle`.
+    /// Nil everywhere else.
+    @Environment(\.sidebarToggle) private var sidebarToggle
+    private var showSidebar: (() -> Void)? { sidebarToggle?.show }
 
     /// A foldable's inside screen held upright has a status strip deeper
     /// than a phone's and empty but for the pill in its trailing corner —
@@ -2609,8 +2678,20 @@ struct AppTopBar<Content: View>: View {
 /// detail column, which on every page that *does* have a system bar sat
 /// under the system's own toggle: two of them, one above the other. Nil when
 /// the sidebar is showing, and on anything that has no sidebar.
+///
+/// Handed down as an object whose `show` changes, not as the closure itself:
+/// a page already pushed onto the detail column's stack kept the environment
+/// it was pushed with, so a title page open when the sidebar was hidden
+/// never got the toggle, and nothing on screen brought the sidebar back.
+/// What a page reads off an observed object reaches it wherever it is.
+@MainActor
+@Observable
+final class SidebarToggle {
+    var show: (() -> Void)?
+}
+
 private struct ShowSidebarKey: EnvironmentKey {
-    static let defaultValue: (() -> Void)? = nil
+    static let defaultValue: SidebarToggle? = nil
 }
 
 /// The way back from a page a section's stack pushed: that stack's path,
@@ -2628,7 +2709,7 @@ extension EnvironmentValues {
 }
 
 extension EnvironmentValues {
-    var showSidebar: (() -> Void)? {
+    var sidebarToggle: SidebarToggle? {
         get { self[ShowSidebarKey.self] }
         set { self[ShowSidebarKey.self] = newValue }
     }
@@ -2646,6 +2727,7 @@ private struct SidebarToggleButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Show sidebar")
+        .accessibilityIdentifier(TestID.Sidebar.show)
     }
 }
 
@@ -2845,6 +2927,7 @@ struct BarBackButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Back")
+        .accessibilityIdentifier(TestID.Common.back)
     }
 }
 #endif
@@ -2867,6 +2950,7 @@ struct PageHeading: View {
             .padding(.horizontal, Metrics.gutter)
             .padding(.top, 12)
             .padding(.bottom, 4)
+            .accessibilityIdentifier(TestID.Common.pageHeading)
     }
 }
 #endif
@@ -2955,6 +3039,7 @@ struct AncestorTrail: View {
                     }
                     .crumbStyle(name: step.name)
                     .accessibilityHint("Opens \(step.name)")
+                    .accessibilityIdentifier(TestID.Item.ancestor(step.id))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

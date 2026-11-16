@@ -97,6 +97,7 @@ struct MusicSearchResultsView: View {
                     .font(.caption)
                     .foregroundStyle(Theme.textDim)
                     .padding(.horizontal, Metrics.gutter)
+                    .accessibilityIdentifier(TestID.Music.searchFootnote)
             }
             ArtistShelf(title: "Artists", items: artists) { open(.artist($0.Id)) }
             AlbumShelf(title: "Albums", items: albums) { open(.album($0.Id)) }
@@ -117,9 +118,11 @@ struct MusicSearchResultsView: View {
                         }
                     }
                 }
+                .testAnchor(TestID.Music.shelf("songs"))
             }
             AlbumShelf(title: "Playlists", items: results.playlists) { open(.playlist($0.Id)) }
         }
+        .testAnchor(TestID.Music.searchResults)
     }
 
     private func open(_ route: MusicRoute) {
@@ -158,15 +161,19 @@ struct MusicSearchView: View {
                         ? "Artists, albums, songs and playlists on this device, by name."
                         : "Artists, albums, songs and playlists, by name."
                 )
+                .testAnchor(TestID.Music.searchPrompt)
             } else if isSearching, answer.results.isEmpty {
                 SkeletonList(count: 8)
+                    .testAnchor(TestID.Music.loading)
             } else if let error {
                 ErrorState(error: error) { schedule(query, immediate: true) }
+                    .testAnchor(TestID.Music.error)
             } else if answer.results.isEmpty {
                 EmptyState(
                     symbol: "magnifyingglass", title: "No matches",
                     message: MusicSearch.noMatchesMessage(for: query, fromDevice: answer.fromDevice, scope: scope)
                 )
+                .testAnchor(TestID.Music.empty)
             } else {
                 MusicSearchResultsView(
                     results: answer.results,
@@ -183,6 +190,7 @@ struct MusicSearchView: View {
         }
         .onChange(of: term, initial: true) { _, new in schedule(new.trimmingCharacters(in: .whitespaces)) }
         .reloadWhenItemsChange { schedule(term.trimmingCharacters(in: .whitespaces), immediate: true) }
+        .testAnchor(TestID.Music.search)
     }
 
     private func schedule(_ query: String, immediate: Bool = false) {
@@ -247,6 +255,7 @@ struct MusicSearchField: View {
                     .focused($isFocused)
                     .submitLabel(.search)
                     .autocorrectionDisabled()
+                    .accessibilityIdentifier(TestID.Music.searchField)
                 if !term.isEmpty {
                     Button {
                         term = ""
@@ -257,6 +266,7 @@ struct MusicSearchField: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Clear")
+                    .accessibilityIdentifier(TestID.Music.searchClear)
                 }
             }
             .padding(.horizontal, 14)
@@ -271,6 +281,7 @@ struct MusicSearchField: View {
                 }
                 .foregroundStyle(Theme.accent)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
+                .accessibilityIdentifier(TestID.Music.searchCancel)
             }
         }
         .padding(.horizontal, Metrics.gutter)
@@ -278,6 +289,7 @@ struct MusicSearchField: View {
         .padding(.bottom, 8)
         .background(Theme.background)
         .animation(.easeOut(duration: 0.2), value: isSearching)
+        .testAnchor(TestID.Music.searchBar)
     }
 }
 

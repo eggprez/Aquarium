@@ -61,7 +61,9 @@ final class JellyfinClient {
     static let shared = JellyfinClient()
 
     nonisolated static let clientName = "Aquarium"
-    nonisolated static let clientVersion = "1.0.0"
+    /// The app's own version, as the phone reports its own, so the server's
+    /// dashboard tells one build from another.
+    nonisolated static let clientVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
     nonisolated static let nonVideoTypes = "Audio,AudioBook,Book,MusicAlbum,MusicArtist,Photo,PhotoAlbum"
     nonisolated static let log = Logger(subsystem: "scottai.FellyJin.watchkitapp", category: "client")
 
@@ -74,6 +76,10 @@ final class JellyfinClient {
     private(set) var account: WatchAccount?
     /// The saved server did not answer the last time it was asked.
     private(set) var isOffline = false
+    /// The server answered the last signed-in request with 401: it refuses
+    /// this watch's token. Cleared by a new sign-in from the phone or the
+    /// next signed-in request it takes.
+    private(set) var signInRefused = false
     private(set) var lastCheckedAt: Date?
 
     var isSignedIn: Bool { account != nil }
@@ -84,12 +90,39 @@ final class JellyfinClient {
 
     private let defaults = UserDefaults.standard
     private var tokenCache: String?
-    private let session: URLSession = {
+    private var session: URLSession = JellyfinClient.makeSession()
+
+    private static func makeSession(protocols: [AnyClass]? = nil) -> URLSession {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 20
         config.waitsForConnectivity = false
+        if let protocols { config.protocolClasses = protocols + (config.protocolClasses ?? []) }
         return URLSession(configuration: config)
-    }()
+    }
+
+    #if DEBUG
+    /// Unit tests only: answer requests through these `URLProtocol` classes
+    /// (canned JSON) from now on; nil puts the plain session back. See
+    /// WatchTests and AquariumTests/Shared/Support.
+    ///
+    /// On the watchOS 27 simulator a session's own protocol classes see GET
+    /// requests only: a POST or DELETE goes to the network. `testTransport`
+    /// covers every method.
+    func useTestProtocols(_ protocols: [AnyClass]?) {
+        session = Self.makeSession(protocols: protocols)
+    }
+
+    /// Unit tests only: when set, every `request` is answered by this in
+    /// place of the session (its errors are taken as the network's).
+    @ObservationIgnored var testTransport: ((URLRequest) async throws -> (Data, URLResponse))?
+    #endif
+
+    private func load(_ req: URLRequest) async throws -> (Data, URLResponse) {
+        #if DEBUG
+        if let testTransport { return try await testTransport(req) }
+        #endif
+        return try await session.data(for: req)
+    }
 
     private init() {
         if let id = defaults.string(forKey: "watch_device_id") {
@@ -115,6 +148,7 @@ final class JellyfinClient {
         )
         WatchKeychain.store(token: credentials.token, account: Self.keychainAccount(next))
         tokenCache = nil
+        signInRefused = false
         if account != next {
             account = next
             defaults.set(try? JSONEncoder().encode(next), forKey: "watch_account")
@@ -126,6 +160,7 @@ final class JellyfinClient {
         if let account { WatchKeychain.delete(account: Self.keychainAccount(account)) }
         account = nil
         tokenCache = nil
+        signInRefused = false
         defaults.removeObject(forKey: "watch_account")
     }
 
@@ -211,7 +246,7 @@ final class JellyfinClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: req)
+            (data, response) = try await load(req)
         } catch {
             if (error as? URLError)?.code == .cancelled || error is CancellationError { throw CancellationError() }
             WatchLog.error("client", "\(method) \(path.components(separatedBy: "?")[0]) failed: \(error.localizedDescription)\(countsForOffline ? " — now offline" : "")")
@@ -223,8 +258,12 @@ final class JellyfinClient {
         if http.statusCode == 401 {
             WatchLog.error("client", "\(method) \(path.components(separatedBy: "?")[0]): 401, sign-in refused")
             tokenCache = nil
+            signInRefused = true
             throw APIError.auth("The watch's sign-in has expired. Open Aquarium on your iPhone to send it again.")
         }
+        // The public probe answers without looking at the token, so only
+        // another path's answer shows the sign-in is taken again.
+        if !path.hasPrefix("/System/Info/Public") { signInRefused = false }
         guard (200..<300).contains(http.statusCode) else {
             WatchLog.error("client", "\(method) \(path.components(separatedBy: "?")[0]): HTTP \(http.statusCode)")
             throw APIError.server(status: http.statusCode, path: path.components(separatedBy: "?")[0])
@@ -351,10 +390,15 @@ final class JellyfinClient {
         try await items(Query(types: "Audio", parentId: albumId, limit: 500)).items.sortedByTrack()
     }
 
+    /// Artists with an album to their name, counted from songs only: an
+    /// audiobook's author is an album artist too, and Music › Artists is
+    /// about the music. (A music library's ParentId would do it only where
+    /// there is one music library.)
     func albumArtists(startIndex: Int = 0, limit: Int = 300) async throws -> ItemsResponse {
         guard let account else { throw APIError.notConfigured }
         let q: [URLQueryItem] = [
             .init(name: "userId", value: account.userId),
+            .init(name: "IncludeItemTypes", value: "Audio"),
             .init(name: "SortBy", value: "SortName"),
             .init(name: "SortOrder", value: "Ascending"),
             .init(name: "Fields", value: Self.listFields),
@@ -739,6 +783,10 @@ enum WatchKeychain {
     }
 
     static func store(token: String, account: String) {
+        #if DEBUG
+        // UI test mode: no keychain — see Shared/TestIDs/TestLaunch.swift.
+        if TestRuntime.isUITest { TestKeychain.store(token, account: account); return }
+        #endif
         var q = query(account)
         SecItemDelete(q as CFDictionary)
         q[kSecValueData as String] = Data(token.utf8)
@@ -747,6 +795,9 @@ enum WatchKeychain {
     }
 
     static func token(account: String) -> String? {
+        #if DEBUG
+        if TestRuntime.isUITest { return TestKeychain.token(account: account) }
+        #endif
         var q = query(account)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -758,6 +809,9 @@ enum WatchKeychain {
     }
 
     static func delete(account: String) {
+        #if DEBUG
+        if TestRuntime.isUITest { TestKeychain.delete(account: account); return }
+        #endif
         SecItemDelete(query(account) as CFDictionary)
     }
 }

@@ -31,6 +31,11 @@ final class SpotlightIndexer {
     /// and take those out. Anything that isn't a film, show or episode is
     /// ignored, so callers can hand over a row as it is.
     func update(changed: [BaseItem], removed: [String] = []) {
+        #if DEBUG
+        // UI test mode leaves the system's index alone: on a Mac it is the
+        // index of the copy in real use.
+        if TestRuntime.isUITest { return }
+        #endif
         let items = changed.filter { Self.kinds.contains($0.kind) && !$0.Id.isEmpty }
         guard !items.isEmpty || !removed.isEmpty else { return }
         let previous = pending
@@ -57,6 +62,9 @@ final class SpotlightIndexer {
 
     /// Everything out, on sign-out.
     func wipe() {
+        #if DEBUG
+        if TestRuntime.isUITest { return }
+        #endif
         let previous = pending
         pending = Task { [previous] in
             await previous?.value

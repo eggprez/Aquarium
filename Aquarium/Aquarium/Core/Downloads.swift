@@ -266,6 +266,7 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
         ownerUserId = try c.decodeIfPresent(String.self, forKey: .ownerUserId)
         verifyFailures = try c.decodeIfPresent(Int.self, forKey: .verifyFailures) ?? 0
         autoRetries = try c.decodeIfPresent(Int.self, forKey: .autoRetries) ?? 0
+        needsMPV = try c.decodeIfPresent(Bool.self, forKey: .needsMPV)
         imageURL = try c.decodeIfPresent(String.self, forKey: .imageURL)
         seasonImageURL = try c.decodeIfPresent(String.self, forKey: .seasonImageURL)
         seriesImageURL = try c.decodeIfPresent(String.self, forKey: .seriesImageURL)
@@ -473,6 +474,16 @@ final class DownloadManager: NSObject {
     nonisolated static let bundleID = Bundle.main.bundleIdentifier ?? "Aquarium"
 
     nonisolated static let log = Logger(subsystem: bundleID, category: "downloads")
+
+    /// What the background sessions are named after: the bundle identifier,
+    /// and in UI test mode a name of their own, so a test run never picks up
+    /// the transfers of the copy in real use (the Mac shares one container).
+    nonisolated static var sessionPrefix: String {
+        #if DEBUG
+        if TestRuntime.isUITest { return bundleID + ".uitest" }
+        #endif
+        return bundleID
+    }
 
     private(set) var records: [DownloadRecord] = []
     private(set) var queue: [QueuedDownload] = [] {
@@ -689,7 +700,7 @@ final class DownloadManager: NSObject {
 
     @ObservationIgnored
     private lazy var session: URLSession = {
-        let cfg = URLSessionConfiguration.background(withIdentifier: "\(Self.bundleID).downloads")
+        let cfg = URLSessionConfiguration.background(withIdentifier: "\(Self.sessionPrefix).downloads")
         cfg.isDiscretionary = false
         cfg.sessionSendsLaunchEvents = true
         // Left open here and decided per transfer instead: a session's
@@ -734,12 +745,12 @@ final class DownloadManager: NSObject {
     /// system hands back any transfer that was running under it.
     @ObservationIgnored
     private lazy var assetSession: AVAssetDownloadURLSession = makeAssetSession(
-        identifier: "\(Self.bundleID).streamdownloads", allowsCellular: true
+        identifier: "\(Self.sessionPrefix).streamdownloads", allowsCellular: true
     )
 
     @ObservationIgnored
     private lazy var wifiAssetSession: AVAssetDownloadURLSession = makeAssetSession(
-        identifier: "\(Self.bundleID).streamdownloads.wifi", allowsCellular: false
+        identifier: "\(Self.sessionPrefix).streamdownloads.wifi", allowsCellular: false
     )
 
     private var assetSessions: [AVAssetDownloadURLSession] { [assetSession, wifiAssetSession] }
@@ -991,7 +1002,7 @@ final class DownloadManager: NSObject {
     /// read from inside view bodies, several times per row, and a path helper
     /// that touches the disk on every draw is not one.
     nonisolated static var rootPath: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        AppDirectory.url(.applicationSupportDirectory)
             // "FellyJin" is the pre-Aquarium name, kept so existing downloads are found
             .appendingPathComponent("FellyJin/Downloads", isDirectory: true)
     }
@@ -1176,6 +1187,12 @@ final class DownloadManager: NSObject {
         // the queue — is described by its record again.
         if record.status != .downloading { liveProgress[record.itemId] = nil }
     }
+
+    #if DEBUG
+    /// Unit tests only: a record put in the list (and its meta.json beside
+    /// its file) as if its transfer had just ended. Nothing else calls it.
+    func installForTesting(_ record: DownloadRecord) { save(record) }
+    #endif
 
     /// Where meta.json files are written. Drained before the app is put away
     /// — see `flushPersisted`.
@@ -2038,7 +2055,12 @@ final class DownloadManager: NSObject {
         for path in streamPaths {
             try? FileManager.default.removeItem(at: Self.hlsURL(forRelativePath: path))
         }
-        try? FileManager.default.removeItem(at: Self.folder(for: itemId))
+        // On the queue meta.json is written on, and waited for: a write still
+        // queued (cancelling the transfer just saved the record) otherwise
+        // lands while the folder is being removed and leaves it behind, with
+        // meta.json in it, to come back as a download at the next launch.
+        let folder = Self.folder(for: itemId)
+        Self.metaWriter.sync { try? FileManager.default.removeItem(at: folder) }
         DownloadArtwork.forget(itemId: itemId)
         records.removeAll { $0.itemId == itemId }
         recordsRevision &+= 1
@@ -2526,6 +2548,9 @@ final class DownloadManager: NSObject {
     /// folder and are not at risk.
     nonisolated static func keepFromPurge(_ url: URL) {
         #if os(iOS)
+        // The storage manager raises an exception, not an error, for a
+        // package that is not there.
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
         let policy = AVMutableAssetDownloadStorageManagementPolicy()
         policy.priority = .important
         policy.expirationDate = .distantFuture
@@ -2908,6 +2933,16 @@ final class DownloadManager: NSObject {
     /// music library draining it is asked every second or so.
     @concurrent
     private nonisolated static func isPlayable(_ url: URL, strict: Bool = true, audio: Bool = false) async -> Bool {
+        if !strict {
+            // A downloaded stream is a folder of segments. AVURLAsset has been
+            // seen to call anything at a .movpkg address playable, a plain
+            // file of junk and a path with nothing at it included, so what is
+            // there is looked at first.
+            var isFolder: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder), isFolder.boolValue,
+                  let inside = try? FileManager.default.contentsOfDirectory(atPath: url.path), !inside.isEmpty
+            else { return false }
+        }
         let asset = AVURLAsset(url: url)
         do {
             guard try await asset.load(.isPlayable) else { return false }
@@ -4396,6 +4431,22 @@ extension DownloadManager: AVAssetDownloadDelegate {
         }
     }
 }
+
+#if DEBUG
+// Unit tests only (AquariumTests/Shared/Download…Tests.swift): the three
+// things a test cannot bring about from outside. Nothing here does anything
+// the manager doesn't already do for itself.
+extension DownloadManager {
+    /// A record put in the way a transfer's start puts one in.
+    func seedForTests(_ record: DownloadRecord) { save(record) }
+    /// What the path monitor would say.
+    func setRouteForTests(satisfied: Bool, cellularOnly: Bool) {
+        pathChanged(satisfied: satisfied, cellularOnly: cellularOnly)
+    }
+    /// The once-a-minute stall sweep, now.
+    func sweepForTests() async { await sweepStalledTransfers() }
+}
+#endif
 
 #endif
 

@@ -229,6 +229,7 @@ struct SkipBadge: View {
         .shadow(color: .black.opacity(0.6), radius: 6)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(seconds < 0 ? "Skipped back \(PlayerTime.spoken(Double(-seconds)))" : "Skipped forward \(PlayerTime.spoken(Double(seconds)))")
+        .accessibilityIdentifier(TestID.Player.hudSkip)
     }
 
     private var label: String {

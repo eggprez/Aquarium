@@ -35,12 +35,14 @@ struct WatchSettingsView: View {
                     } label: {
                         LabeledContent("Kept on the watch", value: keptSummary)
                     }
+                    .accessibilityIdentifier(TestID.WatchSettings.kept)
                     NavigationLink {
                         WatchStoragePage()
                             .clearsBottomChrome()
                     } label: {
                         LabeledContent("Storage on the watch", value: storageSummary)
                     }
+                    .accessibilityIdentifier(TestID.WatchSettings.storage)
                     if !link.relayItems.isEmpty {
                         NavigationLink {
                             WatchTransfersPage()
@@ -48,6 +50,7 @@ struct WatchSettingsView: View {
                         } label: {
                             LabeledContent("Transfers", value: link.transfersSummary ?? "")
                         }
+                        .accessibilityIdentifier(TestID.WatchSettings.transfers)
                     }
                     Button {
                         link.syncNow()
@@ -55,6 +58,7 @@ struct WatchSettingsView: View {
                     } label: {
                         Label("Sync the Watch Now", systemImage: "arrow.triangle.2.circlepath")
                     }
+                    .accessibilityIdentifier(TestID.WatchSettings.syncNow)
                 } header: {
                     Text("Content")
                 } footer: {
@@ -63,11 +67,14 @@ struct WatchSettingsView: View {
 
                 Section {
                     LabeledContent("Waiting for the server", value: "\(link.pendingEvents.count)")
+                        .testAnchor(TestID.WatchSettings.pendingEvents)
                     if let at = link.lastForwardedAt {
                         LabeledContent("Last passed on", value: at.formatted(.relative(presentation: .named)))
+                            .testAnchor(TestID.WatchSettings.lastForwarded)
                     }
                     Button("Pass On Now") { link.forward() }
                         .disabled(link.pendingEvents.isEmpty || client.isOffline)
+                        .accessibilityIdentifier(TestID.WatchSettings.forwardNow)
                 } header: {
                     Text("Listening history")
                 } footer: {
@@ -81,8 +88,10 @@ struct WatchSettingsView: View {
                     } label: {
                         LabeledContent("Diagnostics", value: link.watchLogs.isEmpty ? "" : "\(link.watchLogs.count) log\(link.watchLogs.count == 1 ? "" : "s")")
                     }
+                    .accessibilityIdentifier(TestID.WatchSettings.diagnostics)
                     Button("Send Sign-In Again") { link.sendContext(now: true) }
                         .disabled(client.session == nil)
+                        .accessibilityIdentifier(TestID.WatchSettings.sendSignIn)
                 } header: {
                     Text("Support")
                 } footer: {
@@ -93,6 +102,7 @@ struct WatchSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .testAnchor(TestID.WatchSettings.root)
         .task {
             await playlists.ensureLoaded()
             link.requestInventory()
@@ -129,6 +139,7 @@ struct WatchSettingsView: View {
         }
         .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.WatchSettings.statusCard)
     }
 
     private var cardTitle: String {
@@ -199,6 +210,7 @@ private struct WatchKeptPage: View {
                                 ProgressView().controlSize(.small)
                             }
                         }
+                        .testAnchor(TestID.WatchSettings.want(want.id))
                         .swipeActions {
                             Button(role: .destructive) {
                                 link.removeWant(want)
@@ -206,6 +218,7 @@ private struct WatchKeptPage: View {
                             } label: {
                                 Label("Remove", systemImage: "trash")
                             }
+                            .accessibilityIdentifier(TestID.WatchSettings.wantRemove(want.id))
                         }
                     }
                     Button {
@@ -214,6 +227,7 @@ private struct WatchKeptPage: View {
                     } label: {
                         Label("Sync the Watch Now", systemImage: "arrow.triangle.2.circlepath")
                     }
+                    .accessibilityIdentifier(TestID.WatchSettings.keptSyncNow)
                 } header: {
                     Text("Sent to the watch")
                 } footer: {
@@ -228,6 +242,7 @@ private struct WatchKeptPage: View {
                 )) {
                     Text("Audiobooks in progress")
                 }
+                .accessibilityIdentifier(TestID.WatchSettings.keepsBooks)
             } footer: {
                 Text("Every book you're part-way through, sent as you start it. Turning this off leaves those already sent.")
             }
@@ -236,6 +251,7 @@ private struct WatchKeptPage: View {
                 if playlists.playlists.isEmpty {
                     Text(playlists.isLoading ? "Loading playlists…" : "No playlists on this server.")
                         .foregroundStyle(Theme.textDim)
+                        .accessibilityIdentifier(TestID.WatchSettings.playlistsEmpty)
                 }
                 ForEach(playlists.playlists) { list in
                     Toggle(isOn: binding(for: list.Id)) {
@@ -246,6 +262,7 @@ private struct WatchKeptPage: View {
                             }
                         }
                     }
+                    .accessibilityIdentifier(TestID.WatchSettings.playlist(list.Id))
                 }
             } header: {
                 Text("Playlists")
@@ -254,6 +271,7 @@ private struct WatchKeptPage: View {
             }
         }
         .formStyle(.grouped)
+        .testAnchor(TestID.WatchSettings.keptRoot)
         .screenTitle("Kept on the Watch")
         .paletteBar()
         .palettePage()
@@ -281,12 +299,15 @@ private struct WatchStoragePage: View {
                 Section {
                     LabeledContent("On the watch") {
                         Text("\(inventory.itemCount) item\(inventory.itemCount == 1 ? "" : "s") · \(Format.bytes(inventory.totalBytes))")
+                            .accessibilityIdentifier(TestID.WatchSettings.storageTotal)
                     }
                     if let free = inventory.freeBytes {
                         LabeledContent("Free on the watch", value: Format.bytes(free))
+                            .testAnchor(TestID.WatchSettings.storageFree)
                     }
                     if inventory.inFlight > 0 {
                         LabeledContent("Downloading", value: "\(inventory.inFlight)")
+                            .testAnchor(TestID.WatchSettings.storageInFlight)
                     }
                 } footer: {
                     if let at = link.inventoryAt {
@@ -308,6 +329,7 @@ private struct WatchStoragePage: View {
                                 Spacer()
                                 Text(Format.bytes(group.bytes)).font(.caption.monospacedDigit()).foregroundStyle(Theme.textDim)
                             }
+                            .testAnchor(TestID.WatchSettings.storageGroup(group.id))
                             .swipeActions {
                                 Button(role: .destructive) {
                                     link.deleteFromWatch(group)
@@ -315,6 +337,7 @@ private struct WatchStoragePage: View {
                                 } label: {
                                     Label("Remove", systemImage: "trash")
                                 }
+                                .accessibilityIdentifier(TestID.WatchSettings.storageGroupRemove(group.id))
                             }
                         }
                     } header: {
@@ -327,6 +350,7 @@ private struct WatchStoragePage: View {
 
                     Section {
                         Button("Remove Everything from the Watch", role: .destructive) { confirmAll = true }
+                            .accessibilityIdentifier(TestID.WatchSettings.storageRemoveAll)
                     }
                 }
             } else {
@@ -336,10 +360,12 @@ private struct WatchStoragePage: View {
                         Spacer()
                         ProgressView()
                     }
+                    .testAnchor(TestID.WatchSettings.storageWaiting)
                 }
             }
         }
         .formStyle(.grouped)
+        .testAnchor(TestID.WatchSettings.storageRoot)
         .screenTitle("Storage on the Watch")
         .paletteBar()
         .palettePage()
@@ -349,6 +375,7 @@ private struct WatchStoragePage: View {
                 link.deleteEverythingOnWatch()
                 app.toast("Removing everything from the watch", tone: .ok)
             }
+            .accessibilityIdentifier(TestID.WatchSettings.storageRemoveAllConfirm)
         } message: {
             Text("Every audiobook, playlist and album on the watch will be deleted. Nothing on this phone or the server is touched.")
         }
@@ -379,6 +406,7 @@ private struct WatchTransfersPage: View {
                 if link.relayItems.isEmpty {
                     Text("Nothing is on its way to the watch.")
                         .foregroundStyle(Theme.textDim)
+                        .accessibilityIdentifier(TestID.WatchSettings.transfersEmpty)
                 }
                 // Drawn against a clock that ticks: a send that stops moving
                 // changes nothing in the rows, so nothing else would redraw
@@ -393,20 +421,24 @@ private struct WatchTransfersPage: View {
                 }
                 if moving > 1 {
                     Button("Cancel All", role: .destructive) { confirmCancelAll = true }
+                        .accessibilityIdentifier(TestID.WatchSettings.transfersCancelAll)
                 }
                 if link.relayItems.contains(where: { $0.stage == .failed }) {
                     Button("Clear Failed") { link.clearFinishedRelayItems() }
+                        .accessibilityIdentifier(TestID.WatchSettings.transfersClearFailed)
                 }
             } footer: {
                 Text("What the watch asked this phone for: downloaded from the server here, a few at a time, then sent to the watch. Each leaves the list once it is on the watch. Downloads and sends carry on in the background. A send that has stopped moving is said so; Cancel stops it here and on the watch.")
             }
         }
         .formStyle(.grouped)
+        .testAnchor(TestID.WatchSettings.transfersRoot)
         .screenTitle("Transfers")
         .paletteBar()
         .palettePage()
         .confirmationDialog("Cancel every transfer?", isPresented: $confirmCancelAll, titleVisibility: .visible) {
             Button("Cancel \(moving)", role: .destructive) { link.cancelAllRelays() }
+                .accessibilityIdentifier(TestID.WatchSettings.transfersCancelAllConfirm)
         } message: {
             Text("The watch stops waiting for them. Anything asked for by name on its own comes off the Download to Watch list.")
         }
@@ -439,6 +471,7 @@ private struct WatchDiagnosticsPage: View {
                 } label: {
                     Label("Fetch Log from Watch", systemImage: "applewatch.radiowaves.left.and.right")
                 }
+                .accessibilityIdentifier(TestID.WatchSettings.fetchWatchLog)
                 Button {
                     exportingPhone = true
                     Task { _ = await link.exportPhoneLog(); exportingPhone = false }
@@ -446,6 +479,7 @@ private struct WatchDiagnosticsPage: View {
                     if exportingPhone { ProgressView() } else { Label("Save This iPhone's Log", systemImage: "iphone") }
                 }
                 .disabled(exportingPhone)
+                .accessibilityIdentifier(TestID.WatchSettings.savePhoneLog)
             } footer: {
                 if let at = link.logsRequestedAt, !link.watchLogs.contains(where: { logDate($0) > at }) {
                     Text("Asked \(at.formatted(.relative(presentation: .named))). The watch sends it in the background; it can take a minute, longer when the watch is away.")
@@ -470,8 +504,10 @@ private struct WatchDiagnosticsPage: View {
                                 Image(systemName: "square.and.arrow.up").foregroundStyle(Theme.accent)
                             }
                         }
+                        .accessibilityIdentifier(TestID.WatchSettings.log(url.lastPathComponent))
                         .swipeActions {
                             Button(role: .destructive) { link.deleteWatchLog(url) } label: { Label("Delete", systemImage: "trash") }
+                                .accessibilityIdentifier(TestID.WatchSettings.logDelete(url.lastPathComponent))
                         }
                     }
                 } header: {
@@ -482,6 +518,7 @@ private struct WatchDiagnosticsPage: View {
             }
         }
         .formStyle(.grouped)
+        .testAnchor(TestID.WatchSettings.diagnosticsRoot)
         .screenTitle("Diagnostics")
         .paletteBar()
         .palettePage()
@@ -521,6 +558,7 @@ private struct RelayItemRow: View {
                     Button("Cancel", role: .destructive, action: onCancel)
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .accessibilityIdentifier(TestID.WatchSettings.transferCancel(item.id))
                 }
             }
             step("Download to this phone", symbol: "arrow.down.circle",
@@ -553,9 +591,11 @@ private struct RelayItemRow: View {
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if !item.stage.isFinished {
                 Button("Cancel", role: .destructive, action: onCancel)
+                    .accessibilityIdentifier(TestID.WatchSettings.transferCancel(item.id))
             }
         }
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.WatchSettings.transfer(item.id))
     }
 
     private func step(_ label: String, symbol: String, fraction: Double?, active: Bool) -> some View {

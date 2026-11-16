@@ -55,6 +55,10 @@ struct WatchRecord: Codable, Identifiable, Hashable, Sendable {
     /// Why this is here: "book", "song", "album:<id>", "playlist:<id>". A
     /// group deleted takes its reason away; a record with none left goes.
     var reasons: Set<String> = []
+    /// The server has given a place or a finish for this book at some time:
+    /// a 0 from it after that is someone starting over, not its
+    /// minimum-resume rule.
+    var serverHasHeldPlace = false
     /// Put here by the mirror plan rather than a tap. Waits for Wi-Fi.
     var automatic = false
     /// Being fetched by the phone and handed over as a file, rather than
@@ -97,6 +101,7 @@ struct WatchRecord: Codable, Identifiable, Hashable, Sendable {
         self.automatic = automatic
         positionTicks = item.userData.positionTicks
         played = item.userData.played
+        serverHasHeldPlace = positionTicks > 0 || played
         chapters = item.Chapters
         overview = item.Overview
     }
@@ -125,6 +130,7 @@ struct WatchRecord: Codable, Identifiable, Hashable, Sendable {
         lackedSpace = try c.decodeIfPresent(Bool.self, forKey: .lackedSpace) ?? false
         attempts = try c.decodeIfPresent(Int.self, forKey: .attempts) ?? 0
         reasons = try c.decodeIfPresent(Set<String>.self, forKey: .reasons) ?? ["song"]
+        serverHasHeldPlace = try c.decodeIfPresent(Bool.self, forKey: .serverHasHeldPlace) ?? false
         automatic = try c.decodeIfPresent(Bool.self, forKey: .automatic) ?? false
         relayAskedAt = try c.decodeIfPresent(Date.self, forKey: .relayAskedAt)
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
@@ -224,6 +230,13 @@ final class WatchDownloads: NSObject {
     /// Bytes last passed on for each transfer, so the session's stream of
     /// reports is thinned before it reaches the main thread.
     @ObservationIgnored nonisolated private let lastReported = OSAllocatedUnfairLock(initialState: [String: Int64]())
+    /// Each item's meta.json generation, moved on by every write and every
+    /// removal of its folder, which happen under this lock. A background
+    /// write lands only if nothing has been written or removed for its item
+    /// since it was scheduled: a cancel right after queueing used to lose the
+    /// race to enqueue's detached write, leaving a meta.json that brought the
+    /// cancelled item back at the next launch.
+    private nonisolated static let metaGeneration = OSAllocatedUnfairLock(initialState: [String: Int]())
     private var tasks: [Int: String] {
         get { taskMap.withLock { $0 } }
         set { taskMap.withLock { $0 = newValue } }
@@ -276,6 +289,13 @@ final class WatchDownloads: NSObject {
     private var pendingItems: [String: BaseItem] = [:]
     private let pathMonitor = NWPathMonitor()
     private var backgroundCompletion: (() -> Void)?
+    #if DEBUG
+    /// Unit tests only: see `testSetNetwork`.
+    @ObservationIgnored var testPinsNetwork = false
+    /// Unit tests only: the pump asks the phone as usual but never starts a
+    /// transfer of the watch's own.
+    @ObservationIgnored var testHoldsOwnTransfers = false
+    #endif
 
     @ObservationIgnored private var session: URLSession!
 
@@ -318,6 +338,9 @@ final class WatchDownloads: NSObject {
             WatchLog.note("downloads", "network: \(up ? "up" : "down") via \(path.availableInterfaces.map { "\($0.type)" }.joined(separator: ",")) expensive=\(path.isExpensive)")
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                #if DEBUG
+                guard !self.testPinsNetwork else { return }
+                #endif
                 let gained = up && !self.hasNetwork
                 let first = !self.pathKnown
                 self.pathKnown = true
@@ -336,7 +359,7 @@ final class WatchDownloads: NSObject {
     // MARK: - Storage layout
 
     nonisolated static var root: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let base = AppDirectory.url(.applicationSupportDirectory)
             .appendingPathComponent("Aquarium/Watch", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base
@@ -403,10 +426,13 @@ final class WatchDownloads: NSObject {
             records.insert(record, at: 0)
             reindex()
         }
-        let folder = Self.folder(record.itemId)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(record) {
-            try? data.write(to: folder.appendingPathComponent("meta.json"), options: .atomic)
+        let itemId = record.itemId
+        let folder = Self.folder(itemId)
+        let data = try? JSONEncoder().encode(record)
+        Self.metaGeneration.withLock { g in
+            g[itemId, default: 0] += 1
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try? data?.write(to: folder.appendingPathComponent("meta.json"), options: .atomic)
         }
         changed()
     }
@@ -484,6 +510,9 @@ final class WatchDownloads: NSObject {
     }
 
     nonisolated static func freeBytes() -> Int64? {
+        #if DEBUG
+        if let testFreeBytes { return testFreeBytes }
+        #endif
         let values = try? root.resourceValues(forKeys: [.volumeAvailableCapacityKey])
         return values?.volumeAvailableCapacity.map(Int64.init)
     }
@@ -532,13 +561,24 @@ final class WatchDownloads: NSObject {
 
     /// Each record to its folder, in the background: the caller has already
     /// put them in `records`, which is what the app reads.
+    /// Each write is skipped if the item was written or removed after this
+    /// call (`metaGeneration`).
     private nonisolated static func writeMeta(_ list: [WatchRecord]) {
         let encoded: [(String, Data)] = list.compactMap { r in (try? JSONEncoder().encode(r)).map { (r.itemId, $0) } }
+        let generations: [Int] = metaGeneration.withLock { g in
+            encoded.map { itemId, _ in
+                g[itemId, default: 0] += 1
+                return g[itemId]!
+            }
+        }
         Task.detached(priority: .utility) {
-            for (itemId, data) in encoded {
+            for ((itemId, data), generation) in zip(encoded, generations) {
                 let folder = folder(itemId)
-                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                try? data.write(to: folder.appendingPathComponent("meta.json"), options: .atomic)
+                metaGeneration.withLock { g in
+                    guard g[itemId] == generation else { return }
+                    try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                    try? data.write(to: folder.appendingPathComponent("meta.json"), options: .atomic)
+                }
             }
         }
     }
@@ -858,7 +898,11 @@ final class WatchDownloads: NSObject {
     }
 
     private func removeFolder(_ itemId: String, quiet: Bool = false) {
-        try? FileManager.default.removeItem(at: Self.folder(itemId))
+        let folder = Self.folder(itemId)
+        Self.metaGeneration.withLock { g in
+            g[itemId, default: 0] += 1
+            try? FileManager.default.removeItem(at: folder)
+        }
         pendingItems[itemId] = nil
         liveBytes[itemId] = nil
         lastReported.withLock { $0[itemId] = nil }
@@ -918,6 +962,9 @@ final class WatchDownloads: NSObject {
             }
     }
 
+    /// How much of a book Jellyfin keeps no place for: its MinAudiobookResume.
+    private static let serverEarlyWindow: TimeInterval = 5 * 60
+
     /// The server's word on a book — a chapter listened to on the phone last
     /// night — taken unless the watch has something newer to say: listening
     /// still queued, or noted since the server last heard and later than the
@@ -927,6 +974,24 @@ final class WatchDownloads: NSObject {
         guard !WatchSyncQueue.shared.hasPending(for: itemId) else { return }
         guard BookProgress.takesServer(synced: r.progressSynced, localChangedAt: r.localChangedAt, serverLastPlayed: lastPlayed) else {
             WatchLog.note("downloads", "keeping the watch's place in \(itemId): newer than the server's")
+            return
+        }
+        if positionTicks > 0 || played, !r.serverHasHeldPlace {
+            r.serverHasHeldPlace = true
+            save(r)
+        }
+        // Jellyfin stores no place for the first part of a book
+        // (MinAudiobookResume, five minutes unless changed): a place sent from
+        // early on reads back as 0, dated or, if the book was only ever
+        // reported stopped, not. That 0 is a reset only if the server has
+        // held a place for this book before, or the watch is past that part.
+        if positionTicks == 0, !played, !r.played, !r.serverHasHeldPlace, r.positionTicks > 0,
+           Double(r.positionTicks) / 10_000_000 < Self.serverEarlyWindow {
+            WatchLog.note("downloads", "keeping the watch's place in \(itemId): the server keeps none this early")
+            if !r.progressSynced {
+                r.progressSynced = true
+                save(r)
+            }
             return
         }
         guard r.positionTicks != positionTicks || r.played != played || !r.progressSynced else { return }
@@ -1023,6 +1088,9 @@ final class WatchDownloads: NSObject {
         // What is left for this watch: with no phone app to ask, or given
         // up on by the phone.
         guard canFetchItself, active == nil else { return }
+        #if DEBUG
+        guard !testHoldsOwnTransfers else { return }
+        #endif
         guard let next = candidates.first(where: { r in
             (!link.hasCompanion || phoneGaveUpOn(r.itemId)) && (!r.automatic || isOnWiFi || link.hasCompanion)
         }) else { return }
@@ -1304,7 +1372,7 @@ final class WatchDownloads: NSObject {
     // MARK: - Landing
 
     /// A file has arrived. Opened and measured before it is believed.
-    private func landed(itemId: String, at url: URL, bytes: Int64) async {
+    func landed(itemId: String, at url: URL, bytes: Int64) async {
         settling += 1
         defer { settling -= 1 }
         guard var rec = record(for: itemId) else {
@@ -1350,7 +1418,7 @@ final class WatchDownloads: NSObject {
         await cacheArt(for: rec)
     }
 
-    private func failed(itemId: String, message: String) {
+    func failed(itemId: String, message: String) {
         guard var rec = record(for: itemId) else { finishActive(itemId); return }
         WatchLog.error("downloads", "\(itemId) failed (attempt \(rec.attempts + 1)): \(message)")
         rec.attempts += 1
@@ -1668,6 +1736,82 @@ final class WatchDownloads: NSObject {
         enqueue(audio, reason: request.reason)
     }
 }
+
+#if DEBUG
+// MARK: - Unit-test seams (DEBUG only; nothing here runs unless a test sets it)
+
+extension WatchDownloads {
+    /// Unit tests only: the room the watch reports, in place of the disk's.
+    nonisolated(unsafe) static var testFreeBytes: Int64?
+
+    /// Unit tests only: the network as if the path monitor had said so, and
+    /// held there (the monitor's later word is ignored until `testReset`).
+    func testSetNetwork(known: Bool = true, up: Bool, wifi: Bool) {
+        testPinsNetwork = true
+        pathKnown = known
+        hasNetwork = up
+        isOnWiFi = wifi
+    }
+
+    /// Unit tests only: change a record in place, as time or the disk would
+    /// have (an ask made an hour ago, a file gone).
+    func testUpdate(_ itemId: String, _ change: (inout WatchRecord) -> Void) {
+        guard let i = byId[itemId] else { return }
+        change(&records[i])
+        changed()
+    }
+
+    /// Unit tests only: when a want's item was last queued again.
+    func testSetWantRetried(_ itemId: String, at date: Date?) { wantRetriedAt[itemId] = date }
+
+    /// Unit tests only: when a want was taken off here.
+    func testSetDroppedWant(_ key: String, at date: Date?) { droppedWants[key] = date }
+
+    /// Unit tests only: the items cancelled by hand while a want names them.
+    var testDeclined: Set<String> { declined }
+
+    /// Unit tests only: what each want comes to, as kept on disk.
+    var testWantContents: [String: WatchDownloadContents] { wantContents }
+
+    /// Unit tests only: forget everything — records, files, playlists, the
+    /// plan, the wants and every note kept about them — and stop holding
+    /// the network.
+    func testReset() {
+        cancelActiveTask()
+        mirrorTask?.cancel()
+        mirrorTask = nil
+        mirrorGeneration += 1
+        try? FileManager.default.removeItem(at: Self.root)
+        records = []
+        reindex()
+        playlists = []
+        liveBytes = [:]
+        plan = WatchMirrorPlan()
+        mirrorNote = nil
+        phoneLists = [:]
+        phoneBooks = [:]
+        phoneGaveUp = [:]
+        phoneWorking = []
+        playlistSyncedAt = [:]
+        droppedPlaylists = [:]
+        wantContents = [:]
+        droppedWants = [:]
+        declined = []
+        wantRetriedAt = [:]
+        pendingItems = [:]
+        relayReasks = [:]
+        tasks = [:]
+        lastReported.withLock { $0 = [:] }
+        for key in ["watch_tasks", "watch_plan", "watch_dropped_playlists", "watch_dropped_wants", "watch_declined_items"] {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        testPinsNetwork = false
+        testHoldsOwnTransfers = false
+        Self.testFreeBytes = nil
+        changed()
+    }
+}
+#endif
 
 // MARK: - URLSession delegate
 

@@ -605,7 +605,7 @@ final class WatchLink: NSObject {
     private(set) var logsRequestedAt: Date?
 
     nonisolated static var logsFolder: URL {
-        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = AppDirectory.url(.documentDirectory)
             .appendingPathComponent("WatchLogs", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
@@ -662,7 +662,7 @@ final class WatchLink: NSObject {
 
     // MARK: - Watch → phone
 
-    private func apply(_ dictionary: [String: Any]) {
+    func apply(_ dictionary: [String: Any]) {
         guard let context = WatchSync.unpack(WatchContext.self, from: dictionary) else { return }
         inventory = context.inventory
         inventoryAt = context.sentAt
@@ -755,7 +755,7 @@ final class WatchLink: NSObject {
     /// Pieces of a log on their way, by export id.
     private var logPieces: [String: [Int: Data]] = [:]
 
-    private func take(_ chunk: WatchLogChunk) {
+    func take(_ chunk: WatchLogChunk) {
         var pieces = logPieces[chunk.id] ?? [:]
         pieces[chunk.index] = chunk.data
         guard pieces.count == chunk.count else { logPieces[chunk.id] = pieces; return }
@@ -1498,7 +1498,7 @@ final class WatchLink: NSObject {
         send(.fetchFailed(itemId: itemId, reason: "The transfer to the watch failed"))
     }
 
-    private func take(_ events: [WatchProgressEvent]) {
+    func take(_ events: [WatchProgressEvent]) {
         let known = Set(pendingEvents.map(\.id)).union(settledIds)
         for event in events where !known.contains(event.id) {
             // A book's newer position makes an older one still waiting moot.

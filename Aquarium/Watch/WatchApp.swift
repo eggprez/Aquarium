@@ -12,6 +12,10 @@ import WatchKit
 
 @main
 struct AquariumWatchApp: App {
+    /// UI test mode, when a test launched the app — see WatchTestMode.swift.
+    /// First, so it runs before the properties below create the singletons.
+    private let testMode: Void = WatchTestMode.prepare()
+
     @WKApplicationDelegateAdaptor(WatchDelegate.self) private var delegate
     @Environment(\.scenePhase) private var scenePhase
 

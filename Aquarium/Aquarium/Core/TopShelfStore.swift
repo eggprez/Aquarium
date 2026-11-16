@@ -33,6 +33,15 @@ enum TopShelf {
         await Writer.shared.publish(Array(zip(items, sources)))
     }
 
+    /// Home's Next Up, once its load is over: `nil` when that load failed.
+    /// A failed load publishes nothing, so the shelf keeps what it last had
+    /// rather than being emptied by a request that didn't come back — on a
+    /// launch with no saved Home, the list on hand then is an empty one.
+    static func publishHomeNextUp(_ items: [BaseItem]?) async {
+        guard let items else { return }
+        await publish(items)
+    }
+
     /// Ask the server for Next Up and publish it, for when Home isn't there
     /// to: after playback ends. A title opened from the shelf itself or a deep
     /// link can be watched without Home ever being on screen, and the shelf

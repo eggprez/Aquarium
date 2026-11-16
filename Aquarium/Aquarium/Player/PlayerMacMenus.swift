@@ -167,12 +167,18 @@ final class PlayerMacState {
             player.selectSubtitles(nil)
             return
         }
-        let options = player.subtitleOptions
-        guard !options.isEmpty else { return }
-        let next = options.first { $0.id == lastSubtitle }
+        guard let next = Self.subtitleToTurnOn(player.subtitleOptions, lastOn: lastSubtitle) else { return }
+        player.selectSubtitles(next)
+    }
+
+    /// Which track C turns on when none is: the one that was on last, else
+    /// the first that isn't forced, else the first. Nil with no tracks.
+    /// A static of its own so the choice can be unit-tested without an engine.
+    static func subtitleToTurnOn(_ options: [TrackOption], lastOn: TrackOption.ID?) -> TrackOption? {
+        guard !options.isEmpty else { return nil }
+        return options.first { $0.id == lastOn }
             ?? options.first { !$0.isForced }
             ?? options[0]
-        player.selectSubtitles(next)
     }
 }
 
@@ -206,20 +212,24 @@ struct PlayerMenuItems: View {
                     let streams = !player.isLocal || !JellyfinClient.shared.isOffline
                     if streams {
                         Text("Auto").tag(PlayerModel.QualitySelection.auto)
+                            .accessibilityIdentifier(TestID.Player.menuQualityOption(TestID.Player.qualityAutoKey))
                     }
                     if player.downloadedCopy != nil {
                         Text(player.downloadedTitle).tag(PlayerModel.QualitySelection.downloaded)
+                            .accessibilityIdentifier(TestID.Player.menuQualityOption(TestID.Player.qualityDownloadedKey))
                     }
                     if streams {
                         ForEach(Quality.choices) { choice in
                             Text(choice.maxBitrate == nil ? "Direct (original)" : choice.label)
                                 .tag(PlayerModel.QualitySelection.stream(choice.maxBitrate))
+                                .accessibilityIdentifier(TestID.Player.menuQualityOption(TestID.Player.qualityKey(choice.maxBitrate)))
                         }
                     }
                 }
                 .pickerStyle(.inline)
             }
             .disabled(!player.isActive)
+            .accessibilityIdentifier(TestID.Player.menuQuality)
         }
 
         // The file's own tracks, from what the server says it contains. See
@@ -232,43 +242,51 @@ struct PlayerMenuItems: View {
                 Picker("Audio", selection: audioBinding) {
                     ForEach(audio) { option in
                         Text(trackTitle(option)).tag(option.id as TrackOption.ID?)
+                            .accessibilityIdentifier(TestID.Player.menuAudioOption(TestID.Player.trackKey(option.id)))
                     }
                 }
                 .pickerStyle(.inline)
             }
         }
         .disabled(!player.isActive)
+        .accessibilityIdentifier(TestID.Player.menuAudio)
 
         let subtitles = player.subtitleOptions
         Menu("Subtitles") {
             if !subtitles.isEmpty {
                 Picker("Subtitles", selection: subtitleBinding) {
                     Text("Off").tag(nil as TrackOption.ID?)
+                        .accessibilityIdentifier(TestID.Player.menuSubtitleOption(TestID.Player.subtitlesOffKey))
                     Divider()
                     ForEach(subtitles) { option in
                         Text(trackTitle(option)).tag(option.id as TrackOption.ID?)
+                            .accessibilityIdentifier(TestID.Player.menuSubtitleOption(TestID.Player.trackKey(option.id)))
                     }
                 }
                 .pickerStyle(.inline)
                 Divider()
                 Button("Toggle Subtitles") { state.cycleSubtitles(player) }
                     .keyboardShortcut(shortcut("c", []))
+                    .accessibilityIdentifier(TestID.Player.menuToggleSubtitles)
             } else {
                 Text("No Subtitle Tracks")
             }
         }
         .disabled(!player.isActive)
+        .accessibilityIdentifier(TestID.Player.menuSubtitles)
 
         if !player.isLive {
             Menu("Speed") {
                 Picker("Speed", selection: speedBinding) {
                     ForEach(PlayerModel.speeds, id: \.self) { rate in
                         Text(PlayerModel.speedName(rate)).tag(rate)
+                            .accessibilityIdentifier(TestID.Player.menuSpeedOption(TestID.Player.speedKey(rate)))
                     }
                 }
                 .pickerStyle(.inline)
             }
             .disabled(!player.isActive)
+            .accessibilityIdentifier(TestID.Player.menuSpeed)
         }
 
         // What was queued by hand — see `PlayerModel.queueNext` — else the
@@ -278,25 +296,31 @@ struct PlayerMenuItems: View {
             if !player.queue.isEmpty {
                 ForEach(player.queue, id: \.Id) { queued in
                     Button(PlayerModel.displayTitle(queued)) { Task { await player.playQueued(queued.Id) } }
+                        .accessibilityIdentifier(TestID.Player.menuUpNextItem(queued.Id))
                 }
                 Divider()
                 Button("Clear Up Next") { player.clearQueue() }
+                    .accessibilityIdentifier(TestID.Player.menuUpNextClear)
             } else if !player.upNextList.isEmpty {
                 ForEach(player.upNextList, id: \.Id) { next in
                     Button(PlayerModel.upNextRowTitle(next)) { Task { await player.playUpcoming(next) } }
+                        .accessibilityIdentifier(TestID.Player.menuUpNextItem(next.Id))
                 }
             } else if !player.upNextLocal.isEmpty {
                 ForEach(player.upNextLocal, id: \.itemId) { record in
                     Button(record.title) { player.playLocal(record, keepShuffle: true) }
+                        .accessibilityIdentifier(TestID.Player.menuUpNextItem(record.itemId))
                 }
             } else {
                 Text("Nothing Queued")
             }
         }
+        .accessibilityIdentifier(TestID.Player.menuUpNext)
 
         // The same film on everyone's screen — see Core/SharePlay.swift.
         if SharePlayCoordinator.shared.isActive {
             Button("Leave SharePlay") { SharePlayCoordinator.shared.leave() }
+                .accessibilityIdentifier(TestID.Player.menuSharePlayLeave)
         } else if let item = player.item, !player.isLocal, !player.isLive,
                   player.engine?.capabilities.contains(.sharePlay) == true || player.canSwitchEngine(to: .apple) {
             // On mpv the stream is handed to AVPlayer first, whose player
@@ -307,14 +331,17 @@ struct PlayerMenuItems: View {
                     await SharePlayCoordinator.shared.share(item)
                 }
             }
+            .accessibilityIdentifier(TestID.Player.menuSharePlayStart)
         }
 
         Menu("Sleep") {
             if let left = player.sleepMinutesRemaining {
                 Button("Cancel Sleep Timer (\(left) min left)") { player.cancelSleepTimer() }
+                    .accessibilityIdentifier(TestID.Player.menuSleepCancel)
             } else {
                 ForEach([15, 30, 60, 90], id: \.self) { minutes in
                     Button("Stop in \(minutes) Minutes") { player.setSleepTimer(minutes: minutes) }
+                        .accessibilityIdentifier(TestID.Player.menuSleepOption(minutes))
                 }
             }
             if !player.isLive, player.hasUpNext {
@@ -323,14 +350,17 @@ struct PlayerMenuItems: View {
                     get: { player.autoplayCancelled },
                     set: { if $0 { player.cancelAutoplay() } else { player.resumeAutoplay() } }
                 ))
+                .accessibilityIdentifier(TestID.Player.menuStopAfterThis)
             }
         }
         .disabled(!player.isActive)
+        .accessibilityIdentifier(TestID.Player.menuSleep)
 
         Toggle("Fill Screen", isOn: Binding(
             get: { Preferences.shared.fillScreen },
             set: { Preferences.shared.fillScreen = $0; player.applyFraming() }
         ))
+        .accessibilityIdentifier(TestID.Player.menuFill)
     }
 
     /// "English · 5.1 (reopens the stream)": said in the row rather than
@@ -338,9 +368,14 @@ struct PlayerMenuItems: View {
     /// pick — it costs the couple of seconds the server needs to build a
     /// stream with it in.
     private func trackTitle(_ option: TrackOption) -> String {
+        Self.trackTitle(option, isLocal: player.isLocal)
+    }
+
+    /// The row's words, as a static so they can be unit-tested.
+    static func trackTitle(_ option: TrackOption, isLocal: Bool) -> String {
         var title = option.isForced ? "\(option.label) (Forced)" : option.label
         // Not on a download, where picking one asks before it streams.
-        if option.needsNewStream, !player.isLocal { title += " (reopens the stream)" }
+        if option.needsNewStream, !isLocal { title += " (reopens the stream)" }
         return title
     }
 
@@ -385,12 +420,15 @@ struct PlayerContextMenu: View {
 
     var body: some View {
         Button(player.isPaused ? "Play" : "Pause") { player.togglePlayPause() }
+            .accessibilityIdentifier(TestID.Player.menuPlayPause)
         if let segment = player.activeSegment {
             Button(segment.isOutro ? "Skip Credits" : "Skip Intro") { player.skipSegment() }
                 .keyboardShortcut("s", modifiers: [])
+                .accessibilityIdentifier(TestID.Player.menuSkipSegment)
         }
         if player.shouldShowUpNext, player.upNextTitle != nil {
             Button("Play Next Now") { Task { await player.playNextNow() } }
+                .accessibilityIdentifier(TestID.Player.menuPlayNext)
         }
         Divider()
         // Shown for reference: a context menu's key equivalents are not
@@ -402,12 +440,15 @@ struct PlayerContextMenu: View {
             set: { state.showsStreamInfo = $0 }
         ))
         .keyboardShortcut("i", modifiers: .command)
+        .accessibilityIdentifier(TestID.Player.menuStreamInfo)
         if let pip = state.pictureInPicture, state.canPictureInPicture {
             Button(pip.isActive ? "Leave Picture in Picture" : "Picture in Picture") { state.togglePictureInPicture() }
                 .keyboardShortcut("p", modifiers: [])
+                .accessibilityIdentifier(TestID.Player.menuPictureInPicture)
         }
         Button(state.isFullScreen ? "Exit Full Screen" : "Enter Full Screen") { state.toggleFullScreen() }
             .keyboardShortcut("f", modifiers: [])
+            .accessibilityIdentifier(TestID.Player.menuFullScreen)
     }
 }
 #endif

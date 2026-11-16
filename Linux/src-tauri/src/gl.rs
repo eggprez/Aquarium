@@ -128,3 +128,36 @@ pub fn drain_errors(g: &Api) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// libepoxy's dispatch pointers resolve without a context current (they
+    /// resolve themselves on first call), so this needs no display.
+    #[test]
+    fn epoxy_entry_points_resolve() {
+        if lib().is_none() {
+            eprintln!("libepoxy.so.0 not installed here; skipping");
+            return;
+        }
+        assert!(!proc_addr("glClear").is_null());
+        assert!(api().is_some(), "every GL entry point the GLArea path uses");
+        assert!(available());
+    }
+
+    #[test]
+    fn an_unknown_entry_point_is_null() {
+        assert!(proc_addr("glNoSuchFunctionAnywhere").is_null());
+        assert!(proc_addr("").is_null());
+    }
+
+    #[test]
+    fn gl_constants_match_the_headers() {
+        assert_eq!((FRAMEBUFFER, READ_FRAMEBUFFER, DRAW_FRAMEBUFFER), (0x8D40, 0x8CA8, 0x8CA9));
+        assert_eq!((DRAW_FRAMEBUFFER_BINDING, FRAMEBUFFER_COMPLETE), (0x8CA6, 0x8CD5));
+        assert_eq!((COLOR_ATTACHMENT0, TEXTURE_2D, COLOR_BUFFER_BIT), (0x8CE0, 0x0DE1, 0x4000));
+        assert_eq!((RGBA8, RGBA, UNSIGNED_BYTE, NEAREST), (0x8058, 0x1908, 0x1401, 0x2600));
+        assert_eq!((TEXTURE_MIN_FILTER, TEXTURE_MAG_FILTER), (0x2801, 0x2800));
+    }
+}

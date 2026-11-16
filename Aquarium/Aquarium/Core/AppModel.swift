@@ -45,7 +45,14 @@ enum Route: Hashable, Sendable, Codable {
 /// clear it. On an iPad the split view's detail column kept such a page when
 /// the sidebar went to Home: Home's row lit and the App Icon page stayed on
 /// screen. Pages pushed by value are the section's own and leave with it.
-enum SettingsRoute: String, Hashable, Sendable, Codable {
+///
+/// The first page's rows are values too (`page`), wherever the list is one
+/// column. A value link pressed on a page that was pushed by a view-
+/// destination link goes nowhere — the path gains the value and the page on
+/// top is not the path's — so with the rows as view links, the Sidebar and
+/// App Icon rows on Appearance lit and opened nothing.
+enum SettingsRoute: Hashable, Sendable, Codable {
+    case page(SettingsPage)
     case appIcon, tabBar, syncMeasure, stationMix, customPlaylist
 }
 

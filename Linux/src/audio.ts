@@ -57,6 +57,9 @@ let status: AudioStatus = {
 /** Which item mpv has queued behind the current one, so the same answer
  *  isn't handed down twice (each hand-down clears mpv's prefetch). */
 let queuedNext: string | null | undefined = undefined;
+/** The song `audio_play` was just asked to start: the backend answers it with
+ *  an `audio-track` of its own, which is not mpv moving on. */
+let playEcho: string | null = null;
 let extending = false;
 const listeners = new Set<() => void>();
 
@@ -197,6 +200,7 @@ async function startAt(index: number, startSeconds?: number): Promise<void> {
   status = { ...status, active: true, paused: false, position: startSeconds ?? 0, item_id: item.Id, duration: secondsOf(item.RunTimeTicks) };
   changed();
   publishQueue();
+  playEcho = item.Id;
   try {
     await invoke("audio_play", {
       req: {
@@ -213,6 +217,7 @@ async function startAt(index: number, startSeconds?: number): Promise<void> {
       },
     });
   } catch (e: any) {
+    playEcho = null;
     status = { ...status, active: false };
     changed();
     throw new Error(String(e?.message ?? e));
@@ -580,9 +585,16 @@ export async function wireAudio(onError: (msg: string) => void): Promise<void> {
   await listen<any>("audio-track", (ev) => {
     const id = ev.payload?.item_id;
     if (!id) return;
-    if (q.items[q.index]?.Id === id) return;
+    const echo = playEcho === id;
+    if (echo) playEcho = null;
     const nextIdx = followingIndex();
-    if (nextIdx != null && q.items[nextIdx]?.Id === id) q.index = nextIdx;
+    if (q.items[q.index]?.Id === id) {
+      // The same song again is a move only when it is not the echo of `play`
+      // and the next song is another copy of it: Repeat All on one song, or a
+      // song queued twice running.
+      if (echo || nextIdx == null || q.items[nextIdx]?.Id !== id) return;
+      q.index = nextIdx;
+    } else if (nextIdx != null && q.items[nextIdx]?.Id === id) q.index = nextIdx;
     else {
       const at = q.items.findIndex((i, n) => n > q.index && i.Id === id);
       if (at >= 0) q.index = at;

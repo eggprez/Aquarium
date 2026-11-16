@@ -27,31 +27,40 @@ struct BooksView: View {
                 if local.isEmpty { StatusRow(empty: "No audiobooks on the watch yet") }
                 ForEach(local) { book in
                     NavigationLink(value: WatchRoute.book(book)) { BookRow(item: book) }
+                        .accessibilityIdentifier(TestID.Watch.book(book.Id))
                 }
             } else {
                 StatusRow(loading: loading && books.isEmpty, error: error, empty: !loading && books.isEmpty && error == nil ? "No audiobooks on this server" : nil)
-                ForEach(books) { book in
-                    NavigationLink(value: WatchRoute.book(book)) { BookRow(item: book) }
-                }
-            }
-        }
-        .navigationTitle("Audiobooks")
-        .toolbar {
-            if !offline {
-                // No menus on a watch: the button steps through the orders.
-                // It sits in the bottom bar: a top-bar item on a pushed page
-                // inside the vertical TabView pops the page straight back.
-                ToolbarItem(placement: .bottomBar) {
+                // No menus on a watch: the row steps through the orders. A row
+                // at the head of the list rather than a bar item: a top-bar
+                // item on a pushed page inside the vertical TabView pops the
+                // page straight back, and a bottom-bar one floated over the
+                // third row and took its taps.
+                if !books.isEmpty {
                     Button {
                         let all = Sort.allCases
                         sort = all[(all.firstIndex(of: sort)! + 1) % all.count]
                     } label: {
-                        Image(systemName: sort == .title ? "textformat.abc" : (sort == .author ? "person" : "clock"))
+                        Label("Sorted by \(sort.rawValue)",
+                              systemImage: sort == .title ? "textformat.abc" : (sort == .author ? "person" : "clock"))
+                            .font(.caption2)
+                            .foregroundStyle(WatchTheme.dim)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
+                    .listRowBackground(Color.clear)
+                    .accessibilityHint("Changes the order")
+                    .accessibilityIdentifier(TestID.Watch.booksSort)
+                }
+                ForEach(books) { book in
+                    NavigationLink(value: WatchRoute.book(book)) { BookRow(item: book) }
+                        .accessibilityIdentifier(TestID.Watch.book(book.Id))
                 }
             }
         }
+        .navigationTitle("Audiobooks")
         .task(id: sort) { await load() }
+        .testAnchor(TestID.Watch.booksRoot)
     }
 
     private func load() async {
@@ -99,14 +108,15 @@ struct BookDetail: View {
         List {
             VStack(spacing: 6) {
                 Artwork(item: book, size: 88, corner: 10)
-                Text(book.title).font(.headline).multilineTextAlignment(.center)
-                if !book.artistLine.isEmpty { Text(book.artistLine).font(.caption2).foregroundStyle(WatchTheme.dim) }
+                Text(book.title).font(.headline).multilineTextAlignment(.center).accessibilityIdentifier(TestID.Watch.bookTitle)
+                if !book.artistLine.isEmpty { Text(book.artistLine).font(.caption2).foregroundStyle(WatchTheme.dim).accessibilityIdentifier(TestID.Watch.bookAuthor) }
                 if book.runtimeSeconds > 0 {
                     Text(resumeSeconds > 0 ? "\(Format.clock(resumeSeconds)) of \(Format.ticks(book.RunTimeTicks))" : Format.ticks(book.RunTimeTicks))
-                        .font(.caption2).foregroundStyle(WatchTheme.dim)
+                        .font(.caption2).foregroundStyle(WatchTheme.dim).accessibilityIdentifier(TestID.Watch.bookTime)
                 }
             }
             .frame(maxWidth: .infinity)
+            .testAnchor(TestID.Watch.bookHeader)
             .listRowBackground(Color.clear)
 
             Button {
@@ -117,6 +127,7 @@ struct BookDetail: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier(TestID.Watch.bookPlay)
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
 
@@ -124,12 +135,13 @@ struct BookDetail: View {
                 Button { player.play([book], title: book.title, at: 0) } label: {
                     Label("Start Over", systemImage: "arrow.counterclockwise")
                 }
+                .accessibilityIdentifier(TestID.Watch.bookStartOver)
             }
 
             Section("On Watch") {
                 DownloadControl(item: book, members: [book])
                 if let record, record.status == .error, let message = record.errorMessage {
-                    Text(message).font(.caption2).foregroundStyle(.orange)
+                    Text(message).font(.caption2).foregroundStyle(.orange).accessibilityIdentifier(TestID.Watch.bookDownloadError)
                 }
             }
 
@@ -147,13 +159,14 @@ struct BookDetail: View {
                                 Text(Format.clock(chapter.startSeconds)).font(.caption2.monospacedDigit()).foregroundStyle(WatchTheme.dim)
                             }
                         }
+                        .accessibilityIdentifier(TestID.Watch.bookChapter(i))
                     }
                 }
             }
 
             if let overview = book.Overview ?? record?.overview, !overview.isEmpty {
                 Section("About") {
-                    Text(overview).font(.caption2).foregroundStyle(WatchTheme.dim)
+                    Text(overview).font(.caption2).foregroundStyle(WatchTheme.dim).accessibilityIdentifier(TestID.Watch.bookOverview)
                 }
             }
         }
@@ -162,6 +175,7 @@ struct BookDetail: View {
             guard !client.isOffline, client.isSignedIn, item.Chapters == nil else { return }
             full = try? await client.item(item.Id)
         }
+        .testAnchor(TestID.Watch.bookRoot)
     }
 }
 
@@ -177,11 +191,16 @@ struct MusicMenu: View {
     var body: some View {
         List {
             NavigationLink(value: WatchRoute.playlists) { Label("Playlists", systemImage: "music.note.list") }
+                .accessibilityIdentifier(TestID.Watch.musicDoor("playlists"))
             NavigationLink(value: WatchRoute.albums) { Label("Albums", systemImage: "square.stack") }
+                .accessibilityIdentifier(TestID.Watch.musicDoor("albums"))
             NavigationLink(value: WatchRoute.artists) { Label("Artists", systemImage: "music.mic") }
+                .accessibilityIdentifier(TestID.Watch.musicDoor("artists"))
             NavigationLink(value: WatchRoute.songs) { Label("Songs", systemImage: "music.note") }
+                .accessibilityIdentifier(TestID.Watch.musicDoor("songs"))
             if !offline {
                 NavigationLink(value: WatchRoute.genres) { Label("Genres", systemImage: "guitars") }
+                    .accessibilityIdentifier(TestID.Watch.musicDoor("genres"))
             }
             Button {
                 Task {
@@ -194,8 +213,10 @@ struct MusicMenu: View {
             } label: {
                 Label("Shuffle All", systemImage: "shuffle")
             }
+            .accessibilityIdentifier(TestID.Watch.musicShuffleAll)
         }
         .navigationTitle("Music")
+        .testAnchor(TestID.Watch.musicRoot)
     }
 }
 
@@ -218,6 +239,7 @@ struct PlaylistsView: View {
                     NavigationLink(value: WatchRoute.collection(item)) {
                         CollectionRow(item: item, subtitle: "\(list.itemIds.count) songs")
                     }
+                    .accessibilityIdentifier(TestID.Watch.playlist(item.Id))
                 }
             } else {
                 StatusRow(loading: loading && lists.isEmpty, error: error, empty: !loading && lists.isEmpty && error == nil ? "No playlists" : nil)
@@ -225,6 +247,7 @@ struct PlaylistsView: View {
                     NavigationLink(value: WatchRoute.collection(list)) {
                         CollectionRow(item: list, subtitle: list.ChildCount.map { "\($0) songs" } ?? "Playlist")
                     }
+                    .accessibilityIdentifier(TestID.Watch.playlist(list.Id))
                 }
             }
         }
@@ -235,6 +258,7 @@ struct PlaylistsView: View {
             defer { loading = false }
             do { lists = try await client.playlists(); error = nil } catch is CancellationError {} catch { self.error = error.localizedDescription }
         }
+        .testAnchor(TestID.Watch.playlistsRoot)
     }
 }
 
@@ -270,30 +294,40 @@ struct AlbumsView: View {
                 if local.isEmpty { StatusRow(empty: "No albums on the watch yet") }
                 ForEach(local) { album in
                     NavigationLink(value: WatchRoute.collection(album)) { CollectionRow(item: album) }
+                        .accessibilityIdentifier(TestID.Watch.album(album.Id))
                 }
             } else {
                 StatusRow(loading: loading && albums.isEmpty, error: error, empty: !loading && albums.isEmpty && error == nil ? "No albums" : nil)
+                // A row at the head of the list, as on Audiobooks: a bottom-bar
+                // button floated over the third row and took its taps.
+                if !albums.isEmpty {
+                    Button { recentFirst.toggle() } label: {
+                        Label("Sorted by \(recentFirst ? "Recently added" : "Title")",
+                              systemImage: recentFirst ? "clock" : "textformat.abc")
+                            .font(.caption2)
+                            .foregroundStyle(WatchTheme.dim)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .listRowBackground(Color.clear)
+                    .accessibilityHint("Changes the order")
+                    .accessibilityIdentifier(TestID.Watch.albumsSort)
+                }
                 ForEach(albums) { album in
                     NavigationLink(value: WatchRoute.collection(album)) { CollectionRow(item: album) }
+                        .accessibilityIdentifier(TestID.Watch.album(album.Id))
                 }
                 if albums.count < total {
                     Button { Task { await load(more: true) } } label: {
                         HStack { Spacer(); if loading { ProgressView() } else { Text("More…") }; Spacer() }
                     }
+                    .accessibilityIdentifier(TestID.Watch.albumsMore)
                 }
             }
         }
         .navigationTitle("Albums")
-        .toolbar {
-            if !offline {
-                ToolbarItem(placement: .bottomBar) {
-                    Button { recentFirst.toggle() } label: {
-                        Image(systemName: recentFirst ? "clock" : "textformat.abc")
-                    }
-                }
-            }
-        }
         .task(id: recentFirst) { albums = []; await load() }
+        .testAnchor(TestID.Watch.albumsRoot)
     }
 
     private func load(more: Bool = false) async {
@@ -330,11 +364,13 @@ struct ArtistsView: View {
                 if local.isEmpty { StatusRow(empty: "No music on the watch yet") }
                 ForEach(local) { artist in
                     NavigationLink(value: WatchRoute.artist(artist)) { Text(artist.title).font(.footnote) }
+                        .accessibilityIdentifier(TestID.Watch.artist(artist.Id))
                 }
             } else {
                 StatusRow(loading: loading && artists.isEmpty, error: error, empty: !loading && artists.isEmpty && error == nil ? "No artists" : nil)
                 ForEach(artists) { artist in
                     NavigationLink(value: WatchRoute.artist(artist)) { Text(artist.title).font(.footnote) }
+                        .accessibilityIdentifier(TestID.Watch.artist(artist.Id))
                 }
             }
         }
@@ -345,6 +381,7 @@ struct ArtistsView: View {
             defer { loading = false }
             do { artists = try await client.albumArtists().items; error = nil } catch is CancellationError {} catch { self.error = error.localizedDescription }
         }
+        .testAnchor(TestID.Watch.artistsRoot)
     }
 }
 
@@ -397,6 +434,7 @@ struct ArtistDetail: View {
                     NavigationLink(value: WatchRoute.collection(album)) {
                         CollectionRow(item: album, subtitle: album.ProductionYear.map(String.init) ?? "")
                     }
+                    .accessibilityIdentifier(TestID.Watch.album(album.Id))
                 }
             }
         }
@@ -407,6 +445,7 @@ struct ArtistDetail: View {
             defer { loading = false }
             albums = (try? await client.albums(artistId: artist.Id)) ?? []
         }
+        .testAnchor(TestID.Watch.artistRoot)
     }
 
     private func play(shuffle: Bool) async {
@@ -438,6 +477,7 @@ struct SongsView: View {
                     Button { player.play(local, startingAt: local.position(of: song) ?? 0, title: "Songs") } label: {
                         SongRow(item: song, isCurrent: player.current?.Id == song.Id)
                     }
+                    .accessibilityIdentifier(TestID.Watch.song(song.Id))
                     .swipeActions { SongSwipe(item: song) }
                 }
             } else {
@@ -446,17 +486,20 @@ struct SongsView: View {
                     Button { player.play(songs, startingAt: songs.position(of: song) ?? 0, title: "Songs") } label: {
                         SongRow(item: song, isCurrent: player.current?.Id == song.Id)
                     }
+                    .accessibilityIdentifier(TestID.Watch.song(song.Id))
                     .swipeActions { SongSwipe(item: song) }
                 }
                 if songs.count < total {
                     Button { Task { await load(more: true) } } label: {
                         HStack { Spacer(); if loading { ProgressView() } else { Text("More…") }; Spacer() }
                     }
+                    .accessibilityIdentifier(TestID.Watch.songsMore)
                 }
             }
         }
         .navigationTitle("Songs")
         .task { await load() }
+        .testAnchor(TestID.Watch.songsRoot)
     }
 
     private func load(more: Bool = false) async {
@@ -482,11 +525,13 @@ struct SongSwipe: View {
     var body: some View {
         if downloads.isComplete(item.Id) || downloads.isQueuedOrRunning(item.Id) {
             Button(role: .destructive) { downloads.delete(item.Id) } label: { Label("Remove", systemImage: "trash") }
+                .accessibilityIdentifier(TestID.Watch.itemSwipeRemove(item.Id))
         } else if !client.isOffline, client.isSignedIn {
             Button { downloads.enqueue([item], reason: item.isAudiobook ? "book" : "song") } label: {
                 Label("Download", systemImage: "arrow.down.circle")
             }
             .tint(WatchTheme.accent)
+            .accessibilityIdentifier(TestID.Watch.itemSwipeDownload(item.Id))
         }
     }
 }
@@ -501,6 +546,7 @@ struct GenresView: View {
             if loading, genres.isEmpty { StatusRow(loading: true) }
             ForEach(genres) { genre in
                 NavigationLink(value: WatchRoute.collection(genre)) { Text(genre.title).font(.footnote) }
+                    .accessibilityIdentifier(TestID.Watch.genre(genre.Id))
             }
         }
         .navigationTitle("Genres")
@@ -509,6 +555,7 @@ struct GenresView: View {
             defer { loading = false }
             genres = (try? await client.genres()) ?? []
         }
+        .testAnchor(TestID.Watch.genresRoot)
     }
 }
 
@@ -538,10 +585,11 @@ struct CollectionDetail: View {
         List {
             VStack(spacing: 6) {
                 Artwork(item: item, size: 72, corner: 8)
-                Text(item.title).font(.headline).multilineTextAlignment(.center).lineLimit(3)
-                if !item.artistLine.isEmpty { Text(item.artistLine).font(.caption2).foregroundStyle(WatchTheme.dim) }
+                Text(item.title).font(.headline).multilineTextAlignment(.center).lineLimit(3).accessibilityIdentifier(TestID.Watch.collectionTitle)
+                if !item.artistLine.isEmpty { Text(item.artistLine).font(.caption2).foregroundStyle(WatchTheme.dim).accessibilityIdentifier(TestID.Watch.collectionArtist) }
             }
             .frame(maxWidth: .infinity)
+            .testAnchor(TestID.Watch.collectionHeader)
             .listRowBackground(Color.clear)
 
             PlayShuffleBar(
@@ -562,6 +610,7 @@ struct CollectionDetail: View {
                         SongRow(item: song, showsArt: !item.isAlbum, number: item.isAlbum ? (song.IndexNumber ?? i + 1) : nil,
                                 isCurrent: player.current?.Id == song.Id)
                     }
+                    .accessibilityIdentifier(TestID.Watch.song(song.Id))
                     .swipeActions { SongSwipe(item: song) }
                 }
             }
@@ -579,6 +628,7 @@ struct CollectionDetail: View {
             } catch is CancellationError {
             } catch { self.error = error.localizedDescription }
         }
+        .testAnchor(TestID.Watch.collectionRoot)
     }
 }
 
@@ -597,11 +647,13 @@ struct SearchView: View {
             TextField("Search", text: $term)
                 .textInputAutocapitalization(.never)
                 .onSubmit { Task { await search() } }
+                .accessibilityIdentifier(TestID.Watch.searchField)
             if searching { StatusRow(loading: true) }
             if !results.books.isEmpty {
                 Section("Audiobooks") {
                     ForEach(results.books) { book in
                         NavigationLink(value: WatchRoute.book(book)) { BookRow(item: book) }
+                            .accessibilityIdentifier(TestID.Watch.book(book.Id))
                     }
                 }
             }
@@ -609,6 +661,7 @@ struct SearchView: View {
                 Section("Albums") {
                     ForEach(results.albums) { album in
                         NavigationLink(value: WatchRoute.collection(album)) { CollectionRow(item: album) }
+                            .accessibilityIdentifier(TestID.Watch.album(album.Id))
                     }
                 }
             }
@@ -616,6 +669,7 @@ struct SearchView: View {
                 Section("Playlists") {
                     ForEach(results.playlists) { list in
                         NavigationLink(value: WatchRoute.collection(list)) { CollectionRow(item: list, subtitle: "Playlist") }
+                            .accessibilityIdentifier(TestID.Watch.playlist(list.Id))
                     }
                 }
             }
@@ -625,6 +679,7 @@ struct SearchView: View {
                         Button { player.play(results.songs, startingAt: results.songs.position(of: song) ?? 0, title: "Search") } label: {
                             SongRow(item: song)
                         }
+                        .accessibilityIdentifier(TestID.Watch.song(song.Id))
                         .swipeActions { SongSwipe(item: song) }
                     }
                 }
@@ -632,6 +687,7 @@ struct SearchView: View {
             if !searching, results.isEmpty, !term.isEmpty { StatusRow(empty: "Nothing found") }
         }
         .navigationTitle("Search")
+        .testAnchor(TestID.Watch.searchRoot)
     }
 
     private func search() async {

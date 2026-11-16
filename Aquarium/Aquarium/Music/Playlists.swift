@@ -219,8 +219,10 @@ struct SmartPlaylist: Codable, Identifiable, Hashable, Sendable {
             if page.count < q.limit || q.startIndex >= 50_000 { break }
         }
 
+        // By title, as the server is asked for it (`JellyfinClient.sortBy`):
+        // a song's `SortName` starts with its disc and track numbers.
         func byName(_ a: BaseItem, _ b: BaseItem) -> Bool {
-            (a.SortName ?? a.title).localizedStandardCompare(b.SortName ?? b.title) == .orderedAscending
+            a.title.localizedStandardCompare(b.title) == .orderedAscending
         }
         switch sort {
         case .name: songs.sort(by: byName)

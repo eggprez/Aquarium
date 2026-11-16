@@ -64,10 +64,11 @@ struct MusicTabView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Picker("Page", selection: $page) {
-                    ForEach(Page.allCases) { Text($0.rawValue).tag($0) }
+                    ForEach(Page.allCases) { Text($0.rawValue).accessibilityIdentifier(TestID.Music.page(TestID.key($0.rawValue))).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 260)
+                .accessibilityIdentifier(TestID.Music.pagePicker)
             }
         }
         // The Add to Playlist menu reads this list; loaded here so it is
@@ -76,6 +77,7 @@ struct MusicTabView: View {
         // What the offline pages are drawn from, topped up while there is a
         // server to ask — see `OfflineMusicIndex.refresh`.
         .task(id: client.showsOffline) { await OfflineMusicIndex.shared.refresh() }
+        .testAnchor(TestID.Music.root)
     }
 
     private var isSearching: Bool {
@@ -193,11 +195,21 @@ extension View {
     /// the column never takes the controls with it.
     @ViewBuilder
     func withShellMusic(sidebarShowing: Bool) -> some View {
+        #if os(iOS)
+        // The prompts are on the split view itself there — see
+        // `sidebarShell` — so this is only the bar.
+        if sidebarShowing {
+            self
+        } else {
+            safeAreaInset(edge: .bottom, spacing: 0) { MiniPlayerBar() }
+        }
+        #else
         if sidebarShowing {
             withMusicHosts()
         } else {
             withMiniPlayer()
         }
+        #endif
     }
 
     /// On a navigation stack, inside the mini player and the offline strip:

@@ -39,6 +39,7 @@ struct SyncCodeOverlay: View {
                         .frame(width: Self.size, height: Self.size)
                         .padding(14)
                         .background(Color.white)
+                        .accessibilityIdentifier(TestID.Player.syncCodeImage)
                 }
             }
             Spacer()
@@ -50,6 +51,7 @@ struct SyncCodeOverlay: View {
         .task(id: payload) {
             image = payload.flatMap(Self.render)
         }
+        .testAnchor(TestID.Player.syncCode)
     }
 
     /// The QR code for `payload`, drawn at a whole number of pixels per

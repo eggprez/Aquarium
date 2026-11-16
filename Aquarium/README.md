@@ -28,6 +28,9 @@ xcodebuild -project Aquarium.xcodeproj -scheme Aquarium \
   -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```
 
+Tests (unit and UI, every platform) and the app's UI-test mode are described
+in [TESTING.md](TESTING.md): `Tools/run-tests.sh <unit|iphone|ipad|mac|tv|watch|all>`.
+
 Deployment targets are iOS/iPadOS 17, tvOS 17, macOS 14 and watchOS 10.
 
 **Apple TV note:** compiling the tvOS asset catalogue needs a tvOS simulator
@@ -419,7 +422,7 @@ compiled into both the iPhone app and the watch app.
 - **The icon** is the same mark composed for a circle — `circleIcon` in
   `Tools/IconGenerator/brand.swift` — since watchOS masks every icon into one.
 
-The watch app is `WKRunsIndependentlyWithCompanionApp`: it runs, browses and
+The watch app is `WKRunsIndependentlyOfCompanionApp`: it runs, browses and
 plays with the phone switched off, as long as it has been signed in once.
 
 ## What did not carry over, and why

@@ -44,6 +44,10 @@ enum Keychain {
     @discardableResult
     static func store(token: String, server: String, userId: String) -> Bool {
         let acct = account(server: server, userId: userId)
+        #if DEBUG
+        // UI test mode: no keychain at all — see Shared/TestIDs/TestLaunch.swift.
+        if TestRuntime.isUITest { TestKeychain.store(token, account: acct); return true }
+        #endif
         var query = baseQuery(acct)
         let synchronised = syncs
         // Syncing, this matches both the synchronised copy and any device-only
@@ -88,6 +92,9 @@ enum Keychain {
 
     static func token(server: String, userId: String) -> String? {
         let acct = account(server: server, userId: userId)
+        #if DEBUG
+        if TestRuntime.isUITest { return TestKeychain.token(account: acct) }
+        #endif
         // This device's own copy first — the one it writes when opted out of
         // sync — then the synchronised one.
         if let own = token(acct, synchronizable: kCFBooleanFalse as Any)
@@ -131,6 +138,9 @@ enum Keychain {
     /// which is what "sign out" is expected to mean once the sign-in itself is
     /// shared. A device opted out of sync removes only its own copy.
     static func delete(server: String, userId: String) {
+        #if DEBUG
+        if TestRuntime.isUITest { TestKeychain.delete(account: account(server: server, userId: userId)); return }
+        #endif
         var query = baseQuery(account(server: server, userId: userId))
         query[kSecAttrSynchronizable as String] = syncs ? kSecAttrSynchronizableAny as Any : kCFBooleanFalse as Any
         SecItemDelete(query as CFDictionary)
@@ -143,6 +153,9 @@ enum Keychain {
     /// Copy this user's token to where the Apple TV's other users can read
     /// it, if it isn't there already.
     static func shareToken(server: String, userId: String) {
+        #if DEBUG
+        if TestRuntime.isUITest { return }
+        #endif
         let acct = account(server: server, userId: userId)
         guard Household.read(acct) == nil,
               let own = token(acct, synchronizable: kCFBooleanFalse as Any) ?? token(acct, synchronizable: kCFBooleanTrue as Any)
@@ -176,7 +189,18 @@ enum Keychain {
             return query
         }
 
+        #if DEBUG
+        /// UI test mode keeps the household in the test defaults suite, like
+        /// the tokens (`TestKeychain`): the shared keychain outlives
+        /// `-AquariumTestReset`, and a test run's accounts would otherwise
+        /// greet every later sign-in screen on that simulator.
+        private static func testKey(_ acct: String) -> String { "uitest_household.\(acct)" }
+        #endif
+
         static func store(_ data: Data, _ acct: String) {
+            #if DEBUG
+            if TestRuntime.isUITest { UserDefaults.standard.set(data, forKey: testKey(acct)); return }
+            #endif
             var item = query(acct)
             SecItemDelete(item as CFDictionary)
             item[kSecValueData as String] = data
@@ -185,6 +209,9 @@ enum Keychain {
         }
 
         static func read(_ acct: String) -> Data? {
+            #if DEBUG
+            if TestRuntime.isUITest { return UserDefaults.standard.data(forKey: testKey(acct)) }
+            #endif
             var item = query(acct)
             item[kSecReturnData as String] = true
             item[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -194,6 +221,9 @@ enum Keychain {
         }
 
         static func delete(_ acct: String) {
+            #if DEBUG
+            if TestRuntime.isUITest { UserDefaults.standard.removeObject(forKey: testKey(acct)); return }
+            #endif
             SecItemDelete(query(acct) as CFDictionary)
         }
 

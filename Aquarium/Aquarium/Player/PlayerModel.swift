@@ -102,6 +102,11 @@ struct StreamOptions: Sendable {
     /// `nil` leaves it to the server; `-1` for the subtitle means none.
     var audioStreamIndex: Int?
     var subtitleStreamIndex: Int?
+    /// Which of the title's versions (its media sources), where it has
+    /// several and one was picked. `nil` leaves it to the server, which
+    /// plays the first. Carried through a reopen of the same title; dropped
+    /// for any other, whose versions are its own.
+    var mediaSourceId: String?
 }
 
 /// One entry in a track menu. `avIndex` (here, the engine's track id) says the
@@ -180,6 +185,17 @@ final class PlayerModel {
     /// When the title already playing was last reopened — for a quality, a
     /// track, a recovery — or nil for a fresh start. See `handleStreamFailure`.
     var sameTitleReopenedAt: Date?
+    /// The title the server has been sent a start report for in this
+    /// viewing. A start is what adds to Jellyfin's PlayCount, so a reopen of
+    /// that same title — quality, track, recovery — reports progress
+    /// instead. See `reportStreamOpened`.
+    var startReportedItemId: String?
+    /// A quality chosen on the way in — the title page's Play at a Set
+    /// Quality — held for this sitting: the player shows that rung rather
+    /// than Auto, and Auto doesn't climb away from it. The saved preference
+    /// is left as it was, so the next title opens the way it always would.
+    /// See `qualitySelection` and `adaptsQuality`.
+    var qualityPinned = false
     /// The title whose stream failed near its end and was reopened reading
     /// only a little way ahead. See `recoverFromMissingTail`.
     var tailRetryItemId: String?
