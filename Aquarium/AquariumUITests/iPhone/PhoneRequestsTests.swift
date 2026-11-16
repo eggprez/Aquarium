@@ -148,6 +148,52 @@ final class PhoneRequestsTests: PhoneUITestCase {
         XCTAssertTrue(eventually(timeout: 20) { (SeerrQA.requests().first?["seasons"] as? [Int]) == [3] })
     }
 
+    /// A film's, a show's and an episode's page each end in what Seerr would
+    /// suggest beside them that isn't here; an episode's are its show's.
+    func testTitlePagesOfferLikeThisFromSeerr() throws {
+        try standardOnly()
+        let api = try self.api
+        let filmId = try XCTUnwrap(SeerrQA.libraryId("movie", tmdbId: 10378), "no TMDB film in the QA library")
+        let showId = try XCTUnwrap(SeerrQA.libraryId("tv", tmdbId: 19885), "Sherlock isn't in the QA library")
+        let film = try XCTUnwrap(api.json("/Items/\(filmId)?userId=\(api.userId)") as? [String: Any])
+        let episodes = try XCTUnwrap(api.json("/Shows/\(showId)/Episodes?userId=\(api.userId)&Limit=1") as? [String: Any])
+        let episode = try XCTUnwrap((episodes["Items"] as? [[String: Any]])?.first, "Sherlock has no episodes")
+        launchConnected()
+
+        func expectShelf(_ what: String) {
+            let shelf = app.element(TestID.Requests.shelf("likeThis"))
+            XCTAssertTrue(eventually(timeout: 30) {
+                if !shelf.exists { self.app.swipeUp() }
+                return shelf.exists
+            }, "\(what)'s page offers titles like it from Seerr")
+            app.reveal(shelf)
+            XCTAssertEqual(app.staticTexts[TestID.Common.shelfTitle("requests-likeThis")].firstMatch.label, "Like This, Not in Your Library")
+            XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 10), "with something to open")
+        }
+        // The shelf's anchor doesn't hand its cards down; they are found by id.
+        var cards: XCUIElementQuery {
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "requests.card."))
+        }
+
+        openTitle(filmId, searching: try XCTUnwrap(film["Name"] as? String))
+        expectShelf("a film")
+        attachScreenshot("film like this")
+        // A card opens the title's request page.
+        let card = cards.firstMatch
+        app.reveal(card)
+        card.tapNow(20)
+        app.element(TestID.Requests.titleRoot).waitToExist(30)
+
+        openTitle(showId, searching: "Sherlock")
+        expectShelf("a show")
+        attachScreenshot("show like this")
+
+        openTitle(try XCTUnwrap(episode["Id"] as? String), searching: try XCTUnwrap(episode["Name"] as? String))
+        expectShelf("an episode")
+        attachScreenshot("episode like this")
+        XCTAssertGreaterThan(SeerrQA.callCount("/tv/19885/recommendations"), 0, "the episode asked about its show")
+    }
+
     func testAnExpiredSessionRenewsItselfQuietly() throws {
         try standardOnly()
         launchConnected()

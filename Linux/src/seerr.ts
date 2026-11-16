@@ -645,6 +645,35 @@ export async function collection(tmdbId: number): Promise<SeerrResult[]> {
   return withKind(parts, "movie");
 }
 
+/** Seerr's recommendations for a title, or its similar titles when it has
+ *  none (TMDB has none for many smaller titles), each given its kind. */
+export async function likeThis(kind: SeerrMediaKind, tmdbId: number): Promise<SeerrResult[]> {
+  const list = async (which: string): Promise<SeerrResult[]> => {
+    const body = await get(`/${kind}/${tmdbId}/${which}?page=1`);
+    const results: SeerrResult[] = Array.isArray(body.results) ? body.results.filter((r: any) => r && typeof r.id === "number") : [];
+    return withKind(results, kind);
+  };
+  const recommended = await list("recommendations");
+  return recommended.length ? recommended : list("similar");
+}
+
+/** What a library item is, as Seerr knows titles: a film or a show is
+ *  itself; a season or an episode is its show (`seriesId`), since Jellyfin's
+ *  TMDB id on those is their own. `null` for anything else. */
+export function likeThisSubject(item: any): { kind: SeerrMediaKind; seriesId: string | null } | null {
+  switch (item?.Type) {
+    case "Movie":
+      return { kind: "movie", seriesId: null };
+    case "Series":
+      return { kind: "tv", seriesId: null };
+    case "Season":
+    case "Episode":
+      return item.SeriesId ? { kind: "tv", seriesId: String(item.SeriesId) } : null;
+    default:
+      return null;
+  }
+}
+
 /** Everything someone has been in or made, newest first, each title once. */
 export function sortCredits(cast: SeerrResult[], crew: SeerrResult[]): SeerrResult[] {
   const seen = new Set<string>();

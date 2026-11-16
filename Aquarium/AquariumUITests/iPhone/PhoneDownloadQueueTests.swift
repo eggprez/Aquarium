@@ -234,6 +234,24 @@ final class PhoneDownloadQueueTests: PhoneProxyTestCase {
 
     /// The summary counts it; its menu plays it and marks it watched; then
     /// Delete watched in the page's menu offers exactly it, asks, takes
+    /// With a show and a film on the device, the two grids are headed
+    /// "Shows" and "Movies" ("Films" until 2026-11-16).
+    func testGridsAreHeadedShowsAndMovies() throws {
+        let show = try Fixtures.require().item("show.short")
+        let season = try XCTUnwrap(PhoneFixtures.season("show.short", 1))
+        launchThroughProxy()
+        _ = try queueFilm("film.rated_g")
+        queueSeasons(of: show, seasonIds: [season])
+        openDownloads()
+        app.element(TestID.Downloads.filmsSection).waitToExist(180)
+        app.element(TestID.Downloads.showsSection).waitToExist(180)
+        XCTAssertTrue(label("Movies").waitForExistence(timeout: 10), "the films' grid says Movies")
+        XCTAssertTrue(label("Shows").exists)
+        XCTAssertFalse(label("Films").exists, "not Films any more")
+        app.reveal(label("Movies"))
+        attachScreenshot("downloads shows and movies")
+    }
+
     /// Cancel for an answer, and deletes on the second asking.
     func testFilmMenuAndDeleteWatched() throws {
         let api = try self.api

@@ -383,6 +383,39 @@ final class SeerrClientTests: XCTestCase {
         XCTAssertEqual(seerr.posterEpoch, epoch + 1, "only the change itself counts")
     }
 
+    func testLikeThisIsRecommendationsElseSimilarWithKinds() async throws {
+        try await SeerrFixture.connect { request in
+            switch request.url?.path ?? "" {
+            case "/api/v1/movie/603/recommendations":
+                return SeerrStub.Answer(json: #"{"results":[{"id":604,"title":"The Matrix Reloaded"}]}"#)
+            case "/api/v1/tv/1396/recommendations":
+                return SeerrStub.Answer(json: #"{"results":[]}"#)
+            case "/api/v1/tv/1396/similar":
+                return SeerrStub.Answer(json: #"{"results":[{"id":60059,"name":"Better Call Saul","mediaType":"tv"}]}"#)
+            default: return SeerrStub.Answer(status: 404)
+            }
+        }
+        let films = try await seerr.likeThis(.movie, tmdbId: 603)
+        XCTAssertEqual(films.map(\.id), ["movie-604"], "kind filled in where Seerr left it off")
+        let shows = try await seerr.likeThis(.tv, tmdbId: 1396)
+        XCTAssertEqual(shows.map(\.id), ["tv-60059"], "no recommendations: similar titles instead")
+        XCTAssertEqual(SeerrStub.requests.map { $0.url?.path ?? "" },
+                       ["/api/v1/movie/603/recommendations", "/api/v1/tv/1396/recommendations", "/api/v1/tv/1396/similar"])
+    }
+
+    func testLikeThisSubjectIsTheShowForSeasonsAndEpisodes() {
+        func item(_ kind: String, series: String? = nil) -> BaseItem {
+            CoreItem.make("x", kind, name: "X") { $0.SeriesId = series }
+        }
+        XCTAssertEqual(SeerrClient.likeThisSubject(of: item("Movie"))?.kind, .movie)
+        XCTAssertNil(SeerrClient.likeThisSubject(of: item("Movie"))?.seriesId)
+        XCTAssertEqual(SeerrClient.likeThisSubject(of: item("Series"))?.kind, .tv)
+        XCTAssertEqual(SeerrClient.likeThisSubject(of: item("Season", series: "show"))?.seriesId, "show")
+        XCTAssertEqual(SeerrClient.likeThisSubject(of: item("Episode", series: "show"))?.kind, .tv)
+        XCTAssertNil(SeerrClient.likeThisSubject(of: item("Episode")), "an episode with no show has nothing to ask about")
+        XCTAssertNil(SeerrClient.likeThisSubject(of: item("MusicAlbum")))
+    }
+
     func testCSRFTokenIsEchoedOnWrites() async throws {
         try await SeerrFixture.connect { request in
             if request.httpMethod == "GET" {

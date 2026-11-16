@@ -222,7 +222,8 @@ alone; end it with `kill <pid>`, never MPRIS Quit. Look in `~/.local/share/aquar
     stand-in's call list) and Settings still says the session is in the keyring. Stop the QA
     Jellyfin's Quick Connect, expire again: Settings → Requests shows Session "Run out" and
     Reconnect, and the sidebar entry goes.
-27. **Seerr: in the library.** Search for a title the library lacks: "Not in Your Library"
+27. **Seerr: in the library.** A film's, a show's and an episode's page end with "Like This,
+    Not in Your Library" under "More like this" (an episode's is its show's). Search for a title the library lacks: "Not in Your Library"
     appears under "No results" about half a second after typing stops, and typing on never
     flickers a stale row. A show with fewer seasons here than exist (the QA library has some)
     has the "N more seasons exist" banner under its hero, and Request… opens its request page. A

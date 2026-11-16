@@ -695,6 +695,44 @@ describe("what a library page gains", () => {
     expect(views.seerrItemHooks(series())!.querySelector(".seerr-more-title")).not.toBeNull();
   });
 
+  it("ends a film's page with titles like it that aren't here, and an episode's with its show's", async () => {
+    world.titles["movie/603/recommendations"] = {
+      results: [
+        { id: 604, title: "The Matrix Reloaded", mediaInfo: { status: 5, jellyfinMediaId: "jf-r" } },
+        { id: 605, title: "The Matrix Revolutions", posterPath: "/rev.jpg" },
+      ],
+    };
+    // No recommendations for the show: its similar titles instead.
+    world.titles["tv/1396/recommendations"] = { results: [] };
+    world.titles["tv/1396/similar"] = { results: [{ id: 60059, name: "Better Call Saul", mediaType: "tv" }] };
+    await boot();
+
+    const film = views.seerrLikeThis({ Id: "m1", Type: "Movie", ProviderIds: { Tmdb: "603" } }, async () => null)!;
+    root.append(film);
+    await settle();
+    const shelf = film.querySelector('[data-shelf="likeThis"]')!;
+    expect(shelf.querySelector("h2")!.textContent).toBe("Like This, Not in Your Library");
+    // Only what can be asked for; the kind filled in.
+    expect(texts(shelf, ".card-title")).toEqual(["The Matrix Revolutions"]);
+    click(shelf.querySelector(".card"));
+    expect(location.hash).toBe("#/request/movie/605");
+
+    const asked: string[] = [];
+    const episode = views.seerrLikeThis({ Id: "e1", Type: "Episode", SeriesId: "s1", ProviderIds: { Tmdb: "62085" } }, async (id) => {
+      asked.push(id);
+      return series();
+    })!;
+    root.append(episode);
+    await settle();
+    expect(asked).toEqual(["s1"]);
+    expect(texts(episode, ".card-title")).toEqual(["Better Call Saul"]);
+    expect(sent().map((a) => a.path)).toContain("/tv/1396/similar?page=1");
+    expect(sent().map((a) => a.path)).not.toContain("/tv/62085/recommendations?page=1");
+
+    // Nothing for music, or without Seerr.
+    expect(views.seerrLikeThis({ Id: "a", Type: "MusicAlbum" }, async () => null)).toBeNull();
+  });
+
   it("is absent without a Seerr server, without a TMDB id, and for other kinds of item", async () => {
     await boot();
     expect(views.seerrItemHooks(series({ ProviderIds: { Imdb: "tt1" } }))).toBeNull();

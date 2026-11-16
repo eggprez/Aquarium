@@ -23,6 +23,13 @@ final class DownloadGroupsTests: DownloadTestCase {
 
     // MARK: Films
 
+    /// The grid over downloaded films is headed "Movies", the word the rest
+    /// of the app (and the Linux app) uses; it said "Films" until 2026-11-16.
+    func testMoviesGridIsHeadedMovies() {
+        XCTAssertEqual(DownloadGroups.moviesHeading, "Movies")
+        XCTAssertEqual(DownloadGroups.showsHeading, "Shows")
+    }
+
     func testFilmsAreFinishedVideoThatIsNotAnEpisodeAlphabetically() {
         let records = [
             record("f1", name: "zodiac"),

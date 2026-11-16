@@ -150,13 +150,13 @@ struct MacDownloadsView: View {
             }
 
             if !shows.isEmpty {
-                gridSection(films.isEmpty ? "On This Device" : "Shows", kind: .shows) {
+                gridSection(films.isEmpty ? "On This Device" : DownloadGroups.showsHeading, kind: .shows) {
                     ForEach(shows) { show in seriesTile(show) }
                 }
             }
 
             if !films.isEmpty {
-                gridSection(shows.isEmpty ? "On This Device" : "Films", kind: .films) {
+                gridSection(shows.isEmpty ? "On This Device" : DownloadGroups.moviesHeading, kind: .films) {
                     ForEach(films) { film in filmTile(film) }
                 }
             }

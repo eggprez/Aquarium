@@ -1,5 +1,6 @@
 //  What a library page gains from Seerr: the seasons of a show that aren't
-//  here, the films of a collection that aren't, the rest of what someone made.
+//  here, the films of a collection that aren't, the rest of what someone made,
+//  and titles like this one that could be asked for.
 //
 //  Each is drawn from what `SeerrClient.warm(for:)` found, and draws nothing
 //  at all until there is something to say, so a page looks exactly as it did
@@ -61,6 +62,26 @@ struct SeerrItemHooks: View {
         case 0: return ""
         case 1: return "Season \(numbers[0])"
         default: return "Seasons " + numbers.dropLast().joined(separator: ", ") + " and " + numbers[numbers.count - 1]
+        }
+    }
+}
+
+/// Under More Like This on a film's, a show's, a season's or an episode's
+/// page: what Seerr would suggest beside it that isn't here yet. A season
+/// and an episode are answered with their show's suggestions.
+struct SeerrLikeThisHook: View {
+    let item: BaseItem
+
+    private var seerr: SeerrClient { .shared }
+
+    var body: some View {
+        if seerr.isConnected, let found = seerr.knownLikeThis(for: item) {
+            RequestShelf(
+                title: "Like This, Not in Your Library",
+                subtitle: "Open one to request it.",
+                results: Array(found.filter(\.isRequestable).prefix(20)),
+                key: "likeThis"
+            )
         }
     }
 }

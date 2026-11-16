@@ -35,7 +35,7 @@ import {
 } from "../ui";
 import { getCached, setCached, itemSignature } from "../cache";
 import { tmdbIdOf } from "../seerr";
-import { seerrItemHooks } from "./requests";
+import { seerrItemHooks, seerrLikeThis } from "./requests";
 
 interface ItemData {
   item: any;
@@ -182,6 +182,10 @@ function detailExtras(root: HTMLElement, item: any): void {
       else slot.replaceWith(section("More like this", cardRow(items)));
     })
     .catch(() => slot.remove());
+
+  // And from Seerr, what is like it but not here yet.
+  const likeThis = seerrLikeThis(item, (id) => api.getItem(id));
+  if (likeThis) root.append(likeThis);
 }
 
 function playButtons(item: any): HTMLElement {

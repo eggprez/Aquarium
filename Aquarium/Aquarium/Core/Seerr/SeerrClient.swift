@@ -154,6 +154,8 @@ final class SeerrClient {
             client.titles = [:]
             client.collections = [:]
             client.credits = [:]
+            client.likeThisLists = [:]
+            client.likeThisKey = [:]
             client.needsReconnect = false
             client.revision += 1
         }
@@ -216,6 +218,8 @@ final class SeerrClient {
         cachedKey = nil
         cached = nil
         titles = [:]
+        likeThisLists = [:]
+        likeThisKey = [:]
         csrf = nil
         renewal = nil
         needsReconnect = false
@@ -652,7 +656,9 @@ final class SeerrClient {
     /// the rest of what someone has made. Nothing when Seerr isn't connected
     /// or the item has no TMDB id.
     func warm(for item: BaseItem) {
-        guard isConnected, let id = item.tmdbId else { return }
+        guard isConnected else { return }
+        warmLikeThis(for: item)
+        guard let id = item.tmdbId else { return }
         let key = "\(item.kind)-\(id)"
         guard warming.insert(key).inserted else { return }
         Task {
@@ -664,6 +670,68 @@ final class SeerrClient {
             default: break
             }
         }
+    }
+
+    // MARK: - Like this
+
+    /// Seerr's titles like this one, by `kind-tmdbId`, and which of those a
+    /// library item is answered by (a season or an episode by its show's).
+    private var likeThisLists: [String: [SeerrResult]] = [:]
+    private var likeThisKey: [String: String] = [:]
+
+    /// What Seerr suggests beside a film, a show, a season or an episode,
+    /// once `warm(for:)` has found it. Everything, here or not: the page
+    /// filters for what can be asked for.
+    func knownLikeThis(for item: BaseItem) -> [SeerrResult]? {
+        likeThisKey[item.Id].flatMap { likeThisLists[$0] }
+    }
+
+    /// What a library item is, as Seerr knows titles: a film is itself, a
+    /// show is itself, and a season or an episode is its show (Jellyfin's
+    /// TMDB id on those is the season's or episode's own, which Seerr has
+    /// no list for).
+    nonisolated static func likeThisSubject(of item: BaseItem) -> (kind: SeerrMediaKind, seriesId: String?)? {
+        switch item.kind {
+        case "Movie": (.movie, nil)
+        case "Series": (.tv, nil)
+        case "Season", "Episode": item.SeriesId.map { (.tv, $0) }
+        default: nil
+        }
+    }
+
+    private func warmLikeThis(for item: BaseItem) {
+        guard let subject = Self.likeThisSubject(of: item) else { return }
+        let itemId = item.Id
+        let ownTmdbId = item.tmdbId
+        Task {
+            var tmdbId = ownTmdbId
+            if let seriesId = subject.seriesId {
+                tmdbId = (try? await JellyfinClient.shared.item(seriesId))?.tmdbId
+            }
+            guard let tmdbId else { return }
+            let key = "\(subject.kind.rawValue)-\(tmdbId)"
+            likeThisKey[itemId] = key
+            if likeThisLists[key] != nil { return }
+            guard warming.insert("like-" + key).inserted else { return }
+            defer { warming.remove("like-" + key) }
+            if let found = try? await self.likeThis(subject.kind, tmdbId: tmdbId) { likeThisLists[key] = found }
+        }
+    }
+
+    /// Seerr's recommendations for a title, or its similar titles when it
+    /// has no recommendations (TMDB has none for many smaller titles). Each
+    /// entry is given its kind when Seerr left it off.
+    func likeThis(_ kind: SeerrMediaKind, tmdbId: Int) async throws -> [SeerrResult] {
+        func list(_ which: String) async throws -> [SeerrResult] {
+            let page = try await get(SeerrPage.self, "/\(kind.rawValue)/\(tmdbId)/\(which)?page=1")
+            return (page.results ?? []).map { entry in
+                var entry = entry
+                if entry.mediaType == nil { entry.mediaType = kind.rawValue }
+                return entry
+            }
+        }
+        let recommended = try await list("recommendations")
+        return recommended.isEmpty ? try await list("similar") : recommended
     }
 
     /// A title's own page. Remembered for the session, because the Requests

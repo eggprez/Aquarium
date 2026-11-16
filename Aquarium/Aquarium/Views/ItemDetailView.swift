@@ -731,6 +731,8 @@ struct ItemDetailView: View {
         castSection(item)
         MediaShelf(title: "More Like This", items: similar) { app.push(.item($0.Id)) }
             .testAnchor(TestID.Detail.moreLikeThis)
+        // And from Seerr, what is like it but not here yet.
+        SeerrLikeThisHook(item: item)
     }
 
     private static let scrollSpace = "itemDetailScroll"

@@ -369,6 +369,17 @@ class Handler(BaseHTTPRequestHandler):
                     keys = list(reversed(keys))
                 return self.send_json(200, page([result_json(state, k, with_type=False) for k in keys]))
             return self.send_json(200, page([result_json(state, k) for k in keys]))
+        match = re.fullmatch(r"/(movie|tv)/(\d+)/(recommendations|similar)", path)
+        if match:
+            # Others of the same kind, in a fixed order. Real Seerr names each
+            # entry's mediaType on both lists.
+            kind, tmdb = match.group(1), int(match.group(2))
+            if (kind, tmdb) not in state.catalogue:
+                return self.refuse(404, "Unable to retrieve %s." % ("movie" if kind == "movie" else "series"))
+            keys = sorted((k for k in state.catalogue if k[0] == kind and k[1] != tmdb), key=lambda k: (k[1] * 7919 + tmdb) % 1009)
+            if match.group(3) == "similar":
+                keys = list(reversed(keys))
+            return self.send_json(200, page([result_json(state, k) for k in keys[:20]]))
         match = re.fullmatch(r"/(movie|tv)/(\d+)", path)
         if match:
             key = (match.group(1), int(match.group(2)))

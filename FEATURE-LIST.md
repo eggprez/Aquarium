@@ -83,7 +83,8 @@ is the screens: a "Not in Your Library" row in Search, a request page per
 title, a Requests section (your requests as one carousel, then Trending /
 Popular / Upcoming; a notice when Seerr's Cache Images is off, since Seerr
 then serves no posters), a missing-seasons banner on a show, missing films on a collection
-and on a person, and Settings → Account → Requests. Linux: `Linux/src/seerr.ts`,
+and on a person, "Like This, Not in Your Library" on a film's, show's,
+season's and episode's page, and Settings → Account → Requests. Linux: `Linux/src/seerr.ts`,
 `Linux/src/views/requests.ts`, `Linux/src-tauri/src/seerr.rs`.
 
 **To do:**
