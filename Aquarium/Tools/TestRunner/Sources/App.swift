@@ -22,6 +22,10 @@ struct TestRunnerApp: App {
         }
         .defaultSize(width: 1180, height: 800)
         .commands {
+            CommandGroup(replacing: .help) {
+                Button("How Aquarium Tests Works") { model.introPage = 0; model.introShowing = true }
+                    .keyboardShortcut("?")
+            }
             CommandGroup(after: .newItem) {
                 Button("Start Testing") { model.run(model.suites.map(\.id).filter(model.checked.contains)) }
                     .keyboardShortcut("r")
@@ -65,6 +69,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `--show <suite>` opens on that suite's page instead of the summary.
         let shown = arguments.firstIndex(of: "--show").flatMap { arguments.count > $0 + 1 ? arguments[$0 + 1] : nil }
         if arguments.contains("--snapshot") { NSApp.appearance = NSAppearance(named: .aqua) }
+        // `--intro 3` opens on the walk-through's third page (for a picture of it).
+        if let intro = arguments.firstIndex(of: "--intro") {
+            model.introPage = max(0, (arguments.count > intro + 1 ? Int(arguments[intro + 1]) ?? 1 : 1) - 1)
+            model.introShowing = true
+        } else if !UserDefaults.standard.bool(forKey: "seenIntro"),
+                  !arguments.contains("--run"), !arguments.contains("--snapshot") {
+            // The first time the window opens by itself, say how it works.
+            model.introShowing = true
+        }
         guard let flag = arguments.firstIndex(of: "--run"), arguments.count > flag + 1 else {
             // `--snapshot file.png` alone: a picture of the window as it opens, then quit.
             if let shot = arguments.firstIndex(of: "--snapshot"), arguments.count > shot + 1 {
@@ -81,6 +94,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wanted = arguments[flag + 1] == "all" ? model.suites.map(\.id) : arguments[flag + 1].components(separatedBy: ",")
         let ids = wanted.filter { model.suite($0) != nil }
         guard !ids.isEmpty else { print("no such suite: \(arguments[flag + 1])"); exit(2) }
+        let off = ids.filter { model.suite($0)?.off != nil }
+        if !off.isEmpty { print("switched off in suites.json, not run: \(off.joined(separator: ", "))") }
+        guard off.count < ids.count else { exit(2) }
         // `--only Target/Class,…` narrows every suite named to those classes or files.
         if let only = arguments.firstIndex(of: "--only"), arguments.count > only + 1 {
             for id in ids { model.only[id] = Set(arguments[only + 1].components(separatedBy: ",")) }
@@ -130,6 +146,8 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .windowBackgroundColor))
             }
+            .disabled(model.introShowing)
+            .overlay { if model.introShowing { Intro() } }
         }
     }
 }
@@ -232,7 +250,7 @@ extension Model {
         run.state == .failed && run.count(.failed) == 0
     }
 
-    func startTicked() { run(suites.map(\.id).filter(checked.contains)) }
+    func startTicked() { run(suites.filter(canRun).map(\.id).filter(checked.contains)) }
 }
 
 // MARK: Left: what to test
@@ -255,6 +273,11 @@ struct ChoicePanel: View {
                                 Text("Results and the report for Claude").font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
+                            Button { model.introPage = 0; model.introShowing = true } label: {
+                                Image(systemName: "questionmark.circle").font(.title3)
+                            }
+                            .buttonStyle(.plain).foregroundStyle(.secondary)
+                            .help("How this app works, step by step")
                         }
                         .padding(8)
                         .background(model.selection == nil ? Color.accentColor.opacity(0.14) : .clear,
@@ -274,7 +297,7 @@ struct ChoicePanel: View {
                     Text("Tick one or more, or use a quick pick.").font(.caption).foregroundStyle(.secondary).padding(.leading, 8)
                     HStack(spacing: 8) {
                         ForEach(model.catalogue?.presets ?? [], id: \.self) { preset in
-                            Button { model.checked = Set(preset.suites) } label: {
+                            Button { model.tick(preset.suites) } label: {
                                 Label(preset.title, systemImage: preset.icon).frame(maxWidth: .infinity)
                             }
                             .help(preset.detail)
@@ -300,13 +323,24 @@ struct ChoicePanel: View {
                     }
                     .controlSize(.extraLarge)
                 } else {
-                    Button { model.startTicked() } label: {
+                    Button {
+                        Task {
+                            // Nearly every check signs in to the test server, so switch it on first.
+                            if model.qaUp == false, model.catalogue?.qaAgents != nil { await model.startServer() }
+                            model.startTicked()
+                        }
+                    } label: {
                         Label(model.checked.isEmpty ? "Tick Something to Test" : "Start Testing", systemImage: "play.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.extraLarge)
-                    .disabled(model.checked.isEmpty)
+                    .disabled(model.checked.isEmpty || model.qaBusy)
+                    if !model.checked.isEmpty {
+                        Text("\(model.checked.count) ticked" + (model.tickedEstimate.map { " · \($0) last time" } ?? ""))
+                            .font(.caption).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
             }
             .padding(14)
@@ -322,7 +356,7 @@ struct ChoicePanel: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(model.qaBusy ? "Test server…" : up ? "Test server is running" : "Test server is off")
                     if !up && !model.qaBusy {
-                        Text("Most checks need it. Press Start.").foregroundStyle(.secondary)
+                        Text("Most checks need it. Start Testing turns it on.").foregroundStyle(.secondary)
                     }
                 }
                 .help("A practice media server on this Mac, filled with sample films and shows, that the checks sign in to.")
@@ -357,26 +391,30 @@ struct SuiteCard: View {
 
     var body: some View {
         let ticked = model.checked.contains(suite.id)
-        let unavailable = suite.requires.map(model.missingTools.contains) ?? false
+        let off = suite.off != nil
+        let unavailable = !model.canRun(suite)
         HStack(spacing: 10) {
             Button {
                 if ticked { model.checked.remove(suite.id) } else { model.checked.insert(suite.id) }
             } label: {
-                Image(systemName: ticked ? "checkmark.circle.fill" : "circle")
+                Image(systemName: off ? "nosign" : ticked ? "checkmark.circle.fill" : "circle")
                     .font(.title2)
                     .foregroundStyle(ticked ? Color.accentColor : Color.secondary.opacity(0.6))
             }
             .buttonStyle(.plain)
             .disabled(model.running || unavailable)
-            .help(ticked ? "Leave this out" : "Include this")
+            .help(off ? "Turned off for now" : ticked ? "Leave this out" : "Include this")
             IconTile(symbol: suite.icon ?? "checkmark.seal", tint: unavailable ? .gray : .named(suite.tint))
             VStack(alignment: .leading, spacing: 1) {
                 Text(suite.title).fontWeight(.medium)
                 Text(subtitle(unavailable)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
-            StateBadge(run: model.runs[suite.id], couldNotRun: model.runs[suite.id].map(model.couldNotRun) ?? false)
+            if !off {
+                StateBadge(run: model.runs[suite.id], couldNotRun: model.runs[suite.id].map(model.couldNotRun) ?? false)
+            }
         }
+        .opacity(off ? 0.5 : 1)
         .padding(8)
         .background(model.selection == suite.id ? Color.accentColor.opacity(0.14) : .clear,
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -386,6 +424,7 @@ struct SuiteCard: View {
     }
 
     private func subtitle(_ unavailable: Bool) -> String {
+        if suite.off != nil { return "Turned off for now" }
         if unavailable { return "Can't run on this Mac" }
         let count = model.testCount(suite.id)
         let checks = count == 1 ? "1 check" : count > 0 ? "\(count) checks" : "Checks"
