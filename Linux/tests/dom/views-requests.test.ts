@@ -59,6 +59,8 @@ interface World {
   refuse?: string;
   /** Throw this instead of listing requests. */
   listFails?: string;
+  /** The browse rows answer only once this settles. */
+  rowsHeld?: Promise<void>;
 }
 let world: World;
 
@@ -123,7 +125,10 @@ function serve(): void {
       return ok({ results: world.requests });
     }
     if (route === "/search") return ok({ results: world.search });
-    if (route!.startsWith("/discover/")) return ok({ results: world.rows[route!] ?? [] });
+    if (route!.startsWith("/discover/")) {
+      await world.rowsHeld;
+      return ok({ results: world.rows[route!] ?? [] });
+    }
     if (route!.startsWith("/collection/")) {
       const parts = world.collections[route!.split("/")[2]!];
       if (!parts) throw "refused|Seerr doesn't know that title.";
@@ -206,7 +211,7 @@ describe("the Requests page", () => {
     await boot();
     await views.renderRequests(root);
 
-    expect(root.querySelector("h1")!.textContent).toBe("Requests");
+    expect(root.querySelector("h1")!.textContent).toBe("Seerr");
     expect(texts(root, "h2")).toEqual(["Your Requests", "Trending", "Popular Films", "Popular Shows", "Upcoming Shows"]);
     expect(texts(root, ".request-row-title")).toEqual(["Breaking Bad", "The Matrix"]);
     expect(texts(root, ".request-row-detail")).toEqual(["Show · 2008 · Seasons 1, 2", "Film · 1999 · 4K"]);
@@ -245,6 +250,30 @@ describe("the Requests page", () => {
     expect(location.hash).toBe("#/request/movie/27205");
     click(root.querySelector('.request-mine-card[data-request="2"]'));
     expect(location.hash).toBe("#/request/tv/1396");
+  });
+
+  it("draws the requests first, each browse row standing as a placeholder until it lands, and credits Seerr and TMDB", async () => {
+    world.requests = [{ id: 1, status: 2, type: "movie", media: { tmdbId: 603, mediaType: "movie", status: 3 } }];
+    world.rows = { "/discover/trending": [{ id: 27205, mediaType: "movie", title: "Inception" }] };
+    let release!: () => void;
+    world.rowsHeld = new Promise<void>((r) => (release = r));
+    await boot();
+    const done = views.renderRequests(root);
+    // Before anything has answered: placeholders for every row, headed.
+    expect(root.querySelectorAll(".request-row-loading").length).toBe(5);
+    await waitFor(() => root.querySelector(".request-mine-card") !== null);
+    // The requests are drawn while the rows are still out, and say so.
+    expect(texts(root, ".request-row-loading h2")).toEqual(["Trending", "Popular Films", "Popular Shows", "Upcoming Films", "Upcoming Shows"]);
+    expect(root.querySelector(".request-row-loading .card-row")).not.toBeNull();
+    expect(root.querySelector(".request-credit")!.textContent).toContain("TMDB");
+    release();
+    await done;
+    expect(root.querySelector(".request-row-loading")).toBeNull();
+    expect(texts(root, "h2")).toEqual(["Your Requests", "Trending"]);
+    const credit = root.querySelector(".request-credit")!;
+    expect(credit.textContent).toContain("Seerr");
+    expect(credit.textContent).toContain("isn't made, endorsed or certified");
+    expect(root.lastElementChild!.lastElementChild).toBe(credit);
   });
 
   it("says why there are no posters while Seerr's Cache Images is off, and stops once it is on", async () => {
@@ -840,7 +869,7 @@ describe("Requests in Settings", () => {
     expect(invokeCalls("seerr_connect")[0]!.args).toEqual({ server: "https://seerr.test" });
     expect(invokeCalls("seerr_connect_password")).toEqual([]);
     expect(dialogEl()).toBeNull();
-    expect(lastToast()).toBe("Connected to Requests. Requests is in the sidebar.");
+    expect(lastToast()).toBe("Connected to Requests. Seerr is in the sidebar.");
     expect(rows(b)).toEqual(["Seerr server", "Signed in as", "Connection", "Posters", "Session", "Disconnect"]);
     expect(b.querySelector(".seerr-settings-posters")!.textContent).toBe("On");
   });

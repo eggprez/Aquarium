@@ -80,7 +80,7 @@ the security rules: Quick Connect sign-in with the app's own Jellyfin
 session, no password kept, no admin API key, session in the keychain, cookie
 to one origin, posters through Seerr only). `Aquarium/Aquarium/Views/Seerr/`
 is the screens: a "Not in Your Library" row in Search, a request page per
-title, a Requests section (your requests as one carousel, then Trending /
+title, a Seerr page (called Requests until 2026-11-16; your requests as one carousel, then Trending /
 Popular / Upcoming; a notice when Seerr's Cache Images is off, since Seerr
 then serves no posters), a missing-seasons banner on a show, missing films on a collection
 and on a person, "Like This, Not in Your Library" on a film's, show's,

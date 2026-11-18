@@ -54,7 +54,7 @@ export function openSeerrConnect(onDone: () => void): void {
   };
 
   const finish = (probe: SeerrProbe): void => {
-    toast(`Connected to ${probe.name}. Requests is in the sidebar.`, "ok");
+    toast(`Connected to ${probe.name}. ${seerr.PAGE_TITLE} is in the sidebar.`, "ok");
     close();
     onDone();
   };

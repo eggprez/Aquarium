@@ -100,6 +100,36 @@ final class PhoneRequestsTests: PhoneUITestCase {
         app.element(TestID.Requests.titlePage("movie-603")).waitToExist(30)
     }
 
+    /// Seerr's rows answer after the requests: until each lands it stands as
+    /// a placeholder, so the page says more is coming (it used to show the
+    /// requests alone, the rows appearing later unannounced). The page is
+    /// called Seerr, and its foot credits Seerr and TMDB.
+    func testRowsShowTheyAreLoadingAndThePageCreditsSeerrAndTMDB() throws {
+        try standardOnly()
+        SeerrQA.slowRows(8)
+        defer { SeerrQA.slowRows(0) }
+        launchConnected()
+        let me = try XCTUnwrap(QA.account()).name
+        let made = try XCTUnwrap(SeerrQA.request(as: me, type: "movie", tmdbId: 603))
+
+        moreSection("requests")
+        app.element(TestID.Requests.root).waitToExist(30)
+        app.button(TestID.Requests.row(made)).waitToExist(6)
+        XCTAssertTrue(app.element(TestID.Requests.shelfLoading("trending")).exists, "Trending stands as a placeholder while it loads")
+        XCTAssertFalse(app.element(TestID.Requests.shelf("trending")).exists)
+        XCTAssertTrue(app.navigationBars["Seerr"].exists, "the page is called Seerr")
+        attachScreenshot("seerr rows loading (\(device.rawValue))")
+
+        // Landed: the placeholder gives way to the row.
+        app.element(TestID.Requests.shelf("trending")).waitToExist(30)
+        XCTAssertFalse(app.element(TestID.Requests.shelfLoading("trending")).exists)
+        let credit = app.staticTexts[TestID.Requests.credit].firstMatch
+        app.reveal(credit)
+        XCTAssertTrue(credit.label.contains("Seerr") && credit.label.contains("TMDB"), credit.label)
+        XCTAssertTrue(credit.label.contains("isn't made, endorsed or certified"))
+        attachScreenshot("seerr credit (\(device.rawValue))")
+    }
+
     /// Seerr hands out no posters while its Cache Images is off; the page and
     /// Settings say why instead of showing blank cards with no explanation.
     func testPostersOffIsExplained() throws {

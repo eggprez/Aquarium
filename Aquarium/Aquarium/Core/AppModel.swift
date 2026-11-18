@@ -158,7 +158,7 @@ enum AppSection: Hashable, Identifiable, Sendable, Codable {
         case .library(_, let name, _): name
         case .favorites: "Favorites"
         case .collections: "Collections"
-        case .requests: "Requests"
+        case .requests: RequestsView.title
         case .liveTV: "Live TV"
         case .downloads: "Downloads"
         case .search: "Search"

@@ -195,6 +195,9 @@ for the same Jellyfin server), which the test Mac cannot run.
    in Settings. Turn it on, then pull to refresh Requests or run a new
    search: every poster fills in, your requests' and the search row's (seen 2026-11-16 on a real server: the ones
    already seen stayed blank until this was fixed).
+   Open the Seerr page (Requests until 2026-11-16) on a slow connection:
+   your requests come first and every row below them shows grey
+   placeholders until its posters arrive; the foot credits Seerr and TMDB.
    On a film's, a show's, a season's and an episode's page, under More Like
    This: "Like This, Not in Your Library", from Seerr's recommendations for
    the title (for a season or an episode, its show's); titles already here

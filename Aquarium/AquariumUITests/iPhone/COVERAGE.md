@@ -107,6 +107,7 @@ the other four on the standard phone).
 | Requests in More: your requests as one carousel of named cards with their standing, Trending under it then the other rows, a card opens its page | PhoneRequestsTests.testRequestsSectionShowsWhatWasAskedAndThingsToAskFor | UI, all phones | changed 2026-11-16 |
 | Seerr's Cache Images off: the Requests page and Settings say why there are no posters | PhoneRequestsTests.testPostersOffIsExplained | UI | new 2026-11-16 |
 | Cache Images turned on: posters refused before are asked for again (not left blank for ten minutes) | SeerrClientTests.testPostersOffFollowsCacheImages | unit | new 2026-11-16 |
+| The Seerr page (renamed from Requests): each browse row stands as a placeholder until it lands, asked for beside the requests; the foot credits Seerr and TMDB | PhoneRequestsTests.testRowsShowTheyAreLoadingAndThePageCreditsSeerrAndTMDB | UI | new 2026-11-16 |
 | Cancel a pending request from its page | PhoneRequestsTests.testARequestCanBeCancelled | UI | pass |
 | A film's, a show's and an episode's page end in "Like This, Not in Your Library" from Seerr (an episode asks about its show); a card opens its request page | PhoneRequestsTests.testTitlePagesOfferLikeThisFromSeerr | UI | new 2026-11-16 |
 | Like This: Seerr's recommendations, else its similar titles; a season or an episode is asked about as its show | SeerrClientTests.testLikeThisIsRecommendationsElseSimilarWithKinds, testLikeThisSubjectIsTheShowForSeasonsAndEpisodes | unit | new 2026-11-16 |

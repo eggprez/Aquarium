@@ -14,6 +14,7 @@ Test controls (not part of Seerr):
     POST /__test/reset        forget every request (sessions stay), Cache Images back on
     POST /__test/images/off   Cache Images off: settings say so, /imageproxy answers 404
     POST /__test/images/on    and back on
+    POST /__test/discover/slow?seconds=<n>  every /discover row answers n seconds late (reset: 0)
     POST /__test/expire       forget every session (the apps must sign in again)
     POST /__test/approve/<n>  approve request n
     POST /__test/decline/<n>  decline request n
@@ -102,6 +103,7 @@ class State:
         # Seerr's Settings > General > Cache Images. Off, `/imageproxy`
         # answers 404, as the real server does.
         self.cache_images = True
+        self.discover_delay = 0.0
         self.lock = threading.Lock()
         self.sessions = {}      # cookie -> seerr user id
         self.users = {}         # jellyfin user id -> user dict
@@ -360,6 +362,8 @@ class Handler(BaseHTTPRequestHandler):
                     if term and term in (title.get("title") or title.get("name") or "").lower()]
             return self.send_json(200, page(hits))
         if path.startswith("/discover/"):
+            if state.discover_delay:
+                time.sleep(state.discover_delay)
             kinds = {"movies": "movie", "tv": "tv"}
             part = path.split("/")[2]
             keys = sorted(state.catalogue.keys(), key=lambda k: (k[1] * 7919) % 1009)
@@ -556,7 +560,12 @@ class Handler(BaseHTTPRequestHandler):
             state.requests = []
             state.calls = []
             state.cache_images = True
+            state.discover_delay = 0.0
             state.read_library(force=True)
+            return self.send_json(200, {"status": "ok"})
+        if path == "/__test/discover/slow":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            state.discover_delay = float(query.get("seconds", ["0"])[0])
             return self.send_json(200, {"status": "ok"})
         if path in ("/__test/images/on", "/__test/images/off"):
             state.cache_images = path.endswith("/on")

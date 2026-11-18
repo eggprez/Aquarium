@@ -224,7 +224,7 @@ struct SeerrConnectView: View {
 
     private func finish(_ probe: SeerrProbe) async {
         await seerr.refreshAccount()
-        app.toast("Connected to \(probe.name). Requests is in the \(Self.whereItIs).", tone: .ok)
+        app.toast("Connected to \(probe.name). \(RequestsView.title) is in the \(Self.whereItIs).", tone: .ok)
         dismiss()
     }
 
@@ -336,8 +336,11 @@ struct SeerrSettingsSection: View {
 
 /// The sentences Settings says about Seerr, in one place for every platform.
 enum SeerrCopy {
-    static let offer = "Seerr takes requests for films and shows the library doesn't have yet. Connect one and they can be asked for from Search and from a Requests page."
+    static let offer = "Seerr takes requests for films and shows the library doesn't have yet. Connect one and they can be asked for from Search and from a Seerr page."
     static let postersOffTitle = "No posters from Seerr"
     static let postersOff = "Seerr only shares posters when Cache Images is on. An admin can turn it on in Seerr's Settings, under General. Aquarium doesn't fetch them from the film database directly."
+    /// Seerr's titles are TMDB's; TMDB's terms ask apps that show its data to
+    /// say so and that it doesn't endorse them.
+    static let credit = "Requests and suggestions come from Seerr, the open-source request manager (docs.seerr.dev). Film and show details and posters are from TMDB. Aquarium isn't made, endorsed or certified by Seerr or TMDB."
     static let kept = "Aquarium signed in to Seerr with your Jellyfin account. Only Seerr's session is kept, in the keychain beside your Jellyfin sign-in; no password is stored."
 }

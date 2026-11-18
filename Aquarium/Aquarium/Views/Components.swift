@@ -1684,14 +1684,18 @@ struct SkeletonShelf: View {
     /// Square covers this wide — Music's and Audiobooks' shelves — rather
     /// than posters, so what loads in is the shape that was waiting for it.
     var squareWidth: CGFloat? = nil
+    /// Off under a heading that is already drawn (Seerr's "Your Requests").
+    var heading: Bool = true
     #if os(macOS)
     @State private var shelfWidth: CGFloat = 0
     #endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
-            SkeletonBar(height: 13, width: 140)
-                .padding(.horizontal, Metrics.gutter)
+            if heading {
+                SkeletonBar(height: 13, width: 140)
+                    .padding(.horizontal, Metrics.gutter)
+            }
             HStack(alignment: .top, spacing: Metrics.rowSpacing) {
                 ForEach(0..<cardCount, id: \.self) { _ in
                     SkeletonCard(width: squareWidth ?? cardWidth, wide: wide, square: squareWidth != nil)

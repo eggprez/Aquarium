@@ -755,6 +755,12 @@ export const IMAGE_SIZE = { poster: "w342", posterLarge: "w500", backdrop: "w128
  * posters: the session cookie lives in Rust and never in the webview, so the
  * request carries none.
  */
+/** The page's name: the server it shows, as its makers name it. */
+export const PAGE_TITLE = "Seerr";
+/** Seerr's titles are TMDB's; TMDB's terms ask apps showing its data to say
+ *  so, and that it doesn't endorse them. Same words as the Apple app. */
+export const CREDIT =
+  "Requests and suggestions come from Seerr, the open-source request manager (docs.seerr.dev). Film and show details and posters are from TMDB. Aquarium isn't made, endorsed or certified by Seerr or TMDB.";
 export const POSTERS_OFF_TITLE = "No posters from Seerr";
 export const POSTERS_OFF =
   "Seerr only shares posters when Cache Images is on. An admin can turn it on in Seerr's Settings, under General. Aquarium doesn't fetch them from the film database directly.";
