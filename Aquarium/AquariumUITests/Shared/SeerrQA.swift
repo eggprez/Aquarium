@@ -51,6 +51,9 @@ enum SeerrQA {
     static func expireSessions() { _ = call("POST", "/__test/expire") }
     /// Seerr's Cache Images setting; `require()` turns it back on.
     static func cacheImages(_ on: Bool) { _ = call("POST", "/__test/images/\(on ? "on" : "off")") }
+    /// Every browse row (Trending, Popular…) answers this many seconds late;
+    /// `reset` puts it back to 0.
+    static func slowRows(_ seconds: Int) { _ = call("POST", "/__test/discover/slow?seconds=\(seconds)") }
     static func approve(_ id: Int) { _ = call("POST", "/__test/approve/\(id)") }
     static func decline(_ id: Int) { _ = call("POST", "/__test/decline/\(id)") }
 

@@ -159,6 +159,12 @@ extension TestID {
         static let moreChannels = "player.more.channels"
         static let sharePlayStart = "player.more.sharePlay"
         static let sharePlayLeave = "player.more.sharePlayLeave"
+        /// "Start From Someone's Progress…" in the "…" card while in SharePlay.
+        static let sharePlayProgressAsk = "player.more.sharePlayProgress"
+        /// The question's rows: `beginning`, or a person's name lowercased.
+        static func sharePlayProgressChoice(_ id: String) -> String { "player.shareplay.progress.\(id)" }
+        static let sharePlayProgressKeep = "player.shareplay.progress.keep"
+        static let sharePlayEnd = "player.more.sharePlayEnd"
 
         // MARK: The panel
 

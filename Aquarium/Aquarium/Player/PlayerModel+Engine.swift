@@ -243,10 +243,26 @@ extension PlayerModel {
         Task { await switchEngine(to: .apple, reason: "AirPlay") }
     }
 
-    /// Watch Together is AVPlayer's; the stream goes there first.
+    /// Watch Together is AVPlayer's; the stream goes there first — even with
+    /// Settings set to mpv, which is otherwise what `switchEngine` refuses
+    /// on (setting the override first is what it asks for).
     func prepareForSharePlay() async {
         guard engine?.kind == .mpv else { return }
+        engineOverride = .apple
         await switchEngine(to: .apple, reason: "Watch Together")
+    }
+
+    /// Whether "Watch Together" is offered for what is playing: a server
+    /// title (not a download, not live) that is on AVPlayer or can be handed
+    /// to it. The mpv setting doesn't take it away (`prepareForSharePlay`).
+    var canWatchTogether: Bool {
+        #if os(tvOS)
+        return false
+        #else
+        guard item != nil, !isLocal, !isLive, errorMessage == nil else { return false }
+        if engine?.capabilities.contains(.sharePlay) == true { return true }
+        return engine?.kind == .mpv && fileContainerWithNothingToRemux == nil
+        #endif
     }
 
     /// Picture in Picture ended on a stream that was handed over for it: back

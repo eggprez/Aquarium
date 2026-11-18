@@ -21,14 +21,14 @@ final class TVRequestsTests: TVTestCase {
     func testNoRequestsTabWithoutSeerr() {
         launchHome()
         XCTAssertTrue(focusTabStrip())
-        XCTAssertFalse(tab("requests", title: "Requests").exists)
+        XCTAssertFalse(tab("requests", title: "Seerr").exists)
     }
 
     func testTheRequestsTabListsRequestsAndThingsToAskFor() throws {
         launchConnected()
         let me = try XCTUnwrap(QA.account()).name
         let made = try XCTUnwrap(SeerrQA.request(as: me, type: "movie", tmdbId: 603))
-        openTab("requests", title: "Requests", anchor: TestID.Requests.root)
+        openTab("requests", title: "Seerr", anchor: TestID.Requests.root)
         let row = app.element(TestID.Requests.row(made))
         XCTAssertTrue(row.waitForExistence(timeout: 30))
         XCTAssertTrue(app.element(TestID.Requests.shelf("trending")).waitForExistence(timeout: 30))
@@ -43,7 +43,7 @@ final class TVRequestsTests: TVTestCase {
 
     func testAFilmIsAskedForWithTheRemote() throws {
         launchConnected()
-        openTab("requests", title: "Requests", anchor: TestID.Requests.root)
+        openTab("requests", title: "Seerr", anchor: TestID.Requests.root)
         let card = app.element(TestID.Requests.card("movie-27205"))
         XCTAssertTrue(card.waitForExistence(timeout: 30), "Inception is on a row")
         Remote.press(.down)

@@ -579,7 +579,7 @@ function paintNav(views: any[] | null): void {
   if (collections) add(`#/lib/${collections.Id}`, "Collections", ICONS.collections);
   // Only while a Seerr server is connected (Settings → Requests): without
   // one the page could only say so.
-  if (seerr.isConnected()) add("#/requests", "Requests", ICONS.requests);
+  if (seerr.isConnected()) add("#/requests", seerr.PAGE_TITLE, ICONS.requests);
   // Only servers that actually have a Live TV library get the entry: without a
   // tuner configured, the page can never say anything but "no channels". A
   // custom M3U source doesn't go through the server at all, so it earns the

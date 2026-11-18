@@ -208,7 +208,10 @@ alone; end it with `kill <pid>`, never MPRIS Quit. Look in `~/.local/share/aquar
     name is refused with "That server's certificate couldn't be verified…" and is not retried
     over http. With Quick Connect turned off in Jellyfin's dashboard, the dialog asks for the
     Jellyfin user name and password instead and connects with them.
-26. **Seerr: requesting.** Requests shows Your Requests as one carousel of posters, then
+26. **Seerr: requesting.** The sidebar entry and the page are called Seerr. `curl -X POST
+    '127.0.0.1:8197/__test/discover/slow?seconds=8'`, clear the cache, open it: Your Requests
+    arrives first and every row below stands as a placeholder under its heading until it lands;
+    the foot credits Seerr and TMDB (`…/slow?seconds=0` after). The page shows Your Requests as one carousel of posters, then
     Trending and the other rows of posters (they load through `<seerr>/imageproxy/…`; nothing is
     fetched from `image.tmdb.org`: check with `ss -tp` or the stand-in's `GET /__test/state`
     call list). Seerr serves them only with its Cache Images setting on: `curl -X POST

@@ -462,12 +462,15 @@ extension TestID {
         static let mineError = "requests.mine.error"
         /// "No posters from Seerr": its Cache Images setting is off.
         static let postersOff = "requests.postersOff"
+        static let credit = "requests.credit"
         static let settingsPosters = "settings.requests.posters"
         static func row(_ id: Int) -> String { "requests.row.\(id)" }
         static func rowStatus(_ id: Int) -> String { "requests.row.status.\(id)" }
         /// A shelf of titles from Seerr, by row key ("search", "collection",
         /// "person", or a browse row).
         static func shelf(_ key: String) -> String { "requests.shelf.\(key)" }
+        /// A browse row's placeholder while Seerr hasn't answered for it.
+        static func shelfLoading(_ key: String) -> String { "requests.shelf.loading.\(key)" }
         static func card(_ key: String) -> String { "requests.card.\(key)" }
         static func cardBadge(_ key: String) -> String { "requests.card.badge.\(key)" }
 

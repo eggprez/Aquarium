@@ -92,6 +92,12 @@ Match Frame Rate on the Apple TV first, then off, and run both ways.
 The unit tests cover what the app writes (`TVTopShelfTests`); only a home
 screen shows what the extension draws.
 
+- [ ] On hardware the shelf lives in `<group>/Library/Caches/TopShelf` (writes
+      elsewhere in the group container fail on a real Apple TV; the
+      simulator allows them). After Home loads, check it is there:
+      `xcrun devicectl device info files --device <udid> --domain-type
+      appGroupDataContainer --domain-identifier group.scottai.FellyJin`
+      lists `Library/Caches/TopShelf/nextup.json` and `images/`.
 - [ ] Put Aquarium in the top row. After Home loads once, focusing the icon
       shows "Next Up" with series posters, one per show, with progress bars
       on started episodes.

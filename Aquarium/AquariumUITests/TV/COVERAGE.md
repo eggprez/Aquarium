@@ -198,6 +198,7 @@ The Apple TV has no music UI and keeps no downloads (FEATURE-LIST.md;
 |---|---|---|---|
 | Publish: series posters, manifest, progress, ten at most, failures left out, no re-fetch, prune, ids can't escape the folder, nothing signed out, clear, refresh from Next Up | `TVTopShelfTests` | unit | pass (15) |
 | Snapshot keys the extension decodes; links; URL scheme declared; extension embedded with the right extension point | `TVTopShelfTests` | unit | pass |
+| The shelf is written under the group container's Library/Caches (the only place a real Apple TV allows writes; the root worked only in the simulator, so hardware showed the static image), and the old folder is swept | `TVTopShelfTests.testTheShelfLivesUnderLibraryCachesWhereTVOSAllowsWrites`, `testAPublishSweepsTheOldFolder` | unit | new 2026-11-18 |
 | The extension drawing the shelf on a home screen; Play from a cell | `MANUAL.md` §4 | manual | manual |
 
 ## tvOS-only branches elsewhere, and why some are not tested here

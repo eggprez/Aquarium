@@ -27,15 +27,15 @@ function navRoutes(): string[] {
 describe("Requests in the shell", () => {
   it("has no sidebar entry without a Seerr server", async () => {
     await bootShell();
-    expect(navRoutes().some((r) => r.includes("Requests"))).toBe(false);
+    expect(navRoutes().some((r) => r.includes("Seerr"))).toBe(false);
     expect(navRoutes()).toContain("Favorites #/favorites");
   });
 
   it("has one while a server is connected, after Favorites, and routes to both pages", async () => {
     const shell = await bootShell({ invokes: { seerr_status: { ...CONNECTED } } });
     const routes = navRoutes();
-    expect(routes).toContain("Requests #/requests");
-    expect(routes.indexOf("Requests #/requests")).toBe(routes.indexOf("Favorites #/favorites") + 1);
+    expect(routes).toContain("Seerr #/requests");
+    expect(routes.indexOf("Seerr #/requests")).toBe(routes.indexOf("Favorites #/favorites") + 1);
 
     await shell.go("#/requests");
     expect(page()).toBe("requests");
@@ -48,7 +48,7 @@ describe("Requests in the shell", () => {
 
   it("is not offered while the session has run out", async () => {
     await bootShell({ invokes: { seerr_status: { ...CONNECTED, needs_reconnect: true } } });
-    expect(navRoutes().some((r) => r.includes("Requests"))).toBe(false);
+    expect(navRoutes().some((r) => r.includes("Seerr"))).toBe(false);
   });
 
   it("gains and loses the entry as the connection comes and goes, and redraws a Seerr page", async () => {
@@ -61,7 +61,7 @@ describe("Requests in the shell", () => {
     onInvoke("seerr_status", { ...CONNECTED });
     await seerr.loadStatus();
     await settle();
-    expect(navRoutes()).toContain("Requests #/requests");
+    expect(navRoutes()).toContain("Seerr #/requests");
     expect(shell.views.requests).toHaveBeenCalledTimes(2);
 
     // A detail that isn't the connection itself redraws nothing.
@@ -74,7 +74,7 @@ describe("Requests in the shell", () => {
     onInvoke("seerr_status", { connected: false });
     await seerr.loadStatus();
     await settle();
-    expect(navRoutes().some((r) => r.includes("Requests"))).toBe(false);
+    expect(navRoutes().some((r) => r.includes("Seerr"))).toBe(false);
     expect(shell.views.requests).toHaveBeenCalledTimes(3);
   });
 

@@ -181,7 +181,26 @@ function postersOffNotice(): HTMLElement {
   ]);
 }
 
-function paintRequests(page: HTMLElement, data: RequestsData, mineError: string | null): void {
+/** A browse row whose answer hasn't come: its heading over placeholder
+ *  cards, so the page says more is on its way. */
+function loadingShelf(title: string, key: string): HTMLElement {
+  return el("div", { class: "section request-row-loading", "data-row": key }, [
+    el("div", { class: "section-head" }, [el("h2", {}, [title])]),
+    skeletonRow(),
+  ]);
+}
+
+/** Where the page's titles come from. TMDB's terms ask for its part. */
+function seerrCredit(): HTMLElement {
+  return el("p", { class: "request-note request-credit" }, [seerr.CREDIT]);
+}
+
+function paintRequests(
+  page: HTMLElement,
+  data: RequestsData,
+  mineError: string | null,
+  loading: ReadonlySet<string> = new Set()
+): void {
   clear(page);
   if (seerr.postersOff()) page.append(postersOffNotice());
   const yours = el("div", { class: "section request-mine" }, [
@@ -204,14 +223,19 @@ function paintRequests(page: HTMLElement, data: RequestsData, mineError: string 
   page.append(yours);
   // Trending first (BROWSE_ROWS' order), then the rest.
   for (const row of seerr.BROWSE_ROWS) {
+    if (loading.has(row.key)) {
+      page.append(loadingShelf(row.title, row.key));
+      continue;
+    }
     const shelf = requestShelf(row.title, data.rows[row.key] ?? [], row.key);
     if (shelf) page.append(shelf);
   }
+  page.append(seerrCredit());
 }
 
 export async function renderRequests(root: HTMLElement): Promise<void> {
   clear(root);
-  root.append(el("h1", { class: "page-title" }, ["Requests"]));
+  root.append(el("h1", { class: "page-title" }, [seerr.PAGE_TITLE]));
 
   if (!seerr.isConnected()) {
     const out = seerr.needsReconnect();
@@ -239,9 +263,21 @@ export async function renderRequests(root: HTMLElement): Promise<void> {
         el("div", { class: "section-head" }, [el("h2", {}, ["Your Requests"])]),
       ]),
       skeletonRow(),
-      skeletonRow()
+      ...seerr.BROWSE_ROWS.map((row) => loadingShelf(row.title, row.key))
     );
   }
+
+  // The rows are asked for at once, beside the requests, not after them.
+  const rows: Record<string, SeerrResult[]> = { ...(cached?.rows ?? {}) };
+  const rowsLanded = Promise.all(
+    seerr.BROWSE_ROWS.map(async (row) => {
+      try {
+        rows[row.key] = await seerr.browse(row);
+      } catch {
+        /* the row keeps what it had, or isn't drawn */
+      }
+    })
+  );
 
   let mine = cached?.mine ?? [];
   let mineError: string | null = null;
@@ -278,16 +314,12 @@ export async function renderRequests(root: HTMLElement): Promise<void> {
       }
     })
   );
-  const rows: Record<string, SeerrResult[]> = { ...(cached?.rows ?? {}) };
-  await Promise.all(
-    seerr.BROWSE_ROWS.map(async (row) => {
-      try {
-        rows[row.key] = await seerr.browse(row);
-      } catch {
-        /* the row keeps what it had, or isn't drawn */
-      }
-    })
-  );
+  if (!document.contains(page)) return;
+  // The requests are in before some rows: drawn now, the rows still out
+  // standing as placeholders until they land.
+  const outstanding = new Set(seerr.BROWSE_ROWS.filter((row) => rows[row.key] === undefined).map((row) => row.key));
+  if (!cached && outstanding.size) paintRequests(page, { mine, names, rows: { ...rows } }, mineError, outstanding);
+  await rowsLanded;
   if (!document.contains(page)) return;
 
   // Only the names still asked for are kept.

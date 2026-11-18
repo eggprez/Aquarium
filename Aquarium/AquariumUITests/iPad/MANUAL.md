@@ -137,7 +137,7 @@ What `PadPlaylistTests`, `PadSmartPlaylistTests`, `PadSettingsAccountsTests` and
 
 ## Hardware-only services
 
-AirPlay (no route picker in the simulator), SharePlay in a FaceTime call,
+AirPlay (no route picker in the simulator), SharePlay in a FaceTime call (including "Start from whose progress?", as in the iPhone MANUAL),
 Handoff to and from a Mac or iPhone, Siri and Shortcuts, Control Centre and the
 lock screen's Now Playing (skip and scrub), haptics, and real network loss
 (Wi-Fi off rather than a killed proxy).

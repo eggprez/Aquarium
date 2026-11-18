@@ -51,6 +51,11 @@ enum TestLaunch {
     /// test starts with Requests set up. Skipped when already connected.
     static let seerrEnv = "AQUARIUM_TEST_SEERR"
 
+    /// Environment, "Name:seconds,…": play a title and the SharePlay
+    /// "start from whose progress?" question is asked as if those people
+    /// were on the call (no FaceTime in a simulator). Debug builds only.
+    static let sharePlayProgressEnv = "AQUARIUM_TEST_SHAREPLAY_PROGRESS"
+
     /// `-AquariumTestEngine automatic|apple|mpv`: the player engine
     /// preference, as Settings would set it (iPhone, iPad, Mac, Apple TV).
     /// The engine policy still has the last word where it pins one (iPad).

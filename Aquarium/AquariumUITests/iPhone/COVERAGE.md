@@ -107,6 +107,7 @@ the other four on the standard phone).
 | Requests in More: your requests as one carousel of named cards with their standing, Trending under it then the other rows, a card opens its page | PhoneRequestsTests.testRequestsSectionShowsWhatWasAskedAndThingsToAskFor | UI, all phones | changed 2026-11-16 |
 | Seerr's Cache Images off: the Requests page and Settings say why there are no posters | PhoneRequestsTests.testPostersOffIsExplained | UI | new 2026-11-16 |
 | Cache Images turned on: posters refused before are asked for again (not left blank for ten minutes) | SeerrClientTests.testPostersOffFollowsCacheImages | unit | new 2026-11-16 |
+| The Seerr page (renamed from Requests): each browse row stands as a placeholder until it lands, asked for beside the requests; the foot credits Seerr and TMDB | PhoneRequestsTests.testRowsShowTheyAreLoadingAndThePageCreditsSeerrAndTMDB | UI | new 2026-11-16 |
 | Cancel a pending request from its page | PhoneRequestsTests.testARequestCanBeCancelled | UI | pass |
 | A film's, a show's and an episode's page end in "Like This, Not in Your Library" from Seerr (an episode asks about its show); a card opens its request page | PhoneRequestsTests.testTitlePagesOfferLikeThisFromSeerr | UI | new 2026-11-16 |
 | Like This: Seerr's recommendations, else its similar titles; a season or an episode is asked about as its show | SeerrClientTests.testLikeThisIsRecommendationsElseSimilarWithKinds, testLikeThisSubjectIsTheShowForSeasonsAndEpisodes | unit | new 2026-11-16 |
@@ -238,6 +239,9 @@ the other four on the standard phone).
 | Portrait controls fit; landscape cards | testPortraitControlsFitTheScreen, testLandscapeCardsSitBetweenTitleAndPills | UI, layout | pass (17, SE, Pro Max) / pass (17, SE, Pro Max, Duo) (R-74e72e9) |
 | Chapters | — | none | no chapter list on the phone's More card; chapters show in the fold panel (Duo, manual) and Info |
 | SharePlay | — | manual | needs a FaceTime call |
+| SharePlay "Start from whose progress?": the rows (you first, then by name, each once, spots under 30 s left out, the beginning) and what each device sends | SharePlayProgressTests | unit | new 2026-11-18 |
+| The question on the player, and the pick moves playback there (made-up friends via AQUARIUM_TEST_SHAREPLAY_PROGRESS) | PhoneSharePlayTests.testWhoseProgressIsAskedAndThePickIsWherePlayGoes | UI | new 2026-11-18 |
+| SharePlay fixes: streams matched by the item id in the address, the poster kept off the wire, no app-only fallback link, the invitation's picture, "X paused / jumped to" and the can't-open message | SharePlayProgressTests | unit | new 2026-11-18 |
 
 ## Music and audiobooks (PhoneMusicTests, PhoneAudiobookTests)
 

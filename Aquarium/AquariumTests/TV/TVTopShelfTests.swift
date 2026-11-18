@@ -279,6 +279,28 @@ final class TVTopShelfTests: TVUnitTestCase {
         XCTAssertTrue(AppModel.linkSchemes.contains("fellyjin"), "shelves written before the rename")
     }
 
+    /// A real Apple TV lets an app write only under Library/Caches, in the
+    /// group container as everywhere else; the simulator allows more. The
+    /// shelf was written to `<group>/TopShelf`, which works here and failed
+    /// on hardware, so the home screen only ever showed the static image.
+    func testTheShelfLivesUnderLibraryCachesWhereTVOSAllowsWrites() throws {
+        let container = try XCTUnwrap(FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: TopShelfPaths.appGroup))
+        let caches = container.appendingPathComponent("Library/Caches", isDirectory: true).standardizedFileURL.path
+        for url in [directory!, manifest!, images!] {
+            XCTAssertTrue(url.standardizedFileURL.path.hasPrefix(caches + "/"), "\(url.path) is outside Library/Caches")
+        }
+    }
+
+    /// The old folder at the container's root goes once a shelf is written.
+    func testAPublishSweepsTheOldFolder() async throws {
+        let old = try XCTUnwrap(TopShelfPaths.legacyDirectory)
+        try FileManager.default.createDirectory(at: old, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: old.appendingPathComponent("nextup.json"))
+        await TopShelf.publish([])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: manifest.path))
+    }
+
     func testTheAppDeclaresTheSchemeTheShelfLinksUse() throws {
         let types = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? []
         let schemes = types.flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }

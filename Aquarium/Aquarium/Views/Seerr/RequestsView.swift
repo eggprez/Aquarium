@@ -1,6 +1,10 @@
-//  The Requests section: one carousel of what this account has asked for and
-//  how far each request has got, then rows of things worth asking for,
-//  Trending first.
+//  The Seerr page: one carousel of what this account has asked for and how
+//  far each request has got, then rows of things worth asking for, Trending
+//  first, and a line crediting Seerr and TMDB at the foot.
+//
+//  Every row stands as a placeholder until its answer lands. They are asked
+//  for at once, beside the requests, so the rows below no longer appear one
+//  by one, unannounced, after the carousel.
 
 import SwiftUI
 
@@ -13,6 +17,8 @@ struct RequestsView: View {
     /// by the client).
     @State private var names: [Int: SeerrTitle] = [:]
     @State private var rows: [SeerrClient.BrowseRow: [SeerrResult]] = [:]
+    /// Rows Seerr couldn't give: drawn as nothing rather than waiting forever.
+    @State private var failedRows: Set<SeerrClient.BrowseRow> = []
     @State private var isLoading = true
     @State private var error: String?
 
@@ -22,7 +28,7 @@ struct RequestsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 #if os(tvOS)
-                PageHeading(title: "Requests")
+                PageHeading(title: Self.title)
                 #endif
                 if !seerr.isConnected {
                     EmptyState(
@@ -37,8 +43,14 @@ struct RequestsView: View {
                     if seerr.postersOff { postersOffNotice }
                     yours
                     ForEach(SeerrClient.BrowseRow.allCases) { row in
-                        RequestShelf(title: row.title, results: rows[row] ?? [], key: row.rawValue)
+                        if let results = rows[row] {
+                            RequestShelf(title: row.title, results: results, key: row.rawValue)
+                        } else if !failedRows.contains(row) {
+                            SkeletonShelf()
+                                .testAnchor(TestID.Requests.shelfLoading(row.rawValue))
+                        }
                     }
+                    SeerrCredit()
                 }
             }
             .padding(.top, 12)
@@ -46,7 +58,7 @@ struct RequestsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .focusOnArrival()
-        .screenTitle("Requests")
+        .screenTitle(Self.title)
         .paletteBar()
         // Asked again whenever a request is made or withdrawn anywhere.
         .task(id: seerr.requestsChanged) { await load() }
@@ -69,7 +81,7 @@ struct RequestsView: View {
                 .accessibilityAddTraits(.isHeader)
                 .padding(.horizontal, Metrics.gutter)
             if isLoading, mine.isEmpty {
-                SkeletonList(count: 1)
+                SkeletonShelf(heading: false)
             } else if let error, mine.isEmpty {
                 Text(error)
                     .font(.subheadline)
@@ -152,10 +164,15 @@ struct RequestsView: View {
 
     // MARK: - Loading
 
+    /// The page's name: the server it shows, named as its makers name it.
+    static let title = "Seerr"
+
     private func load() async {
         guard seerr.isConnected else { return }
         isLoading = true
         defer { isLoading = false }
+        // The rows don't wait on the requests: both are asked for at once.
+        async let browsed: Void = loadRows()
         // Picks up Cache Images being turned on (or off) since the last look.
         await seerr.refreshAccount()
         do {
@@ -169,17 +186,57 @@ struct RequestsView: View {
             guard !Task.isCancelled else { return }
             self.error = error.localizedDescription
         }
-        for request in mine where names[request.id] == nil {
-            guard let kind = request.kind, let tmdbId = request.media?.tmdbId else { continue }
-            if let title = try? await seerr.title(kind, tmdbId: tmdbId) { names[request.id] = title }
-            if Task.isCancelled { return }
+        await loadNames()
+        await browsed
+    }
+
+    /// Each request's name and poster, all asked for together.
+    private func loadNames() async {
+        let wanted = mine.compactMap { request -> (Int, SeerrMediaKind, Int)? in
+            guard names[request.id] == nil, let kind = request.kind, let tmdbId = request.media?.tmdbId else { return nil }
+            return (request.id, kind, tmdbId)
         }
-        for row in SeerrClient.BrowseRow.allCases where rows[row] == nil {
-            if let page = try? await seerr.browse(row) {
-                rows[row] = (page.results ?? []).filter { $0.kind != nil }
+        await withTaskGroup(of: (Int, SeerrTitle?).self) { group in
+            for (id, kind, tmdbId) in wanted {
+                group.addTask { (id, try? await SeerrClient.shared.title(kind, tmdbId: tmdbId)) }
             }
-            if Task.isCancelled { return }
+            for await (id, title) in group where !Task.isCancelled {
+                if let title { names[id] = title }
+            }
         }
+    }
+
+    /// The rows not yet here (or that failed last time), all asked for
+    /// together; each replaces its placeholder as it lands.
+    private func loadRows() async {
+        let wanted = SeerrClient.BrowseRow.allCases.filter { rows[$0] == nil }
+        failedRows.subtract(wanted)
+        await withTaskGroup(of: (SeerrClient.BrowseRow, SeerrPage?).self) { group in
+            for row in wanted {
+                group.addTask { (row, try? await SeerrClient.shared.browse(row)) }
+            }
+            for await (row, page) in group {
+                if let page {
+                    rows[row] = (page.results ?? []).filter { $0.kind != nil }
+                } else if !Task.isCancelled {
+                    failedRows.insert(row)
+                }
+            }
+        }
+    }
+}
+
+/// Where this page's titles come from. Seerr is the server answering; its
+/// films, shows and posters are TMDB's, whose terms ask for this line.
+struct SeerrCredit: View {
+    var body: some View {
+        Text(SeerrCopy.credit)
+            .font(.caption)
+            .foregroundStyle(Theme.textDim)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, Metrics.gutter)
+            .padding(.top, 8)
+            .accessibilityIdentifier(TestID.Requests.credit)
     }
 }
 
