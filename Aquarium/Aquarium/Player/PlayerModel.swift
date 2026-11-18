@@ -859,7 +859,11 @@ final class PlayerModel {
     /// closing reports would be sent with the new account's token.
     @discardableResult
     func stop(reason: String = "stop", tellServer: Bool = true) -> Task<Void, Never> {
-        Task { await finish(userRequested: true, reason: reason, tellServer: tellServer) }
+        #if !os(tvOS)
+        // Closing the player is leaving Watch Together.
+        SharePlayCoordinator.shared.playerClosed()
+        #endif
+        return Task { await finish(userRequested: true, reason: reason, tellServer: tellServer) }
     }
 
     /// `generation`, for a caller outside that has to act on the stream it saw

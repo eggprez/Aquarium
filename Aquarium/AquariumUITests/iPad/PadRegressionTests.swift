@@ -166,7 +166,8 @@ final class PadRegressionTests: PadUITestCase {
 
     /// QA 2026-11-11 B4, fixed 5a0e2d7: "Toasts are drawn over the player on
     /// iPhone and iPad. They were under it." Watch Together with no FaceTime
-    /// call says "Start a FaceTime call first".
+    /// call opens Apple's SharePlay sheet; a simulator has no FaceTime, so it
+    /// closes at once and the player says SharePlay didn't start.
     func testPlayerMessagesShowOverThePlayer() throws {
         let film = try fx.item("film.hevc_mp4")
         launchHome()
@@ -177,7 +178,8 @@ final class PadRegressionTests: PadUITestCase {
         try XCTSkipUnless(reveal(together, in: app.element(TestID.Player.cardMore)), "no Watch Together row")
         together.padTap()
         let toast = app.element(TestID.Shell.toastText)
-        XCTAssertTrue(toast.waitForExistence(timeout: 10), "the player's message is seen")
+        XCTAssertTrue(toast.waitForExistence(timeout: 15), "the player's message is seen")
+        XCTAssertTrue(toast.label.hasPrefix("SharePlay didn"), toast.label)
         XCTAssertTrue(player.exists)
         attachScreenshot("toast over player")
     }

@@ -239,6 +239,9 @@ the other four on the standard phone).
 | Portrait controls fit; landscape cards | testPortraitControlsFitTheScreen, testLandscapeCardsSitBetweenTitleAndPills | UI, layout | pass (17, SE, Pro Max) / pass (17, SE, Pro Max, Duo) (R-74e72e9) |
 | Chapters | — | none | no chapter list on the phone's More card; chapters show in the fold panel (Duo, manual) and Info |
 | SharePlay | — | manual | needs a FaceTime call |
+| SharePlay "Start from whose progress?": the rows (you first, then by name, each once, spots under 30 s left out, the beginning) and what each device sends | SharePlayProgressTests | unit | new 2026-11-18 |
+| The question on the player, and the pick moves playback there (made-up friends via AQUARIUM_TEST_SHAREPLAY_PROGRESS) | PhoneSharePlayTests.testWhoseProgressIsAskedAndThePickIsWherePlayGoes | UI | new 2026-11-18 |
+| SharePlay fixes: streams matched by the item id in the address, the poster kept off the wire, no app-only fallback link, the invitation's picture, "X paused / jumped to" and the can't-open message | SharePlayProgressTests | unit | new 2026-11-18 |
 
 ## Music and audiobooks (PhoneMusicTests, PhoneAudiobookTests)
 

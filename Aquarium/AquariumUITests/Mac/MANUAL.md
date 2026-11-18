@@ -42,6 +42,7 @@ Before starting: `python3 -I suite-reset.py suite-mac` in the QA folder.
 | N3 | Picture in Picture from the Playback menu (P) on AVFoundation, and on mpv (hand-over to AVPlayer). | A floating picture; the player window is put away, not black. Clicking the sidebar's Now Playing strip during PiP does nothing (commit 430f7d6); the PiP window's own button brings the player back. |
 | N4 | AirPlay to an Apple TV from the player. | Picture moves; the Mac's window shows the AirPlay placeholder. |
 | N5 | SharePlay: "Watch Together with SharePlay" in a FaceTime call. | The session starts; the other side follows play/pause. |
+| N5b | SharePlay with the other person part-way through the same film on their own account. | They join at your spot; you are asked "Start from whose progress?"; Playback › Start From Someone's Progress… asks again. |
 | N6 | Handoff: start a film on the Mac, look at an iPhone's app switcher. | The Aquarium Handoff banner; opening it resumes at the Mac's position. |
 | N7 | Spotlight: search for a title Home has shown. | It is listed; choosing it opens the title page. (Test mode does not write Spotlight, so only a normal launch shows this.) |
 

@@ -519,17 +519,31 @@ private struct MoreMenu: View {
         }
 
         #if !os(tvOS)
-        if let item = player.item, !player.isLocal, !player.isLive,
-           player.engine?.capabilities.contains(.sharePlay) == true || player.canSwitchEngine(to: .apple) {
+        if let item = player.item, player.canWatchTogether || SharePlayCoordinator.shared.isActive {
             let shareplay = SharePlayCoordinator.shared
             PanelHeading(text: "Watch Together")
             if shareplay.isActive {
+                if !shareplay.progressChoices.isEmpty {
+                    PanelRow(title: "Start From Someone’s Progress…",
+                             detail: "Everyone jumps to the spot you pick") {
+                        onInteract()
+                        close()
+                        shareplay.askAgain()
+                    }
+                    .accessibilityIdentifier(TestID.Player.sharePlayProgressAsk)
+                }
                 PanelRow(title: "Leave SharePlay", isSelected: true) {
                     onInteract()
                     shareplay.leave()
                     close()
                 }
                 .accessibilityIdentifier(TestID.Player.sharePlayLeave)
+                PanelRow(title: "End SharePlay for Everyone") {
+                    onInteract()
+                    shareplay.endForEveryone()
+                    close()
+                }
+                .accessibilityIdentifier(TestID.Player.sharePlayEnd)
             } else {
                 // On mpv the stream is handed to AVPlayer first, whose player
                 // the session coordinates.

@@ -97,3 +97,37 @@ season's and episode's page, and Settings → Account → Requests. Linux: `Linu
   a problem with a title, a Home row of requests, notifications, the Watch.
 - Apple TV: after Request is pressed, focus goes to the tab strip instead of
   Cancel Request.
+
+## Watching together
+
+### SharePlay: start from whose progress
+
+**Wanted:** on a SharePlay call where each person has their own account
+(same Jellyfin server or not), a question asking whose saved spot everyone
+starts from.
+
+**Built 2026-11-18**, iPhone, iPad and Mac (`Aquarium/Aquarium/Core/SharePlay.swift`,
+the alert in `Player/PlayerScreen.swift`, rows in `Player/Chrome/PlayerMenus.swift`
+and `Player/PlayerMacMenus.swift`). Each device sends its account's saved
+spot (`SharedProgress`) over the session; the person who put the title on is
+asked "Start from whose progress?" (you, each friend with a spot, From the
+Beginning); the pick is a seek, which the coordinator makes everyone's.
+"…" → Start From Someone's Progress… asks again. A device that joins now
+opens at the start and is placed by the coordinator, instead of seeking to
+its own spot (which would have moved everyone).
+
+**To do:**
+
+- Try it on a real FaceTime call (iPhone MANUAL.md); no simulator can.
+- Fixed the same day: "Start Only for Me" no longer shows an error; no
+  `aquarium://` fallback link (the App Store is offered instead); the
+  invitation carries the poster; streams are matched by the item id in the
+  address (no main-actor read, which could trap); a joiner whose server or
+  account can't open the title is told and leaves; an mpv joiner switches
+  engine even with Settings set to mpv, and only for the session's title;
+  closing the player leaves SharePlay; End SharePlay for Everyone; "Alex
+  paused / played / jumped to 23:10" toasts; with no call on, iPhone and iPad
+  open the system's SharePlay sheet to start one.
+- Still not built: SharePlay on the Apple TV (its player is mpv, which
+  would need an `AVDelegatingPlaybackCoordinator`).
+- Linux: no SharePlay (Apple only).

@@ -213,6 +213,7 @@ struct PlayerScreen: View {
         .modifier(PlayerScreenLifecycle())
         #if !os(tvOS)
         .modifier(StreamSwitchPrompt())
+        .modifier(SharePlayProgressPrompt())
         #endif
         #if os(iOS)
         // The status bar comes and goes with the controls, as in Apple's
@@ -442,6 +443,36 @@ private struct StreamSwitchPrompt: ViewModifier {
         case .audio(let option): "“\(option.label)”"
         case .subtitle(let option): "“\(option.label)”"
         case .quality: "That quality"
+        }
+    }
+}
+#endif
+
+// MARK: - SharePlay: whose progress
+
+#if !os(tvOS)
+/// "Start from whose progress?" — asked of the person who put a title on in
+/// SharePlay, once the others' saved spots are in (see `SharePlayCoordinator`).
+/// Each row is a person and their spot, then the beginning; the pick is a
+/// seek, and on a coordinated player a seek moves everyone.
+private struct SharePlayProgressPrompt: ViewModifier {
+    func body(content: Content) -> some View {
+        let shareplay = SharePlayCoordinator.shared
+        let asking = Binding(
+            get: { shareplay.progressQuestion != nil },
+            set: { if !$0 { shareplay.progressQuestion = nil } })
+        content.alert(
+            "Start from whose progress?",
+            isPresented: asking, presenting: shareplay.progressQuestion
+        ) { choices in
+            ForEach(choices) { choice in
+                Button(choice.title) { shareplay.choose(choice) }
+                    .accessibilityIdentifier(TestID.Player.sharePlayProgressChoice(choice.id))
+            }
+            Button("Keep Watching Here", role: .cancel) {}
+                .accessibilityIdentifier(TestID.Player.sharePlayProgressKeep)
+        } message: { _ in
+            Text("Everyone in SharePlay jumps to the spot you pick.")
         }
     }
 }

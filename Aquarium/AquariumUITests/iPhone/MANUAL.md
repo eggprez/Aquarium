@@ -147,7 +147,23 @@ The suite unit-tests the snapshot and state the extensions read
 - Downloads separated by account [R-18P10, low confidence].
 - mpv on a private-CA HTTPS server fails (by design, memory
   `mpv-tls-verification`); on a public certificate it plays.
-- SharePlay "Watch Together" with a FaceTime call.
+- SharePlay "Watch Together" with a FaceTime call (two Apple IDs, two
+  devices; two accounts on the same Jellyfin server is the common case).
+  Both of you start the same film on your own and stop part-way at
+  different spots. Then: you start it, "…" → Watch Together; the other
+  joins. Expect them to open at the start and land where you are (not at
+  their own spot, and you are not pulled to theirs); a moment later you
+  are asked "Start from whose progress?" with you, them and From the
+  Beginning; picking theirs moves both phones there. "…" → Start From
+  Someone's Progress… asks again. The joiner is never asked.
+  Also on that call: their pause shows "<name> paused" on yours, a seek
+  "<name> jumped to 12:34"; "…" → End SharePlay for Everyone ends it on both;
+  closing the player leaves SharePlay. "Start Only for Me" plays on with no
+  error. With no call on, Watch Together opens the system SharePlay sheet
+  (pick a contact; FaceTime starts with the title offered; the invitation
+  shows the poster). A friend on another server, or whose account can't see
+  the title, is told so and leaves. Someone without Aquarium is offered it
+  in the App Store.
 
 ## What the 2026-11-14 logic tests could not reach
 

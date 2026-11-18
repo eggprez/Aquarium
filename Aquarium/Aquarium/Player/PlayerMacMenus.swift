@@ -319,10 +319,15 @@ struct PlayerMenuItems: View {
 
         // The same film on everyone's screen — see Core/SharePlay.swift.
         if SharePlayCoordinator.shared.isActive {
+            if !SharePlayCoordinator.shared.progressChoices.isEmpty {
+                Button("Start From Someone’s Progress…") { SharePlayCoordinator.shared.askAgain() }
+                    .accessibilityIdentifier(TestID.Player.sharePlayProgressAsk)
+            }
             Button("Leave SharePlay") { SharePlayCoordinator.shared.leave() }
                 .accessibilityIdentifier(TestID.Player.menuSharePlayLeave)
-        } else if let item = player.item, !player.isLocal, !player.isLive,
-                  player.engine?.capabilities.contains(.sharePlay) == true || player.canSwitchEngine(to: .apple) {
+            Button("End SharePlay for Everyone") { SharePlayCoordinator.shared.endForEveryone() }
+                .accessibilityIdentifier(TestID.Player.sharePlayEnd)
+        } else if let item = player.item, player.canWatchTogether {
             // On mpv the stream is handed to AVPlayer first, whose player
             // the session coordinates.
             Button("Watch Together with SharePlay") {

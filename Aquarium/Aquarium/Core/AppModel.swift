@@ -1274,7 +1274,7 @@ final class AppModel {
     /// Start something by id — from a link, a Siri request, a Handoff. A
     /// show plays its first unwatched episode, the way Home's hero does; an
     /// id the server no longer has lands on the title page's own error.
-    func play(itemId id: String, at seconds: Double? = nil) async {
+    func play(itemId id: String, at seconds: Double? = nil, resume: Bool = true) async {
         guard client.isSignedIn else { return }
         // These arrive as the app comes to the front, and coming to the front
         // is what resets the URL session — a request in flight at that moment
@@ -1291,6 +1291,7 @@ final class AppModel {
             item = first
         }
         var options = StreamOptions()
+        options.resume = resume
         if let seconds, seconds > 1 { options.startSeconds = seconds }
         await PlayerModel.shared.play(item: item, options: options)
     }

@@ -45,10 +45,29 @@ enum TopShelfPaths {
     /// Registered under the pre-Aquarium name; it moves only with the bundle id.
     static let appGroup = "group.scottai.FellyJin"
 
+    /// `<group>/Library/Caches/TopShelf`. On a real Apple TV that is the only
+    /// place in the group container an app may write: tvOS keeps nothing
+    /// outside Caches, and a write anywhere else fails. The simulator allows
+    /// it, which is how the shelf shipped writing to `<group>/TopShelf` and
+    /// showing only the static image on hardware (found on the Home Theater
+    /// Apple TV, 2026-11-18: its group container held no TopShelf folder).
+    /// Caches can be purged under storage pressure; the app writes the shelf
+    /// again on every Home load and after playback.
     static var directory: URL? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: appGroup)?
+        container?
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Caches", isDirectory: true)
             .appendingPathComponent("TopShelf", isDirectory: true)
+    }
+
+    /// Where builds before 2026-11-18 wrote the shelf (only ever worked in the
+    /// simulator). Swept by the app so it doesn't linger there.
+    static var legacyDirectory: URL? {
+        container?.appendingPathComponent("TopShelf", isDirectory: true)
+    }
+
+    private static var container: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)
     }
 
     static var manifest: URL? { directory?.appendingPathComponent("nextup.json") }
