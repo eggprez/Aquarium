@@ -963,11 +963,15 @@ describe("Requests in Settings", () => {
 
   it("shows where it is connected, as whom, how, and where the session is kept", async () => {
     const b = await block();
-    expect(rows(b)).toEqual(["Seerr server", "Signed in as", "Connection", "Session", "Disconnect"]);
+    // Posters joined on 2026-11-16 (73c3c92): says when Seerr's Cache Images
+    // is off, which leaves every poster blank.
+    expect(rows(b)).toEqual(["Seerr server", "Signed in as", "Connection", "Posters", "Session", "Disconnect"]);
     expect(b.querySelector(".seerr-settings-server")!.textContent).toBe("seerr.test");
     expect(b.querySelector(".seerr-settings-user")!.textContent).toBe("Ann");
     expect(b.querySelector(".seerr-settings-connection")!.textContent).toBe("HTTPS");
     expect(b.querySelector(".seerr-settings-connection")!.classList.contains("ok")).toBe(true);
+    expect(b.querySelector(".seerr-settings-posters")!.textContent).toBe("On");
+    expect(b.querySelector(".seerr-settings-posters")!.classList.contains("ok")).toBe(true);
     expect(b.querySelector(".seerr-settings-session")!.textContent).toBe("Keyring");
     expect(b.textContent).toContain("Only Seerr's session is kept, in the keyring beside your Jellyfin sign-in; no password is stored.");
   });
