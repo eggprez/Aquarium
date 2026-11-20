@@ -213,8 +213,9 @@ struct PlayerScreen: View {
         .modifier(PlayerScreenLifecycle())
         #if !os(tvOS)
         .modifier(StreamSwitchPrompt())
-        .modifier(SharePlayProgressPrompt())
         #endif
+        .modifier(SharePlayProgressPrompt())
+        .modifier(SyncPlayPrompt(whilePlaying: true))
         #if os(iOS)
         // The status bar comes and goes with the controls, as in Apple's
         // player; the home indicator dims on its own over a full-screen video.
@@ -450,7 +451,6 @@ private struct StreamSwitchPrompt: ViewModifier {
 
 // MARK: - SharePlay: whose progress
 
-#if !os(tvOS)
 /// "Start from whose progress?" — asked of the person who put a title on in
 /// SharePlay, once the others' saved spots are in (see `SharePlayCoordinator`).
 /// Each row is a person and their spot, then the beginning; the pick is a
@@ -461,6 +461,34 @@ private struct SharePlayProgressPrompt: ViewModifier {
         let asking = Binding(
             get: { shareplay.progressQuestion != nil },
             set: { if !$0 { shareplay.progressQuestion = nil } })
+        #if os(macOS)
+        // A Mac alert shows three buttons at most and drops the rest, so with
+        // you, a friend and the beginning "Keep Watching Here" was gone and
+        // there was no visible way to decline (2026-11-19). A sheet holds
+        // every row.
+        content.sheet(isPresented: asking) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Start from whose progress?").font(.headline)
+                Text("Everyone in SharePlay jumps to the spot you pick.")
+                    .font(.callout).foregroundStyle(.secondary)
+                ForEach(shareplay.progressQuestion ?? []) { choice in
+                    Button { shareplay.choose(choice) } label: {
+                        Text(choice.title).frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.large)
+                    .accessibilityIdentifier(TestID.Player.sharePlayProgressChoice(choice.id))
+                }
+                Button { shareplay.progressQuestion = nil } label: {
+                    Text("Keep Watching Here").frame(maxWidth: .infinity)
+                }
+                .controlSize(.large)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityIdentifier(TestID.Player.sharePlayProgressKeep)
+            }
+            .padding(20)
+            .frame(width: 300)
+        }
+        #else
         content.alert(
             "Start from whose progress?",
             isPresented: asking, presenting: shareplay.progressQuestion
@@ -474,6 +502,6 @@ private struct SharePlayProgressPrompt: ViewModifier {
         } message: { _ in
             Text("Everyone in SharePlay jumps to the spot you pick.")
         }
+        #endif
     }
 }
-#endif

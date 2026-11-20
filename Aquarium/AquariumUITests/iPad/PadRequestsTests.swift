@@ -41,6 +41,30 @@ final class PadRequestsTests: PadUITestCase {
         attachScreenshot("requests")
     }
 
+    /// Seerr's rows answer after the requests: until each lands it stands as
+    /// a placeholder, so the page says more is coming. The page is called
+    /// Seerr, and its foot credits Seerr and TMDB.
+    func testRowsShowTheyAreLoadingAndThePageCreditsSeerrAndTMDB() throws {
+        SeerrQA.slowRows(8)
+        defer { SeerrQA.slowRows(0) }
+        launchConnected()
+        showSection("requests")
+        app.element(TestID.Requests.root).waitToExist(30)
+        XCTAssertTrue(app.element(TestID.Requests.shelfLoading("trending")).waitForExistence(timeout: 6),
+                      "Trending stands as a placeholder while it loads")
+        XCTAssertFalse(app.element(TestID.Requests.shelf("trending")).exists)
+        XCTAssertTrue(app.navigationBars["Seerr"].exists || app.staticTexts["Seerr"].exists, "the page is called Seerr")
+        attachScreenshot("seerr rows loading")
+
+        app.element(TestID.Requests.shelf("trending")).waitToExist(30)
+        XCTAssertFalse(app.element(TestID.Requests.shelfLoading("trending")).exists)
+        let credit = app.staticTexts[TestID.Requests.credit].firstMatch
+        _ = reveal(credit)
+        XCTAssertTrue(credit.label.contains("Seerr") && credit.label.contains("TMDB"), credit.label)
+        XCTAssertTrue(credit.label.contains("isn't made, endorsed or certified"))
+        attachScreenshot("seerr credit")
+    }
+
     func testSearchOffersARequestAndThePageMakesIt() throws {
         launchConnected()
         search("Inception")

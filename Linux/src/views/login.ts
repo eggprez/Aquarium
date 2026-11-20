@@ -1,5 +1,5 @@
 import * as api from "../api";
-import { el, clear, toast } from "../ui";
+import { el, clear, toast, wordmark } from "../ui";
 
 export interface LoginOptions {
   /** Signing in to another account while one is still in use (Settings →
@@ -43,7 +43,7 @@ export function renderLogin(root: HTMLElement, onSuccess: () => void, opts: Logi
   const brand = (): HTMLElement =>
     el("div", { class: "login-brand" }, [
       el("img", { src: "/aquarium-logo.svg", alt: "", width: "56", height: "56" }),
-      el("span", { class: "wordmark" }, [el("span", {}, ["Aqua"]), el("b", {}, ["rium"])]),
+      wordmark(),
     ]);
 
   const hint = (): HTMLElement =>

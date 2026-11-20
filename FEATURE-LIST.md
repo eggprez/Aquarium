@@ -128,6 +128,119 @@ its own spot (which would have moved everyone).
   closing the player leaves SharePlay; End SharePlay for Everyone; "Alex
   paused / played / jumped to 23:10" toasts; with no call on, iPhone and iPad
   open the system's SharePlay sheet to start one.
-- Still not built: SharePlay on the Apple TV (its player is mpv, which
-  would need an `AVDelegatingPlaybackCoordinator`).
 - Linux: no SharePlay (Apple only).
+
+### SharePlay on the Apple TV
+
+**Wanted:** SharePlay on the Apple TV as well.
+
+**Built 2026-11-18** (`Core/SharePlay.swift`, the part at the end;
+`Player/PlayerModel+Group.swift`; `Aquarium-tvOS.entitlements`). The Apple
+TV's player is mpv, so its session is joined through an
+`AVDelegatingPlaybackCoordinator`: the coordinator's orders (play from here
+at this moment, pause, seek) are carried out on mpv, and the remote's
+play/pause and jumps are asked of the coordinator. Swipe down in the player
+→ Watch Together tab. An Apple TV and an iPhone can be in the same session.
+
+**To do:**
+
+- Never run in a real session: no simulator has FaceTime. Check on the Apple
+  TV with a call on it, or one moved to it from an iPhone (TV MANUAL.md).
+  What SyncPlay shares with it (the player's group seam) is tested.
+- The Apple TV has no system sheet to start a call from: with no call on it
+  says to start one first.
+
+### "TV shows don't have SharePlay" (reported 2026-11-18)
+
+**Fixed 2026-11-18**, two causes found:
+
+- Watch Together was last in the "…" card, under Speed, Sleep timer and
+  After this. An episode is the title with all three, so on a phone held
+  sideways it was below the fold. It is first in the card now.
+- An episode that is downloaded plays from the download, and Watch Together
+  was never offered on a download. It is now: choosing it leaves the
+  download for the server's stream at the same moment. A device joining a
+  session also opens the server's stream rather than its own download,
+  which the coordinator could not match to anyone else's.
+
+**To do:** confirm on the phone which of the two it was.
+
+### SyncPlay (Jellyfin's own watch-together)
+
+**Wanted:** the Jellyfin equivalent, under SharePlay, on iOS and tvOS.
+
+**Built 2026-11-18**, iPhone, iPad, Mac ("…" card) and Apple TV (Watch
+Together tab): `Core/SyncPlay.swift`, `Core/SyncPlayWire.swift`,
+`Player/Chrome/WatchTogether.swift`, `Player/PlayerModel+Group.swift`.
+"Watch Together with SyncPlay" asks which of the server's groups to join, or
+starts one named for you with what is playing put on. Everyone in the group
+is on the same server; pause, play and jumps are everyone's; a device that
+runs dry holds the rest; the next thing anyone plays is put on for the
+group. No FaceTime call, and it works with people in a browser or another
+Jellyfin client. Settings has a SyncPlay row (Account page on the Apple TV)
+for joining with nothing playing. One of SharePlay and SyncPlay at a time.
+
+**To do:**
+
+- Tested against the QA server with a scripted second person
+  (`PhoneSyncPlayTests`, `TVSyncPlayTests`). Not yet tried with two real
+  devices side by side, or with Jellyfin's web client in the group.
+- The group plays at normal speed (the speed chips are hidden in a group).
+- Not built: the group's queue beyond one title (add next, reorder), who
+  pressed pause (the server doesn't say), a SyncPlay item in the Mac's
+  Playback menu (it is in the "…" card), Linux.
+
+## Brand
+
+### One-word wordmark ("aquarium" with a bubble for the i's dot)
+
+**Wanted:** the name drawn as one word. "Aqua·rium", with its two weights and
+two colours, came from FellyJin, where the split joined two real words.
+Option 03 of the sixty on the wordmark page was picked on 2026-11-20.
+
+**Built 2026-11-20**, every platform. The Apple app has `Shared/Wordmark.swift`
+(SF Rounded heavy, lowercase, a dotless i with a purple `WordmarkBubble`
+over it, read as "Aquarium"). It is compiled into the app, the watch app and
+the watch widgets, and drawn in `BrandMark`, both sign-in headers
+(`LoginView`), the tent idle screen, and the watch widget's empty state. The
+tvOS Top Shelf images are redrawn by `Tools/IconGenerator` (`drawWordmark`).
+Linux has `wordmark()` in `src/ui.ts` and `.wordmark .wm-i::after` in
+`styles.css`, used in the sidebar (`index.html`), the sign-in card and
+Settings → About.
+
+**To do:**
+
+- Linux has no bundled rounded face, so it uses one only if the system has
+  one, otherwise Inter. Bundle Nunito (`@fontsource-variable/nunito`) if Inter
+  looks too square next to the Apple app.
+- The watch's navigation title and the "Aquarium" storage label stay plain
+  text (system title, data label).
+- Check the bubble by eye on hardware (iPhone MANUAL.md "The wordmark", Linux
+  TESTING.md 29, the Top Shelf in TV MANUAL.md §4).
+
+## Phone layout
+
+### A top bar that floats over the artwork
+
+**Wanted:** the iPhone's solid band at the top looked clunky. Something
+modern that fades, or sits on the posters, and hides as little of them as
+possible. Ten mock-ups on 2026-11-20; option 6 (a progressive blur) was
+picked and then cut down three times until only the clock strip was blurred.
+
+**Built 2026-11-20**, iPhone (`Views/PhoneHeroBar.swift`, used by `HomeView`
+and `ItemDetailView`). The hero and a title's artwork run to the top of the
+screen; the wordmark with Search and Refresh, or Back, float on it in white.
+Behind the clock is a blur with no tint of its own, so it takes the
+poster's colours, and it ends at the bottom of the status bar. Once the
+artwork has scrolled away the blur reaches past the bar's row, the glyphs
+turn the page's colour, and a title page shows its name beside Back.
+
+**To do:**
+
+- The untinted blur is the backdrop's `variableBlur` filter, which UIKit
+  does not publish (looked up by name, with a paler masked blur if it ever
+  stops answering). Watch App Review for it.
+- The iPhone Duo keeps the solid `AppTopBar` (its status strips and dead
+  touch strip). The iPad already floats its own bar; the two could share.
+- Check dark mode and a real iPhone by eye (iPhone MANUAL.md, "The floating
+  top bar").

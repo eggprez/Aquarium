@@ -161,10 +161,11 @@ struct PlayerPanel: View {
         case .speed: SpeedTab()
         case .sync: SyncTab()
         case .picture: PictureTab()
+        case .together: PanelRows { WatchTogetherRows(onInteract: {}, close: { close?() }) }
         #else
         // Cards off the pills and the "…" button, or not offered: never a
         // page here. `panelTabs` doesn't list them.
-        case .audio, .subtitles, .quality, .speed, .sync, .picture: EmptyView()
+        case .audio, .subtitles, .quality, .speed, .sync, .picture, .together: EmptyView()
         #endif
         }
     }

@@ -227,7 +227,10 @@ struct HomeView: View {
         // scroll view, and it carries the application's name rather than the
         // page's — "Home" above a hard-edged backdrop is the seam that made the
         // top of this page look bolted on.
-        if Metrics.phoneLayout {
+        if PhoneHeroBar.applies {
+            phoneHome
+                .toolbar(.hidden, for: .navigationBar)
+        } else if Metrics.phoneLayout {
             scroll()
                 .toolbar(.hidden, for: .navigationBar)
         } else {
@@ -269,6 +272,30 @@ struct HomeView: View {
     }
 
     #if os(iOS)
+    /// Whether the phone's hero has scrolled out from under its bar.
+    @State private var phoneScrolled = false
+
+    /// A phone's Home: the hero runs up to the top of the screen and the bar
+    /// floats over it — see `PhoneHeroBar`. The same arrangement as `padHome`,
+    /// with the phone's own bar. A foldable keeps the solid `AppTopBar`
+    /// that `scroll` adds instead.
+    private var phoneHome: some View {
+        ZStack(alignment: .top) {
+            scroll(bleed: EdgeInsets(top: padTopInset + Metrics.topBar, leading: 0, bottom: 0, trailing: 0))
+                .ignoresSafeArea(.container, edges: .top)
+                .modifier(PhoneHeroScrollWatcher(threshold: PhoneHeroBar.threshold(home: true),
+                                                 isPast: $phoneScrolled))
+            PhoneHeroBar(
+                page: .home(search: { app.push(.search("")) },
+                            refresh: { Task { await reload(fresh: true) } },
+                            isRefreshing: isRefreshing),
+                overPage: phoneScrolled,
+                topInset: padTopInset
+            )
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
+    }
+
     /// What the top of the screen keeps for the clock, read from outside
     /// the scroll view that ignores it — see `padHome`.
     @State private var padTopInset: CGFloat = 0
@@ -607,7 +634,7 @@ struct HomeView: View {
         // A phone's. An iPad's bar floats over the hero instead — see
         // `padHome` — so here it is nothing, which takes no room.
         .safeAreaInset(edge: .top, spacing: 0) {
-            if Metrics.phoneLayout {
+            if Metrics.phoneLayout, !PhoneHeroBar.applies {
                 AppTopBar {
                     HStack(spacing: 0) {
                         BrandMark()

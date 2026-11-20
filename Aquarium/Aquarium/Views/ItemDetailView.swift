@@ -115,7 +115,21 @@ struct ItemDetailView: View {
         // only takes its own when something else makes the page redraw, which
         // on a page that loads in stages is the moment after it has finished.
         Group {
-            if Metrics.phoneLayout {
+            if PhoneHeroBar.applies {
+                // The artwork runs up to the top of the screen and the bar
+                // floats over it — see `PhoneHeroBar`. A foldable keeps the
+                // solid bar below.
+                ZStack(alignment: .top) {
+                    scroll()
+                        .ignoresSafeArea(.container, edges: .top)
+                        .modifier(PhoneHeroScrollWatcher(threshold: PhoneHeroBar.threshold(home: false),
+                                                         isPast: $phoneScrolled))
+                    PhoneHeroBar(page: .detail(title: navigationTitle),
+                                 overPage: phoneScrolled,
+                                 topInset: padTopInset)
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
+            } else if Metrics.phoneLayout {
                 scroll()
                     .safeAreaInset(edge: .top, spacing: 0) { topBar }
             } else {
@@ -279,12 +293,13 @@ struct ItemDetailView: View {
     /// fit beside the poster — see `padHeader`. Zero until the first pass.
     @State private var padHeaderWidth: CGFloat = 0
 
-    /// How far down the content starts: on an iPad the clock and the
-    /// floating bar, on the Mac the window's toolbar, which has no surface
-    /// over this page (see `body`) and which the header's wash runs up under.
+    /// How far down the content starts: on an iPad or a phone the clock and
+    /// the floating bar (a foldable's solid bar is already outside the
+    /// page), on the Mac the window's toolbar, which has no surface over
+    /// this page (see `body`) and which the header's wash runs up under.
     private var padContentInset: CGFloat {
         #if os(iOS)
-        Metrics.phoneLayout ? 0 : padTopInset + Metrics.topBar
+        Metrics.phoneLayout && !PhoneHeroBar.applies ? 0 : padTopInset + Metrics.topBar
         #else
         52
         #endif
@@ -299,6 +314,8 @@ struct ItemDetailView: View {
     /// What the top of the screen keeps for the clock, read from outside the
     /// scroll view that ignores it — see `body`. iPad only.
     @State private var padTopInset: CGFloat = 0
+    /// Whether the phone's artwork has scrolled out from under its bar.
+    @State private var phoneScrolled = false
 
     /// An iPad's bar: the way back and, once the header has gone past, the
     /// title — floating over the header's wash, with a surface of its own
@@ -679,7 +696,8 @@ struct ItemDetailView: View {
     private func headerSections(_ item: BaseItem) -> some View {
         #if os(iOS)
         if Metrics.phoneLayout {
-            HeroHeader(item: item, style: .detail)
+            HeroHeader(item: item, style: .detail,
+                       topBleed: PhoneHeroBar.applies ? padTopInset + Metrics.topBar : 0)
                 .id(Self.topAnchor)
                 .testAnchor(TestID.Detail.hero)
             details(item)

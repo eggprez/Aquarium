@@ -163,6 +163,8 @@ describe("page", () => {
     ]);
     expect(rowNamed("Downloads folder").textContent).toContain("/home/u/Videos/Aquarium");
     expect(root.querySelector(".about-version")!.textContent).toBe("v1.2.3");
+    expect(root.querySelector(".about-name .wordmark")!.getAttribute("aria-label")).toBe("Aquarium");
+    expect(root.querySelector(".about-name .wordmark .wm-i")).not.toBeNull();
     expect(rowNamed("mpv").textContent).toContain("Running mpv 0.41.0");
   });
 

@@ -78,6 +78,8 @@ extension TestID {
         /// TV's dialog.
         static func accountRemove(_ key: String) -> String { "settings.accounts.remove.\(key)" }
         static let addAccount = "settings.accounts.add"
+        /// SyncPlay: asks which of the server's groups to join.
+        static let syncPlay = "settings.syncPlay"
         /// The Mac's − and Switch buttons, which act on the selected row.
         static let removeSelectedAccount = "settings.accounts.removeSelected"
         static let switchSelectedAccount = "settings.accounts.switchSelected"
@@ -328,6 +330,8 @@ extension TestID {
         static let root = "login.root"
         /// The card (the Mac's form) holding the fields.
         static let form = "login.form.root"
+        /// The "aquarium" wordmark (bubble for the dot on the i) over the form.
+        static let wordmark = "login.wordmark"
 
         // The server
         static let serverField = "login.server.field"

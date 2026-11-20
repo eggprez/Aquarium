@@ -94,7 +94,8 @@ class TVPlayerTestCase: TVTestCase {
     static func tab(for id: String) -> String? {
         let map = ["player.audio.": "audio", "player.subtitles.": "subtitles", "player.quality.": "quality",
                    "player.speed.": "speed", "player.sleep.": "info", "player.afterThis.": "info",
-                   "player.sync.": "sync", "player.picture.": "picture", "player.channels.": "channels"]
+                   "player.sync.": "sync", "player.picture.": "picture", "player.channels.": "channels",
+                   "player.more.syncPlay": "together", "player.more.sharePlay": "together"]
         return map.first { id.hasPrefix($0.key) }?.value
     }
 

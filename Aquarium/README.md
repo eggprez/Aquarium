@@ -266,14 +266,20 @@ Siri Remote parts of this list):
   start playback without bringing the app forward. The same three are App
   Shortcuts, so any of them can be the Action button on an iPhone 15 Pro or
   later (Settings → Action Button → Shortcut).
-- **SharePlay** (iPhone, iPad, Mac). "Watch Together with SharePlay" in the
-  player's menu offers the title to the FaceTime call in progress; everyone
-  on the call opens their own stream from their own server and
-  `AVPlayerPlaybackCoordinator` keeps the transports in step — a pause is a
-  pause for everyone, and the next thing anyone plays becomes what the call
-  is watching. Everyone needs an account that can see the title. Not Apple
-  TV, whose player has no coordinator to join. Needs Group Activities on the
-  App ID (`com.apple.developer.group-session`).
+- **SharePlay** (iPhone, iPad, Mac, Apple TV). "Watch Together with
+  SharePlay" in the player's menu (the Watch Together tab of the Apple TV's
+  panel) offers the title to the FaceTime call in progress; everyone on the
+  call opens their own stream from their own server and the playback
+  coordinator keeps the transports in step — a pause is a pause for
+  everyone, and the next thing anyone plays becomes what the call is
+  watching. Everyone needs an account that can see the title. AVPlayer has
+  a coordinator of its own; the Apple TV's mpv follows an
+  `AVDelegatingPlaybackCoordinator` (Core/SharePlay.swift). Needs Group
+  Activities on the App ID (`com.apple.developer.group-session`).
+- **SyncPlay**, the Jellyfin server's own version of the same thing, beside
+  it in the same menu: no call, everyone on one server, and it works with
+  people watching in a browser. Join a group or start one; Settings has a
+  row for joining with nothing playing (Core/SyncPlay.swift).
 - Picture in Picture, and AirPlay to another device.
 - The lock screen, Control Centre and Now Playing transport, plus media keys on
   a Mac keyboard and the Siri Remote on Apple TV — the counterpart to MPRIS.
@@ -353,6 +359,10 @@ it exists on the Linux build.
   system's Now Playing screen. The scene is declared but needs Apple's
   `com.apple.developer.carplay-audio` entitlement on the App ID and in the
   provisioning profile before a car will show it.
+  With `FJCarPlayVideo` set in Info.plist a Video tab joins them where the
+  screen can show video: a car that allows it when parked, and Apple
+  HomeView, which shows an iPhone's CarPlay audio and video apps. The video
+  entitlement is not used: Apple does not allow it beside the audio one.
 
 With both libraries the tab bar becomes Home, Music, Audiobooks, Search, More;
 the video Library, Live TV and Downloads move into More. With one of the two

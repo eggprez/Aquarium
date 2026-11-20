@@ -34,5 +34,9 @@
 	<array>
 		<string>runs-as-current-user-with-user-independent-keychain</string>
 	</array>
+	<!-- SharePlay — see Core/SharePlay.swift. Needs Group Activities enabled
+	     on the App ID (it is: the iPhone and the Mac sign with it too). -->
+	<key>com.apple.developer.group-session</key>
+	<true/>
 </dict>
 </plist>

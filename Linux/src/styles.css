@@ -233,8 +233,30 @@ button {
   flex-shrink: 0;
   object-fit: contain;
 }
-.wordmark { font-weight: 600; }
-.wordmark b { font-weight: 800; color: var(--accent); }
+/* The wordmark (wordmark() in ui.ts): "aquarium", heavy and rounded, with a
+   bubble for the dot on the i, as in the Apple app. Rounded faces where the
+   system has one, Inter otherwise; the bubble is what makes it the mark. */
+.wordmark {
+  font-family: ui-rounded, "SF Pro Rounded", "Nunito", "Varela Round", "Inter Variable", "Inter", "Cantarell", system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+/* line-height 1 makes the i's box one em tall, so the bubble can be placed in
+   ems from its top: 0.32em across, its foot just above the x-height. */
+.wordmark .wm-i { position: relative; display: inline-block; line-height: 1; }
+.wordmark .wm-i::after {
+  content: "";
+  position: absolute;
+  left: 50%; top: -0.04em;
+  width: 0.32em; height: 0.32em;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  border-radius: 50%;
+  /* The brand purple, fixed like the icon's, not the themeable accent. */
+  border: 0.055em solid #8b5cf6;
+  background: radial-gradient(circle at 34% 34%, rgba(255, 255, 255, 0.9) 0 0.045em, rgba(139, 92, 246, 0.2) 0.055em);
+}
 
 .sidebar-footer .foot-version { display: flex; align-items: center; gap: 7px; }
 .sidebar-footer .foot-version img { width: 15px; height: 15px; opacity: 0.75; }

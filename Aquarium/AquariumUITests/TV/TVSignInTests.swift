@@ -62,6 +62,18 @@ final class TVSignInTests: TVTestCase {
         }
     }
 
+    /// The sign-in screen names the app with the one-word wordmark (the
+    /// bubble standing in for the dot on the i), read aloud as "Aquarium".
+    func testSignInShowsTheWordmark() {
+        launch(signIn: false)
+        app.element(TestID.Login.root).waitToExist(30)
+        let mark = app.element(TestID.Login.wordmark)
+        XCTAssertTrue(mark.waitForExistence(timeout: 30), "no wordmark on the sign-in screen")
+        XCTAssertEqual(mark.label, "Aquarium")
+        XCTAssertGreaterThan(mark.frame.width, mark.frame.height, "the word, not a lone glyph: \(mark.frame)")
+        attachScreenshot("wordmark")
+    }
+
     func testPasswordSignInLandsOnHome() throws {
         guard let account = QA.account() else { throw XCTSkip("no suite account") }
         connect()

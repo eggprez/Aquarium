@@ -245,11 +245,8 @@ struct LoginView: View {
                     .interpolation(.high)
                     .scaledToFit()
                     .frame(width: 64, height: 64)
-                HStack(spacing: 0) {
-                    Text("Aqua").fontWeight(.semibold)
-                    Text("rium").fontWeight(.heavy).foregroundStyle(Theme.accent)
-                }
-                .font(.title2)
+                Wordmark(font: .title2)
+                    .accessibilityIdentifier(TestID.Login.wordmark)
                 Text("A Jellyfin client")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -779,11 +776,8 @@ struct LoginView: View {
                 .scaledToFit()
                 .frame(width: 76, height: 76)
                 .padding(.bottom, 2)
-            HStack(spacing: 0) {
-                Text("Aqua").fontWeight(.semibold)
-                Text("rium").fontWeight(.heavy).foregroundStyle(Theme.accent)
-            }
-            .font(.largeTitle)
+            Wordmark(font: .largeTitle)
+                .accessibilityIdentifier(TestID.Login.wordmark)
             Text("A Jellyfin client")
                 .font(.subheadline)
                 .foregroundStyle(Theme.textDim)

@@ -58,6 +58,9 @@ extension PlayerModel {
         }
         awaitingLoad = false
         outgoingQuiesced = false
+        // Watching together: what the group last said is carried out on
+        // this stream once it has a frame up.
+        if group != nil { groupOrderAwaitsFrame = true }
         // The session goes active before the sound starts. AVPlayer does
         // this itself; mpv's audio unit started into a session nothing had
         // activated, so the system never took the stage from whatever else
@@ -180,8 +183,9 @@ extension PlayerModel {
         // reopen is still on its way the pause flag is the quiesce's, not the
         // viewer's, and the answer is the one that reopen was given.
         let sameSitting = isActive && self.item?.Id == item.Id && !isLocal && !isExternal
-        let staysPaused = sameSitting && errorMessage == nil && !opts.live
-            && (outgoingQuiesced ? reopensPaused : isPaused)
+        // Watching together, a title opens paused and the group says when.
+        let staysPaused = !opts.live && (group?.holdsNewStreams == true
+            || sameSitting && errorMessage == nil && (outgoingQuiesced ? reopensPaused : isPaused))
         let keepsStopAfter = sameSitting && autoplayCancelled
         reopensPaused = staysPaused
         // The same viewing, already counted by the server: the reopen must
@@ -293,9 +297,8 @@ extension PlayerModel {
         let handoverTarget = startSeconds + Self.handoverLead
         let requestedStart = canHandOver ? handoverTarget : startSeconds
         let requestedTicks = Int64(requestedStart * 10_000_000)
-        #if !os(tvOS)
-        SharePlayCoordinator.shared.playerStarted(item)
-        #endif
+        SharePlayCoordinator.shared.playerStarted(item, at: requestedStart)
+        SyncPlayCoordinator.shared.playerStarted(item, at: requestedStart)
 
         do {
             let src: PlaybackSource
@@ -448,6 +451,9 @@ extension PlayerModel {
     #if !os(tvOS)
     private func downloadToPlay(for item: BaseItem, options: StreamOptions, meta: StartMeta) -> DownloadRecord? {
         guard !options.live, !meta.recovering, !meta.reopening, !meta.leavingDownloadForTrack else { return nil }
+        // Watching together, everyone is on the server's stream: a download
+        // is a different file to the coordinator, and plays to its own clock.
+        if isWatchingTogether, !JellyfinClient.shared.isOffline { return nil }
         if isActive, !isLocal, self.item?.Id == item.Id { return nil }
         let askedForAStream = options.maxBitrate != nil || options.bitrateIsChosen
             || options.forceTranscode || options.forceFullEncode || options.mediaSourceId != nil

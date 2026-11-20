@@ -253,6 +253,19 @@ final class PlayerModel {
     var tracks: [EngineTrack] = []
 
     var speed: Double = 1 { didSet { engine?.rate = speed } }
+
+    // Watching together — see PlayerModel+Group.swift.
+    /// The group that owns the transport, while one does.
+    @ObservationIgnored weak var group: (any GroupTransport)?
+    /// What the group last asked for.
+    @ObservationIgnored var groupOrder: GroupOrder?
+    /// The order has to be carried out (again) at the stream's next first
+    /// frame: it arrived, or the stream was reopened, with nothing open.
+    @ObservationIgnored var groupOrderAwaitsFrame = false
+    /// A jump the group ordered hasn't put a frame up yet.
+    @ObservationIgnored var groupSeekLanding = false
+    @ObservationIgnored var groupPlayTask: Task<Void, Never>?
+    @ObservationIgnored var groupDriftTask: Task<Void, Never>?
     var volume: Double = 1 {
         didSet {
             engine?.volume = volume
@@ -697,6 +710,7 @@ final class PlayerModel {
         case .buffering(let waiting):
             isBuffering = waiting || isOpening
             noteBuffering(waiting)
+            if !isOpening { group?.streamStalled(waiting) }
 
         case .seeking:
             break
@@ -744,6 +758,7 @@ final class PlayerModel {
 
         case .firstFrame:
             onFirstFrame()
+            groupStreamSettled()
 
         case .noPicture:
             onNoPicture()
@@ -822,14 +837,26 @@ final class PlayerModel {
 
     func togglePlayPause() { isPaused ? resume() : pause() }
 
+    /// Pause, play and jump are the viewer's. While people are watching
+    /// together they are asked of the group, which answers everyone at once
+    /// (`follow`); otherwise they are done.
     func pause() {
+        if let group { group.viewerPaused() } else { pauseNow() }
+    }
+
+    func resume() {
+        if let group { group.viewerResumed() } else { resumeNow() }
+    }
+
+    /// Pause this stream, whoever asked.
+    func pauseNow() {
         engine?.pause()
         isPaused = true
         postNowPlayingRate()
         Task { await reportNow() }
     }
 
-    func resume() {
+    func resumeNow() {
         reactivateAudioSession()
         engine?.play()
         isPaused = false
@@ -840,6 +867,10 @@ final class PlayerModel {
     func seek(to seconds: Double) {
         guard isActive else { return }
         let target = duration > 0 ? min(max(0, seconds), duration - 0.5) : max(0, seconds)
+        if let group {
+            group.viewerSeeked(to: target)
+            return
+        }
         adaptive.noteSeek()
         position = target
         engine?.seek(to: target)
@@ -859,10 +890,9 @@ final class PlayerModel {
     /// closing reports would be sent with the new account's token.
     @discardableResult
     func stop(reason: String = "stop", tellServer: Bool = true) -> Task<Void, Never> {
-        #if !os(tvOS)
         // Closing the player is leaving Watch Together.
         SharePlayCoordinator.shared.playerClosed()
-        #endif
+        SyncPlayCoordinator.shared.playerClosed()
         return Task { await finish(userRequested: true, reason: reason, tellServer: tellServer) }
     }
 

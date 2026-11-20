@@ -143,3 +143,6 @@ The unit tests cover what the app writes for the widget
 - **40 mm layout:** the smallest watch's book player and word breaks (master fix
   list "Layout, 40 mm"). Run the UI suite on a 40 mm simulator for a first look:
   `AQUARIUM_TEST_WATCH="Aquarium Test Watch 40mm"` with a 40 mm device made by hand.
+- **Widget wordmark (2026-11-20):** with nothing playing, the rectangular
+  complication shows the "aquarium" wordmark with a purple bubble for the i's
+  dot. A widget is not reachable from XCUITest; check on the watch face.

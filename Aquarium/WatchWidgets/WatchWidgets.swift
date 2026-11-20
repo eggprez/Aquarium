@@ -87,7 +87,7 @@ struct ListeningWidgetView: View {
                         ProgressView(value: f).tint(Self.accent).scaleEffect(x: 1, y: 0.7, anchor: .center)
                     }
                 } else {
-                    Text("Aquarium").font(.headline)
+                    Wordmark(font: .headline)
                     Text("Nothing playing").font(.caption2).foregroundStyle(.secondary)
                 }
             }

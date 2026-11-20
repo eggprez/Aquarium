@@ -164,7 +164,11 @@ describe("login: the server address step", () => {
     expect(document.activeElement).toBe(addressInput());
     expect(submitButton().textContent).toBe("Connect");
     expect(hasButton("Cancel")).toBe(false);
-    expect(card.querySelector(".login-brand .wordmark")!.textContent).toBe("Aquarium");
+    const mark = card.querySelector(".login-brand .wordmark")!;
+    expect(mark.getAttribute("aria-label")).toBe("Aquarium");
+    expect(mark.getAttribute("role")).toBe("img");
+    expect(mark.textContent).toBe("aquar\u0131um");
+    expect(mark.querySelector(".wm-i")!.getAttribute("aria-hidden")).toBe("true");
     expect(card.classList.contains("wide")).toBe(false);
   });
 

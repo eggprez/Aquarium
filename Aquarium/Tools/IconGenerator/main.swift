@@ -90,12 +90,9 @@ func topShelf(w: Int, h: Int, scale: Int) -> CGContext {
     let s = CGFloat(scale)
     let tileSide = CGFloat(h) * 0.40 * s
     let fontSize = CGFloat(h) * 0.20 * s
-    let runs: [(String, NSFont.Weight, NSColor)] = [
-        ("Aqua", .semibold, .white),
-        ("rium", .heavy, NSColor(srgbRed: 0.71, green: 0.51, blue: 0.99, alpha: 1))
-    ]
     let gap = tileSide * 0.30
-    let total = tileSide + gap + textWidth(runs, size: fontSize)
+    let wordWidth = wordmarkWidth(size: fontSize)
+    let total = tileSide + gap + wordWidth
     let left = (CGFloat(W) - total) / 2
     let midY = CGFloat(H) / 2
 
@@ -108,8 +105,7 @@ func topShelf(w: Int, h: Int, scale: Int) -> CGContext {
     ctx.draw(tile, in: tileRect)
     ctx.restoreGState()
 
-    drawText(ctx, runs, size: fontSize,
-             centerAt: CGPoint(x: left + tileSide + gap + textWidth(runs, size: fontSize)/2, y: midY))
+    drawWordmark(ctx, size: fontSize, centerAt: CGPoint(x: left + tileSide + gap + wordWidth/2, y: midY), color: .white)
     return ctx
 }
 

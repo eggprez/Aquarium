@@ -238,6 +238,10 @@ alone; end it with `kill <pid>`, never MPRIS Quit. Look in `~/.local/share/aquar
     gone and the stand-in was sent `POST /api/v1/auth/logout`. With two accounts on the device,
     each has its own Seerr connection or none, and switching accounts switches Requests with it.
     None of the Seerr screens runs a CSS animation that never ends (item 22).
+29. **Wordmark.** The sidebar, the sign-in card and Settings → About show "aquarium" in heavy
+    lowercase with a purple bubble where the i's dot would be, sitting just above the stem. On a
+    desktop with no rounded font it is Inter; the bubble should still clear the r and u. Orca reads
+    "Aquarium" once.
 
 ## Function inventory
 

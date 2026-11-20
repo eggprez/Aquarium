@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import * as api from "../api";
 import * as iptv from "../iptv";
 import { cachedLineup, loadLineup, refreshNow as refreshLineup } from "../lineup";
-import { el, clear, toast, openDialog } from "../ui";
+import { el, clear, toast, openDialog, wordmark } from "../ui";
 import {
   isAdaptiveEnabled,
   setAdaptiveEnabled,
@@ -1112,7 +1112,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
         el("img", { src: "/aquarium-logo.svg", alt: "", width: "48", height: "48" }),
         el("div", {}, [
           el("div", { class: "about-name" }, [
-            el("span", { class: "wordmark" }, [el("span", {}, ["Aqua"]), el("b", {}, ["rium"])]),
+            wordmark(),
             el("span", { class: "about-version" }, [info.version ? `v${info.version}` : ""]),
           ]),
           el("div", { class: "sub" }, [
