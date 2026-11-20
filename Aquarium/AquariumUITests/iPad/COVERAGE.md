@@ -145,6 +145,7 @@ iPhone file (the same shared unit tests run here). Run 2026-11-16: 4 pass.
 | Search offers a title, its page requests it, Requests lists it by name | PadRequestsTests.testSearchOffersARequestAndThePageMakesIt | UI | pass |
 | A show partly in the library is not offered as missing | PadRequestsTests.testLibraryResultsStillLeadAndSeerrFollows | UI | pass |
 | A show's missing-seasons banner; a person's "Not in Your Library" row | PadRequestsTests.testAPersonsPageShowsTheRestOfTheirWork | UI | pass |
+| The Seerr page: each browse row a placeholder until it lands, the foot credits Seerr and TMDB | PadRequestsTests.testRowsShowTheyAreLoadingAndThePageCreditsSeerrAndTMDB | UI | pass 2026-11-19 |
 
 ## Player
 
@@ -182,6 +183,8 @@ iPhone file (the same shared unit tests run here). Run 2026-11-16: 4 pass.
 | Player messages (toasts) over the player (B4) | PadRegressionTests.testPlayerMessagesShowOverThePlayer | UI | pass |
 | Pills take taps while up (fade fix 58f77cf) | PadRegressionTests.testPillTakesATapWhileTheControlsAreUp | UI | pass; the timed edge-of-fade tap is manual |
 | mpv, AirPlay, SharePlay, pinch, hold 2×, PiP placement | — | manual | manual |
+| SharePlay "Start from whose progress?" on the player: you, then others with a spot, then the beginning; the pick moves playback (made-up friends via AQUARIUM_TEST_SHAREPLAY_PROGRESS) | PadSharePlayTests.testWhoseProgressIsAskedAndThePickIsWherePlayGoes | UI | pass 2026-11-19 |
+| "Keep Watching Here" leaves playback where it was | PadSharePlayTests.testKeepWatchingHereStaysPut | UI | pass 2026-11-19 |
 
 ## Music, books
 

@@ -75,6 +75,7 @@ in a comment.
 | Full screen (F) on the player window only; not while PiP has it | `MacPlayerTests.testBugFullScreenMenuFullScreensMainWindow`, `testBugHiddenForPictureInPictureIsDetected`, `testNoWindowIsNotHiddenForPictureInPicture`, `MacPlayerUITests.testBugFullScreenIsThePlayersAndEscapeLeavesIt` (now checks the window really grows: it passed with no full screen before); MANUAL D6 | unit, UI, manual | pass (fixed cdca18b) |
 | Picture in Picture (P), mpv hand-over | `MacPlayerTests.testPictureInPictureMenuIsOffWithNoController`; MANUAL N3 | unit, manual | built |
 | SharePlay start / leave | MANUAL N5 | manual | manual |
+| SharePlay "Start from whose progress?" in the player window, as a sheet (a Mac alert shows three buttons and dropped Keep Watching Here, found 2026-11-19); the pick moves playback (made-up friends via AQUARIUM_TEST_SHAREPLAY_PROGRESS) | MacSharePlayUITests.testWhoseProgressIsAskedAndThePickIsWherePlayGoes | UI | pass 2026-11-19 |
 | Show Panel (⌘K) | `MacPlayerUITests.testShowPanelOpensInfo` | UI | built |
 | Stop (⌘.) from any window | `MacPlayerUITests.testStopFromAnyWindow` | UI | built |
 | Picture's right-click menu | `MacPlayerUITests.testRightClickOnThePicture` | UI | built |
@@ -175,6 +176,7 @@ Against the stand-in Seerr server (TESTING.md). Run 2026-11-16 (the class alone;
 | Sidebar gains Requests (under You); no window of its own | MacRequestsUITests.testTheSidebarGainsRequests, MacSidebarTests.testRequestsSitsWithWhatIsYours | UI, unit | pass |
 | Sidebar search offers a title, its page requests it | MacRequestsUITests.testSearchOffersARequestAndThePageMakesIt | UI | pass |
 | Settings → Account: connect by address (http warning, no password typed) | MacRequestsUITests.testConnectingInSettings | UI | pass |
+| The Seerr page: each browse row a placeholder until it lands, the foot credits Seerr and TMDB | MacRequestsUITests.testRowsShowTheyAreLoadingAndThePageCreditsSeerrAndTMDB | UI | pass 2026-11-19 |
 
 ## Deep Water
 

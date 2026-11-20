@@ -461,6 +461,34 @@ private struct SharePlayProgressPrompt: ViewModifier {
         let asking = Binding(
             get: { shareplay.progressQuestion != nil },
             set: { if !$0 { shareplay.progressQuestion = nil } })
+        #if os(macOS)
+        // A Mac alert shows three buttons at most and drops the rest, so with
+        // you, a friend and the beginning "Keep Watching Here" was gone and
+        // there was no visible way to decline (2026-11-19). A sheet holds
+        // every row.
+        content.sheet(isPresented: asking) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Start from whose progress?").font(.headline)
+                Text("Everyone in SharePlay jumps to the spot you pick.")
+                    .font(.callout).foregroundStyle(.secondary)
+                ForEach(shareplay.progressQuestion ?? []) { choice in
+                    Button { shareplay.choose(choice) } label: {
+                        Text(choice.title).frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.large)
+                    .accessibilityIdentifier(TestID.Player.sharePlayProgressChoice(choice.id))
+                }
+                Button { shareplay.progressQuestion = nil } label: {
+                    Text("Keep Watching Here").frame(maxWidth: .infinity)
+                }
+                .controlSize(.large)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityIdentifier(TestID.Player.sharePlayProgressKeep)
+            }
+            .padding(20)
+            .frame(width: 300)
+        }
+        #else
         content.alert(
             "Start from whose progress?",
             isPresented: asking, presenting: shareplay.progressQuestion
@@ -474,6 +502,7 @@ private struct SharePlayProgressPrompt: ViewModifier {
         } message: { _ in
             Text("Everyone in SharePlay jumps to the spot you pick.")
         }
+        #endif
     }
 }
 #endif

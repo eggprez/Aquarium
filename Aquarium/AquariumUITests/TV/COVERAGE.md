@@ -71,6 +71,7 @@ Against the stand-in Seerr server (TESTING.md). Run 2026-11-16: 4 pass.
 | Requests tab: a request's row reachable with the remote, opens its page with focus | TVRequestsTests.testTheRequestsTabListsRequestsAndThingsToAskFor | UI | pass |
 | A film asked for with the remote from a browse row | TVRequestsTests.testAFilmIsAskedForWithTheRemote | UI | pass |
 | Search offers what the library lacks, reachable with the remote | TVRequestsTests.testSearchOffersWhatTheLibraryLacks | UI | pass |
+| The Seerr tab: each browse row a placeholder until it lands, the foot credits Seerr and TMDB, focus kept | TVRequestsTests.testRowsShowTheyAreLoadingAndThePageCreditsSeerrAndTMDB | UI | pass 2026-11-19 |
 | Connecting in Settings (the full-screen form and the on-screen keyboard) | — | manual | MANUAL.md |
 
 Seen, not fixed: after Request is pressed the button goes and focus moves up to

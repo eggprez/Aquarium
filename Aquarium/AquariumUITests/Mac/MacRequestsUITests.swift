@@ -31,6 +31,33 @@ final class MacRequestsUITests: MacUITestCase {
         attachScreenshot("requests")
     }
 
+    /// Seerr's rows answer after the requests: until each lands it stands as
+    /// a placeholder, so the page says more is coming. The page is called
+    /// Seerr, and its foot credits Seerr and TMDB.
+    func testRowsShowTheyAreLoadingAndThePageCreditsSeerrAndTMDB() throws {
+        SeerrQA.slowRows(8)
+        defer { SeerrQA.slowRows(0) }
+        launchConnected()
+        XCTAssertTrue(sidebarRow("requests").waitForExistence(timeout: 30))
+        XCTAssertTrue(text(sidebarRow("requests")).contains("Seerr") || app.staticTexts["Seerr"].exists,
+                      "the row is called Seerr")
+        openSection("requests")
+        app.element(TestID.Requests.root).waitToExist(30)
+        XCTAssertTrue(app.element(TestID.Requests.shelfLoading("trending")).waitForExistence(timeout: 6),
+                      "Trending stands as a placeholder while it loads")
+        XCTAssertFalse(app.element(TestID.Requests.shelf("trending")).exists)
+        attachScreenshot("seerr rows loading")
+
+        app.element(TestID.Requests.shelf("trending")).waitToExist(30)
+        XCTAssertFalse(app.element(TestID.Requests.shelfLoading("trending")).exists)
+        let credit = app.staticTexts[TestID.Requests.credit].firstMatch
+        credit.waitToExist(10)
+        scrollIntoView(credit)
+        let words = text(credit)
+        XCTAssertTrue(words.contains("Seerr") && words.contains("TMDB"), words)
+        attachScreenshot("seerr credit")
+    }
+
     func testSearchOffersARequestAndThePageMakesIt() throws {
         launchConnected()
         searchFromSidebar("Inception")

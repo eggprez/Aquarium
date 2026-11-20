@@ -41,6 +41,28 @@ final class TVRequestsTests: TVTestCase {
         attachScreenshot("request page")
     }
 
+    /// Seerr's rows answer after the requests: until each lands it stands as
+    /// a placeholder, so the page says more is coming. The page is headed
+    /// Seerr, and its foot credits Seerr and TMDB.
+    func testRowsShowTheyAreLoadingAndThePageCreditsSeerrAndTMDB() throws {
+        SeerrQA.slowRows(8)
+        defer { SeerrQA.slowRows(0) }
+        launchConnected()
+        openTab("requests", title: "Seerr", anchor: TestID.Requests.root)
+        XCTAssertTrue(app.element(TestID.Requests.shelfLoading("trending")).waitForExistence(timeout: 6),
+                      "Trending stands as a placeholder while it loads")
+        XCTAssertFalse(app.element(TestID.Requests.shelf("trending")).exists)
+        XCTAssertTrue(app.staticTexts["Seerr"].firstMatch.exists, "the page is headed Seerr")
+        attachScreenshot("seerr rows loading")
+
+        XCTAssertTrue(app.element(TestID.Requests.shelf("trending")).waitForExistence(timeout: 30))
+        XCTAssertFalse(app.element(TestID.Requests.shelfLoading("trending")).exists)
+        let credit = app.staticTexts[TestID.Requests.credit].firstMatch
+        XCTAssertTrue(credit.waitForExistence(timeout: 10), "the credit is at the foot")
+        XCTAssertTrue(credit.label.contains("Seerr") && credit.label.contains("TMDB"), credit.label)
+        assertFocusPresent("after the rows land")
+    }
+
     func testAFilmIsAskedForWithTheRemote() throws {
         launchConnected()
         openTab("requests", title: "Seerr", anchor: TestID.Requests.root)
