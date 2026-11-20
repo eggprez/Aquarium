@@ -56,9 +56,7 @@ struct TentIdleView: View {
 
     private var topRow: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text("Aquarium")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(Theme.text)
+            Wordmark(font: .title2, color: Theme.text)
             Spacer()
             Button {
                 app.tentBrowsing = true

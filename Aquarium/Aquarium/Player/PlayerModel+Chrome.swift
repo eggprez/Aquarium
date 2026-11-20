@@ -88,9 +88,11 @@ extension PlayerModel {
         out.append(.audio)
         out.append(.subtitles)
         if !isExternal, !isLive, !isLocal { out.append(.quality) }
-        if !isLive { out.append(.speed) }
+        // A group's speed is normal — see PlayerModel+Group.swift.
+        if !isLive, !isInGroup { out.append(.speed) }
         out.append(.sync)
         out.append(.picture)
+        if offersWatchTogether { out.append(.together) }
         #endif
         return out
     }

@@ -244,6 +244,9 @@ struct RootView: View {
         } message: {
             Text(app.blockingMessage ?? "")
         }
+        // SyncPlay's "which group?", asked from Settings with nothing
+        // playing; the player asks its own — see Player/Chrome/WatchTogether.swift.
+        .modifier(SyncPlayPrompt(whilePlaying: false))
         // What an error toast becomes on a Mac — see `AppModel.toast` and
         // `presentAlert`. On the main window, whichever page is in front —
         // unless a title window is the one being worked in, which shows its

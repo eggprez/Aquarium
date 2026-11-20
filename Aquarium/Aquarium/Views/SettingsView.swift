@@ -1015,6 +1015,29 @@ private struct SettingsMapRows: View {
             row(.liveTV, value: SettingsSummary.liveTV(prefs))
         }
 
+        Section {
+            Button {
+                Task { await SyncPlayCoordinator.shared.choose() }
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsTile(page: .about, symbol: "person.2.fill", tint: Color(hex: 0x7C3AED))
+                    Text("SyncPlay")
+                        .foregroundStyle(Theme.text)
+                    Spacer(minLength: 12)
+                    Text(SyncPlayCopy.status)
+                        .foregroundStyle(Theme.textDim)
+                        .lineLimit(1)
+                }
+                .padding(.vertical, 2)
+                .accessibilityElement(children: .combine)
+            }
+            .accessibilityIdentifier(TestID.Settings.syncPlay)
+        } header: {
+            Text("Watch Together")
+        } footer: {
+            Text(SyncPlayCopy.about)
+        }
+
         Section("Storage") {
             row(.downloads, value: SettingsSummary.downloads(prefs))
             row(.libraryCopy, value: SettingsSummary.libraryCopy(prefs))

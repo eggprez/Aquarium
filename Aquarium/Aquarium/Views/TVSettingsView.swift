@@ -222,6 +222,13 @@ private struct ServerSettingsPage: View {
                         .accessibilityIdentifier(TestID.Requests.settingsConnect)
                     }
                 }
+                SettingGroup("Watch Together", symbol: "person.2") {
+                    SettingButton("SyncPlay…", value: SyncPlayCopy.status,
+                                  notes: [SettingNote(name: "SyncPlay", text: SyncPlayCopy.about)]) {
+                        Task { await SyncPlayCoordinator.shared.choose() }
+                    }
+                    .accessibilityIdentifier(TestID.Settings.syncPlay)
+                }
                 SettingGroup("", page: .account) {
                     SettingButton(isSigningOut ? "Signing out…" : "Sign out", role: .destructive,
                                   notes: [Copy.signOut]) {

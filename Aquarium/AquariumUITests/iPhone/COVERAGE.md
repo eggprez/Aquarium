@@ -22,6 +22,10 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | `Format.ticks/clock/bytes/resolutionLabel/channelLabel/mediaSummary/itemSubtitle/trackLabel/parseDate/programWindow` | PhoneFormattingTests | unit | pass |
 | `Format.ticks` under a minute | PhoneFormattingTests.testShortRuntimeReadsSeconds | unit | pass (R-TV-30s) |
 | Artless audiobook placeholder is a book | PhoneFormattingTests.testArtlessAudiobookShowsABook | unit | pass |
+| CarPlay: only the audio entitlement is held (never combined with video); the bundle carries `FJCarPlayVideo`; none on the Mac | PhoneCarPlayConfigTests | unit | pass |
+| App Store export is signed by hand, with a named profile for the app, Live Activities, watch app and watch widgets | PhoneCarPlayConfigTests.testAppStoreExportNamesAProfileForEveryBundle | unit | pass |
+| CarPlay Video tab on HomeView or a video car; the app appears on HomeView at all | — | manual | MANUAL.md (CarPlay, step 2) |
+| Floating bar's blur uses the untinted variable-blur filter (not the fallback); the bar floats on phones and not on a foldable; its colour thresholds | PhoneHeroBarUnitTests | unit | pass |
 | `PlayerTime.format/spoken` | PhoneFormattingTests.testPlayerTime | unit | pass |
 | `Quality.choices/label/shortLabel/snapped/rungIndex/cap/smallerStream/untouchedRung` | PhoneFormattingTests (quality group) | unit | pass |
 | `DownloadQualities.named/menuLabel`, catalogue keys | PhoneFormattingTests | unit | pass |
@@ -123,6 +127,7 @@ the other four on the standard phone).
 |---|---|---|---|
 | Connect to a server, banner (name, security) | testPasswordSignInReachesHome | UI | skip |
 | Password sign-in | testPasswordSignInReachesHome | UI | skip |
+| Sign-in shows the one-word wordmark (bubble for the dot on the i), read as "Aquarium" | testSignInShowsTheWordmark | UI | new, not yet run |
 | Wrong password | testWrongPasswordSaysSo | UI | skip |
 | Disabled account (fx-disabled) | testDisabledAccountIsRefused | UI | skip |
 | Public users, passwordless user (fx-guest, fx-public) | testPublicUsersAreListedAndAPasswordlessOneSignsIn | UI | pass (17) |
@@ -147,6 +152,9 @@ the other four on the standard phone).
 |---|---|---|---|
 | Rows: My Media, Continue Watching, On Now, Next Up, Latest per library | testHomeShowsTheBaselineRows | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Bar (Search, Refresh) and hero fit | testHomeBarAndHeroFitTheScreen | UI, layout | pass (17, SE, Pro Max, Duo) |
+| Floating bar: the hero runs up under it, the wordmark and buttons sit below the clock and above the hero's Play (not on the Duo, which keeps the solid bar) | PhoneHeroBarTests.testHomeHeroRunsUpUnderTheBar | UI, layout | pass (17, SE, Pro Max); skip on Duo (solid bar) |
+| Floating bar stays put and tappable while Home scrolls | PhoneHeroBarTests.testHomeBarStaysWhileThePageScrolls | UI | pass (17) |
+| The blur under the clock: untinted, takes the artwork's colours, deepens once scrolled | — | manual | MANUAL.md (The floating top bar) |
 | Hero Details, hero paging | testHeroDetailsOpensTheTitle, testHeroSwipesToTheNextPage | UI | pass (17) |
 | Refresh | testRefreshKeepsHome | UI | pass (17) |
 | Continue Watching card → title with progress | testContinueWatchingCardOpensTheTitle | UI | pass (17) |
@@ -182,6 +190,7 @@ the other four on the standard phone).
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
+| Floating bar: the artwork runs up under it, Back clears the clock, the title arrives in the bar once scrolled, Back leaves | PhoneHeroBarTests.testTitleArtworkRunsUpUnderTheBarAndTheTitleArrivesOnScroll | UI, layout | pass (17, SE, Pro Max); skip on Duo (solid bar) |
 | Film page facts and actions fit | testFilmPageShowsItsFacts | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Action row one line | testActionRowIsOneLine | UI, layout | pass (17, SE, Pro Max, Duo) (R-2c20fe6-row) |
 | Favourite, Mark watched (server) | testFavouriteButtonReachesTheServer, testMarkWatchedFromTheMoreMenu | UI | pass (17) |
@@ -241,6 +250,12 @@ the other four on the standard phone).
 | SharePlay | — | manual | needs a FaceTime call |
 | SharePlay "Start from whose progress?": the rows (you first, then by name, each once, spots under 30 s left out, the beginning) and what each device sends | SharePlayProgressTests | unit | new 2026-11-18 |
 | The question on the player, and the pick moves playback there (made-up friends via AQUARIUM_TEST_SHAREPLAY_PROGRESS) | PhoneSharePlayTests.testWhoseProgressIsAskedAndThePickIsWherePlayGoes | UI | new 2026-11-18 |
+| Watch Together is first in the "…" card and both rows are on screen on an episode (reported 2026-11-18: "TV shows don't have SharePlay") | PhoneSyncPlayTests.testAnEpisodeOffersBothWaysToWatchTogetherWithoutScrolling | UI, layout | new 2026-11-18 |
+| SyncPlay: what the server's socket says read into values, its timestamps, the server-clock sums, ids with and without dashes, the wording | SyncPlayWireTests, SyncPlayClockTests | unit | new 2026-11-18 |
+| What the player does with a group's order (pause, play now, play at a moment; seek only when far) | GroupOrderTests | unit | new 2026-11-18 |
+| SyncPlay against the QA server: a group from the player is watching what is on; pause and play here are the group's; someone else's jump and play move this player; leave | PhoneSyncPlayTests.testSyncPlayStartsAGroupAndFollowsIt | UI | new 2026-11-18 |
+| Settings › SyncPlay joins a group and opens what it is watching at its spot | PhoneSyncPlayTests.testJoiningFromSettingsOpensWhatTheGroupIsWatching | UI | new 2026-11-18 |
+| SyncPlay with two real devices, with the web client, a stall on one device holding the other, the socket surviving the background, a downloaded title left for the stream | — | manual | MANUAL |
 | SharePlay fixes: streams matched by the item id in the address, the poster kept off the wire, no app-only fallback link, the invitation's picture, "X paused / jumped to" and the can't-open message | SharePlayProgressTests | unit | new 2026-11-18 |
 
 ## Music and audiobooks (PhoneMusicTests, PhoneAudiobookTests)

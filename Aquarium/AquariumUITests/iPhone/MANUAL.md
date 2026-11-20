@@ -11,10 +11,17 @@ The CarPlay scene (`Music/CarPlayScene.swift`) is CPTemplates, which carry no
 accessibility identifiers and have no simulator driver in XCUITest.
 
 1. Connect to a CarPlay head unit (or Xcode's CarPlay Simulator window).
-2. Open Aquarium: the Music, Audiobooks and (dormant) Video tabs appear.
-   Video stays off: the `carplay-video` entitlement blanks the CarPlay screen
-   (iOS bug, memory `carplay-video-blank-screen`). Check the app is signed
-   **without** that entitlement and CarPlay is not blank.
+2. Open Aquarium: the Music and Audiobooks tabs appear, and CarPlay is not
+   blank. The build holds the `carplay-audio` entitlement only — Apple's
+   guide forbids combining it with `carplay-video`, and a build signed with
+   both (1.6 build 6) did not appear on HomeView. The Video tab
+   (`FJCarPlayVideo`) rides on the audio entitlement.
+   The tabs are on screen at once, with no spinner first: the root template
+   is set inside the connect call (`CarPlaySceneDelegate`, 2026-11-20).
+   - Car without video (most cars): no Video tab; music is as before.
+   - Apple HomeView, or a car that shows video when parked: a Video tab
+     with Continue Watching, Next Up, Libraries and On This iPhone; a row
+     plays on the screen, and a library opens its films and shows.
 3. Play an album, a station and an audiobook; Now Playing shows the title,
    art and a running clock; the clock stops while buffering
    [R-f72bd13c: `nowPlayingRate` 0 while buffering].
@@ -147,6 +154,21 @@ The suite unit-tests the snapshot and state the extensions read
 - Downloads separated by account [R-18P10, low confidence].
 - mpv on a private-CA HTTPS server fails (by design, memory
   `mpv-tls-verification`); on a public certificate it plays.
+- Watch Together on a downloaded episode: play an episode that is in
+  Downloads, "…" → Watch Together with SharePlay (or SyncPlay). Expect the
+  player to reopen from the server at the same moment and carry on into
+  the session; with the server unreachable, a message and the download
+  plays on. (Reported 2026-11-18 as "TV shows don't have SharePlay".)
+- SyncPlay with two devices on the same server (two accounts): on one, play
+  a film, "…" → Watch Together with SyncPlay → Start a New Group. On the
+  other, Settings → SyncPlay → Join. Expect the film to open there at the
+  first one's spot and both to start together; pause, play and a jump on
+  either move both; "<name> joined SyncPlay" on the first. Put the second
+  on a slow network: when it runs dry the first waits, then both go on.
+  Background the app for a minute and return: still in the group. Let an
+  episode run out: the next one opens on both. Close the player on one: it
+  has left, the other plays on. Also with Jellyfin's web page as the second
+  person. An account without SyncPlay access (Dashboard → Users) is told so.
 - SharePlay "Watch Together" with a FaceTime call (two Apple IDs, two
   devices; two accounts on the same Jellyfin server is the common case).
   Both of you start the same film on your own and stop part-way at
@@ -229,3 +251,36 @@ for the same Jellyfin server), which the test Mac cannot run.
    it loads without asking anything.
 8. A collection whose Jellyfin entry has a TMDB id (the QA library has none):
    its page lists "Missing From This Collection" with the films not yet here.
+
+## The wordmark (added 2026-11-20)
+
+The UI tests check the sign-in wordmark exists and reads "Aquarium"; only an
+eye can say the bubble sits right.
+
+1. Home's top bar, the sign-in screen, Settings → Add an Account, and the
+   Duo's tent idle screen: "aquarium" in rounded heavy lowercase, with a
+   purple bubble where the i's dot would be, clear of the stem and of the
+   letters beside it.
+2. The same at the largest accessibility text size: the bubble grows with
+   the word and stays over the i.
+3. VoiceOver reads "Aquarium" once, not "aquar", "dotless i", "um".
+
+## The floating top bar (added 2026-11-20)
+
+`PhoneHeroBar` on Home and title pages. The UI tests check where the bar and
+the artwork sit and that the title arrives on scroll, and a unit test checks
+the blur filter is found; only an eye can judge the blur itself.
+
+1. Home with a bright hero (a yellow or white poster): the clock and battery
+   are readable, the blur behind them takes the poster's colours (no grey or
+   white band), and the picture is sharp from the bottom of the status bar
+   down — a face under the wordmark is not blurred.
+2. Scroll Home until posters pass under the bar: the blur reaches past the
+   wordmark's row, the wordmark and buttons turn from white to the page's
+   colour, and no line of text shows through behind them.
+3. A title page: the same over its artwork with only Back in the bar;
+   scrolled, the title appears beside Back on the blur.
+4. Both again in dark mode, and on a real iPhone (the blur is a system
+   filter; a simulator draws it, but check the real thing for banding).
+5. The iPhone Duo keeps the solid bar on both screens.
+

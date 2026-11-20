@@ -27,6 +27,20 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+/**
+ * The app's name as it is drawn wherever the app names itself: "aquarium" in
+ * lowercase, heavy and rounded, with a dotless i whose dot is one of the
+ * icon's bubbles (`.wordmark .wm-i::after` in styles.css). The Apple app draws
+ * the same thing (Aquarium/Shared/Wordmark.swift). Read aloud as one word.
+ */
+export function wordmark(): HTMLSpanElement {
+  return el("span", { class: "wordmark", role: "img", "aria-label": "Aquarium" }, [
+    "aquar",
+    el("span", { class: "wm-i", "aria-hidden": "true" }, ["\u0131"]),
+    "um",
+  ]);
+}
+
 export function clear(node: HTMLElement): void {
   node.textContent = "";
 }

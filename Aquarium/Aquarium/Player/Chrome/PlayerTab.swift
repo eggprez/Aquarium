@@ -11,6 +11,9 @@ enum PlayerTab: String, Hashable, CaseIterable, Identifiable {
     /// Brightness, contrast, saturation, gamma, zoom and aspect: the mpv
     /// engine's, over the live picture.
     case picture
+    /// SharePlay and SyncPlay, on the Apple TV, whose panel is where its
+    /// choices live. Elsewhere they are rows in the "…" card.
+    case together
 
     var id: String { rawValue }
 
@@ -24,6 +27,7 @@ enum PlayerTab: String, Hashable, CaseIterable, Identifiable {
         case .speed: "Speed"
         case .sync: "Sync"
         case .picture: "Picture"
+        case .together: "Watch Together"
         }
     }
 
@@ -37,6 +41,7 @@ enum PlayerTab: String, Hashable, CaseIterable, Identifiable {
         case .speed: "gauge.with.dots.needle.67percent"
         case .sync: "waveform.path.ecg"
         case .picture: "camera.filters"
+        case .together: "person.2"
         }
     }
 }

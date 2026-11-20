@@ -165,6 +165,14 @@ extension TestID {
         static func sharePlayProgressChoice(_ id: String) -> String { "player.shareplay.progress.\(id)" }
         static let sharePlayProgressKeep = "player.shareplay.progress.keep"
         static let sharePlayEnd = "player.more.sharePlayEnd"
+        /// "Watch Together with SyncPlay" and "Leave SyncPlay", in the "…"
+        /// card and the Apple TV's Watch Together tab.
+        static let syncPlayStart = "player.more.syncPlay"
+        static let syncPlayLeave = "player.more.syncPlayLeave"
+        /// The "which group?" question: a group by its name, a new one, cancel.
+        static func syncPlayGroup(_ name: String) -> String { "player.syncplay.group.\(name)" }
+        static let syncPlayNew = "player.syncplay.new"
+        static let syncPlayCancel = "player.syncplay.cancel"
 
         // MARK: The panel
 

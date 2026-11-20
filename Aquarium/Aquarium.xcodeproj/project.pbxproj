@@ -30,6 +30,9 @@
 		FE11A5D00000000000000611 /* FollowTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000601 /* FollowTypes.swift */; };
 		FE11A5D00000000000000612 /* FollowTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000601 /* FollowTypes.swift */; };
 		FE11A5D00000000000000613 /* FollowWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000602 /* FollowWidget.swift */; };
+		FE11A5D00000000000000A02 /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000A01 /* Wordmark.swift */; };
+		FE11A5D00000000000000A03 /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000A01 /* Wordmark.swift */; };
+		FE11A5D00000000000000A04 /* Wordmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE11A5D00000000000000A01 /* Wordmark.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -158,6 +161,7 @@
 		FE11A5D00000000000000801 /* AquariumUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AquariumUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FE11A5D00000000000000901 /* AquariumWatchUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AquariumWatchUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FE11A5D00000000000000902 /* AquariumWatchTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AquariumWatchTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FE11A5D00000000000000A01 /* Wordmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wordmark.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -234,17 +238,17 @@
 			path = Watch;
 			sourceTree = "<group>";
 		};
-		FE11A5D00000000000000810 /* TestIDs */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = TestIDs;
-			sourceTree = "<group>";
-		};
 		FE11A5D00000000000000710 /* AquariumTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				FE11A5D00000000000000960 /* Exceptions for "AquariumTests" folder in "AquariumWatchTests" target */,
 			);
 			path = AquariumTests;
+			sourceTree = "<group>";
+		};
+		FE11A5D00000000000000810 /* TestIDs */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TestIDs;
 			sourceTree = "<group>";
 		};
 		FE11A5D00000000000000812 /* Shared */ = {
@@ -418,6 +422,7 @@
 				FE11A5D00000000000000207 /* WatchWidgetSnapshot.swift */,
 				FE11A5D00000000000000107 /* WidgetTypes.swift */,
 				FE11A5D00000000000000601 /* FollowTypes.swift */,
+				FE11A5D00000000000000A01 /* Wordmark.swift */,
 				FE11A5D00000000000000810 /* TestIDs */,
 			);
 			path = Shared;
@@ -610,12 +615,12 @@
 				FE11A5D00000000000000844 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
+				FE11A5D00000000000000810 /* TestIDs */,
 				FE11A5D00000000000000812 /* Shared */,
 				FE11A5D00000000000000813 /* iPhone */,
 				FE11A5D00000000000000814 /* iPad */,
 				FE11A5D00000000000000815 /* Mac */,
 				FE11A5D00000000000000816 /* TV */,
-				FE11A5D00000000000000810 /* TestIDs */,
 			);
 			name = AquariumUITests;
 			packageProductDependencies = (
@@ -638,9 +643,9 @@
 				FE11A5D00000000000000944 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				FE11A5D00000000000000910 /* WatchUITests */,
-				FE11A5D00000000000000812 /* Shared */,
 				FE11A5D00000000000000810 /* TestIDs */,
+				FE11A5D00000000000000812 /* Shared */,
+				FE11A5D00000000000000910 /* WatchUITests */,
 			);
 			name = AquariumWatchUITests;
 			packageProductDependencies = (
@@ -843,6 +848,7 @@
 				FE11A5D00000000000000126 /* WidgetTypes.swift in Sources */,
 				FE11A5D00000000000000611 /* FollowTypes.swift in Sources */,
 				FE11A5D00000000000000220 /* WatchSyncTypes.swift in Sources */,
+				FE11A5D00000000000000A02 /* Wordmark.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -874,6 +880,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FE11A5D00000000000000221 /* WatchSyncTypes.swift in Sources */,
+				FE11A5D00000000000000A03 /* Wordmark.swift in Sources */,
 				FE11A5D00000000000000222 /* WatchWidgetSnapshot.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -883,6 +890,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FE11A5D00000000000000226 /* WatchWidgets.swift in Sources */,
+				FE11A5D00000000000000A04 /* Wordmark.swift in Sources */,
 				FE11A5D00000000000000223 /* WatchWidgetSnapshot.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1535,141 +1543,141 @@
 		FE11A5D00000000000000842 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-					CODE_SIGN_STYLE = Automatic;
-					CURRENT_PROJECT_VERSION = 1;
-					DEVELOPMENT_TEAM = 6S26L64S3C;
-					GENERATE_INFOPLIST_FILE = YES;
-					IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-					MACOSX_DEPLOYMENT_TARGET = 14.0;
-					MARKETING_VERSION = 1.6;
-					PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.AquariumUITests;
-					PRODUCT_NAME = "$(TARGET_NAME)";
-					SDKROOT = auto;
-					SUPPORTED_PLATFORMS = "iphoneos iphonesimulator appletvos appletvsimulator macosx";
-					SWIFT_APPROACHABLE_CONCURRENCY = YES;
-					SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
-					SWIFT_EMIT_LOC_STRINGS = NO;
-					SWIFT_VERSION = 5.0;
-					TARGETED_DEVICE_FAMILY = "1,2,3";
-					TEST_TARGET_NAME = Aquarium;
-					TVOS_DEPLOYMENT_TARGET = 17.0;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6S26L64S3C;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.6;
+				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.AquariumUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator appletvos appletvsimulator macosx";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,3";
+				TEST_TARGET_NAME = Aquarium;
+				TVOS_DEPLOYMENT_TARGET = 17.0;
 			};
 			name = Debug;
 		};
 		FE11A5D00000000000000843 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-					CODE_SIGN_STYLE = Automatic;
-					CURRENT_PROJECT_VERSION = 1;
-					DEVELOPMENT_TEAM = 6S26L64S3C;
-					GENERATE_INFOPLIST_FILE = YES;
-					IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-					MACOSX_DEPLOYMENT_TARGET = 14.0;
-					MARKETING_VERSION = 1.6;
-					PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.AquariumUITests;
-					PRODUCT_NAME = "$(TARGET_NAME)";
-					SDKROOT = auto;
-					SUPPORTED_PLATFORMS = "iphoneos iphonesimulator appletvos appletvsimulator macosx";
-					SWIFT_APPROACHABLE_CONCURRENCY = YES;
-					SWIFT_COMPILATION_MODE = wholemodule;
-					SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
-					SWIFT_EMIT_LOC_STRINGS = NO;
-					SWIFT_VERSION = 5.0;
-					TARGETED_DEVICE_FAMILY = "1,2,3";
-					TEST_TARGET_NAME = Aquarium;
-					TVOS_DEPLOYMENT_TARGET = 17.0;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6S26L64S3C;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.6;
+				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.AquariumUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator appletvos appletvsimulator macosx";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2,3";
+				TEST_TARGET_NAME = Aquarium;
+				TVOS_DEPLOYMENT_TARGET = 17.0;
 			};
 			name = Release;
 		};
 		FE11A5D00000000000000942 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-					CODE_SIGN_STYLE = Automatic;
-					CURRENT_PROJECT_VERSION = 1;
-					DEVELOPMENT_TEAM = 6S26L64S3C;
-					GENERATE_INFOPLIST_FILE = YES;
-					MARKETING_VERSION = 1.6;
-					PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.UITests;
-					PRODUCT_NAME = "$(TARGET_NAME)";
-					SDKROOT = watchos;
-					SUPPORTED_PLATFORMS = "watchos watchsimulator";
-					SWIFT_APPROACHABLE_CONCURRENCY = YES;
-					SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
-					SWIFT_EMIT_LOC_STRINGS = NO;
-					SWIFT_VERSION = 5.0;
-					TARGETED_DEVICE_FAMILY = 4;
-					TEST_TARGET_NAME = AquariumWatch;
-					WATCHOS_DEPLOYMENT_TARGET = 10.0;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6S26L64S3C;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.6;
+				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.UITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_TARGET_NAME = AquariumWatch;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
 			name = Debug;
 		};
 		FE11A5D00000000000000943 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-					CODE_SIGN_STYLE = Automatic;
-					CURRENT_PROJECT_VERSION = 1;
-					DEVELOPMENT_TEAM = 6S26L64S3C;
-					GENERATE_INFOPLIST_FILE = YES;
-					MARKETING_VERSION = 1.6;
-					PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.UITests;
-					PRODUCT_NAME = "$(TARGET_NAME)";
-					SDKROOT = watchos;
-					SUPPORTED_PLATFORMS = "watchos watchsimulator";
-					SWIFT_APPROACHABLE_CONCURRENCY = YES;
-					SWIFT_COMPILATION_MODE = wholemodule;
-					SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
-					SWIFT_EMIT_LOC_STRINGS = NO;
-					SWIFT_VERSION = 5.0;
-					TARGETED_DEVICE_FAMILY = 4;
-					TEST_TARGET_NAME = AquariumWatch;
-					WATCHOS_DEPLOYMENT_TARGET = 10.0;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6S26L64S3C;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.6;
+				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.UITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_TARGET_NAME = AquariumWatch;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
 			name = Release;
 		};
 		FE11A5D00000000000000952 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-					BUNDLE_LOADER = "$(TEST_HOST)";
-					CODE_SIGN_STYLE = Automatic;
-					CURRENT_PROJECT_VERSION = 1;
-					DEVELOPMENT_TEAM = 6S26L64S3C;
-					GENERATE_INFOPLIST_FILE = YES;
-					MARKETING_VERSION = 1.6;
-					PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.Tests;
-					PRODUCT_NAME = "$(TARGET_NAME)";
-					SDKROOT = watchos;
-					SUPPORTED_PLATFORMS = "watchos watchsimulator";
-					SWIFT_APPROACHABLE_CONCURRENCY = YES;
-					SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
-					SWIFT_EMIT_LOC_STRINGS = NO;
-					SWIFT_VERSION = 5.0;
-					TARGETED_DEVICE_FAMILY = 4;
-					TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AquariumWatch.app/AquariumWatch";
-					WATCHOS_DEPLOYMENT_TARGET = 10.0;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6S26L64S3C;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.6;
+				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.Tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AquariumWatch.app/AquariumWatch";
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
 			name = Debug;
 		};
 		FE11A5D00000000000000953 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-					BUNDLE_LOADER = "$(TEST_HOST)";
-					CODE_SIGN_STYLE = Automatic;
-					CURRENT_PROJECT_VERSION = 1;
-					DEVELOPMENT_TEAM = 6S26L64S3C;
-					GENERATE_INFOPLIST_FILE = YES;
-					MARKETING_VERSION = 1.6;
-					PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.Tests;
-					PRODUCT_NAME = "$(TARGET_NAME)";
-					SDKROOT = watchos;
-					SUPPORTED_PLATFORMS = "watchos watchsimulator";
-					SWIFT_APPROACHABLE_CONCURRENCY = YES;
-					SWIFT_COMPILATION_MODE = wholemodule;
-					SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
-					SWIFT_EMIT_LOC_STRINGS = NO;
-					SWIFT_VERSION = 5.0;
-					TARGETED_DEVICE_FAMILY = 4;
-					TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AquariumWatch.app/AquariumWatch";
-					WATCHOS_DEPLOYMENT_TARGET = 10.0;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6S26L64S3C;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.6;
+				PRODUCT_BUNDLE_IDENTIFIER = scottai.FellyJin.watchkitapp.Tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AquariumWatch.app/AquariumWatch";
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
 			name = Release;
 		};

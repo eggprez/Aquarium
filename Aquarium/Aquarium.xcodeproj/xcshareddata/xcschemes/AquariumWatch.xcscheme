@@ -30,7 +30,8 @@
       shouldUseLaunchSchemeArgsEnv = "YES">
       <TestPlans>
          <TestPlanReference
-            reference = "container:TestPlans/Watch.xctestplan" default = "YES">
+            reference = "container:TestPlans/Watch.xctestplan"
+            default = "YES">
          </TestPlanReference>
          <TestPlanReference
             reference = "container:TestPlans/WatchUnit.xctestplan">
@@ -72,12 +73,11 @@
       <BuildableProductRunnable
          runnableDebuggingMode = "0">
          <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "FE11A5D00000000000000240"
-               BuildableName = "AquariumWatch.app"
-               BlueprintName = "AquariumWatch"
-               ReferencedContainer = "container:Aquarium.xcodeproj">
-            </BuildableReference>
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "FE11A5D00000000000000240"
+            BuildableName = "AquariumWatch.app"
+            ReferencedContainer = "container:Aquarium.xcodeproj">
+         </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
    <ProfileAction
@@ -89,12 +89,11 @@
       <BuildableProductRunnable
          runnableDebuggingMode = "0">
          <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "FE11A5D00000000000000240"
-               BuildableName = "AquariumWatch.app"
-               BlueprintName = "AquariumWatch"
-               ReferencedContainer = "container:Aquarium.xcodeproj">
-            </BuildableReference>
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "FE11A5D00000000000000240"
+            BuildableName = "AquariumWatch.app"
+            ReferencedContainer = "container:Aquarium.xcodeproj">
+         </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
    <AnalyzeAction

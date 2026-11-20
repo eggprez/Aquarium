@@ -76,6 +76,7 @@ in a comment.
 | Picture in Picture (P), mpv hand-over | `MacPlayerTests.testPictureInPictureMenuIsOffWithNoController`; MANUAL N3 | unit, manual | built |
 | SharePlay start / leave | MANUAL N5 | manual | manual |
 | SharePlay "Start from whose progress?" in the player window, as a sheet (a Mac alert shows three buttons and dropped Keep Watching Here, found 2026-11-19); the pick moves playback (made-up friends via AQUARIUM_TEST_SHAREPLAY_PROGRESS) | MacSharePlayUITests.testWhoseProgressIsAskedAndThePickIsWherePlayGoes | UI | pass 2026-11-19 |
+| SyncPlay from the "…" card (not in the Playback menu) | MANUAL N5c; logic in SyncPlayWireTests, GroupOrderTests | unit, manual | manual |
 | Show Panel (⌘K) | `MacPlayerUITests.testShowPanelOpensInfo` | UI | built |
 | Stop (⌘.) from any window | `MacPlayerUITests.testStopFromAnyWindow` | UI | built |
 | Picture's right-click menu | `MacPlayerUITests.testRightClickOnThePicture` | UI | built |
@@ -142,6 +143,7 @@ in a comment.
 | Function | Test | Kind | Status |
 |---|---|---|---|
 | Sign-in (password, wrong password, disabled account), Quick Connect, relaunch | `MacSignInUITests.*`; MANUAL A5 (VoiceOver on the Quick Connect code) | UI, manual | pass (Quick Connect crash fixed cb59aa6) |
+| Sign-in shows the one-word wordmark (bubble for the dot on the i), read as "Aquarium" | `MacSignInUITests.testSignInShowsTheWordmark` | UI | new, not yet run |
 | Authorization header ASCII on a Mac | `MacClientTests.testAuthorizationHeaderIsASCIIOnAMac` | unit | built |
 | Avatar URL (`/UserImage`) | `MacClientTests.testBugAvatarOnOldUsersRoute` | unit | built |
 | Home: Continue Watching, Next Up, toolbar, See all | `MacBrowseUITests.testHomeShowsContinueWatchingAndNextUp`, `testToolbarSearchRefreshAndPlayFeatured`, `testShelfHeadingOpensSeeAll` | UI | built |

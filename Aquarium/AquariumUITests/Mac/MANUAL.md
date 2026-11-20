@@ -43,6 +43,7 @@ Before starting: `python3 -I suite-reset.py suite-mac` in the QA folder.
 | N4 | AirPlay to an Apple TV from the player. | Picture moves; the Mac's window shows the AirPlay placeholder. |
 | N5 | SharePlay: "Watch Together with SharePlay" in a FaceTime call. | The session starts; the other side follows play/pause. |
 | N5b | SharePlay with the other person part-way through the same film on their own account. | They join at your spot; you are asked "Start from whose progress?"; Playback › Start From Someone's Progress… asks again. |
+| N5c | SyncPlay: "…" → Watch Together with SyncPlay → Start a New Group, with a second device joining from its Settings. | Both start together; pause, play and jumps on either move both; Leave SyncPlay leaves. |
 | N6 | Handoff: start a film on the Mac, look at an iPhone's app switcher. | The Aquarium Handoff banner; opening it resumes at the Mac's position. |
 | N7 | Spotlight: search for a title Home has shown. | It is listed; choosing it opens the title page. (Test mode does not write Spotlight, so only a normal launch shows this.) |
 

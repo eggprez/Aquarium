@@ -347,6 +347,62 @@ func textWidth(_ runs: [(String, NSFont.Weight, NSColor)], size: CGFloat) -> CGF
     return CGFloat(CTLineGetTypographicBounds(CTLineCreateWithAttributedString(attributed), nil, nil, nil))
 }
 
+// ---------------------------------------------------------------- wordmark
+
+/// "aquarium" set the way the app sets it (Shared/Wordmark.swift): SF Rounded
+/// heavy, lowercase, with a dotless i and a purple bubble where its dot goes.
+func wordmarkFont(_ size: CGFloat) -> NSFont {
+    let base = NSFont.systemFont(ofSize: size, weight: .heavy)
+    guard let rounded = base.fontDescriptor.withDesign(.rounded) else { return base }
+    return NSFont(descriptor: rounded, size: size) ?? base
+}
+
+func wordmarkLine(_ size: CGFloat, color: NSColor) -> CTLine {
+    CTLineCreateWithAttributedString(NSAttributedString(string: "aquar\u{0131}um", attributes: [
+        .font: wordmarkFont(size), .foregroundColor: color
+    ]))
+}
+
+func wordmarkWidth(size: CGFloat) -> CGFloat {
+    CGFloat(CTLineGetTypographicBounds(wordmarkLine(size, color: .white), nil, nil, nil))
+}
+
+/// Draws the wordmark centred on `centerAt` in a top-left-origin context.
+func drawWordmark(_ ctx: CGContext, size: CGFloat, centerAt: CGPoint, color: NSColor,
+                  bubble: CGColor = rgb(0xB583FD)) {
+    let line = wordmarkLine(size, color: color)
+    var ascent: CGFloat = 0, descent: CGFloat = 0
+    let w = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, nil))
+    let left = centerAt.x - w / 2
+    let baseline = centerAt.y + (ascent - descent) / 2
+    ctx.saveGState()
+    ctx.translateBy(x: left, y: baseline)
+    ctx.scaleBy(x: 1, y: -1)
+    ctx.textPosition = .zero
+    CTLineDraw(line, ctx)
+    ctx.restoreGState()
+
+    // The bubble: centred over the dotless i (the sixth character), a third
+    // of an em across, just above the x-height, as in the app.
+    let iStart = CTLineGetOffsetForStringIndex(line, 5, nil)
+    let iEnd = CTLineGetOffsetForStringIndex(line, 6, nil)
+    let font = wordmarkFont(size)
+    let d = size * 0.32
+    let c = CGPoint(x: left + (iStart + iEnd) / 2, y: baseline - font.xHeight - size * 0.035 - d / 2)
+    let disc = CGRect(x: c.x - d / 2, y: c.y - d / 2, width: d, height: d)
+    let ring = d * 0.17
+    ctx.saveGState()
+    ctx.setFillColor(bubble.copy(alpha: 0.22)!)
+    ctx.fillEllipse(in: disc)
+    ctx.setStrokeColor(bubble)
+    ctx.setLineWidth(ring)
+    ctx.strokeEllipse(in: disc.insetBy(dx: ring / 2, dy: ring / 2))
+    let hl = d * 0.3
+    ctx.setFillColor(rgb(0xFFFFFF, 0.9))
+    ctx.fillEllipse(in: CGRect(x: c.x - d * 0.16 - hl / 2, y: c.y - d * 0.16 - hl / 2, width: hl, height: hl))
+    ctx.restoreGState()
+}
+
 // ---------------------------------------------------------------- Apple Watch
 
 /// The bubble trail laid out for a disc rather than a square: up the right of

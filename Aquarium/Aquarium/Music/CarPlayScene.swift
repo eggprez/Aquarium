@@ -19,10 +19,11 @@
 //  screen over the same route AirPlay uses — `PlayerModel`'s player already
 //  allows external playback, so the tab below is the whole of it. When the
 //  car says no (it is moving), the system plays the sound alone and shows
-//  Now Playing instead; none of that is decided here. That tab needs the
-//  CarPlay *video* entitlement as well as the audio one, and `FJCarPlayVideo`
-//  set in Info.plist once Apple has granted it: a template feature used
-//  without its entitlement is one more of the car's exceptions.
+//  Now Playing instead; none of that is decided here. That tab is switched
+//  by `FJCarPlayVideo` in Info.plist and rides on the *audio* entitlement:
+//  Apple's CarPlay guide lets an audio app offer "a mixture of audio and
+//  video playback" and forbids holding the video entitlement beside the
+//  audio one. The same tab is what Apple HomeView shows.
 //
 //  Needs the `com.apple.developer.carplay-audio` entitlement on the App ID
 //  and in the provisioning profile before a car (or the simulator's CarPlay
@@ -51,8 +52,9 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     }
     private var shape: Shape?
 
-    /// Whether there is a Video tab: a car that can show video, a build that
-    /// holds the entitlement for it, and a server with something to watch.
+    /// Whether there is a Video tab: a screen that can show video (a car
+    /// that allows it, or Apple HomeView), a build with the tab switched on,
+    /// and a server with something to watch.
     @MainActor
     private var offersVideo: Bool {
         guard #available(iOS 26.4, *),
@@ -69,10 +71,17 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         self.interfaceController = interfaceController
         interfaceController.delegate = self
         sessionConfiguration = CPSessionConfiguration(delegate: self)
-        Task { @MainActor in
+        // The root goes up inside this call, not a turn of the run loop later:
+        // Apple's "Building your app's initial CarPlay interface" has the
+        // first setRootTemplate in didConnect itself, and a host left without
+        // one shows a spinner (reported on Apple HomeView, forum 857559).
+        // UIKit calls scene delegates on the main thread.
+        MainActor.assumeIsolated {
             CPNowPlayingTemplate.shared.add(self)
             self.rebuildRoot()
             self.watch()
+        }
+        Task { @MainActor in
             // A car can start the app with no window at all, and everything
             // the window's first task does — find out whether the server
             // answers, read the library copy, ask what libraries there are —

@@ -185,6 +185,7 @@ iPhone file (the same shared unit tests run here). Run 2026-11-16: 4 pass.
 | mpv, AirPlay, SharePlay, pinch, hold 2×, PiP placement | — | manual | manual |
 | SharePlay "Start from whose progress?" on the player: you, then others with a spot, then the beginning; the pick moves playback (made-up friends via AQUARIUM_TEST_SHAREPLAY_PROGRESS) | PadSharePlayTests.testWhoseProgressIsAskedAndThePickIsWherePlayGoes | UI | pass 2026-11-19 |
 | "Keep Watching Here" leaves playback where it was | PadSharePlayTests.testKeepWatchingHereStaysPut | UI | pass 2026-11-19 |
+| SyncPlay (shared with the iPhone: same card, same code) | PhoneSyncPlayTests on the iPhone; iPhone MANUAL for two devices | UI (iPhone) | not run on the iPad |
 
 ## Music, books
 
@@ -297,6 +298,7 @@ A smart playlist is kept in the app's settings, which every launch starts empty.
 | Function | Test | Kind | Status |
 |---|---|---|---|
 | Sign-in card centred | PadSignInTests.testSignInCardIsCentredOnTheWideScreen | UI | pass |
+| Sign-in shows the one-word wordmark, read as "Aquarium" | PadSignInTests.testSignInShowsTheWordmark | UI | new, not yet run |
 | Return connects; server banner | PadSignInTests.testReturnInTheServerFieldConnects | UI | pass |
 | Public users listed | PadSignInTests.testPublicUsersAreListed | UI | pass |
 | Password sign-in by Return → sidebar shell | PadSignInTests.testPasswordSignInByKeyboardLandsOnTheSidebarShell | UI | pass |

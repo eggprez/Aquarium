@@ -23,11 +23,16 @@
 //  coordinator place it, rather than seeking to its own account's spot, which
 //  the coordinator would have sent to everyone.
 //
-//  iPhone, iPad and Mac. Not Apple TV, whose player is mpv and has no
-//  coordinator to join; the activity would arrive there with nothing to
-//  hand it to.
-
-#if !os(tvOS)
+//  The Apple TV's player is mpv, which has no coordinator of its own, so
+//  there the session is joined through an `AVDelegatingPlaybackCoordinator`:
+//  the same group, the same clock, but the orders — play from here at this
+//  moment, pause, seek — are handed to this file (`delegated`, at the end)
+//  and carried out on mpv through the player's group seam
+//  (Player/PlayerModel+Group.swift). An Apple TV and an iPhone in one session
+//  are each on their own kind of coordinator and neither can tell.
+//
+//  The Jellyfin server's own way of doing this, with no call at all, is
+//  SyncPlay — Core/SyncPlay.swift.
 
 import AVFoundation
 import Combine
@@ -35,6 +40,7 @@ import Foundation
 import GroupActivities
 import ImageIO
 import Observation
+import CoreMedia
 import os
 #if os(iOS)
 import UIKit
@@ -181,6 +187,20 @@ final class SharePlayCoordinator: NSObject {
 
     @ObservationIgnored private var transportObservers: [NSObjectProtocol] = []
 
+    #if os(tvOS)
+    /// The session's coordinator on a player that isn't AVPlayer.
+    @ObservationIgnored private var delegating: AVDelegatingPlaybackCoordinator?
+    /// This device is opening a title because the session said so: it opens
+    /// held, and the coordinator places it.
+    @ObservationIgnored private var followingOpen = false
+    /// A title this device put on, to be named to the coordinator once it
+    /// has a frame up and a clock to propose.
+    @ObservationIgnored private var proposeAtFirstFrame: String?
+    /// Orders that are only done once the stream has a frame up.
+    @ObservationIgnored private var whenSettled: [@Sendable () -> Void] = []
+    @ObservationIgnored private var stallSuspension: AVCoordinatedPlaybackSuspension?
+    #endif
+
     private override init() {
         super.init()
     }
@@ -222,6 +242,9 @@ final class SharePlayCoordinator: NSObject {
             openedItemId = item.Id
             putItOn = true
             session.activity = activity
+            #if os(tvOS)
+            name(item.Id, proposing: true)
+            #endif
             return
         }
         activity.poster = await Self.poster(for: item)
@@ -233,7 +256,7 @@ final class SharePlayCoordinator: NSObject {
             putItOn = true
             await invite(activity)
             #else
-            AppModel.shared.toast("Start a FaceTime call first, then choose Watch Together", tone: .error)
+            AppModel.shared.toast(Self.needsCall, tone: .error)
             #endif
             return
         }
@@ -311,6 +334,16 @@ final class SharePlayCoordinator: NSObject {
     }
     #endif
 
+    /// Watch Together with no call to offer it to, where the system has no
+    /// sheet to start one from.
+    nonisolated static var needsCall: String {
+        #if os(tvOS)
+        "Start a FaceTime call on this Apple TV first, or move one here from your iPhone, then choose Watch Together."
+        #else
+        "Start a FaceTime call first, then choose Watch Together"
+        #endif
+    }
+
     /// Watch Together that didn't get as far as a session.
     nonisolated static let notStarted = "SharePlay didn\u{2019}t start. Pick someone in the SharePlay sheet, or start a FaceTime call first."
 
@@ -343,7 +376,7 @@ final class SharePlayCoordinator: NSObject {
     /// Something started playing here. On a session, it becomes what the
     /// session is watching — unless it is the very thing the session just
     /// asked this device to open.
-    func playerStarted(_ item: BaseItem) {
+    func playerStarted(_ item: BaseItem, at seconds: Double = 0) {
         #if DEBUG
         if session == nil, TestRuntime.isUITest, let fake = TestLaunch.env(TestLaunch.sharePlayProgressEnv) {
             askForTests(item, fake)
@@ -351,14 +384,19 @@ final class SharePlayCoordinator: NSObject {
         }
         #endif
         guard let session else { return }
-        if openedItemId == item.Id { return }
-        openedItemId = item.Id
-        putItOn = true
-        session.activity = WatchTogetherActivity(
-            itemId: item.Id,
-            title: PlayerModel.displayTitle(item),
-            subtitle: item.isEpisode ? item.SeriesName : nil
-        )
+        let mine = openedItemId != item.Id
+        if mine {
+            openedItemId = item.Id
+            putItOn = true
+            session.activity = WatchTogetherActivity(
+                itemId: item.Id,
+                title: PlayerModel.displayTitle(item),
+                subtitle: item.isEpisode ? item.SeriesName : nil
+            )
+        }
+        #if os(tvOS)
+        delegatedStarted(item, mine: mine)
+        #endif
     }
 
     // MARK: - Being in one
@@ -371,12 +409,26 @@ final class SharePlayCoordinator: NSObject {
         self.session = session
         Self.log.notice("joining session for \(session.activity.itemId, privacy: .public)")
 
+        // One or the other keeps everyone together, not both.
+        if SyncPlayCoordinator.shared.isActive { Task { await SyncPlayCoordinator.shared.leave() } }
+
         // The player's transport follows the group from here on.
-        // The coordinator lives on AVPlayer, which is the Apple engine's; a
-        // Watch Together session forces that engine for its length (see the
-        // plan's "SharePlay stays an AVPlayer-only feature"), so a stream on
-        // mpv is handed over first.
         let player = PlayerModel.shared
+        #if os(tvOS)
+        // mpv has no coordinator of its own: the session's orders come to
+        // this file and go to the player through its group seam.
+        let coordinator = AVDelegatingPlaybackCoordinator(playbackControlDelegate: self)
+        delegating = coordinator
+        coordinator.coordinateWithSession(session)
+        player.joinGroup(self)
+        if player.isActive, player.item?.Id == session.activity.itemId {
+            openedItemId = session.activity.itemId
+            name(session.activity.itemId, proposing: true)
+        }
+        #else
+        // The coordinator lives on AVPlayer, which is the Apple engine's; a
+        // Watch Together session forces that engine for its length, so a
+        // stream on mpv is handed over first.
         // Only when what is on mpv is the session's title: anything else is
         // about to be replaced by `follow`, and reopening it first would
         // race that.
@@ -410,6 +462,7 @@ final class SharePlayCoordinator: NSObject {
         })
 
         observeTransport(of: player.appleEngine.player)
+        #endif
 
         let messenger = GroupSessionMessenger(session: session)
         self.messenger = messenger
@@ -452,6 +505,10 @@ final class SharePlayCoordinator: NSObject {
         // moves this player to where the group is, and a seek of its own
         // here would have moved the whole group instead. Where to start is
         // the question the one who put it on is asked.
+        #if os(tvOS)
+        followingOpen = true
+        defer { followingOpen = false }
+        #endif
         await AppModel.shared.play(itemId: activity.itemId, resume: false)
     }
 
@@ -463,6 +520,7 @@ final class SharePlayCoordinator: NSObject {
 
     // MARK: - Who did that
 
+    #if !os(tvOS)
     /// Someone else paused, played or jumped: say who, since every device
     /// does it at once and the player's own controls don't.
     private func observeTransport(of avPlayer: AVPlayer) {
@@ -486,6 +544,8 @@ final class SharePlayCoordinator: NSObject {
             MainActor.assumeIsolated { self?.announce(Self.notice(name: self?.name(of: id), jumpedTo: seconds)) }
         })
     }
+
+    #endif
 
     private func name(of participant: UUID) -> String? { reports[participant]?.name }
 
@@ -584,9 +644,19 @@ final class SharePlayCoordinator: NSObject {
         for observer in transportObservers { NotificationCenter.default.removeObserver(observer) }
         transportObservers = []
         lastNotice = nil
+        #if os(tvOS)
+        delegating = nil
+        followingOpen = false
+        proposeAtFirstFrame = nil
+        stallSuspension?.end()
+        stallSuspension = nil
+        settle()
+        PlayerModel.shared.leaveGroup(self)
+        #endif
     }
 }
 
+#if !os(tvOS)
 extension SharePlayCoordinator: AVPlayerPlaybackCoordinatorDelegate {
     /// Each device streams its own copy, by its own URL — a transcode's URL
     /// carries that device's session — so the coordinator has to be told
@@ -600,6 +670,190 @@ extension SharePlayCoordinator: AVPlayerPlaybackCoordinatorDelegate {
         // off the main thread and answered with a per-device URL mid-swap.
         let url = (playerItem.asset as? AVURLAsset)?.url
         return WatchTogetherActivity.itemId(in: url) ?? url?.absoluteString ?? "unknown"
+    }
+}
+
+#else
+
+// MARK: - The Apple TV: a coordinator that asks
+
+/// The session on a player that isn't AVPlayer. The coordinator keeps the
+/// group's clock and tells this device what to do about it; what the viewer
+/// does with the remote is asked of the coordinator, which tells everyone,
+/// this device included.
+extension SharePlayCoordinator: GroupTransport {
+    /// What the coordinator knows a title by: the same id an iPhone's
+    /// coordinator reads out of its stream's address.
+    nonisolated static func identifier(_ itemId: String) -> String {
+        itemId.lowercased().replacingOccurrences(of: "-", with: "")
+    }
+
+    /// Tell the coordinator what is on here. `proposing` hands it this
+    /// device's clock as the group's — the title is playing here and the
+    /// others are to match it; without, this device is the one placed.
+    fileprivate func name(_ itemId: String, proposing: Bool) {
+        guard let delegating else { return }
+        let player = PlayerModel.shared
+        var timebase: CMTimebase?
+        if proposing, player.isActive, !player.isOpening {
+            CMTimebaseCreateWithSourceClock(
+                allocator: kCFAllocatorDefault, sourceClock: CMClockGetHostTimeClock(), timebaseOut: &timebase)
+            if let timebase {
+                CMTimebaseSetTime(timebase, time: CMTime(seconds: player.engine?.clock ?? player.position, preferredTimescale: 600))
+                CMTimebaseSetRate(timebase, rate: player.isPaused ? 0 : 1)
+            }
+        }
+        Self.log.info("naming \(itemId, privacy: .public) to the coordinator, \(timebase == nil ? "to be placed" : "with this clock", privacy: .public)")
+        delegating.transitionToItem(withIdentifier: Self.identifier(itemId), proposingInitialTimingBasedOn: timebase)
+    }
+
+    /// A title is opening here. One the session asked for is named at once,
+    /// so the coordinator's orders are waiting when it has a frame up; one
+    /// this device put on is named at its first frame, with its clock.
+    fileprivate func delegatedStarted(_ item: BaseItem, mine: Bool) {
+        guard let delegating else { return }
+        let identifier = Self.identifier(item.Id)
+        // The same title reopened — a quality, a track — is still the one
+        // the coordinator has: its last order is carried out again.
+        guard delegating.currentItemIdentifier != identifier, proposeAtFirstFrame != item.Id else { return }
+        PlayerModel.shared.groupOrder = nil
+        if mine {
+            proposeAtFirstFrame = item.Id
+        } else {
+            name(item.Id, proposing: false)
+        }
+    }
+
+    var holdsNewStreams: Bool { followingOpen }
+
+    /// Whether the coordinator has this title, and so can be asked.
+    private var asks: AVDelegatingPlaybackCoordinator? {
+        guard let delegating, delegating.currentItemIdentifier != nil else { return nil }
+        return delegating
+    }
+
+    func viewerPaused() {
+        if let asks { asks.coordinateRateChange(to: 0, options: []) } else { PlayerModel.shared.pauseNow() }
+    }
+
+    func viewerResumed() {
+        if let asks { asks.coordinateRateChange(to: 1, options: []) } else { PlayerModel.shared.resumeNow() }
+    }
+
+    func viewerSeeked(to seconds: Double) {
+        if let asks {
+            asks.coordinateSeek(to: CMTime(seconds: seconds, preferredTimescale: 600), options: [])
+        } else {
+            let player = PlayerModel.shared
+            player.follow(GroupOrder(position: seconds, playing: !player.isPaused))
+        }
+    }
+
+    func streamSettled() {
+        if let itemId = proposeAtFirstFrame {
+            proposeAtFirstFrame = nil
+            name(itemId, proposing: true)
+        }
+        settle()
+    }
+
+    /// Running dry is this device's trouble: the coordinator is told, the
+    /// others carry on or wait as it decides, and ending the suspension is
+    /// what has it bring this device back to where they are.
+    func streamStalled(_ stalled: Bool) {
+        guard let delegating else { return }
+        if stalled, stallSuspension == nil, !PlayerModel.shared.isPaused {
+            stallSuspension = delegating.beginSuspension(for: .stallRecovery)
+        } else if !stalled, let suspension = stallSuspension {
+            stallSuspension = nil
+            suspension.end()
+        }
+    }
+
+    /// Everything waiting on a frame is done.
+    fileprivate func settle() {
+        let waiting = whenSettled
+        whenSettled = []
+        for done in waiting { done() }
+    }
+
+    /// Call `done` once the stream has a frame up — now, if it has. Never
+    /// left uncalled: the coordinator waits on it.
+    private func afterSettling(_ done: @escaping @Sendable () -> Void) {
+        guard !PlayerModel.shared.isSettledForGroup, PlayerModel.shared.isActive else { return done() }
+        whenSettled.append(done)
+        let count = whenSettled.count
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            guard let self, self.whenSettled.count >= count else { return }
+            self.settle()
+        }
+    }
+
+    /// An order from the coordinator, on the main actor, if it is still for
+    /// the title that is on.
+    private func delegated(_ expected: String, who: UUID?, notice: String?, order: GroupOrder?, waits: Bool,
+                           done: @escaping @Sendable () -> Void) {
+        guard let delegating, delegating.currentItemIdentifier == expected else { return done() }
+        if let order { PlayerModel.shared.follow(order) }
+        if let who, let notice { announce("\(name(of: who) ?? "Someone") \(notice)") }
+        if waits { afterSettling(done) } else { done() }
+    }
+}
+
+extension SharePlayCoordinator: AVPlaybackCoordinatorPlaybackControlDelegate {
+    nonisolated func playbackCoordinator(
+        _ coordinator: AVDelegatingPlaybackCoordinator, didIssue playCommand: AVDelegatingPlaybackCoordinatorPlayCommand,
+        completionHandler: @escaping @Sendable () -> Void
+    ) {
+        // "Play from `itemTime` as of `hostClockTime`", which may be a moment
+        // ago or a moment from now: as a date by this device's clock.
+        let behind = CMTimeSubtract(CMClockGetTime(CMClockGetHostTimeClock()), playCommand.hostClockTime).seconds
+        let at = Date().addingTimeInterval(behind.isFinite ? -behind : 0)
+        let order = GroupOrder(position: playCommand.itemTime.seconds, playing: true, at: at)
+        let expected = playCommand.expectedCurrentItemIdentifier
+        let who = playCommand.originator?.identifier
+        Task { @MainActor in
+            self.delegated(expected, who: who, notice: "played", order: order, waits: false, done: completionHandler)
+        }
+    }
+
+    nonisolated func playbackCoordinator(
+        _ coordinator: AVDelegatingPlaybackCoordinator, didIssue pauseCommand: AVDelegatingPlaybackCoordinatorPauseCommand,
+        completionHandler: @escaping @Sendable () -> Void
+    ) {
+        let expected = pauseCommand.expectedCurrentItemIdentifier
+        let who = pauseCommand.originator?.identifier
+        let waits = pauseCommand.shouldBufferInAnticipationOfPlayback
+        Task { @MainActor in
+            self.delegated(expected, who: who, notice: "paused", order: GroupOrder(position: nil, playing: false),
+                           waits: waits, done: completionHandler)
+        }
+    }
+
+    nonisolated func playbackCoordinator(
+        _ coordinator: AVDelegatingPlaybackCoordinator, didIssue seekCommand: AVDelegatingPlaybackCoordinatorSeekCommand,
+        completionHandler: @escaping @Sendable () -> Void
+    ) {
+        let seconds = seekCommand.itemTime.seconds
+        let expected = seekCommand.expectedCurrentItemIdentifier
+        let who = seekCommand.originator?.identifier
+        Task { @MainActor in
+            // Held where it lands; a play order follows if the group is playing.
+            self.delegated(expected, who: who, notice: "jumped to \(Format.clock(seconds))",
+                           order: GroupOrder(position: seconds, playing: false), waits: true, done: completionHandler)
+        }
+    }
+
+    nonisolated func playbackCoordinator(
+        _ coordinator: AVDelegatingPlaybackCoordinator,
+        didIssue bufferingCommand: AVDelegatingPlaybackCoordinatorBufferingCommand,
+        completionHandler: @escaping @Sendable () -> Void
+    ) {
+        let expected = bufferingCommand.expectedCurrentItemIdentifier
+        Task { @MainActor in
+            self.delegated(expected, who: nil, notice: nil, order: nil, waits: true, done: completionHandler)
+        }
     }
 }
 

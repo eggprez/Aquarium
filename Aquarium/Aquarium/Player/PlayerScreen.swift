@@ -213,8 +213,9 @@ struct PlayerScreen: View {
         .modifier(PlayerScreenLifecycle())
         #if !os(tvOS)
         .modifier(StreamSwitchPrompt())
-        .modifier(SharePlayProgressPrompt())
         #endif
+        .modifier(SharePlayProgressPrompt())
+        .modifier(SyncPlayPrompt(whilePlaying: true))
         #if os(iOS)
         // The status bar comes and goes with the controls, as in Apple's
         // player; the home indicator dims on its own over a full-screen video.
@@ -450,7 +451,6 @@ private struct StreamSwitchPrompt: ViewModifier {
 
 // MARK: - SharePlay: whose progress
 
-#if !os(tvOS)
 /// "Start from whose progress?" — asked of the person who put a title on in
 /// SharePlay, once the others' saved spots are in (see `SharePlayCoordinator`).
 /// Each row is a person and their spot, then the beginning; the pick is a
@@ -505,4 +505,3 @@ private struct SharePlayProgressPrompt: ViewModifier {
         #endif
     }
 }
-#endif

@@ -83,10 +83,15 @@ struct AquariumApp: App {
     }
     #endif
 
-    #if os(tvOS) && DEBUG
+    #if os(tvOS)
     init() {
+        #if DEBUG
         // Remote presses from a script — see Player/TV/RemoteDebugHook.swift.
         RemoteDebugHook.start()
+        #endif
+        // A film shared from a FaceTime call on this Apple TV, or one moved
+        // here from an iPhone — see Core/SharePlay.swift.
+        Launch.afterFirstFrame { SharePlayCoordinator.shared.start() }
     }
     #endif
 

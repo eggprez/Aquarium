@@ -2546,12 +2546,7 @@ struct BrandMark: View {
                 .interpolation(.high)
                 .scaledToFit()
                 .frame(width: 24, height: 24)
-            HStack(spacing: 0) {
-                Text("Aqua").fontWeight(.semibold)
-                Text("rium").fontWeight(.heavy).foregroundStyle(Theme.accent)
-            }
-            .font(.title3)
-            .foregroundStyle(Theme.text)
+            Wordmark(font: .title3, color: Theme.text)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Aquarium")

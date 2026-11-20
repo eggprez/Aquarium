@@ -28,6 +28,7 @@ Regression tests are named after their bug and cite the source in a comment.
 | Function | Test | Kind | Status |
 |---|---|---|---|
 | Server address, connect, password sign-in | `TVSignInTests.testPasswordSignInLandsOnHome` | UI | pass |
+| Sign-in shows the one-word wordmark, read as "Aquarium" | `TVSignInTests.testSignInShowsTheWordmark` | UI | new, not yet run |
 | Wrong password message, stays on screen | `TVSignInTests.testAWrongPasswordSaysSoAndStaysPut` | UI | xfail |
 | Disabled account refused in plain words | `TVSignInTests.testADisabledAccountIsRefusedInPlainWords` | UI | xfail |
 | Public users offered; passwordless user signs straight in, sees only its library, no Live TV | `TVSignInTests.testTheServersPublicUsersAreOffered`, `testAPasswordlessUserSignsStraightInAndSeesOnlyTheirLibrary` | UI | pass |
@@ -213,7 +214,12 @@ The Apple TV has no music UI and keeps no downloads (FEATURE-LIST.md;
 | `MPVEngine` tvOS audio session; TLS roots (mpv-tls-verification.md) | every UI player test plays on mpv over http; HTTPS through mpv untested (the QA server is plain http) | untested: no HTTPS QA server |
 | `RemoteDebugHook` (DEBUG) | used by the UI tests to swipe; not itself under test | n/a |
 | `AppIntents`/`PlayerIntents` tvOS branches (Siri) | MANUAL §5 | manual: Siri can't be driven in the simulator |
-| Downloads, OfflineProgress, SharePlay, Watch link (`#if !os(tvOS)`) | absent on tvOS by compilation | n/a |
+| Downloads, OfflineProgress, Watch link (`#if !os(tvOS)`) | absent on tvOS by compilation | n/a |
+| Watch Together tab in the panel, with SharePlay and SyncPlay | TVSyncPlayTests.testThePanelHasAWatchTogetherTabWithSharePlayAndSyncPlay | new 2026-11-18 |
+| SyncPlay against the QA server: a group from the panel, the remote's play/pause is the group's, someone else's jump and play move mpv, leave | TVSyncPlayTests.testSyncPlayStartsAGroupAndFollowsIt | new 2026-11-18 |
+| What mpv does with a group's order; SyncPlay's wire and clock | GroupOrderTests, SyncPlayWireTests, SyncPlayClockTests (unit) | new 2026-11-18 |
+| SharePlay session on the Apple TV (`AVDelegatingPlaybackCoordinator`) | MANUAL: needs a FaceTime call; never run | manual, untested |
+| Settings › Account › SyncPlay (join with nothing playing) | MANUAL | manual |
 | Focus styles and sizes in `Components.swift`, `HomeView`, `ItemDetailView` (layout) | screenshots attached by the UI tests; MANUAL §5 for the sofa | visual only |
 | Dropout taken as end of episode (master-fix-list "Top priority") | not automated: needs the QA proxy killed mid-stream; MANUAL §5 | untested |
 | Starved direct play notice | not automated: needs the 8098 throttle, which can hang below 2.6 Mbps (qa-rproxy-low-rate-hang.md) | untested |

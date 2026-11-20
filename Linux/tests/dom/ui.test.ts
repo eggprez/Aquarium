@@ -1425,3 +1425,30 @@ describe("scrollRow, cardRow and section", () => {
     expect(ui.section("Plain", ui.el("div")).querySelector(".see-all")).toBeNull();
   });
 });
+
+describe("wordmark", () => {
+  it("is one word to a screen reader, drawn as lowercase with a bubble for the i's dot", () => {
+    const mark = ui.wordmark();
+    expect(mark.className).toBe("wordmark");
+    expect(mark.getAttribute("role")).toBe("img");
+    expect(mark.getAttribute("aria-label")).toBe("Aquarium");
+    // The dotless i carries the bubble; a dotted one would show both.
+    expect(mark.textContent).toBe("aquarıum");
+    const i = mark.querySelector(".wm-i")!;
+    expect(i.textContent).toBe("ı");
+    expect(i.getAttribute("aria-hidden")).toBe("true");
+    // Regression: the FellyJin-era split ("Aqua" + bold "rium") is gone.
+    expect(mark.querySelector("b")).toBeNull();
+  });
+
+  it("matches the static one in the sidebar of index.html", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const html = readFileSync(resolve(__dirname, "../../index.html"), "utf8");
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const side = doc.querySelector(".brand .wordmark")!;
+    expect(side.getAttribute("aria-label")).toBe("Aquarium");
+    expect(side.textContent).toBe(ui.wordmark().textContent);
+    expect(side.querySelector(".wm-i")).not.toBeNull();
+  });
+});

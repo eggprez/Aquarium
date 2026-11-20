@@ -459,7 +459,17 @@ private struct MoreMenu: View {
     private let chipColumns = [GridItem(.adaptive(minimum: 64), spacing: 6)]
 
     var body: some View {
-        if !player.isLive {
+        // First: under the speed, the sleep timer and "After this" it was
+        // below the fold of a card on a phone held sideways, and on an
+        // episode — which has the most above it — looked not to be there.
+        if player.offersWatchTogether {
+            PanelHeading(text: "Watch Together")
+            WatchTogetherRows(onInteract: onInteract, close: close)
+        }
+
+        // The group's speed is normal: SyncPlay has no other, and one
+        // device on 1.5× would walk away from the rest.
+        if !player.isLive, !player.isInGroup {
             PanelHeading(text: "Speed")
             LazyVGrid(columns: chipColumns, spacing: 6) {
                 ForEach(PlayerModel.speeds, id: \.self) { rate in
@@ -517,48 +527,5 @@ private struct MoreMenu: View {
             }
             .accessibilityIdentifier(TestID.Player.moreChannels)
         }
-
-        #if !os(tvOS)
-        if let item = player.item, player.canWatchTogether || SharePlayCoordinator.shared.isActive {
-            let shareplay = SharePlayCoordinator.shared
-            PanelHeading(text: "Watch Together")
-            if shareplay.isActive {
-                if !shareplay.progressChoices.isEmpty {
-                    PanelRow(title: "Start From Someone’s Progress…",
-                             detail: "Everyone jumps to the spot you pick") {
-                        onInteract()
-                        close()
-                        shareplay.askAgain()
-                    }
-                    .accessibilityIdentifier(TestID.Player.sharePlayProgressAsk)
-                }
-                PanelRow(title: "Leave SharePlay", isSelected: true) {
-                    onInteract()
-                    shareplay.leave()
-                    close()
-                }
-                .accessibilityIdentifier(TestID.Player.sharePlayLeave)
-                PanelRow(title: "End SharePlay for Everyone") {
-                    onInteract()
-                    shareplay.endForEveryone()
-                    close()
-                }
-                .accessibilityIdentifier(TestID.Player.sharePlayEnd)
-            } else {
-                // On mpv the stream is handed to AVPlayer first, whose player
-                // the session coordinates.
-                PanelRow(title: "Watch Together with SharePlay",
-                         detail: "The same picture on everyone's screen, over FaceTime") {
-                    onInteract()
-                    close()
-                    Task {
-                        await player.prepareForSharePlay()
-                        await shareplay.share(item)
-                    }
-                }
-                .accessibilityIdentifier(TestID.Player.sharePlayStart)
-            }
-        }
-        #endif
     }
 }
