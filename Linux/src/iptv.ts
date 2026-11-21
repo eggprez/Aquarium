@@ -31,6 +31,8 @@ export interface IptvProgram {
   Name: string;
   Overview: string;
   EpisodeTitle: string;
+  /** XMLTV `<category>` entries, when the guide carries any. */
+  Genres?: string[];
   StartDate: string;
   EndDate: string;
 }
@@ -208,6 +210,10 @@ export function parseXmltv(text: string): {
       StartDate: new Date(s).toISOString(),
       EndDate: new Date(e).toISOString(),
     };
+    const genres = Array.from(p.getElementsByTagName("category"))
+      .map((c) => c.textContent?.trim() ?? "")
+      .filter(Boolean);
+    if (genres.length) entry.Genres = Array.from(new Set(genres));
     const list = programs.get(chan);
     if (list) list.push(entry);
     else programs.set(chan, [entry]);

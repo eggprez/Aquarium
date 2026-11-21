@@ -21,6 +21,7 @@ import {
   QUALITY_CHOICES,
   registerPlayerBridge,
   restoreDownloadQueue,
+  getQueuedDownloads,
   resumeAutoplay,
   setLiveSetting,
   getEpisodeQueue,
@@ -52,6 +53,7 @@ import {
   clear,
   asButton,
   closeMenus,
+  openMenu,
   toast,
   errorState,
   openDialog,
@@ -66,12 +68,14 @@ import { wireSmoothScroll } from "./scroll";
 import { initTheme } from "./theme";
 import { wireSpatialNav } from "./spatial";
 import { fillChannelsPanel, liveTitleLines, stepChannel } from "./channels-panel";
-import { preloadLineup } from "./lineup";
+import { preloadLineup, nowNextSync } from "./lineup";
 import { wirePrefetch } from "./prefetch";
 import { clearCache, hydrateCache, getCached, setCached } from "./cache";
 import { renderLogin } from "./views/login";
 import { renderHome } from "./views/home";
 import { renderLibrary, renderSearch } from "./views/library";
+import { renderPerson } from "./views/person";
+import { startDesktopIntegration } from "./desktop";
 import { renderFavorites } from "./views/favorites";
 import { renderItem } from "./views/item";
 import { renderLiveTv } from "./views/livetv";
@@ -195,7 +199,9 @@ function fsArmHide(): void {
   fsHideTimer = window.setTimeout(() => {
     if (!videoFullscreen) return;
     // Don't hide under the pointer or while a panel is open.
-    if (fsBarHovered || $("player-bar").querySelector(".pb-panel")) {
+    // Nor while paused: a stopped picture with no controls says nothing
+    // about why it stopped.
+    if (fsBarHovered || $("player-bar").querySelector(".pb-panel") || openCard || lastBarStatus?.paused) {
       fsArmHide();
       return;
     }
@@ -229,6 +235,8 @@ function fsPointerMoved(e: MouseEvent): boolean {
 async function setVideoFullscreen(full: boolean): Promise<void> {
   videoFullscreen = full;
   clearTimeout(fsHideTimer);
+  // The band is cut against the layout being left.
+  closeBarCard();
   // Leaving fullscreen mid-reveal would otherwise strand the subtitles at the
   // lifted position fsSetBar puts them in.
   if (fsBarShown) {
@@ -367,8 +375,10 @@ function updateBackButton(): void {
 }
 
 // Pages that can't render without the server.
-const SERVER_PAGES = ["home", "lib", "item", "livetv", "search", "favorites", "music", "books"];
+const SERVER_PAGES = ["home", "lib", "item", "person", "livetv", "search", "favorites", "music", "books"];
 
+// The strip above every page carries Retry, so this screen only has to say
+// what is missing and point at what still works.
 function renderOffline(content: HTMLElement): void {
   clear(content);
   content.append(
@@ -382,19 +392,6 @@ function renderOffline(content: HTMLElement): void {
           class: "btn primary",
           onClick: () => (location.hash = "#/downloads"),
         }, ["Go to Downloads"]),
-        el("button", {
-          class: "btn",
-          onClick: async (ev: MouseEvent) => {
-            const b = ev.currentTarget as HTMLButtonElement;
-            b.disabled = true;
-            b.textContent = "Checking…";
-            const ok = await api.checkOnline();
-            b.disabled = false;
-            b.textContent = "Retry connection";
-            if (ok) route();
-            else toast("Still offline — server unreachable", "error");
-          },
-        }, ["Retry connection"]),
       ]),
     ])
   );
@@ -415,6 +412,9 @@ function highlightNav(): void {
     if (active) n.setAttribute("aria-current", "page");
     else n.removeAttribute("aria-current");
   });
+  // Settings has no row any more: it is reached from the account control at
+  // the sidebar's foot, which takes the selected fill while Settings is open.
+  document.getElementById("account-btn")?.classList.toggle("active", page === "settings");
 }
 
 /**
@@ -451,8 +451,9 @@ async function route(): Promise<void> {
   void content.offsetWidth;
   content.classList.add("view-in");
 
-  // Downloaded music is the one music page that works with no server.
-  if (api.isOffline() && SERVER_PAGES.includes(page || "home") && !(page === "music" && arg === "downloaded")) {
+  // Music and audiobooks answer for themselves with no server: their views
+  // show what is downloaded instead.
+  if (api.isOffline() && SERVER_PAGES.includes(page || "home") && page !== "music" && page !== "books") {
     renderOffline(content);
     settleScroll(content, 0);
     return;
@@ -463,6 +464,7 @@ async function route(): Promise<void> {
       case "home": await renderHome(content); break;
       case "lib": await renderLibrary(content, arg); break;
       case "item": await renderItem(content, arg); break;
+      case "person": await renderPerson(content, arg); break;
       case "favorites": await renderFavorites(content); break;
       case "livetv": await renderLiveTv(content); break;
       case "downloads": await renderDownloads(content); break;
@@ -493,22 +495,18 @@ function viewsSignature(views: any[]): string {
   return views.map((v) => `${v.Id}:${v.Name}:${v.CollectionType ?? ""}`).join(",");
 }
 
+/** The library list the sidebar was last drawn from, so a connectivity change
+ *  can redraw it (reduced, or whole again) without asking the server. */
+let navViews: any[] | null = null;
+/** Transfers running or waiting to start: the Downloads row's badge. */
+let downloadsBusy = 0;
+
 async function buildNav(): Promise<void> {
   // The library list is the one request every page of a session waits on for
   // its sidebar; the last known list paints it immediately and the fresh one
   // only redraws it if a library was added, renamed or removed.
   const cached = getCached<any[]>(VIEWS_CACHE_KEY);
   paintNav(cached ?? null);
-
-  const s = api.getSession();
-  const userBox = $("topbar-user");
-  clear(userBox);
-  if (s) {
-    userBox.append(
-      el("span", {}, [s.userName]),
-      el("div", { class: "avatar", "aria-hidden": "true" }, [s.userName.slice(0, 1).toUpperCase()])
-    );
-  }
   void updateSidebarFooter();
 
   const views = await api.getViews().catch(() => null);
@@ -521,70 +519,108 @@ async function buildNav(): Promise<void> {
 }
 
 /** Draw the sidebar for a library list. `null` is "not known yet": only the
- *  entries that don't depend on the server, until the list arrives. */
+ *  entries that don't depend on the server, until the list arrives.
+ *
+ *  Grouped as the Mac and iPad sidebars are: Home on its own, the libraries
+ *  (Music and Audiobooks among them), Live, then what is yours. Offline it
+ *  reduces to the rows that still have something to show. */
 function paintNav(views: any[] | null): void {
+  navViews = views;
   const nav = $("nav");
   clear(nav);
 
-  const add = (route: string, label: string, icon: string) => {
-    const b = el("button", { class: "nav-item", "data-route": route, html: icon });
-    b.append(el("span", {}, [label]));
+  type Row = [route: string, label: string, icon: string];
+  let position = 0;
+  const add = ([route, label, icon]: Row) => {
+    position++;
+    // Ctrl+1…9 open the rows in order (see `shellShortcut`); the tooltip is
+    // also the whole name of a library the sidebar's width cuts short.
+    const tip = position <= 9 ? `${label} (Ctrl+${position})` : label;
+    const b = el("button", { class: "nav-item", "data-route": route, title: tip, html: icon });
+    b.append(el("span", { class: "nav-label" }, [label]));
     b.addEventListener("click", () => (location.hash = route));
     nav.append(b);
   };
-
-  add("#/home", "Home", ICONS.home);
-  if (!views) {
-    highlightNav();
-    return;
-  }
-
-  let hasLiveTv = false;
-  const hasMusic = views.some((v) => v.CollectionType === "music");
-  const hasBooks = views.some((v) => v.CollectionType === "books" || v.CollectionType === "audiobooks");
-  if (views.length) nav.append(el("div", { class: "nav-sep" }, ["Libraries"]));
-  for (const v of views) {
-    if (v.CollectionType === "livetv") { hasLiveTv = true; continue; }
-    // Only video libraries: Books (audiobooks), Music, Photos etc. are out of scope.
-    if (!api.VIDEO_COLLECTION_TYPES.includes(v.CollectionType)) continue;
-    const icon =
-      v.CollectionType === "movies" ? ICONS.movies :
-      v.CollectionType === "tvshows" ? ICONS.tv : ICONS.folder;
-    add(`#/lib/${v.Id}`, v.Name, icon);
-  }
+  const group = (title: string | null, rows: Row[]) => {
+    if (!rows.length) return;
+    if (title) nav.append(el("div", { class: "nav-sep" }, [title]));
+    rows.forEach(add);
+  };
 
   // Music and audiobooks have screens of their own (views/music.ts, books.ts)
   // rather than a library grid each.
-  if (hasMusic) {
-    nav.append(el("div", { class: "nav-sep" }, ["Music"]));
-    add("#/music/discover", "Listen Now", ICONS.music);
-    add("#/music/library", "Library", ICONS.musicLibrary);
+  const listening: Row[] = [];
+  if (views?.some((v) => v.CollectionType === "music")) {
+    listening.push(["#/music/discover", "Listen Now", ICONS.music], ["#/music/library", "Library", ICONS.musicLibrary]);
   }
-  if (hasBooks) {
-    if (!hasMusic) nav.append(el("div", { class: "nav-sep" }, ["Listening"]));
-    add("#/books", "Audiobooks", ICONS.books);
+  if (views?.some((v) => v.CollectionType === "books" || v.CollectionType === "audiobooks")) {
+    listening.push(["#/books", "Audiobooks", ICONS.books]);
+  }
+  const downloads: Row = ["#/downloads", "Downloads", ICONS.downloads];
+
+  if (api.isOffline()) {
+    // Only what works with no server: what is on this computer, and the two
+    // sections whose views show their downloaded content offline.
+    group(null, [downloads]);
+    group("Libraries", listening);
+  } else {
+    group(null, [["#/home", "Home", ICONS.home]]);
+    if (views) {
+      // Only video libraries get a grid: Photos and the like are out of scope.
+      const libraries: Row[] = views
+        .filter((v) => api.VIDEO_COLLECTION_TYPES.includes(v.CollectionType))
+        .map((v) => [
+          `#/lib/${v.Id}`,
+          v.Name,
+          v.CollectionType === "movies" ? ICONS.movies : v.CollectionType === "tvshows" ? ICONS.tv : ICONS.folder,
+        ]);
+      group("Libraries", [...libraries, ...listening]);
+      // Only servers that actually have a Live TV library get the entry:
+      // without a tuner configured, the page can never say anything but "no
+      // channels". A custom M3U source doesn't go through the server at all,
+      // so it earns the entry on its own.
+      const hasLiveTv = views.some((v) => v.CollectionType === "livetv");
+      if (hasLiveTv || api.getConfig()?.livetv_source === "custom") {
+        group("Live", [["#/livetv", "Live TV", ICONS.livetv]]);
+      }
+      group("You", [["#/favorites", "Favorites", ICONS.favorites], downloads]);
+    }
   }
 
-  nav.append(el("div", { class: "nav-sep" }, ["Aquarium"]));
-  add("#/favorites", "Favorites", ICONS.favorites);
-  // Only servers that actually have a Live TV library get the entry: without a
-  // tuner configured, the page can never say anything but "no channels". A
-  // custom M3U source doesn't go through the server at all, so it earns the
-  // entry on its own.
-  if (hasLiveTv || api.getConfig()?.livetv_source === "custom") {
-    add("#/livetv", "Live TV", ICONS.livetv);
-  }
-  add("#/downloads", "Downloads", ICONS.downloads);
-  add("#/settings", "Settings", ICONS.settings);
-
+  paintDownloadsBadge();
   highlightNav();
 }
 
+/** The count on the Downloads row while anything is in flight or queued. The
+ *  row is rebuilt with the sidebar, so the count is kept and drawn again. */
+function paintDownloadsBadge(): void {
+  const row = document.querySelector('.nav-item[data-route="#/downloads"]');
+  if (!row) return;
+  row.querySelector(".nav-badge")?.remove();
+  if (downloadsBusy <= 0) return;
+  row.append(
+    el("span", {
+      class: "nav-badge",
+      "aria-label": `${downloadsBusy} download${downloadsBusy === 1 ? "" : "s"} in progress`,
+    }, [String(downloadsBusy)])
+  );
+}
+
+function hostOf(server: string): string {
+  try {
+    return new URL(server).host || server;
+  } catch {
+    return server;
+  }
+}
+
 /**
- * The sidebar's footer was an empty styled box. It now holds the two facts that
- * belong in the corner of a media client: which build this is, and whether the
- * app has anything outstanding with the server — transfers in flight, or watch
- * progress recorded offline that hasn't been pushed back yet.
+ * The foot of the sidebar: who is signed in and to which server, with one line
+ * under it for whether the app has anything outstanding with that server —
+ * transfers in flight, or watch progress recorded offline that hasn't been
+ * pushed back yet. The whole thing is a button onto the account menu, where
+ * the Mac keeps switching, Settings and signing out. The build number sits
+ * under it, small.
  */
 async function updateSidebarFooter(): Promise<void> {
   const foot = $("sidebar-footer");
@@ -594,6 +630,10 @@ async function updateSidebarFooter(): Promise<void> {
     invoke<any[]>("downloads_list").catch(() => [] as any[]),
   ]);
   const active = downloads.filter((d) => d?.status === "downloading").length;
+  // `downloads_list` reads what is on disk; the ones still waiting their turn
+  // live only in playback.ts's queue.
+  downloadsBusy = active + getQueuedDownloads().length;
+  paintDownloadsBadge();
 
   let cls = "ok";
   let text = "Synced";
@@ -608,22 +648,152 @@ async function updateSidebarFooter(): Promise<void> {
     text = `Syncing ${pending} item${pending === 1 ? "" : "s"}`;
   }
 
+  // The footer is redrawn under whoever is using it; keep the keyboard's
+  // place on the account button if that is where it was.
+  const hadFocus = document.activeElement?.id === "account-btn";
+  const s = api.getSession();
   clear(foot);
+  if (s) {
+    // A click on the button while its menu is up should close it. The menu's
+    // own outside-click handler has already done that by the time `click`
+    // arrives, so whether it was open is noted on the way down.
+    let wasOpen = false;
+    const button = el("button", {
+      class: "account-btn",
+      id: "account-btn",
+      type: "button",
+      title: "Account, Settings and Sign Out",
+      "aria-haspopup": "menu",
+      onPointerdown: () => {
+        wasOpen = !!document.querySelector(".account-menu");
+      },
+      onClick: () => {
+        if (wasOpen) wasOpen = false;
+        else void openAccountMenu();
+      },
+    }, [
+      el("div", { class: "avatar", "aria-hidden": "true" }, [s.userName.slice(0, 1).toUpperCase()]),
+      el("div", { class: "account-text" }, [
+        el("span", { class: "account-name" }, [s.userName]),
+        el("span", { class: "account-server" }, [hostOf(s.server)]),
+        el("span", { class: `foot-line ${cls}` }, [
+          el("span", { class: "foot-dot" }),
+          el("span", {}, [text]),
+        ]),
+      ]),
+      icon("chevron-down", 14),
+    ]);
+    foot.append(button);
+    if (hadFocus) button.focus({ preventScroll: true });
+  }
   foot.append(
-    el("div", { class: "foot-version" }, [
-      el("img", { src: "/aquarium-logo.svg", alt: "" }),
-      el("span", {}, [`Aquarium ${info.version ? `v${info.version}` : ""}`.trim()]),
-    ]),
-    el("div", { class: `foot-line ${cls}` }, [
-      el("span", { class: "foot-dot" }),
-      el("span", {}, [text]),
-    ])
+    el("div", { class: "foot-version" }, [`Aquarium ${info.version ? `v${info.version}` : ""}`.trim()])
   );
+  highlightNav();
 }
 
-function updateOfflinePill(): void {
-  $("offline-pill").toggleAttribute("hidden", !api.isOffline());
-  void updateSidebarFooter();
+/** The account menu: the other saved accounts, Add Account, Settings, Sign
+ *  Out — in the Mac's order. Signing out is confirmed in Settings' account
+ *  pane rather than here, so there is one place that does it. */
+async function openAccountMenu(): Promise<void> {
+  const others = (await api.listAccounts()).filter((a) => !a.current);
+  const anchor = document.getElementById("account-btn");
+  if (!anchor) return;
+  openMenu(anchor, (menu) => {
+    menu.classList.add("account-menu");
+    const item = (label: string, run: () => void, danger = false): void => {
+      menu.append(
+        el("button", {
+          class: danger ? "danger" : null,
+          role: "menuitem",
+          onClick: () => {
+            closeMenus();
+            run();
+          },
+        }, [el("span", { class: "menu-text" }, [label])])
+      );
+    };
+    const rule = (): void => void menu.append(el("div", { class: "menu-rule", role: "separator" }));
+
+    if (others.length) {
+      menu.append(el("div", { class: "menu-label" }, ["Switch Account"]));
+      for (const a of others) item(`${a.user_name} — ${hostOf(a.server)}`, () => void switchToAccount(a.key));
+    }
+    item("Add Account…", showAddAccount);
+    rule();
+    item("Settings…", () => (location.hash = "#/settings"));
+    rule();
+    item("Sign Out…", () => (location.hash = "#/settings/account"), true);
+  }, { fixed: true });
+}
+
+// ---------- Offline ----------
+
+// While offline, quietly retry the server — backing off rather than probing
+// at a fixed rate forever. Each probe is a TCP connect with a 5s timeout, and
+// being offline is exactly when the machine is on battery and away from a
+// network, so a flat 15s poll spends the evening waking the radio 240 times
+// an hour to hear the same answer. Backing off to a 5min ceiling makes that
+// about a dozen, and a server that comes back is still found within minutes.
+const RETRY_MIN_MS = 15_000;
+const RETRY_MAX_MS = 300_000;
+let retryDelay = RETRY_MIN_MS;
+let retryTimer = 0;
+/** A probe the user asked for is out: the strip says so and Retry waits. */
+let retryChecking = false;
+
+function stopServerRetry(): void {
+  clearTimeout(retryTimer);
+  retryTimer = 0;
+  retryDelay = RETRY_MIN_MS;
+}
+
+/** (Re)arm the offline probe at the current backoff, from zero or a reset —
+ *  or at `delay`, for a signal that the answer may have changed. */
+function scheduleServerRetry(delay = retryDelay): void {
+  clearTimeout(retryTimer);
+  retryTimer = window.setTimeout(async () => {
+    retryTimer = 0;
+    if (!api.getSession() || !api.isOffline()) return;
+    const ok = await api.checkOnline();
+    // Coming back online fires the connectivity event, which stops the loop;
+    // still offline means wait longer before asking again.
+    if (!ok) {
+      retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+      scheduleServerRetry();
+    }
+  }, delay);
+}
+
+/** Retry, from the strip's button or the Refresh key. Success arrives as the
+ *  connectivity event, which redraws everything; only failure is said here. */
+async function retryServerNow(): Promise<void> {
+  if (retryChecking || !api.isOffline()) return;
+  retryChecking = true;
+  updateOfflineStrip();
+  const ok = await api.checkOnline();
+  retryChecking = false;
+  updateOfflineStrip();
+  if (!ok) {
+    toast("Still offline — server unreachable", "error");
+    // An explicit ask means the user thinks the network changed; start the
+    // backoff over so the next automatic probe is soon, not five minutes out.
+    retryDelay = RETRY_MIN_MS;
+    scheduleServerRetry();
+  }
+}
+
+/** The strip under the top bar on every page while the server can't be
+ *  reached. The Apple app counts down to its next automatic try there; this
+ *  one doesn't, because a line that changes every second repaints the window
+ *  every second for as long as the machine is offline. */
+function updateOfflineStrip(): void {
+  const off = api.isOffline();
+  $("offline-strip").toggleAttribute("hidden", !off);
+  $("offline-status").textContent = retryChecking ? "Looking for your server…" : "Your server can't be reached";
+  const retry = $("offline-retry") as HTMLButtonElement;
+  retry.disabled = retryChecking;
+  retry.textContent = retryChecking ? "Checking…" : "Retry";
 }
 
 /** The account whose screens the persistent cache holds: one server, one user. */
@@ -643,7 +813,7 @@ async function showShell(): Promise<void> {
   $("shell").classList.remove("hidden");
   void wireMusicPlayer();
   buildNav();
-  updateOfflinePill();
+  updateOfflineStrip();
   // Reopen where the last session left off. Only on a cold start with no hash
   // — a hash already in the URL is a deliberate destination and wins.
   if (!location.hash) {
@@ -661,6 +831,8 @@ async function showShell(): Promise<void> {
   void restoreDownloadQueue();
   // Live TV's line-up, so the guide and any "On Now" row open with it there.
   preloadLineup();
+  // A launcher action or a search result this run was started for.
+  startDesktopIntegration();
 }
 
 function showLogin(): void {
@@ -719,6 +891,10 @@ async function switchToAccount(key: string): Promise<void> {
 // ---------- Player bar ----------
 
 const PB_ICONS = {
+  // The "…" pill: three dots, as on the Apple player's title row.
+  more: '<svg viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.9" fill="currentColor"/><circle cx="12" cy="12" r="1.9" fill="currentColor"/><circle cx="18.5" cy="12" r="1.9" fill="currentColor"/></svg>',
+  // Fill: arrows out to the corners of the frame.
+  fill: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></svg>',
   exit:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
   back30:
@@ -810,6 +986,52 @@ function pbButton(id: string, icon: string, tip: string, onClick: () => void): H
   return b;
 }
 
+/** A labelled capsule in the bar's second row. `opens` names the card or
+ *  strip it opens, so it can be lit while that is up (see `markPills`). The
+ *  label gives way to the glyph alone when the window is narrow. */
+function pbPill(id: string, glyph: string, label: string, tip: string, onClick: () => void, opens?: string): HTMLElement {
+  const b = el("button", { class: "pb-pill", id, title: tip, "aria-label": label || tip, "data-for": opens ?? null }, [
+    el("span", { class: "pb-pill-glyph", html: glyph }),
+    label ? el("span", { class: "pb-pill-label" }, [label]) : null,
+  ]);
+  b.addEventListener("click", () => {
+    invoke("ui_log", { msg: `click ${id}` }).catch(() => {});
+    Promise.resolve(onClick()).catch((e) => {
+      invoke("ui_log", { msg: `click ${id} error: ${e}` }).catch(() => {});
+    });
+  });
+  return b;
+}
+
+/** Set a pill's label, touching the DOM only when it changes. */
+function setPillLabel(id: string, text: string): void {
+  const label = document.getElementById(id)?.querySelector(".pb-pill-label");
+  if (label && label.textContent !== text) label.textContent = text;
+}
+
+// Fill crops the picture to the window; Fit shows all of it. Remembered, as
+// on the Apple player.
+const FILL_KEY = "aquarium.fill";
+
+function fillOn(): boolean {
+  try {
+    return localStorage.getItem(FILL_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setFill(on: boolean, note = true): void {
+  try {
+    localStorage.setItem(FILL_KEY, on ? "1" : "0");
+  } catch {
+    // Not remembered, that's all.
+  }
+  playerCtl.setProp("panscan", on ? 1 : 0).catch(() => {});
+  document.getElementById("pb-fill")?.classList.toggle("on", on);
+  if (note) flashBarNote(on ? "Fill" : "Fit");
+}
+
 /**
  * mpv's audio/timing state as last reported. Mirrored here because relative
  * adjustments (a nudge of the volume, one step of subtitle delay) need a base
@@ -878,6 +1100,8 @@ interface BarPanel extends HTMLElement {
 
 function closeBarPanel(): void {
   $("player-bar").querySelector(".pb-panel")?.remove();
+  closeBarCard();
+  markPills();
 }
 
 function toggleBarPanel(name: string, label: string, build: (panel: BarPanel) => void): void {
@@ -885,8 +1109,12 @@ function toggleBarPanel(name: string, label: string, build: (panel: BarPanel) =>
   const open = bar.querySelector(".pb-panel") as HTMLElement | null;
   const reopeningSame = open?.dataset.panel === name;
   open?.remove();
+  closeBarCard();
   // Pressing the same button again closes rather than redraws.
-  if (reopeningSame) return;
+  if (reopeningSame) {
+    markPills();
+    return;
+  }
   const panel = el("div", { class: "pb-panel", "data-panel": name }, [
     el("span", { class: "pb-panel-label" }, [label]),
   ]) as BarPanel;
@@ -900,67 +1128,245 @@ function toggleBarPanel(name: string, label: string, build: (panel: BarPanel) =>
     }, [icon("close", 15)])
   );
   bar.append(panel);
+  markPills();
   panel.sync?.(pbState);
 }
 
+
+// ---------- Cards ----------
+
+/**
+ * A card is what a pill opens: a titled list of rows, the Apple player's
+ * shape. It can't be drawn over the picture — the video covers every pixel
+ * above the bar — so the backend takes the video off a band above the bar
+ * (`player_set_card_band`, a clip: the picture doesn't move) and the card is
+ * drawn there. The band lives outside `#player-bar`, which clips its content.
+ */
+interface CardRow {
+  title: string;
+  detail?: string;
+  selected?: boolean;
+  disabled?: boolean;
+  /** Stays open after the click (a toggle, a chip); the default closes. */
+  keepOpen?: boolean;
+  onClick?: () => void;
+}
+
+interface BarCard {
+  name: string;
+  root: HTMLElement;
+  body: HTMLElement;
+  section(label: string): void;
+  row(r: CardRow): HTMLElement;
+  chips(items: { text: string; active?: boolean; onClick: () => void }[]): HTMLElement;
+  note(text: string): void;
+  sync?: (st: PlayerState) => void;
+}
+
+let openCard: BarCard | null = null;
+let cardBandPx = 0;
+let cardBandWatch: ResizeObserver | null = null;
+
+function cardBand(): HTMLElement {
+  let band = document.getElementById("player-cards");
+  if (!band) {
+    band = el("div", { id: "player-cards", class: "hidden" });
+    document.body.append(band);
+    // The band follows the card's height: a card that loads its rows late,
+    // or the window being resized, must not leave picture under the card or
+    // a dark strip above it.
+    cardBandWatch = new ResizeObserver(() => syncCardBand());
+    cardBandWatch.observe(band);
+  }
+  return band;
+}
+
+function syncCardBand(): void {
+  const band = document.getElementById("player-cards");
+  const px = band && openCard ? Math.ceil(band.getBoundingClientRect().height) : 0;
+  if (px === cardBandPx) return;
+  cardBandPx = px;
+  invoke("player_set_card_band", { px }).catch(() => {});
+}
+
+/** Light the pill whose card or strip is open. */
+function markPills(): void {
+  const open = openCard?.name ?? ($("player-bar").querySelector(".pb-panel") as HTMLElement | null)?.dataset.panel ?? "";
+  for (const pill of Array.from($("player-bar").querySelectorAll<HTMLElement>("[data-for]"))) {
+    pill.classList.toggle("on", !!open && pill.dataset.for!.split(" ").includes(open));
+  }
+}
+
+function closeBarCard(): void {
+  if (!openCard) return;
+  openCard = null;
+  const band = document.getElementById("player-cards");
+  // The picture comes back over the band first; the card is taken away once
+  // it has, so the page underneath never shows through.
+  cardBandPx = 0;
+  invoke("player_set_card_band", { px: 0 })
+    .catch(() => {})
+    .finally(() => {
+      if (openCard || !band) return;
+      band.classList.add("hidden");
+      clear(band);
+    });
+  markPills();
+}
+
+/**
+ * Open `name`'s card above the pill `anchorId`, or close it if it's the one
+ * already open.
+ */
+function toggleBarCard(
+  name: string,
+  title: string,
+  glyph: string,
+  anchorId: string,
+  build: (card: BarCard) => void,
+  wide = false
+): void {
+  const same = openCard?.name === name;
+  $("player-bar").querySelector(".pb-panel")?.remove();
+  if (same) {
+    closeBarCard();
+    return;
+  }
+  const band = cardBand();
+  clear(band);
+  const body = el("div", { class: "pb-card-body" });
+  const root = el("div", { class: `pb-card${wide ? " wide" : ""}`, "data-card": name, role: "dialog", "aria-label": title }, [
+    el("div", { class: "pb-card-head" }, [
+      el("span", { class: "pb-card-glyph", html: glyph }),
+      el("h4", {}, [title]),
+      el("button", { class: "pb-card-close", title: "Close", "aria-label": "Close", onClick: closeBarCard }, [icon("close", 14)]),
+    ]),
+    body,
+  ]);
+  const card: BarCard = {
+    name,
+    root,
+    body,
+    section(label) {
+      body.append(el("div", { class: "pb-card-section" }, [label]));
+    },
+    row(r) {
+      const row = el("button", {
+        class: `pb-card-row${r.selected ? " selected" : ""}`,
+        disabled: r.disabled ? "" : null,
+        onClick: () => {
+          if (!r.keepOpen) closeBarCard();
+          r.onClick?.();
+        },
+      }, [
+        el("span", { class: "pb-card-text" }, [
+          el("span", { class: "pb-card-title" }, [r.title]),
+          r.detail ? el("span", { class: "pb-card-detail" }, [r.detail]) : null,
+        ]),
+        r.selected ? el("span", { class: "pb-card-tick" }, [icon("check", 15)]) : null,
+      ]);
+      body.append(row);
+      return row;
+    },
+    chips(items) {
+      const wrap = el("div", { class: "pb-card-chips" }, items.map((c) =>
+        el("button", { class: `pb-chip${c.active ? " on" : ""}`, onClick: c.onClick }, [c.text])
+      ));
+      body.append(wrap);
+      return wrap;
+    },
+    note(text) {
+      body.append(el("p", { class: "pb-card-note" }, [text]));
+    },
+  };
+  build(card);
+  band.append(root);
+  band.classList.remove("hidden");
+  // Over its pill, kept inside the window.
+  const anchor = document.getElementById(anchorId)?.getBoundingClientRect();
+  const width = root.getBoundingClientRect().width;
+  if (anchor && anchor.width) {
+    const centre = anchor.left + anchor.width / 2;
+    const left = Math.max(20, Math.min(window.innerWidth - width - 20, centre - width / 2));
+    root.style.marginLeft = `${left}px`;
+  } else {
+    root.style.marginLeft = `${Math.max(20, window.innerWidth - width - 20)}px`;
+  }
+  openCard = card;
+  // In fullscreen the bar must be up for the band to be cut (and stays up
+  // while a card is open — see `fsArmHide`).
+  if (videoFullscreen) fsPokeControls();
+  syncCardBand();
+  markPills();
+  card.sync?.(pbState);
+}
+
+/** What the Quality pill says: the choice in force, in a word. */
+function qualityPillText(): string {
+  const state = getQualityState();
+  if (!state) return "Quality";
+  if (state.isLocal) return "Downloaded";
+  if (isAdaptiveEnabled()) return "Auto";
+  const rung = QUALITY_CHOICES.find((q) => q.maxBitrate === state.current);
+  if (!rung || rung.maxBitrate === undefined) return "Direct";
+  return rung.label.split("·").pop()!.trim();
+}
+
+/**
+ * The Quality card, as the Apple app lays it out: Auto first (with what it is
+ * playing now), the download when there is one, then Direct and the rungs.
+ */
 function toggleQualityPicker(): void {
-  toggleBarPanel("quality", "Quality", (panel) => {
+  toggleBarCard("quality", "Quality", PB_ICONS.quality, "pb-quality", (card) => {
     const state = getQualityState();
     if (!state || state.live) {
-      panel.append(el("span", { class: "pb-panel-note" }, ["Live TV — quality is set by the channel"]));
+      card.note(state?.live ? "Live TV — quality is set by the channel." : "Nothing here to choose between: this isn't a stream from the server.");
       return;
     }
-    // The downloaded file is a rung of its own, above the streams: it's what
-    // plays by default, and the way back to it after trying a stream.
+    // A download plays as it was saved: its card holds the one row.
+    if (state.isLocal) {
+      card.row({ title: "Downloaded", detail: state.download ?? "Playing from this device", selected: true });
+      return;
+    }
+    const auto = isAdaptiveEnabled();
+    const playing = QUALITY_CHOICES.find((q) => q.maxBitrate === state.current)?.label ?? "Direct Play";
+    card.row({
+      title: "Auto",
+      detail: auto ? `Playing now · ${playing}` : "Moves between the rungs as the connection allows",
+      selected: auto,
+      onClick: () => {
+        setAdaptiveEnabled(true);
+        flashBarNote("Quality: Auto");
+      },
+    });
+    // While streaming a title that is also downloaded, the file is the way
+    // back to it.
     if (state.download) {
-      panel.append(
-        el("button", {
-          class: `btn small${state.isLocal ? " primary" : ""}`,
-          title: "Play the downloaded file from disk",
-          onClick: () => {
-            closeBarPanel();
-            if (state.isLocal) return;
-            switchToDownload()
-              .then((ok) => { if (!ok) toast("The download isn't there anymore", "error"); })
-              .catch((e) => toast(String(e), "error"));
-          },
-        }, [downloadedLabel(state.download)])
-      );
-    }
-    // Streaming needs the server; from a download while offline there's
-    // nowhere to switch to.
-    if (state.isLocal && api.isOffline()) {
-      panel.append(el("span", { class: "pb-panel-note" }, ["Offline — streaming unavailable"]));
-      return;
+      card.row({
+        title: "Downloaded",
+        detail: state.download,
+        onClick: () => {
+          switchToDownload()
+            .then((ok) => { if (!ok) toast("The download isn't there anymore", "error"); })
+            .catch((e) => toast(String(e), "error"));
+        },
+      });
     }
     for (const q of QUALITY_CHOICES) {
-      panel.append(
-        el("button", {
-          class: `btn small${!state.isLocal && q.maxBitrate === state.current ? " primary" : ""}`,
-          onClick: () => {
-            closeBarPanel();
-            switchQuality(q.maxBitrate).catch((e) => toast(`Couldn't start the stream: ${e?.message ?? e}`, "error"));
-          },
-        }, [q.label])
-      );
+      const current = q.maxBitrate === state.current;
+      card.row({
+        title: q.maxBitrate === undefined ? "Direct (original)" : q.label,
+        detail: current ? (q.maxBitrate === undefined ? "Playing now" : "Playing now · transcoding") : undefined,
+        selected: current && !auto,
+        onClick: () => {
+          // A rung picked by hand is a choice to stay on it.
+          setAdaptiveEnabled(false);
+          if (current) return;
+          switchQuality(q.maxBitrate).catch((e) => toast(`Couldn't start the stream: ${e?.message ?? e}`, "error"));
+        },
+      });
     }
-    // Whether the player is allowed to move that choice by itself. It belongs
-    // next to the rungs it moves between — a stream that changed quality on its
-    // own is the moment anyone goes looking for the off switch.
-    const auto = el("button", {
-      class: `btn small${isAdaptiveEnabled() ? " primary" : ""}`,
-      title:
-        "Drop to a smaller stream when playback stalls or can't keep up, " +
-        "and climb back when the connection steadies",
-      onClick: (ev: Event) => {
-        const on = !isAdaptiveEnabled();
-        setAdaptiveEnabled(on);
-        const btn = ev.currentTarget as HTMLButtonElement;
-        btn.classList.toggle("primary", on);
-        toast(on ? "Quality will adapt to the connection" : "Quality stays where you set it", "ok");
-      },
-    }, ["Auto"]);
-    panel.append(el("span", { class: "pb-panel-label" }, ["Adapt"]), auto);
+    card.note("Auto drops to a smaller stream when playback stalls or can't keep up, and climbs back when the connection steadies. It never goes above the quality you picked last.");
   });
 }
 
@@ -985,58 +1391,129 @@ function trackLabel(t: any, index: number): string {
   return t.title || languageName(t.lang) || t.lang || `Track ${index + 1}`;
 }
 
-/** Audio and subtitle pickers: one click shows every track with its language,
- *  the current one highlighted — replacing uosc's own in-video menu, which
- *  took a click to open and another to actually see what was selected. */
+/** The second line of a track's row: "EAC3 · 5.1", "ASS · Forced". */
+function trackDetail(t: any): string {
+  const parts: string[] = [];
+  // A named track says its language underneath; an unnamed one already has.
+  if (t.title && (languageName(t.lang) || t.lang)) parts.push(languageName(t.lang) || t.lang);
+  if (t.codec) parts.push(String(t.codec).toUpperCase());
+  const ch = Number(t["demux-channel-count"] ?? t["audio-channels"] ?? 0);
+  if (t.type === "audio" && ch > 0) parts.push(ch === 1 ? "Mono" : ch === 2 ? "Stereo" : ch === 6 ? "5.1" : ch === 8 ? "7.1" : `${ch} ch`);
+  if (t.forced) parts.push("Forced");
+  if (t.default) parts.push("Default");
+  if (t.external) parts.push("External");
+  return parts.join(" · ");
+}
+
+/** Audio and subtitle cards: every track with its language and what it is,
+ *  the current one ticked. */
 function toggleAudioPanel(): void {
-  toggleBarPanel("audio", "Audio track", (panel) => {
+  toggleBarCard("audio", "Audio", PB_ICONS.audio, "pb-audio", (card) => {
     const tracks = getTracks().filter((t) => t.type === "audio");
     if (!tracks.length) {
-      panel.append(el("span", { class: "pb-panel-note" }, ["No audio tracks reported yet"]));
+      card.note("No audio tracks reported yet.");
       return;
     }
     tracks.forEach((t, i) => {
-      panel.append(
-        el("button", {
-          class: `btn small${t.selected ? " primary" : ""}`,
-          onClick: () => {
-            closeBarPanel();
-            playerCtl.setTrack("audio", t.id).catch((e) => toast(String(e), "error"));
-          },
-        }, [trackLabel(t, i)])
-      );
+      card.row({
+        title: trackLabel(t, i),
+        detail: trackDetail(t),
+        selected: !!t.selected,
+        onClick: () => void playerCtl.setTrack("audio", t.id).catch((e) => toast(String(e), "error")),
+      });
     });
   });
 }
 
 function toggleSubtitlePanel(): void {
-  toggleBarPanel("subs", "Subtitles", (panel) => {
+  toggleBarCard("subs", "Subtitles", PB_ICONS.subtitles, "pb-subs", (card) => {
     const tracks = getTracks().filter((t) => t.type === "sub");
-    const noneSelected = !tracks.some((t) => t.selected);
-    panel.append(
-      el("button", {
-        class: `btn small${noneSelected ? " primary" : ""}`,
-        onClick: () => {
-          closeBarPanel();
-          playerCtl.setTrack("sub", "no").catch((e) => toast(String(e), "error"));
-        },
-      }, ["Off"])
-    );
+    card.row({
+      title: "Off",
+      selected: !tracks.some((t) => t.selected),
+      onClick: () => void playerCtl.setTrack("sub", "no").catch((e) => toast(String(e), "error")),
+    });
     if (!tracks.length) {
-      panel.append(el("span", { class: "pb-panel-note" }, ["No subtitles for this file"]));
+      card.note("No subtitles for this file.");
       return;
     }
     tracks.forEach((t, i) => {
-      panel.append(
-        el("button", {
-          class: `btn small${t.selected ? " primary" : ""}`,
-          onClick: () => {
-            closeBarPanel();
-            playerCtl.setTrack("sub", t.id).catch((e) => toast(String(e), "error"));
-          },
-        }, [trackLabel(t, i)])
-      );
+      card.row({
+        title: trackLabel(t, i),
+        detail: trackDetail(t),
+        selected: !!t.selected,
+        onClick: () => void playerCtl.setTrack("sub", t.id).catch((e) => toast(String(e), "error")),
+      });
     });
+  });
+}
+
+/**
+ * The "…" card: speed, the sleep timer, stopping after this episode and
+ * changing channel in one place, as the Apple player has them — then the ways
+ * into the strips this player has besides (chapters, picture, delays).
+ */
+function toggleMoreCard(): void {
+  toggleBarCard("more", "More", PB_ICONS.more, "pb-more", (card) => {
+    const live = !!getQualityState()?.live;
+    const reopen = (): void => {
+      closeBarCard();
+      toggleMoreCard();
+    };
+    if (!live) {
+      card.section("Speed");
+      const speeds = card.chips(SPEEDS.map((sp) => ({
+        text: sp === 1 ? "Normal" : `${sp}×`,
+        onClick: () => void playerCtl.setSpeed(sp).catch(() => {}),
+      })));
+      card.sync = (st) => {
+        Array.from(speeds.children).forEach((chip, i) => chip.classList.toggle("on", Math.abs(SPEEDS[i] - st.speed) < 0.001));
+      };
+    }
+    card.section("Sleep timer");
+    const deadline = sleepDeadline();
+    if (deadline) {
+      const left = Math.max(1, Math.round((deadline - Date.now()) / 60_000));
+      card.row({
+        title: left <= 1 ? "Stopping in under a minute" : `Stopping in ${left} min`,
+        detail: "Click to cancel",
+        selected: true,
+        keepOpen: true,
+        onClick: () => {
+          cancelSleepTimer();
+          reopen();
+        },
+      });
+    } else {
+      card.chips([15, 30, 60, 90].map((minutes) => ({
+        text: `${minutes} min`,
+        onClick: () => {
+          setSleepTimer(minutes);
+          flashBarNote(`Stopping in ${minutes} min`);
+          reopen();
+        },
+      })));
+    }
+    if (!live) {
+      const stopping = isAutoplayCancelled();
+      card.row({
+        title: "Stop after this episode",
+        detail: upNextItem ? `Otherwise next: ${upNextTitle(upNextItem)}` : "Play this one to the end, then stop",
+        selected: stopping,
+        keepOpen: true,
+        onClick: () => {
+          if (stopping) resumeAutoplay();
+          else cancelAutoplay();
+          reopen();
+        },
+      });
+    } else {
+      card.row({ title: "Change channel", detail: "Page Up and Page Down step through them", onClick: () => toggleChannelsPanel() });
+    }
+    card.section("This player");
+    if (pbChapters.length) card.row({ title: "Chapters", detail: `${pbChapters.length + 1} in this file`, onClick: () => toggleChapterPanel() });
+    card.row({ title: "Picture and zoom", detail: "Brightness, contrast, saturation", onClick: () => togglePicturePanel() });
+    if (!live) card.row({ title: "Subtitle and audio delay", onClick: () => togglePlaybackPanel() });
   });
 }
 
@@ -1457,24 +1934,73 @@ function deliveryLabel(): string {
 }
 
 /**
- * Stream info: how it's being delivered, what it is, and how it's going —
- * the same facts the Apple app's info panel lists, as label/value pairs along
- * the bar (the only surface there is). Live values refresh with the status.
+ * Info: what is playing — poster, the facts line, the overview, and on a
+ * channel what is on and coming up — then how it is being delivered, what the
+ * file is and how playback is going, in the Apple panel's three groups. Live
+ * values refresh with the status.
  */
 function toggleInfoPanel(): void {
-  toggleBarPanel("info", "Stream", (panel) => {
-    panel.classList.add("pb-info");
+  toggleBarCard("info", "Info", PB_ICONS.info, "pb-info", (card) => {
+    const np = getNowPlayingFull();
+    const item = np?.serverItem ?? np?.item ?? {};
+    const live = !!np?.live;
+    const { line1, line2 } = playerTitleLines(np?.item, lastBarStatus?.title || "Playing");
+    const facts: string[] = [];
+    const minutes = item.RunTimeTicks ? Math.round(item.RunTimeTicks / 600_000_000) : 0;
+    if (item.ProductionYear) facts.push(String(item.ProductionYear));
+    if (minutes && !live) facts.push(minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes} min`);
+    if (item.OfficialRating) facts.push(item.OfficialRating);
+    if (item.CommunityRating) facts.push(`★ ${Number(item.CommunityRating).toFixed(1)}`);
+    if (Array.isArray(item.Genres) && item.Genres.length) facts.push(item.Genres.slice(0, 3).join(", "));
+    const poster = item.Id ? api.imageUrl(item.SeriesId ? { ...item, Id: item.SeriesId, ImageTags: { Primary: item.SeriesPrimaryImageTag } } : item, "Primary", 240) : null;
+    const text = el("div", { class: "pb-info-text" }, [
+      line2 && !live ? el("div", { class: "pb-info-kicker" }, [line2]) : null,
+      el("h3", {}, [line1]),
+      facts.length ? el("div", { class: "pb-info-facts" }, [facts.join(" · ")]) : null,
+    ]);
+    if (live) {
+      const { now, next } = nowNextSync(np?.item);
+      const clock = (d: any): string => new Date(d).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      if (now) {
+        text.append(
+          el("div", { class: "pb-info-kicker" }, ["On now"]),
+          el("div", { class: "pb-info-prog" }, [`${now.Name ?? ""}${now.EpisodeTitle ? ` — ${now.EpisodeTitle}` : ""}`]),
+          el("div", { class: "pb-info-facts" }, [`${clock(now.StartDate)} – ${clock(now.EndDate)}`]),
+          now.Overview ? el("p", { class: "pb-info-overview" }, [now.Overview]) : null as any
+        );
+      }
+      if (next) {
+        text.append(
+          el("div", { class: "pb-info-kicker" }, ["Coming up"]),
+          el("div", { class: "pb-info-prog" }, [`${clock(next.StartDate)}  ${next.Name ?? ""}`])
+        );
+      }
+    } else if (item.Overview) {
+      text.append(el("p", { class: "pb-info-overview" }, [item.Overview]));
+    }
+    card.body.append(el("div", { class: "pb-info-top" }, [
+      poster ? el("div", { class: "pb-info-poster" }, [art(poster, () => icon("play", 20), { lazy: false })]) : null,
+      text,
+    ]));
+
     const cells = new Map<string, HTMLElement>();
-    const cell = (label: string): HTMLElement => {
-      const value = el("span", { class: "pb-info-value" }, ["…"]);
-      panel.append(el("div", { class: "pb-info-cell" }, [el("span", { class: "pb-info-label" }, [label]), value]));
-      cells.set(label, value);
-      return value;
+    const group = (title: string, labels: string[]): void => {
+      const grid = el("div", { class: "pb-info-grid" });
+      for (const l of labels) {
+        const value = el("span", { class: "pb-info-value" }, ["…"]);
+        grid.append(el("span", { class: "pb-info-label" }, [l]), value);
+        cells.set(l, value);
+      }
+      card.section(title);
+      card.body.append(grid);
     };
-    for (const l of ["Delivery", "Container", "Video", "Audio", "Resolution", "Bitrate", "On the server", "Engine", "Decoder", "Buffer", "Stalls", "Dropped frames"]) cell(l);
+    group("Coming down", ["Delivery", "Bitrate", "Buffer"]);
+    group("On the server", ["Source", "Container"]);
+    group("Playing", ["Video", "Audio", "Resolution", "Decoder", "Engine", "Stalls", "Dropped frames", "Position", "Chapter", "Sleep timer"]);
     const set = (label: string, text: string | null | undefined) => {
       const c = cells.get(label);
-      if (c) c.textContent = text && text.trim() ? text : "–";
+      const v = text && text.trim() ? text : "–";
+      if (c && c.textContent !== v) c.textContent = v;
     };
     let engine = "mpv";
     void invoke<any>("app_info").then((info) => {
@@ -1487,11 +2013,11 @@ function toggleInfoPanel(): void {
     ];
     let busy = false;
     const refresh = async (): Promise<void> => {
-      if (busy || !panel.isConnected) return;
+      if (busy || !card.root.isConnected) return;
       busy = true;
       const p: Record<string, string> = await invoke<any>("player_get_properties", { names: props }).catch(() => ({}));
       busy = false;
-      if (!panel.isConnected) return;
+      if (!card.root.isConnected) return;
       const ms = getStreamSource()?.mediaSource;
       set("Delivery", deliveryLabel());
       set("Container", p["file-format"] ?? ms?.Container);
@@ -1502,7 +2028,7 @@ function toggleInfoPanel(): void {
       const vb = Number(p["video-bitrate"] ?? 0) + Number(p["audio-bitrate"] ?? 0);
       const speed = Number(p["cache-speed"] ?? 0) * 8;
       set("Bitrate", [vb > 0 ? mbps(vb) : null, speed > 0 ? `arriving at ${mbps(speed)}` : null].filter(Boolean).join(" · "));
-      set("On the server", ms?.Bitrate ? `${mbps(ms.Bitrate)} source` : getNowPlayingFull()?.isLocal ? "Downloaded file" : null);
+      set("Source", ms?.Bitrate ? `${mbps(ms.Bitrate)}${ms.Size ? ` · ${api.bytesToText(ms.Size)}` : ""}` : getNowPlayingFull()?.isLocal ? "Downloaded file" : null);
       set("Engine", `${engine}${p["current-vo"] ? ` · vo=${p["current-vo"]}` : ""}`);
       const hw = p["hwdec-current"];
       set("Decoder", !hw ? null : hw === "no" ? "Software (CPU)" : `Hardware (${hw})`);
@@ -1510,10 +2036,19 @@ function toggleInfoPanel(): void {
       set("Buffer", isFinite(buf) ? `${Math.round(buf)} s ahead` : null);
       set("Stalls", String(stallsThisFile));
       set("Dropped frames", String(lastBarStatus?.dropped_frames ?? 0));
+      const st = lastBarStatus;
+      set("Position", st && st.duration > 0 && !live
+        ? `${api.secondsToClock(st.position ?? 0)} · ${api.secondsToClock(Math.max(0, st.duration - (st.position ?? 0)))} left`
+        : null);
+      set("Chapter", chapterNameAt(st?.position ?? 0));
+      const deadline = sleepDeadline();
+      set("Sleep timer", deadline
+        ? `Stopping in ${Math.max(1, Math.round((deadline - Date.now()) / 60_000))} min`
+        : isAutoplayCancelled() ? "Stopping after this episode" : "Off");
     };
     void refresh();
-    panel.sync = () => void refresh();
-  });
+    card.sync = () => void refresh();
+  }, true);
 }
 
 /** Up Next with nothing to say about a season: the queue, on its own. */
@@ -1668,6 +2203,9 @@ function resetMediaExtras(itemId: string | null): void {
   segments = [];
   upNextItem = null;
   upNextStarting = false;
+  upNextCount = 0;
+  renderSegments(0);
+  closeBarCard();
   document.getElementById("pb-preview")?.classList.remove("on");
   document.getElementById("pb-skip")?.classList.remove("on");
   document.getElementById("pb-upnext")?.classList.remove("on");
@@ -1680,7 +2218,15 @@ function resetMediaExtras(itemId: string | null): void {
     if (mediaItemId === itemId) tpInfo = info;
   }).catch(() => {});
   void api.getMediaSegments(itemId).then((s) => {
-    if (mediaItemId === itemId) segments = s;
+    if (mediaItemId !== itemId) return;
+    segments = s;
+    renderSegments(lastBarStatus?.duration ?? 0);
+  }).catch(() => {});
+  // How many episodes follow this one, for the Up Next pill.
+  void getEpisodeQueue().then((queue) => {
+    if (mediaItemId !== itemId || !queue) return;
+    const at = queue.episodes.findIndex((ep: any) => ep.Id === queue.current.Id);
+    upNextCount = at >= 0 ? queue.episodes.length - at - 1 : 0;
   }).catch(() => {});
   void peekNextEpisode().then((next) => {
     if (mediaItemId !== itemId) return;
@@ -1689,6 +2235,29 @@ function resetMediaExtras(itemId: string | null): void {
     // no idea what a series is; this is the only place that knows.
     invoke("player_set_next_available", { available: !!next }).catch(() => {});
   }).catch(() => {});
+}
+
+/** Episodes after the playing one in its season (the hand queue is added on
+ *  top where the pill is drawn). */
+let upNextCount = 0;
+
+/** Draw the intro and credits spans on the scrubber. Redrawn only when the
+ *  spans or the duration change. */
+function renderSegments(duration: number): void {
+  const host = document.getElementById("pb-segments");
+  if (!host) return;
+  const key = duration > 0 ? `${Math.round(duration)}:${segments.map((s) => `${s.start.toFixed(0)}-${s.end.toFixed(0)}`).join(",")}` : "";
+  if (host.dataset.key === key) return;
+  host.dataset.key = key;
+  clear(host);
+  if (!key) return;
+  for (const seg of segments) {
+    if (seg.end <= seg.start || seg.start >= duration) continue;
+    const mark = el("i", { title: seg.type === "Outro" ? "Credits" : "Intro" });
+    mark.style.left = `${(seg.start / duration) * 100}%`;
+    mark.style.width = `${((Math.min(seg.end, duration) - seg.start) / duration) * 100}%`;
+    host.append(mark);
+  }
 }
 
 /** The tile sheet holding thumbnail `n`, fetched at most once. */
@@ -1860,16 +2429,18 @@ async function startUpNext(): Promise<void> {
  * "Series Season 2, Episode 4 · Name" shape MPRIS and toasts want, which is
  * the wrong shape for two lines that are laid out separately.
  */
-function playerTitleLines(item: any, fallback: string): { line1: string; line2: string; tip?: string } {
+function playerTitleLines(item: any, fallback: string): { line1: string; line2: string; tip?: string; kicker?: boolean } {
   // A channel: its name, then what's on and what's coming up.
   const live = liveTitleLines(item);
   if (live) return live;
   if (item?.Type === "Episode" && item.SeriesName) {
+    // The episode's own name is the title; the show and where this falls in
+    // it sit above, as on the Apple player.
     const s = item.ParentIndexNumber, e = item.IndexNumber;
-    return {
-      line1: item.SeriesName,
-      line2: s != null && e != null ? `Season ${s}, Episode ${e}` : item.Name ?? "",
-    };
+    const where = s != null && e != null ? ` · S${s} E${e}` : "";
+    return item.Name
+      ? { line1: item.Name, line2: `${item.SeriesName}${where}`, kicker: true }
+      : { line1: item.SeriesName, line2: where.slice(3) };
   }
   // A downloaded item is its meta.json record (see startDownload in
   // playback.ts), which spells the same facts in lower case: `series`,
@@ -1878,10 +2449,10 @@ function playerTitleLines(item: any, fallback: string): { line1: string; line2: 
   // nothing on the second.
   if (item?.series && item.type !== "Movie") {
     const s = item.season, e = item.episode;
-    return {
-      line1: item.series,
-      line2: s != null && e != null ? `Season ${s}, Episode ${e}` : item.name ?? "",
-    };
+    const where = s != null && e != null ? ` · S${s} E${e}` : "";
+    return item.name
+      ? { line1: item.name, line2: `${item.series}${where}`, kicker: true }
+      : { line1: item.series, line2: where.slice(3) };
   }
   return { line1: item?.Name || item?.name || fallback, line2: "" };
 }
@@ -1987,10 +2558,12 @@ function buildPlayerBar(): void {
   // the <input>, which can't carry children of its own.
   const chapters = el("div", { class: "pb-chapters", id: "pb-chapters" });
   const tip = el("div", { class: "pb-tip", id: "pb-tip" }, ["0:00"]);
-  const scrub = el("div", { class: "pb-scrub" }, [chapters, range, tip]);
+  // Intro and credits, marked on the track they can be skipped across.
+  const marks = el("div", { class: "pb-segments", id: "pb-segments" });
+  const scrub = el("div", { class: "pb-scrub" }, [marks, chapters, range, tip]);
   // A live channel has no position worth showing and nowhere to seek to; the
   // scrubber and its two clocks give way to a badge that says so.
-  const liveBadge = el("div", { class: "pb-live" }, [el("span", { class: "live-dot" }), "Live"]);
+  const liveBadge = el("div", { class: "pb-live" }, ["Live"]);
   // "Where would this click land?" — the one question a bare scrubber can't
   // answer. Follows the pointer across the track and names the chapter it's in.
   scrub.addEventListener("mousemove", (ev: MouseEvent) => {
@@ -2012,36 +2585,45 @@ function buildPlayerBar(): void {
   });
   scrub.addEventListener("mouseleave", hideScrubPreview);
 
+  // Two rows beside the title: the timeline with its clocks, then the
+  // transport and the pills — the Apple player's bottom band, in the bar.
+  // The title slot spans both, since the frame preview and the Up Next card
+  // both need its full height.
+  const exit = pbButton("pb-exit", PB_ICONS.exit, "Back (stop and leave the player)", async () => {
+    if (videoFullscreen) await setVideoFullscreen(false);
+    await playerCtl.stop();
+  });
+  const fill = pbPill("pb-fill", PB_ICONS.fill, "Fill", "Fill the window, cropping the edges (pinch on a touchscreen)", () => setFill(!fillOn()));
+  fill.classList.toggle("on", fillOn());
   bar.append(
-    pbButton("pb-exit", PB_ICONS.exit, "Back (stop and leave the player)", async () => {
-      if (videoFullscreen) await setVideoFullscreen(false);
-      await playerCtl.stop();
-    }),
+    exit,
     title,
-    skip,
-    el("div", { class: "pb-controls" }, [
-      pbButton("pb-back", skipIcon(false, skipInterval()), `Back ${skipInterval()}s (←)`, () => playerCtl.seek(-skipInterval(), false)),
-      pbButton("pb-playpause", PB_ICONS.pause, "Play/Pause (Space)", () => playerCtl.pauseToggle()),
-      pbButton("pb-fwd", skipIcon(true, skipInterval()), `Forward ${skipInterval()}s (→)`, () => playerCtl.seek(skipInterval(), false)),
-      pbButton("pb-stop", PB_ICONS.stop, "Stop", () => playerCtl.stop()),
-    ]),
     el("div", { class: "pb-seek" }, [liveBadge, pos, scrub, dur]),
-    buildVolume(),
-    el("div", { class: "pb-controls" }, [
-      pbButton("pb-subs", PB_ICONS.subtitles, "Subtitles", () => toggleSubtitlePanel()),
-      pbButton("pb-audio", PB_ICONS.audio, "Audio track", () => toggleAudioPanel()),
-      pbButton("pb-tune", PB_ICONS.tune, "Speed, subtitle and audio delay", () => togglePlaybackPanel()),
-      pbButton("pb-chapters-btn", PB_ICONS.chapters, "Chapters", () => toggleChapterPanel()),
-      pbButton("pb-info", PB_ICONS.info, "Stream info (i)", () => toggleInfoPanel()),
-      pbButton("pb-picture", PB_ICONS.picture, "Picture and zoom", () => togglePicturePanel()),
-      pbButton("pb-sleep", PB_ICONS.sleep, "Sleep timer", () => toggleSleepPanel()),
-      pbButton("pb-quality", PB_ICONS.quality, "Stream quality", () => toggleQualityPicker()),
-      pbButton("pb-episodes", PB_ICONS.episodes, "Up next (this season's episodes)", () => toggleEpisodePanel()),
-      pbButton("pb-channels", ICONS.livetv, "Channels (Page Up/Down changes channel)", () => toggleChannelsPanel()),
-      pbButton("pb-pip", PB_ICONS.pip, "Picture in picture (p)", () => setVideoPip(!videoPip)),
-      pbButton("pb-fullscreen", PB_ICONS.fullscreen, "Fullscreen (f, Esc exits)", () =>
-        setVideoFullscreen(!videoFullscreen)
-      ),
+    el("div", { class: "pb-row" }, [
+      el("div", { class: "pb-controls" }, [
+        pbButton("pb-back", skipIcon(false, skipInterval()), `Back ${skipInterval()}s (←)`, () => playerCtl.seek(-skipInterval(), false)),
+        pbButton("pb-playpause", PB_ICONS.pause, "Play/Pause (Space)", () => playerCtl.pauseToggle()),
+        pbButton("pb-fwd", skipIcon(true, skipInterval()), `Forward ${skipInterval()}s (→)`, () => playerCtl.seek(skipInterval(), false)),
+        pbButton("pb-stop", PB_ICONS.stop, "Stop", () => playerCtl.stop()),
+      ]),
+      skip,
+      el("div", { class: "pb-pills" }, [
+        pbPill("pb-info", PB_ICONS.info, "Info", "What's playing and how (i)", () => toggleInfoPanel(), "info"),
+        pbPill("pb-audio", PB_ICONS.audio, "Audio", "Audio track", () => toggleAudioPanel(), "audio"),
+        pbPill("pb-subs", PB_ICONS.subtitles, "Subtitles", "Subtitles (c turns them off and on)", () => toggleSubtitlePanel(), "subs"),
+        pbPill("pb-quality", PB_ICONS.quality, "Quality", "Stream quality", () => toggleQualityPicker(), "quality"),
+        pbPill("pb-episodes", PB_ICONS.episodes, "Up Next", "Up next (this season's episodes)", () => toggleEpisodePanel(), "episodes"),
+        pbPill("pb-channels", ICONS.livetv, "Channels", "Channels (Page Up/Down changes channel)", () => toggleChannelsPanel(), "channels"),
+        fill,
+        pbPill("pb-more", PB_ICONS.more, "", "Speed, sleep timer, stop after this episode and more", () => toggleMoreCard(), "more tune sleep chapters picture"),
+      ]),
+      buildVolume(),
+      el("div", { class: "pb-controls" }, [
+        pbButton("pb-pip", PB_ICONS.pip, "Picture in picture (p)", () => setVideoPip(!videoPip)),
+        pbButton("pb-fullscreen", PB_ICONS.fullscreen, "Fullscreen (f, Esc exits)", () =>
+          setVideoFullscreen(!videoFullscreen)
+        ),
+      ]),
     ])
   );
 
@@ -2105,6 +2687,12 @@ function flashBarNote(text: string): void {
   if (videoFullscreen) fsPokeControls();
 }
 
+// What adaptive quality just did, said in the bar: its toast is on the page,
+// under the picture.
+document.addEventListener("aquarium-player-note", (e) => {
+  if (playerActive) flashBarNote(String((e as CustomEvent).detail ?? ""));
+});
+
 /** The subtitle track `c` brings back after turning subtitles off. */
 let lastSubTrack: { id: number; lang?: string } | null = null;
 
@@ -2143,8 +2731,14 @@ function skipBy(dir: -1 | 1): void {
   if (getQualityState()?.live) return;
   const n = skipInterval();
   playerCtl.seek(dir * n, false).catch(() => {});
-  flashBarNote(`${dir < 0 ? "−" : "+"}${n} s`);
+  // Presses in quick succession read as one jump: "+30 s", not three "+10 s".
+  const at = Date.now();
+  if (at - skipRun.at > 650 || Math.sign(skipRun.total) !== dir) skipRun.total = 0;
+  skipRun = { total: skipRun.total + dir * n, at };
+  flashBarNote(`${skipRun.total < 0 ? "−" : "+"}${Math.abs(skipRun.total)} s`);
 }
+
+let skipRun = { total: 0, at: 0 };
 
 function nudgeAudioDelay(dir: -1 | 0 | 1, quiet = false): void {
   // Rounded to the millisecond: mpv reports 0.050000-ish floats, and the sum
@@ -2155,6 +2749,7 @@ function nudgeAudioDelay(dir: -1 | 0 | 1, quiet = false): void {
   playerCtl.setAudioDelay(v).catch(() => {});
   if (!quiet) flashBarNote(`Audio delay ${v > 0 ? "+" : ""}${Math.round(v * 1000)} ms`);
   ($("player-bar").querySelector(".pb-panel") as BarPanel | null)?.sync?.(pbState);
+  openCard?.sync?.(pbState);
 }
 
 function openInfo(): void {
@@ -2218,8 +2813,13 @@ function openPictureMenu(): void {
       })),
     });
   }
+  if (!live) items.push({ title: "Quality", hint: qualityPillText(), value: "script-message aquarium-ctl quality" });
+  if (upNextCount > 0) items.push({ title: "Up Next", hint: String(upNextCount), value: "script-message aquarium-ctl upnext" });
+  items.push({ title: "Sleep timer", hint: sleepDeadline() ? "On" : "", value: "script-message aquarium-ctl more" });
+  if (!live) items.push({ title: "Stop after this episode", active: isAutoplayCancelled(), value: "script-message aquarium-ctl stop-after" });
+  items.push({ title: "Fill screen", active: fillOn(), value: "script-message aquarium-ctl fill" });
   items.push(
-    { title: "Stream info", hint: "i", value: "script-message aquarium-ctl info" },
+    { title: "Info", hint: "i", value: "script-message aquarium-ctl info" },
     { title: videoFullscreen ? "Leave fullscreen" : "Fullscreen", hint: "f", value: "script-message aquarium-ctl fullscreen" },
     { title: videoPip ? "Back into the window" : "Picture in picture", hint: "p", value: "script-message aquarium-ctl pip" },
     { title: "Stop", value: "script-message aquarium-ctl stop" }
@@ -2258,6 +2858,15 @@ function onPlayerInput(name: string, arg: string): void {
       case "info": openInfo(); break;
       case "fullscreen": if (playerEmbedded && !videoPip) void setVideoFullscreen(!videoFullscreen); break;
       case "pip": void setVideoPip(!videoPip); break;
+      case "quality": if (videoFullscreen) fsPokeControls(); toggleQualityPicker(); break;
+      case "upnext": if (videoFullscreen) fsPokeControls(); toggleEpisodePanel(); break;
+      case "more": if (videoFullscreen) fsPokeControls(); toggleMoreCard(); break;
+      case "stop-after":
+        if (isAutoplayCancelled()) resumeAutoplay();
+        else cancelAutoplay();
+        flashBarNote(isAutoplayCancelled() ? "Stopping after this episode" : "Autoplay back on");
+        break;
+      case "fill": setFill(!fillOn()); break;
       case "stop":
         void (async () => {
           if (videoFullscreen) await setVideoFullscreen(false);
@@ -2283,12 +2892,10 @@ function onPlayerInput(name: string, arg: string): void {
         break;
       // Fill crops the picture to the window; Fit shows all of it.
       case "pinch-out":
-        playerCtl.setProp("panscan", 1).catch(() => {});
-        flashBarNote("Fill");
+        setFill(true);
         break;
       case "pinch-in":
-        playerCtl.setProp("panscan", 0).catch(() => {});
-        flashBarNote("Fit");
+        setFill(false);
         break;
       case "hold-start":
         if (speedBeforeHold === null) speedBeforeHold = pbState.speed;
@@ -2329,6 +2936,7 @@ function updatePlayerBar(st: any): void {
       return;
     }
     resetMediaExtras(null);
+    closeBarPanel();
     playerActive = false;
     playerEmbedded = false;
     reflectCoverage();
@@ -2345,6 +2953,8 @@ function updatePlayerBar(st: any): void {
     playerActive = true;
     bar.classList.remove("hidden");
     content.classList.add("has-player");
+    // Fill is remembered; the core starts every session at Fit.
+    if (fillOn()) setFill(true, false);
   }
   playerEmbedded = !!st.embedded;
   reflectCoverage();
@@ -2363,6 +2973,9 @@ function updatePlayerBar(st: any): void {
     }
   }
   if (Array.isArray(st.chapters)) pbChapters = st.chapters;
+  // Paused in fullscreen with the controls away: bring them up, and
+  // `fsArmHide` keeps them up until it plays again.
+  if (st.paused && videoFullscreen && !fsBarShown && playerEmbedded && !videoPip) fsPokeControls();
   if (barOutOfSight()) return;
 
   // mpv reports a duration for a live mux too — a growing one, which is worse
@@ -2375,8 +2988,10 @@ function updatePlayerBar(st: any): void {
   // of its own is already the thing PiP would make.
   const pipBtn = $("pb-pip");
   if (pipBtn) pipBtn.style.display = playerEmbedded ? "" : "none";
-  const { line1, line2, tip } = playerTitleLines(getNowPlaying()?.item, st.title || "Playing");
+  const { line1, line2, tip, kicker } = playerTitleLines(getNowPlaying()?.item, st.title || "Playing");
   const titleEl = $("pb-title") as HTMLElement;
+  // An episode: the show and its number sit above the episode's name.
+  titleEl.parentElement?.classList.toggle("kicker-first", !!kicker);
   titleEl.textContent = line1;
   // The box is narrow and the text is ellipsised; the tooltip is the only way
   // to read the whole of "The One Where Everybody Finds Out".
@@ -2395,17 +3010,43 @@ function updatePlayerBar(st: any): void {
         ? "Buffering…"
         : "";
   ($("pb-playpause") as HTMLElement).innerHTML = st.paused ? PB_ICONS.play : PB_ICONS.pause;
-  ($("pb-pos") as HTMLElement).textContent = api.secondsToClock(st.position ?? 0);
-  ($("pb-dur") as HTMLElement).textContent =
-    st.duration > 0
-      ? showsRemaining()
-        ? `−${api.secondsToClock(Math.max(0, st.duration - (st.position ?? 0)))}`
-        : api.secondsToClock(st.duration)
-      : "live";
-  syncSkipButtons();
-  const chBtn = document.getElementById("pb-chapters-btn");
-  if (chBtn) chBtn.style.display = pbChapters.length ? "" : "none";
   const range = $("pb-range") as HTMLInputElement;
+  // A channel has no position of its own, but the programme on it does: how
+  // far through it is, when it started and when it ends.
+  const prog = live ? nowNextSync(getNowPlaying()?.item).now : null;
+  const progStart = prog ? Date.parse(prog.StartDate) : NaN;
+  const progEnd = prog ? Date.parse(prog.EndDate) : NaN;
+  const hasProg = isFinite(progStart) && isFinite(progEnd) && progEnd > progStart;
+  bar.classList.toggle("live-prog", live && hasProg);
+  if (live && hasProg) {
+    const clock = (t: number): string => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const left = Math.max(0, Math.round((progEnd - Date.now()) / 60_000));
+    ($("pb-pos") as HTMLElement).textContent = clock(progStart);
+    ($("pb-dur") as HTMLElement).textContent = `${left} min left · ends ${clock(progEnd)}`;
+    const pct = Math.max(0, Math.min(100, ((Date.now() - progStart) / (progEnd - progStart)) * 100));
+    const tenths = String(Math.round(pct * 10));
+    if (range.value !== tenths) {
+      range.value = tenths;
+      setRangeFill(range, pct);
+    }
+  } else {
+    ($("pb-pos") as HTMLElement).textContent = api.secondsToClock(st.position ?? 0);
+    ($("pb-dur") as HTMLElement).textContent =
+      st.duration > 0
+        ? showsRemaining()
+          ? `−${api.secondsToClock(Math.max(0, st.duration - (st.position ?? 0)))}`
+          : api.secondsToClock(st.duration)
+        : "live";
+  }
+  syncSkipButtons();
+  // The pills say what is in force, and go when they have nothing to open.
+  setPillLabel("pb-quality", qualityPillText());
+  const queued = upNextCount + getUserQueue().length;
+  setPillLabel("pb-episodes", queued > 0 ? `Up Next · ${queued}` : "Up Next");
+  const qualityPill = document.getElementById("pb-quality");
+  if (qualityPill) qualityPill.style.display = live ? "none" : "";
+  const episodesPill = document.getElementById("pb-episodes");
+  if (episodesPill) episodesPill.style.display = !live && (queued > 0 || getNowPlaying()?.item?.Type === "Episode") ? "" : "none";
   range.dataset.duration = String(live ? 0 : st.duration ?? 0);
   if (!seeking && !live && st.duration > 0) {
     const pct = Math.min(100, (st.position / st.duration) * 100);
@@ -2420,6 +3061,7 @@ function updatePlayerBar(st: any): void {
     range.style.setProperty("--buffered", `${Math.min(100, (buffered / st.duration) * 100)}%`);
   }
   renderChapters(st.duration ?? 0);
+  renderSegments(live ? 0 : st.duration ?? 0);
   syncSkipButton(st);
   syncUpNext(st);
   syncAudioState(st);
@@ -2456,6 +3098,7 @@ function syncAudioState(st: any): void {
     state.textContent = `${pbState.speed}× speed`;
   }
   ($("player-bar").querySelector(".pb-panel") as BarPanel | null)?.sync?.(pbState);
+  openCard?.sync?.(pbState);
 }
 
 // ---------- Search ----------
@@ -2574,10 +3217,82 @@ function isTyping(target: EventTarget | null): boolean {
   return ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName) || t.isContentEditable;
 }
 
+/** Run the current page again, as the Mac's Refresh does. Offline, the useful
+ *  thing to ask again is whether the server is back; its return redraws the
+ *  page by itself. */
+function refreshPage(): void {
+  if (api.isOffline()) void retryServerNow();
+  else void route();
+}
+
+/**
+ * The Mac menu bar's shell commands, on Ctrl where the Mac has ⌘. Returns
+ * whether the key was one of them.
+ *
+ * Ctrl combinations used to be ignored wholesale outside the player, so that
+ * nothing here could collide with the player's own (Ctrl+I, Ctrl+− / = / 0) or
+ * with editing keys in a field. Both still hold: none of these is a key the
+ * player binds with Ctrl, and none fires while a field has the caret — Ctrl+[
+ * is distinct from the player's bare [, which that handler only takes without
+ * a modifier.
+ */
+function shellShortcut(ev: KeyboardEvent): boolean {
+  if (isTyping(ev.target)) return false;
+  // Nothing to steer while the sign-in screen is up, a dialog is asking
+  // something, or fullscreen playback has the shell hidden.
+  if ($("shell").classList.contains("hidden") || videoFullscreen || document.querySelector(".dialog-scrim")) {
+    return false;
+  }
+  const go = (hash: string): boolean => {
+    location.hash = hash;
+    return true;
+  };
+  // Letters by physical key: with Shift or Alt held, `key` is whatever that
+  // layout makes of the combination.
+  if (ev.altKey) return !ev.shiftKey && ev.code === "KeyJ" && go("#/downloads");
+  if (ev.shiftKey) {
+    if (ev.code === "KeyH") return go("#/home");
+    // Only where the sidebar offers Live TV at all.
+    if (ev.code === "KeyL") return !!document.querySelector('.nav-item[data-route="#/livetv"]') && go("#/livetv");
+    return false;
+  }
+  // The sidebar's rows, in the order they are drawn — whichever rows those
+  // are for this server, and for the reduced offline sidebar too.
+  const digit = ev.code.match(/^Digit([1-9])$/)?.[1];
+  if (digit) {
+    const row = document.querySelectorAll<HTMLElement>("#nav .nav-item")[Number(digit) - 1];
+    row?.click();
+    return !!row;
+  }
+  switch (ev.key) {
+    case "r":
+    case "R":
+      refreshPage();
+      return true;
+    case "[":
+      goBack();
+      return true;
+    case "f":
+    case "F": {
+      const input = $("search-input") as HTMLInputElement;
+      input.focus();
+      input.select();
+      return true;
+    }
+    case ",":
+      return go("#/settings");
+  }
+  return false;
+}
+
 /** Shell-level keys, live whether or not something is playing. */
 function wireGlobalKeys(): void {
   document.addEventListener("keydown", (ev) => {
-    if (ev.ctrlKey || ev.metaKey) return;
+    if (ev.metaKey) return;
+    if (ev.ctrlKey) {
+      if (shellShortcut(ev)) ev.preventDefault();
+      return;
+    }
     // Alt+← is the desktop convention for Back, and it's the only way to
     // navigate back without a mouse (the button itself is tabbable, but this
     // works from anywhere).
@@ -2589,6 +3304,10 @@ function wireGlobalKeys(): void {
       return;
     }
     if (isTyping(ev.target)) return;
+    if (ev.key === "F5") {
+      ev.preventDefault();
+      refreshPage();
+    }
     // "?" is Shift+/ on most layouts; match the character, not the key code.
     if (ev.key === "?") {
       ev.preventDefault();
@@ -2603,10 +3322,21 @@ const SHORTCUTS: { group: string; rows: [string[], string][] }[] = [
   {
     group: "Anywhere",
     rows: [
-      [["/"], "Focus search"],
+      [["/"], "Focus search (also Ctrl+F)"],
       [["?"], "This list"],
       [["Esc"], "Close menu, panel or dialog"],
-      [["Alt", "←"], "Back"],
+      [["Alt", "←"], "Back (also Ctrl+[)"],
+    ],
+  },
+  {
+    group: "Go to",
+    rows: [
+      [["Ctrl", "1…9"], "Sidebar rows, in order"],
+      [["Ctrl", "Shift", "H"], "Home"],
+      [["Ctrl", "Shift", "L"], "Live TV"],
+      [["Ctrl", "Alt", "J"], "Downloads"],
+      [["Ctrl", ","], "Settings"],
+      [["Ctrl", "R"], "Refresh the page (also F5)"],
     ],
   },
   {
@@ -2891,8 +3621,12 @@ async function boot(): Promise<void> {
   // Offline/online transitions from the API layer.
   document.addEventListener("aquarium-connectivity", (ev) => {
     const off = !!(ev as CustomEvent).detail?.offline;
-    updateOfflinePill();
+    updateOfflineStrip();
     if (off) {
+      // Down to the rows that work offline; `buildNav` puts the rest back
+      // when the server returns.
+      paintNav(navViews);
+      void updateSidebarFooter();
       toast("Server unreachable — offline mode. Downloads still work.", "error");
       // The verdict now comes a probe *after* the request that failed (see
       // api.ts), so the page that request was for has already drawn its
@@ -2909,40 +3643,6 @@ async function boot(): Promise<void> {
       syncOfflineProgress(false);
     }
   });
-
-  // While offline, quietly retry the server — backing off rather than probing
-  // at a fixed rate forever. Each probe is a TCP connect with a 5s timeout, and
-  // being offline is exactly when the machine is on battery and away from a
-  // network, so a flat 15s poll spends the evening waking the radio 240 times
-  // an hour to hear the same answer. Backing off to a 5min ceiling makes that
-  // about a dozen, and a server that comes back is still found within minutes.
-  const RETRY_MIN_MS = 15_000;
-  const RETRY_MAX_MS = 300_000;
-  let retryDelay = RETRY_MIN_MS;
-  let retryTimer = 0;
-
-  function stopServerRetry(): void {
-    clearTimeout(retryTimer);
-    retryTimer = 0;
-    retryDelay = RETRY_MIN_MS;
-  }
-
-  /** (Re)arm the offline probe at the current backoff, from zero or a reset —
-   *  or at `delay`, for a signal that the answer may have changed. */
-  function scheduleServerRetry(delay = retryDelay): void {
-    clearTimeout(retryTimer);
-    retryTimer = window.setTimeout(async () => {
-      retryTimer = 0;
-      if (!api.getSession() || !api.isOffline()) return;
-      const ok = await api.checkOnline();
-      // Coming back online fires the connectivity event, which stops the loop;
-      // still offline means wait longer before asking again.
-      if (!ok) {
-        retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
-        scheduleServerRetry();
-      }
-    }, delay);
-  }
 
   // A session restored while the server is already unreachable never fires a
   // transition, so arm the first probe here.
@@ -2966,16 +3666,7 @@ async function boot(): Promise<void> {
     scheduleServerRetry(0);
   });
 
-  $("offline-retry").addEventListener("click", async () => {
-    const ok = await api.checkOnline();
-    if (!ok) {
-      toast("Still offline — server unreachable", "error");
-      // An explicit ask means the user thinks the network changed; start the
-      // backoff over so the next automatic probe is soon, not five minutes out.
-      retryDelay = RETRY_MIN_MS;
-      scheduleServerRetry();
-    }
-  });
+  $("offline-retry").addEventListener("click", () => void retryServerNow());
 
   await listen("player-status", (ev) => updatePlayerBar(ev.payload as any));
   // Something other than mpv changed what the bar says (a channel switch
@@ -2987,13 +3678,25 @@ async function boot(): Promise<void> {
   // footer's "Syncing N items" is otherwise only re-read on navigation.
   await listen("progress-queue-changed", () => void updateSidebarFooter());
   document.addEventListener("aquarium-progress-queue", () => void updateSidebarFooter());
+  // Transfers the footer and the Downloads badge already count.
+  const transfersSeen = new Set<string>();
   await listen("download-progress", (ev) => {
     updateDownloadProgress(ev.payload, $("content"));
-    // Only terminal states change the footer's summary; per-byte updates would
-    // rebuild it several times a second.
-    const state = (ev.payload as any)?.state;
-    if (state && state !== "downloading") void updateSidebarFooter();
+    // Only a transfer starting or reaching a terminal state changes the
+    // footer's summary and the Downloads badge; per-byte updates would
+    // rebuild them several times a second.
+    const { state, item_id: id } = (ev.payload as any) ?? {};
+    if (!state) return;
+    if (state === "downloading") {
+      if (id == null || transfersSeen.has(id)) return;
+      transfersSeen.add(id);
+    } else {
+      transfersSeen.delete(id);
+    }
+    void updateSidebarFooter();
   });
+  // Something joined or left the queue of downloads waiting to start.
+  document.addEventListener("aquarium-download-queue", () => void updateSidebarFooter());
   // Mouse moved over the video (mpv owns the pointer there): reveal the
   // fullscreen bar. Motion over the revealed bar itself arrives as normal
   // DOM events instead.
@@ -3199,7 +3902,13 @@ async function boot(): Promise<void> {
         void setVideoPip(!videoPip);
         break;
       case "Escape":
-        if (videoFullscreen) {
+        // An open card or strip closes first; then the Up Next card takes
+        // "Not now"; only then does Esc leave fullscreen.
+        if (openCard || $("player-bar").querySelector(".pb-panel")) {
+          closeBarPanel();
+        } else if (upNextShowing()) {
+          dismissUpNext();
+        } else if (videoFullscreen) {
           setVideoFullscreen(false);
         } else {
           // The window can be fullscreen without a video owning it (a

@@ -140,6 +140,23 @@ export function currentChapter(): { name: string; index: number; start: number; 
   return { name: chapters[at].Name || `Chapter ${at + 1}`, index: at, start, end };
 }
 
+/** Step through a book's chapters. Back goes to the top of this chapter, or
+ *  to the one before when this one has only just started, the way a track
+ *  skip works. A book with no chapter marks skips by seconds instead. */
+export async function skipChapter(direction: 1 | -1): Promise<void> {
+  const chapters: any[] = current()?.Chapters ?? [];
+  if (!q.book || !chapters.length) return skip(direction > 0 ? 30 : -15);
+  const starts = chapters.map((c) => secondsOf(c.StartPositionTicks));
+  const pos = status.position;
+  if (direction > 0) {
+    const next = starts.find((s) => s > pos + 1);
+    if (next != null) await seek(next);
+    return;
+  }
+  const past = starts.filter((s) => s < pos - 3);
+  await seek(past.length ? past[past.length - 1] : 0);
+}
+
 // ---------- Talking to the backend ----------
 
 function trackOf(item: any): any {

@@ -121,6 +121,13 @@ impl Prefs {
             // on by itself", which is the setting people actually want when
             // they say they don't use subtitles.
             push("sid", "no".into());
+        } else if slang == "forced" {
+            // Forced only: signs and the odd line of foreign dialogue, whatever
+            // the audio is in. No language is preferred, a track merely flagged
+            // default is not taken, and a forced one always is.
+            push("sid", "auto".into());
+            push("subs-fallback", "no".into());
+            push("subs-fallback-forced", "always".into());
         } else if !slang.is_empty() {
             push("slang", slang.clone());
             push("sid", "auto".into());
@@ -128,7 +135,7 @@ impl Prefs {
         // Forced subtitles only: when the audio is already in a preferred
         // language, show nothing but the signs-and-songs track. mpv understands
         // this natively as a third value of subs-with-matching-audio.
-        if self.flag("subs_forced_only") && slang != "off" {
+        if self.flag("subs_forced_only") && slang != "off" && slang != "forced" {
             push("subs-with-matching-audio", "forced".into());
         }
 
@@ -314,6 +321,15 @@ mod tests {
         assert!(!args.iter().any(|a| a.starts_with("--sub-")));
         assert!(!args.iter().any(|a| a.starts_with("--brightness")));
         assert!(!args.iter().any(|a| a.starts_with("--audio-delay")));
+    }
+
+    #[test]
+    fn forced_only_is_not_a_language() {
+        let args = prefs(json!({ "sub_lang": "forced", "subs_forced_only": true })).args();
+        assert!(args.contains(&"--subs-fallback-forced=always".to_string()));
+        assert!(args.contains(&"--subs-fallback=no".to_string()));
+        assert!(!args.iter().any(|a| a.starts_with("--slang")));
+        assert!(!args.iter().any(|a| a.starts_with("--subs-with-matching-audio")));
     }
 
     #[test]

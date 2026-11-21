@@ -645,6 +645,7 @@ const BITRATE_PROBE_SAFETY = 0.7;
  * started.
  */
 async function pickStartingBitrate(item: any): Promise<number | undefined> {
+  if (!speedCheckEnabled()) return undefined;
   const measured = await api.probeBandwidth(BITRATE_PROBE_BYTES);
   if (!measured) return undefined;
   const budget = measured * BITRATE_PROBE_SAFETY;
@@ -853,6 +854,9 @@ export async function playLocal(
   autoplayCancelled = false;
   nextPeek = null;
   tracksApplied = false;
+  // Played with the server in reach: keep its intro and credits markers with
+  // the download, for one saved before they were kept or analysed since.
+  if (dl.item_id && s && !api.isOffline()) void api.keepMediaSegments(dl.item_id);
   try {
     await invoke("player_play", {
       req: {
@@ -1099,7 +1103,7 @@ function maybeAutoplay(st: any): void {
 const SPACE_HEADROOM = 1 << 30; // 1 GiB
 
 /** Free bytes on the downloads volume, or null when the backend can't tell. */
-async function freeSpace(): Promise<number | null> {
+export async function freeSpace(): Promise<number | null> {
   const v = await invoke<number | null>("disk_free").catch(() => null);
   return typeof v === "number" && v > 0 ? v : null;
 }
@@ -1248,6 +1252,9 @@ async function beginDownload(
       },
     },
   });
+  // Intro and credits markers go with the download, so Skip works offline.
+  // The server's times fit a transcode as they are: both start at zero.
+  void api.keepMediaSegments(item.Id);
   toast(
     swapped
       ? `Download started: ${item.Name} (original file — smaller than a ${chosen.label} transcode)`
@@ -2007,6 +2014,15 @@ export async function switchToDownload(meta: StartMeta = {}): Promise<boolean> {
 // importing the policy.
 
 const ADAPTIVE_KEY = "aquarium.adaptive";
+
+/**
+ * Is a stream's opening quality chosen by timing a short download first
+ * (`pickStartingBitrate`)? On unless turned off in Settings; off, a stream
+ * opens at the original and adaptive quality steps it down if it has to.
+ */
+export function speedCheckEnabled(): boolean {
+  return api.getConfig()?.speed_check !== false;
+}
 
 /**
  * May the player change transcode quality by itself when a stream stops

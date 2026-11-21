@@ -16,6 +16,7 @@ import {
   isDownloadsPaused,
   setDownloadsPaused,
   downloadHoldReason,
+  freeSpace,
   isWaitingForTranscode,
   isTranscodeDownload,
   itemTitle,
@@ -130,8 +131,8 @@ function libCard(opts: {
   actions?: () => MenuAction[];
   /** Title shown at the top of that menu. */
   menuTitle?: string;
-  /** What the Delete key removes while this card is selected. */
-  deletes?: { ids: string[]; what: string };
+  /** What the Delete key does while this card is selected: ask, then remove. */
+  deletes?: () => void;
 }): HTMLElement {
   const pct = opts.progressPct ?? 0;
   const poster = el("div", { class: "card-poster" }, [
@@ -177,14 +178,17 @@ function libCard(opts: {
   if (opts.actions) {
     attachContextMenu(card, opts.menuTitle ?? opts.title, opts.actions);
   }
-  if (opts.deletes) markDeletable(card, opts.deletes.ids, opts.deletes.what);
+  if (opts.deletes) markDeletable(card, opts.deletes);
   return card;
 }
 
+/** Remove a download with no question asked. For what never finished — a
+ *  failed or paused transfer has nothing on disk worth a dialog. */
 async function deleteDownload(itemId: string, root: HTMLElement): Promise<void> {
   // A retry still waiting in the queue would otherwise bring it back.
   cancelQueuedDownload(itemId);
   await invoke("download_delete", { itemId });
+  api.forgetMediaSegments(itemId);
   toast("Download deleted");
   renderDownloads(root, { keepTab: true });
 }
@@ -193,8 +197,9 @@ async function deleteMany(eps: any[], root: HTMLElement): Promise<void> {
   for (const ep of eps) {
     cancelQueuedDownload(ep.item_id);
     await invoke("download_delete", { itemId: ep.item_id }).catch(() => {});
+    api.forgetMediaSegments(ep.item_id);
   }
-  toast(`Deleted ${eps.length} download${eps.length === 1 ? "" : "s"}`);
+  toast(eps.length === 1 ? "Download deleted" : `Deleted ${eps.length} downloads`);
   renderDownloads(root, { keepTab: true });
 }
 
@@ -226,6 +231,89 @@ function confirmDeletion(opts: {
   });
 }
 
+const seasonTitle = (n: number): string => (n >= 0 ? `Season ${n}` : "Episodes");
+const seasonOf = (ep: any): number => (typeof ep.season === "number" ? ep.season : -1);
+
+/** "2 seasons · 14 episodes", as the Apple app counts a downloaded show. */
+function showCounts(eps: any[]): string {
+  const seasons = new Set(eps.map(seasonOf)).size;
+  return `${plural(seasons, "season")} · ${plural(eps.length, "episode")}`;
+}
+
+/** "2 seasons · 14 episodes · 9.8 GB · 3 unwatched". */
+function showSummary(eps: any[]): string {
+  const parts = [showCounts(eps)];
+  const bytes = bytesOf(eps);
+  if (bytes) parts.push(api.bytesToText(bytes));
+  const unwatched = eps.filter((e) => !e.played).length;
+  if (unwatched) parts.push(`${unwatched} unwatched`);
+  return parts.join(" · ");
+}
+
+/** "8 episodes · 4.1 GB", for a season's header and card. */
+function seasonSummary(eps: any[]): string {
+  const bytes = bytesOf(eps);
+  return plural(eps.length, "episode") + (bytes ? ` · ${api.bytesToText(bytes)}` : "");
+}
+
+/** " (4.1 GB)", or nothing when the sizes aren't known. */
+function sizeSuffix(list: any[]): string {
+  const bytes = bytesOf(list);
+  return bytes ? ` (${api.bytesToText(bytes)})` : "";
+}
+
+/**
+ * Ask before deleting finished downloads, saying what goes: one title by
+ * name, a season or a show by its episode count, and always the bytes. What
+ * is on disk is not cheap to fetch again.
+ *
+ * `scope` names the group the records came from, when they are all of it.
+ */
+function confirmDelete(
+  records: any[],
+  root: HTMLElement,
+  scope?: { series: string; season?: number }
+): void {
+  if (!records.length) return;
+  const n = records.length;
+  const run = (): void => void deleteMany(records, root);
+  if (scope && scope.season != null) {
+    confirmDeletion({
+      title: `Delete ${plural(n, "episode")} of ${seasonTitle(scope.season)}${sizeSuffix(records)}?`,
+      message: `${seasonTitle(scope.season)} of “${scope.series}” will be removed from this computer.`,
+      confirm: `Delete ${plural(n, "Episode")}`,
+      run,
+    });
+    return;
+  }
+  if (scope) {
+    confirmDeletion({
+      title: `Delete ${n === 1 ? "the episode" : `all ${n} episodes`} of “${scope.series}”${sizeSuffix(records)}?`,
+      message: `${showCounts(records)} will be removed from this computer.`,
+      confirm: `Delete ${plural(n, "Episode")}`,
+      run,
+    });
+    return;
+  }
+  if (n === 1) {
+    const d = records[0];
+    const bits = [d.quality, d.size_bytes ? api.bytesToText(d.size_bytes) : null].filter(Boolean);
+    confirmDeletion({
+      title: `Delete “${d.name ?? d.title ?? "this download"}”?`,
+      message: (bits.length ? `${bits.join(" · ")} · ` : "") + "The file is removed from this computer.",
+      confirm: "Delete",
+      run,
+    });
+    return;
+  }
+  confirmDeletion({
+    title: `Delete ${n} downloads${sizeSuffix(records)}?`,
+    message: `${plural(n, "file")} will be removed from this computer.`,
+    confirm: `Delete ${n} Downloads`,
+    run,
+  });
+}
+
 /** Films and episodes that have been watched to the end. */
 function watchedDownloads(items: any[]): any[] {
   return items.filter((d) => d.status === "complete" && d.played);
@@ -254,6 +342,7 @@ async function deleteEverything(root: HTMLElement): Promise<void> {
   }
   for (const d of items) {
     await invoke("download_delete", { itemId: d.item_id }).catch(() => {});
+    api.forgetMediaSegments(d.item_id);
   }
   toast(
     `Deleted ${plural(items.length, "download")}` + (dropped ? ` · ${dropped} queued dropped` : ""),
@@ -269,11 +358,22 @@ function revealInFiles(ids: string[]): void {
   );
 }
 
+/** Show the downloads folder itself in Files. */
+function showDownloadsFolder(): void {
+  void invoke("downloads_reveal", { itemIds: [] }).catch((e) =>
+    toast(`Couldn't show the downloads folder: ${e}`, "error")
+  );
+}
+
+/** What the Delete key does on each selectable card or row. */
+const deleters = new WeakMap<HTMLElement, () => void>();
+
 /** Mark a card or row as something the Delete key removes while it has
- *  focus (a click on it focuses it). */
-function markDeletable(node: HTMLElement, ids: string[], what: string): void {
-  node.dataset.dlIds = ids.join(",");
-  node.dataset.dlWhat = what;
+ *  focus (a click on it focuses it). `ask` opens the confirmation. */
+function markDeletable(node: HTMLElement, ask: () => void): void {
+  // The attribute is what the stylesheet and the key handler look for.
+  node.dataset.dlIds = "";
+  deleters.set(node, ask);
   if (!node.hasAttribute("tabindex")) node.tabIndex = 0;
 }
 
@@ -287,16 +387,10 @@ function installDeleteKey(): void {
     if (!root || !document.contains(root) || !root.querySelector(".dl-tabs")) return;
     const target = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>("[data-dl-ids]");
     if (!target || !root.contains(target) || document.querySelector(".dialog-scrim")) return;
+    const ask = deleters.get(target);
+    if (!ask) return;
     ev.preventDefault();
-    const ids = (target.dataset.dlIds ?? "").split(",").filter(Boolean);
-    if (!ids.length) return;
-    const what = target.dataset.dlWhat ?? "this download";
-    confirmDeletion({
-      title: `Delete ${what}?`,
-      message: ids.length === 1 ? "The file is removed from this computer." : `${plural(ids.length, "download")} are removed from this computer.`,
-      confirm: ids.length === 1 ? "Delete" : `Delete ${ids.length}`,
-      run: () => void deleteMany(ids.map((item_id) => ({ item_id })), root),
-    });
+    ask();
   });
 }
 
@@ -441,16 +535,21 @@ function localActions(dl: any, root: HTMLElement): MenuAction[] {
     out.push({ label: "Show in Files", icon: "folder", run: () => revealInFiles([dl.item_id]) });
   }
   out.push({
-    label: "Delete download",
+    label: "Delete download…",
     icon: "trash",
     danger: true,
-    run: () => deleteDownload(dl.item_id, root),
+    run: () => confirmDelete([dl], root),
   });
   return out;
 }
 
 /** Right-click actions for a group card (a series or a season). */
-function groupActions(eps: any[], label: string, root: HTMLElement): MenuAction[] {
+function groupActions(
+  eps: any[],
+  label: "series" | "season",
+  root: HTMLElement,
+  scope: { series: string; season?: number }
+): MenuAction[] {
   const playable = eps.filter((e) => e.status === "complete" && e.path);
   const allPlayed = eps.every((e) => e.played);
   const watched = watchedDownloads(eps);
@@ -492,7 +591,7 @@ function groupActions(eps: any[], label: string, root: HTMLElement): MenuAction[
           run: () => confirmDeleteWatched(eps, root, `the watched episodes of this ${label}`),
         }
       : null,
-    { label: `Delete ${label}`, danger: true, run: () => deleteMany(eps, root) },
+    { label: `Delete ${label}…`, icon: "trash", danger: true, run: () => confirmDelete(eps, root, scope) },
   ].filter(Boolean) as MenuAction[];
 }
 
@@ -560,9 +659,7 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
         libCard({
           posterPath: poster,
           title: series,
-          sub:
-            `${eps.length} episode${eps.length === 1 ? "" : "s"}` +
-            (watched ? ` · ${watched} watched` : ""),
+          sub: seasonSummary(eps) + (watched ? ` · ${watched} watched` : ""),
           played: watched === eps.length,
           progressPct: frac > 0 && frac < 1 ? frac * 100 : null,
           onOpen: () => {
@@ -571,11 +668,8 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
             renderTvTab(pane, tv, root);
           },
           onShuffle: () => startLocalShuffle(eps),
-          actions: () => groupActions(eps, "series", root),
-          deletes: {
-            ids: eps.map((e) => e.item_id),
-            what: eps.length === 1 ? `the episode of “${series}”` : `all ${eps.length} episodes of “${series}”`,
-          },
+          actions: () => groupActions(eps, "series", root, { series }),
+          deletes: () => confirmDelete(eps, root, { series }),
         })
       );
     }
@@ -583,10 +677,11 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
     return;
   }
 
-  const eps = groups.get(openSeries)!;
+  const series = openSeries;
+  const eps = groups.get(series)!;
   const bySeason = new Map<number, any[]>();
   for (const ep of eps) {
-    const s = typeof ep.season === "number" ? ep.season : -1;
+    const s = seasonOf(ep);
     (bySeason.get(s) ?? bySeason.set(s, []).get(s)!).push(ep);
   }
   for (const list of bySeason.values()) {
@@ -594,7 +689,6 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
   }
   if (openSeason != null && !bySeason.has(openSeason)) openSeason = null;
 
-  const seasonTitle = (n: number) => (n >= 0 ? `Season ${n}` : "Episodes");
   // The breadcrumb links back up a level.
   const toAllShows = (): void => {
     openSeries = null;
@@ -626,12 +720,16 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
             title: "Show these downloads in Files",
             onClick: () => revealInFiles(eps.map((e) => e.item_id)),
           }, [icon("folder"), "Show in Files"]),
-          deleteAllButton("Delete series", eps.length, () => deleteMany(eps, root)),
+          el("button", {
+            class: "btn small danger",
+            onClick: () => confirmDelete(eps, root, { series }),
+          }, ["Delete series…"]),
         ]),
-      ])
+      ]),
+      el("p", { class: "dl-summary" }, [showSummary(eps)])
     );
     const grid = el("div", { class: "card-grid" });
-    for (const [season, list] of [...bySeason].sort((a, b) => a[0] - b[0])) {
+    for (const [n, list] of [...bySeason].sort((a, b) => a[0] - b[0])) {
       const poster =
         list.find((e) => e.season_poster_path)?.season_poster_path ??
         list.find((e) => e.series_poster_path)?.series_poster_path ??
@@ -641,19 +739,17 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
       grid.append(
         libCard({
           posterPath: poster,
-          title: seasonTitle(season),
-          sub:
-            `${list.length} episode${list.length === 1 ? "" : "s"}` +
-            (watched ? ` · ${watched} watched` : ""),
+          title: seasonTitle(n),
+          sub: seasonSummary(list) + (watched ? ` · ${watched} watched` : ""),
           played: watched === list.length,
           progressPct: frac > 0 && frac < 1 ? frac * 100 : null,
           onOpen: () => {
-            openSeason = season;
+            openSeason = n;
             renderTvTab(pane, tv, root);
           },
-          actions: () => groupActions(list, "season", root),
-          menuTitle: `${openSeries} · ${seasonTitle(season)}`,
-          deletes: { ids: list.map((e) => e.item_id), what: `${seasonTitle(season)} of “${openSeries}”` },
+          actions: () => groupActions(list, "season", root, { series, season: n }),
+          menuTitle: `${series} · ${seasonTitle(n)}`,
+          deletes: () => confirmDelete(list, root, { series, season: n }),
         })
       );
     }
@@ -662,14 +758,15 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
   }
 
   // One season: its episode list.
-  const list = bySeason.get(openSeason)!;
+  const season = openSeason;
+  const list = bySeason.get(season)!;
   pane.append(
     el("div", { class: "lib-crumb" }, [
       el("a", {
         onClick: toSeasons,
         ...asButton(toSeasons),
       }, [icon("arrow-left"), "Seasons"]),
-      el("span", {}, [`${openSeries} · ${seasonTitle(openSeason)}`]),
+      el("span", {}, [`${series} · ${seasonTitle(season)}`]),
       el("span", { class: "row-actions" }, [
         playNextButton(list),
         el("button", {
@@ -682,9 +779,13 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
           title: "Show this season in Files",
           onClick: () => revealInFiles(list.map((e) => e.item_id)),
         }, [icon("folder"), "Show in Files"]),
-        deleteAllButton("Delete season", list.length, () => deleteMany(list, root)),
+        el("button", {
+          class: "btn small danger",
+          onClick: () => confirmDelete(list, root, { series, season }),
+        }, ["Delete season…"]),
       ]),
-    ])
+    ]),
+    el("p", { class: "dl-summary" }, [`${seasonTitle(season)} — ${seasonSummary(list)}`])
   );
   for (const ep of list) {
     const code = ep.episode != null ? `${ep.episode}. ` : "";
@@ -695,7 +796,7 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
             "Play",
           ])
         : null,
-      el("button", { class: "btn small danger", onClick: () => deleteDownload(ep.item_id, root) }, ["Delete"]),
+      el("button", { class: "btn small danger", onClick: () => confirmDelete([ep], root) }, ["Delete…"]),
     ]);
     const row = dlRow(
       ep.poster_path,
@@ -708,7 +809,7 @@ function renderTvTab(pane: HTMLElement, tv: any[], root: HTMLElement): void {
       watchedOverlay(ep)
     );
     attachContextMenu(row, ep.name ?? ep.title ?? null, () => localActions(ep, root));
-    markDeletable(row, [ep.item_id], `“${ep.name ?? ep.title ?? "this episode"}”`);
+    markDeletable(row, () => confirmDelete([ep], root));
     pane.append(row);
   }
 }
@@ -744,9 +845,9 @@ function renderMoviesTab(pane: HTMLElement, movies: any[], root: HTMLElement): v
         onOpen: () => {
           if (dl.path) playLocal(dl);
         },
-        onDelete: () => deleteDownload(dl.item_id, root),
+        onDelete: () => confirmDelete([dl], root),
         actions: () => localActions(dl, root),
-        deletes: { ids: [dl.item_id], what: `“${dl.title ?? dl.name ?? "this film"}”` },
+        deletes: () => confirmDelete([dl], root),
       })
     );
   }
@@ -1150,9 +1251,10 @@ export async function renderDownloads(
   }
   const seq = ++renderSeq;
 
-  const [items, pending] = await Promise.all([
+  const [items, pending, free] = await Promise.all([
     invoke<any[]>("downloads_list"),
     invoke<number>("progress_pending"),
+    freeSpace(),
   ]);
   // Navigated away while loading (the page that was here is gone), or a newer
   // refresh has started and will paint fresher data: either way, not ours to
@@ -1173,11 +1275,30 @@ export async function renderDownloads(
     (d) => (d.status === "error" || d.status === "paused") && !waitingIds.has(d.item_id)
   );
 
+  // Markers kept for a download deleted from a menu elsewhere in the app go
+  // with it; anything on disk or still waiting keeps its own.
+  api.pruneMediaSegments(new Set([...items.map((d) => d.item_id as string), ...waiting.map((p) => p.id)]));
+
+  // "42 items · 120 GB · 310 GB free · Paused", as the Apple app's subtitle.
+  const storage = [plural(completed.length, "item")];
+  const onDisk = bytesOf(items);
+  if (onDisk > 0) storage.push(api.bytesToText(onDisk));
+  if (free != null) storage.push(`${api.bytesToText(free)} free`);
+  if (isDownloadsPaused()) storage.push("Paused");
+
   clear(root);
   root.append(
     el("div", { class: "section-head" }, [
-      el("h1", { class: "page-title" }, ["Downloads"]),
+      el("div", { class: "dl-title" }, [
+        el("h1", { class: "page-title" }, ["Downloads"]),
+        el("p", { class: "dl-storage" }, [storage.join(" · ")]),
+      ]),
       el("div", { class: "head-tools" }, [
+        el("button", {
+          class: "btn small",
+          title: "Show the downloads folder in Files",
+          onClick: showDownloadsFolder,
+        }, [icon("folder"), "Show in Files"]),
         pauseButton(active.length + waiting.length > 0),
         concurrencySelector(),
         el("span", { class: "sync-pill" }, [

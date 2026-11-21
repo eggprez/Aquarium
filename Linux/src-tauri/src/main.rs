@@ -1,6 +1,20 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // The desktop's other ways in (see `desktop.rs`), settled before anything
+    // of the window is set up: the search provider has none, and an action
+    // handed to a running copy of the app is all this process is for.
+    for arg in std::env::args().skip(1) {
+        if arg == "--search-provider" {
+            aquarium_lib::run_search_provider();
+            return;
+        }
+        if let Some(action) = arg.strip_prefix("--action=") {
+            if aquarium_lib::launch_action(action) {
+                return;
+            }
+        }
+    }
     // No backend override: video is rendered through libmpv's render API into
     // a GtkGLArea we own (see WAYLAND-MIGRATION.md), so the app runs as a
     // plain client on whichever backend GDK picks — native Wayland under a

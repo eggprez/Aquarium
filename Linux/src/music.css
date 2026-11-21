@@ -43,6 +43,7 @@
 .mu-filter-input { width: 240px; }
 .mu-search { width: min(520px, 100%); margin-bottom: 20px; font-size: var(--fs-base); padding: 10px 14px; }
 .dialog .mu-input { width: 100%; margin-top: 6px; }
+.mu-search-note { color: var(--text-dim); font-size: var(--fs-sm); margin: -8px 0 16px; }
 .mu-sub-head { font-size: var(--fs-lg); font-weight: 700; margin: 8px 0 12px; }
 .mu-sentinel { height: 1px; }
 
@@ -356,3 +357,21 @@
   .np-body { grid-template-columns: 1fr; overflow-y: auto; }
   .np-right { min-height: 420px; }
 }
+
+/* ---------- Downloads, on-device pages, clamped text ---------- */
+/* The mark is always in the row and fills in when the file is here, so a
+   download finishing doesn't rebuild the list. */
+.mu-dl { display: inline-flex; vertical-align: -2px; margin-left: 6px; color: var(--accent); }
+.mu-dl:empty { display: none; }
+.mu-dl[data-state="busy"] { color: var(--text-dim); }
+.mu-cover .mu-dl {
+  position: absolute; left: 7px; top: 7px; margin: 0;
+  padding: 3px; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6); color: #fff;
+}
+.mu-cover .mu-dl[data-state="busy"] { color: rgba(255, 255, 255, 0.6); }
+.mu-offline-note { margin: 0 0 16px; }
+.mu-footnote { color: var(--text-dim); font-size: var(--fs-xs); margin: 14px 10px 0; }
+.mu-about-box { max-width: 820px; }
+.mu-about.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; }
+.mu-about-more { display: inline-block; margin-top: 6px; font-size: var(--fs-sm); cursor: pointer; }

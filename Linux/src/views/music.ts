@@ -6,7 +6,7 @@ import "../music.css";
 // Routes (all under #/music/):
 //   discover · library/<tab> · album/<id> · artist/<id> · genre/<id>
 //   playlist/<id> · smart/<id> · smart-edit/<id|new> · songs/<recent|top>
-//   search/<term>
+//   search/<term> · downloaded · downloaded/album/<key> · downloaded/artist/<name>
 import * as api from "../api";
 import * as m from "../musicApi";
 import * as audio from "../audio";
@@ -18,9 +18,9 @@ import {
 } from "../smartPlaylists";
 import {
   mi, musicCard, shelf, grid, songList, songRow, pageHeader, playButtons, link, askName, newPlaylistWith,
-  playlistsChanged, startStation, primePlaylists, markPlaying, iconButton, musicActions,
+  playlistsChanged, startStation, primePlaylists, markPlaying, iconButton, musicActions, aboutText,
 } from "./musicCommon";
-import { renderDownloaded } from "./musicDownloads";
+import { renderDownloaded, downloadedItems, downloadedSections, downloadActions, watchDownloadState } from "./musicDownloads";
 
 function report(e: any): void {
   toast(e?.message ?? String(e), "error");
@@ -35,13 +35,21 @@ function trackPlaying(root: HTMLElement): void {
 }
 
 export async function renderMusic(content: HTMLElement, arg: string): Promise<void> {
-  const [page, ...rest] = (arg || "discover").split("/");
+  let [page, ...rest] = (arg || "discover").split("/");
+  // With the server away, every page but the two that read the downloads
+  // would only fail: Downloaded stands in for them.
+  if (api.isOffline() && page !== "downloaded" && page !== "search") {
+    history.replaceState(null, "", "#/music/downloaded");
+    page = "downloaded";
+    rest = [];
+  }
   const id = decodeURIComponent(rest.join("/"));
   clear(content);
   // A wrapper rather than a class on #content, which every page shares.
   const root = el("div", { class: "mu-page" });
   content.append(root);
-  void primePlaylists();
+  if (!api.isOffline()) void primePlaylists();
+  watchDownloadState();
   switch (page) {
     case "library": return renderLibrary(root, id || "albums");
     case "album": return renderAlbum(root, id);
@@ -52,7 +60,7 @@ export async function renderMusic(content: HTMLElement, arg: string): Promise<vo
     case "smart-edit": return renderSmartEditor(root, id);
     case "songs": return renderSongChart(root, id);
     case "search": return renderMusicSearch(root, id);
-    case "downloaded": return renderDownloaded(root, musicTabs("downloaded"));
+    case "downloaded": return renderDownloaded(root, musicTabs("downloaded"), id);
     default: return renderDiscover(root);
   }
 }
@@ -143,17 +151,26 @@ function stationTile(s: { title: string; sub: string; seed: any }): HTMLElement 
   ]);
 }
 
+/** The Apple app's Listen Now title: the time of day, not the page's name. */
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 12) return "Good Morning";
+  if (h >= 12 && h < 17) return "Good Afternoon";
+  return "Good Evening";
+}
+
 function musicTabs(active: string): HTMLElement {
-  const tabs: [string, string][] = [
+  const tabs = [
     ["discover", "Listen Now"],
     ["library/playlists", "Playlists"],
     ["library/artists", "Artists"],
     ["library/albums", "Albums"],
     ["library/songs", "Songs"],
     ["library/genres", "Genres"],
+    ["library/favorites", "Favorites"],
     ["search", "Search"],
     ["downloaded", "Downloaded"],
-  ];
+  ].filter(([r]) => !api.isOffline() || r === "search" || r === "downloaded") as [string, string][];
   return el("nav", { class: "mu-tabs", "aria-label": "Music" }, tabs.map(([r, label]) =>
     el("a", { class: `mu-tab${r === active ? " active" : ""}`, href: `#/music/${r}`, "aria-current": r === active ? "page" : null }, [label])
   ));
@@ -162,7 +179,7 @@ function musicTabs(active: string): HTMLElement {
 async function renderDiscover(root: HTMLElement): Promise<void> {
   const surpriseBtn = el("button", { class: "btn primary", onClick: () => void surprise(surpriseBtn) }, [mi("shuffle"), " Surprise Me"]) as HTMLButtonElement;
   const head = el("div", { class: "mu-page-head" }, [
-    el("h1", { class: "page-title" }, ["Listen Now"]),
+    el("h1", { class: "page-title" }, [greeting()]),
     el("div", { class: "mu-head-buttons" }, [
       surpriseBtn,
       el("button", { class: "btn", onClick: openMixDialog }, [mi("mix"), " Station Mix…"]),
@@ -182,7 +199,7 @@ async function renderDiscover(root: HTMLElement): Promise<void> {
       }));
       return;
     }
-    const topList = songList(d.top, { lead: "art", title: "Top Songs", showAlbum: false });
+    const topList = songList(d.top, { lead: "rank", title: "Top Songs", showAlbum: false });
     topList.classList.add("columns");
     const parts = [
       shelf("Recently Played", d.recent.map((a) => musicCard(a)), () => void (location.hash = "#/music/songs/recent")),
@@ -197,7 +214,7 @@ async function renderDiscover(root: HTMLElement): Promise<void> {
           ])
         : null,
       shelf("New in Your Library", d.added.map((a) => musicCard(a)), () => void (location.hash = "#/music/library/albums?sort=added")),
-      shelf("Favorite Albums", d.favAlbums.map((a) => musicCard(a))),
+      shelf("Favorite Albums", d.favAlbums.map((a) => musicCard(a)), () => void (location.hash = "#/music/library/favorites")),
       shelf("Favorite Artists", d.favArtists.map((a) => musicCard(a))),
       shelf("Something Different", d.random.map((a) => musicCard(a)), undefined, "A random draw from the shelves"),
     ];
@@ -327,6 +344,10 @@ async function renderLibrary(root: HTMLElement, tabArg: string): Promise<void> {
   const body = el("div", { class: "mu-lib-body" });
   root.append(bar, body);
 
+  if (tab === "favorites") {
+    bar.remove();
+    return renderFavoritesTab(body);
+  }
   if (tab === "playlists") return renderPlaylistsTab(bar, body);
   if (tab === "genres") return renderGenresTab(bar, body);
 
@@ -341,6 +362,29 @@ async function renderLibrary(root: HTMLElement, tabArg: string): Promise<void> {
   const count = el("span", { class: "lib-count" });
   bar.append(filter, sortSel, favBtn, count);
   let favorites = false;
+  if (tab === "songs") {
+    // Play and Shuffle take the list as it is filtered, not just the rows
+    // scrolled into existence so far. A thousand is plenty to be going on with.
+    const playAll = async (shuffle: boolean) => {
+      try {
+        const r = await m.music({
+          types: "Audio",
+          sort: shuffle ? "random" : prefs.sort,
+          limit: 1000,
+          searchTerm: filter.value.trim() || undefined,
+          favorites,
+        });
+        if (!r.Items.length) return toast("Nothing to play there", "info");
+        await audio.play(r.Items, 0, { title: "Songs" });
+      } catch (e) {
+        report(e);
+      }
+    };
+    bar.append(
+      el("button", { class: "btn small primary", onClick: () => void playAll(false) }, [mi("play"), " Play"]),
+      el("button", { class: "btn small", onClick: () => void playAll(true) }, [mi("shuffle"), " Shuffle"]),
+    );
+  }
 
   const PAGE = 100;
   let start = 0;
@@ -455,6 +499,58 @@ async function renderLibrary(root: HTMLElement, tabArg: string): Promise<void> {
   });
   if (tab === "songs") trackPlaying(body);
   await reset();
+}
+
+/** Library → Favorites: the starred artists and albums as shelves, then the
+ *  starred songs. */
+async function renderFavoritesTab(body: HTMLElement): Promise<void> {
+  interface Favs { artists: any[]; albums: any[]; songs: any[] }
+  const title = "Favorite Songs";
+  const paint = (d: Favs) => {
+    clear(body);
+    if (!d.artists.length && !d.albums.length && !d.songs.length) {
+      body.append(emptyState({ icon: "star", title: "No favorites yet", body: "Open the menu on anything in your music and choose Add to Favorites." }));
+      return;
+    }
+    const parts = [
+      shelf("Artists", d.artists.map((a) => musicCard(a))),
+      shelf("Albums", d.albums.map((a) => musicCard(a))),
+    ].filter(Boolean) as HTMLElement[];
+    body.append(...parts);
+    if (d.songs.length) {
+      body.append(
+        el("div", { class: "mu-page-head" }, [
+          el("h2", { class: "mu-sub-head" }, [`Songs (${d.songs.length})`]),
+          el("div", { class: "mu-head-buttons" }, [
+            el("button", { class: "btn primary", onClick: () => void audio.play(d.songs, 0, { title }) }, [mi("play"), " Play"]),
+            el("button", { class: "btn", onClick: () => void audio.play(d.songs, 0, { title, shuffle: true }) }, [mi("shuffle"), " Shuffle"]),
+          ]),
+        ]),
+        songList(d.songs, { lead: "art", showAlbum: true, title })
+      );
+    }
+    trackPlaying(body);
+  };
+  const sig = (d: Favs) => [d.artists, d.albums, d.songs].map(itemSignature).join("#");
+  const cached = getCached<Favs>("music:favorites");
+  if (cached) paint(cached);
+  else body.append(skeletonRow(7), skeletonRow(7));
+  try {
+    const [artists, albums, songs] = await Promise.all([
+      m.artists({ all: true, favorites: true, limit: 200 }).then((r) => r.Items),
+      m.music({ types: "MusicAlbum", sort: "name", favorites: true, limit: 500 }).then((r) => r.Items),
+      m.music({ types: "Audio", sort: "name", favorites: true, limit: 1000 }).then((r) => r.Items),
+    ]);
+    const fresh = { artists, albums, songs };
+    if (!body.isConnected) return;
+    if (!cached || sig(cached) !== sig(fresh)) paint(fresh);
+    setCached("music:favorites", fresh);
+  } catch (e) {
+    if (!cached && body.isConnected) {
+      clear(body);
+      body.append(errorState("Couldn't load your favorites", e));
+    }
+  }
 }
 
 async function renderGenresTab(bar: HTMLElement, body: HTMLElement): Promise<void> {
@@ -583,14 +679,20 @@ async function renderArtist(root: HTMLElement, id: string): Promise<void> {
         })(),
       ]));
     }
-    const albums = shelf("Albums", d.albums.map((x) => musicCard(x, { sub: x.ProductionYear ? String(x.ProductionYear) : "" })));
-    if (albums) root.append(albums);
+    // Every album on the page, wrapping, as the Apple app's artist page has
+    // it: a sideways shelf hid most of a long discography.
+    if (d.albums.length) {
+      root.append(el("section", { class: "mu-shelf" }, [
+        el("div", { class: "section-head" }, [el("h2", {}, ["Albums"])]),
+        grid(d.albums.map((x) => musicCard(x, { sub: x.ProductionYear ? String(x.ProductionYear) : "" }))),
+      ]));
+    }
     const appears = shelf("Appears On", d.appears.map((x) => musicCard(x)));
     if (appears) root.append(appears);
     if (a.Overview) {
       root.append(el("section", { class: "mu-shelf" }, [
         el("div", { class: "section-head" }, [el("h2", {}, ["About"])]),
-        el("p", { class: "mu-about" }, [a.Overview]),
+        aboutText(a.Overview),
       ]));
     }
     const similar = shelf("Similar Artists", d.similar.map((x) => musicCard(x)));
@@ -618,7 +720,7 @@ async function renderArtist(root: HTMLElement, id: string): Promise<void> {
 
 async function renderGenre(root: HTMLElement, id: string): Promise<void> {
   const key = `music:genre:${id}`;
-  const paint = (d: { genre: any; albums: any[]; songs: any[] }) => {
+  const paint = (d: { genre: any; albums: any[]; songs: any[]; artists?: any[] }) => {
     clear(root);
     root.append(pageHeader({
       item: d.genre,
@@ -632,20 +734,23 @@ async function renderGenre(root: HTMLElement, id: string): Promise<void> {
       l.classList.add("columns");
       root.append(el("section", { class: "mu-shelf" }, [el("div", { class: "section-head" }, [el("h2", {}, ["Popular Songs"])]), l]));
     }
+    const artists = shelf("Artists", (d.artists ?? []).map((a) => musicCard(a)));
+    if (artists) root.append(artists);
     root.append(el("h2", { class: "mu-sub-head" }, ["Albums"]), grid(d.albums.map((a) => musicCard(a))));
     trackPlaying(root);
   };
   const cached = getCached<any>(key);
   if (cached) paint(cached);
   else root.append(spinner());
-  const [genre, albums, songs] = await Promise.all([
+  const [genre, albums, songs, artists] = await Promise.all([
     m.musicItem(id),
     m.music({ types: "MusicAlbum", genreIds: [id], sort: "name", limit: 300 }).then((r) => r.Items),
     m.music({ types: "Audio", genreIds: [id], sort: "plays", limit: 12 }).then((r) => r.Items),
+    m.artists({ genreIds: [id], limit: 24 }).then((r) => r.Items).catch(() => []),
   ]);
-  const fresh = { genre, albums, songs };
+  const fresh = { genre, albums, songs, artists };
   if (!root.isConnected) return;
-  if (!cached || itemSignature(cached.albums) !== itemSignature(albums)) paint(fresh);
+  if (!cached || itemSignature(cached.albums) !== itemSignature(albums) || itemSignature(cached.artists ?? []) !== itemSignature(artists)) paint(fresh);
   setCached(key, fresh);
 }
 
@@ -674,6 +779,7 @@ async function renderPlaylist(root: HTMLElement, id: string): Promise<void> {
         } catch (e) { report(e); }
       } },
       { label: "Start Station", run: () => void startStation(list) },
+      ...downloadActions(list),
       { label: "Delete Playlist", icon: "trash", danger: true, run: () => {
         openDialog({
           title: `Delete “${list.Name}”?`,
@@ -957,6 +1063,20 @@ async function renderMusicSearch(root: HTMLElement, term: string): Promise<void>
   const run = async (q: string) => {
     clear(body);
     if (!q) return;
+    // With the server away, or when it stops answering mid-search, the
+    // downloads answer instead, and the page says so.
+    const fromDownloads = async (): Promise<boolean> => {
+      const parts = downloadedSections(await downloadedItems(), q, `Downloaded: ${q}`);
+      if (!parts.length) return false;
+      clear(body);
+      body.append(el("p", { class: "mu-search-note" }, ["The server can't be reached. Showing what's downloaded."]), ...parts);
+      trackPlaying(body);
+      return true;
+    };
+    if (api.isOffline()) {
+      if (!(await fromDownloads())) body.append(emptyState({ icon: "search", title: `Nothing downloaded for “${q}”`, body: "The server can't be reached, so only downloads were searched." }));
+      return;
+    }
     body.append(spinner());
     try {
       const r = await m.searchMusic(q);
@@ -974,6 +1094,7 @@ async function renderMusicSearch(root: HTMLElement, term: string): Promise<void>
       body.append(...parts.filter(Boolean) as HTMLElement[]);
       trackPlaying(body);
     } catch (e) {
+      if (await fromDownloads()) return;
       clear(body);
       body.append(errorState("Search failed", e));
     }

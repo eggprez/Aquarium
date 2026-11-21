@@ -870,6 +870,8 @@ export interface LibraryQuery {
   unwatched?: boolean;
   favorites?: boolean;
   genre?: string;
+  /** Only titles containing this. */
+  searchTerm?: string;
 }
 
 export async function getLibraryItems(
@@ -892,7 +894,44 @@ export async function getLibraryItems(
   if (opts.unwatched) p.set("Filters", "IsUnplayed");
   if (opts.favorites) p.set("IsFavorite", "true");
   if (opts.genre) p.set("Genres", opts.genre);
+  if (opts.searchTerm) p.set("SearchTerm", opts.searchTerm);
   return api(`/Items?${p}`);
+}
+
+/**
+ * A random handful of films and shows that have a backdrop: the draw Home's
+ * spotlight is dealt from, as in the Apple app.
+ */
+export async function getFeatured(limit = 6): Promise<any[]> {
+  const s = session!;
+  const p = new URLSearchParams({
+    userId: s.userId,
+    Recursive: "true",
+    IncludeItemTypes: "Movie,Series",
+    SortBy: "Random",
+    ImageTypes: "Backdrop",
+    Fields: ITEM_FIELDS,
+    Limit: String(limit),
+  });
+  const r = await api(`/Items?${p}`);
+  return (r.Items ?? []).filter(isVideoItem);
+}
+
+/** The films and shows someone from a cast list is in, newest first. */
+export async function getPersonItems(personId: string): Promise<any[]> {
+  const s = session!;
+  const p = new URLSearchParams({
+    userId: s.userId,
+    Recursive: "true",
+    PersonIds: personId,
+    IncludeItemTypes: "Movie,Series",
+    SortBy: "PremiereDate,SortName",
+    SortOrder: "Descending",
+    Fields: ITEM_FIELDS,
+    Limit: "300",
+  });
+  const r = await api(`/Items?${p}`);
+  return r.Items ?? [];
 }
 
 /**
@@ -1054,15 +1093,96 @@ export interface MediaSegment {
  * appears.
  */
 export async function getMediaSegments(itemId: string): Promise<MediaSegment[]> {
-  const r = await api(`/MediaSegments/${itemId}?includeSegmentTypes=Intro,Outro`).catch(() => null);
-  const items: any[] = r?.Items ?? [];
-  return items
-    .map((s) => ({
-      type: String(s.Type ?? ""),
-      start: (s.StartTicks ?? 0) / 10_000_000,
-      end: (s.EndTicks ?? 0) / 10_000_000,
-    }))
-    .filter((s) => s.end > s.start);
+  const fetched = await fetchMediaSegments(itemId);
+  if (fetched.length) {
+    // A download's kept copy follows the server: a plugin may have analysed
+    // the episode since the file was saved.
+    if (readStoredSegments(itemId)) writeStoredSegments(itemId, fetched);
+    return fetched;
+  }
+  // Nothing from the server, or no server at all: a download plays with the
+  // markers that were kept with it.
+  return readStoredSegments(itemId) ?? [];
+}
+
+/** Requests in flight, so playing a download (which asks once to keep the
+ *  markers and once for the player bar) makes one call. */
+const segmentFetches = new Map<string, Promise<MediaSegment[]>>();
+
+function fetchMediaSegments(itemId: string): Promise<MediaSegment[]> {
+  const running = segmentFetches.get(itemId);
+  if (running) return running;
+  const p = (async () => {
+    const r = await api(`/MediaSegments/${itemId}?includeSegmentTypes=Intro,Outro`).catch(() => null);
+    const items: any[] = r?.Items ?? [];
+    return items
+      .map((s) => ({
+        type: String(s.Type ?? ""),
+        start: (s.StartTicks ?? 0) / 10_000_000,
+        end: (s.EndTicks ?? 0) / 10_000_000,
+      }))
+      .filter((s) => s.end > s.start);
+  })().finally(() => segmentFetches.delete(itemId));
+  segmentFetches.set(itemId, p);
+  return p;
+}
+
+// Intro and credits markers kept with a download, so Skip works with no
+// server to ask. One small localStorage entry per downloaded item: written
+// when the download starts and again whenever it is played online, read when
+// the server has nothing to say, removed with the download.
+const SEGMENTS_PREFIX = "aquarium-dl-segments:";
+
+function readStoredSegments(itemId: string): MediaSegment[] | null {
+  try {
+    const raw = localStorage.getItem(SEGMENTS_PREFIX + itemId);
+    const list = raw ? JSON.parse(raw) : null;
+    return Array.isArray(list) ? list.filter((s) => s && s.end > s.start) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSegments(itemId: string, list: MediaSegment[]): void {
+  try {
+    localStorage.setItem(SEGMENTS_PREFIX + itemId, JSON.stringify(list));
+  } catch {
+    // Quota exceeded: the download still plays, without Skip offline.
+  }
+}
+
+/**
+ * Ask the server for a download's markers and keep what it says. A failure
+ * reads as an empty list, so an empty answer never replaces markers already
+ * kept.
+ */
+export async function keepMediaSegments(itemId: string): Promise<void> {
+  const fetched = await fetchMediaSegments(itemId).catch(() => [] as MediaSegment[]);
+  if (fetched.length) writeStoredSegments(itemId, fetched);
+}
+
+/** Drop the markers kept for a download that has been deleted. */
+export function forgetMediaSegments(itemId: string): void {
+  try {
+    localStorage.removeItem(SEGMENTS_PREFIX + itemId);
+  } catch {
+    // Nothing to remove from.
+  }
+}
+
+/** Drop kept markers for anything no longer downloaded or queued — a delete
+ *  made from a menu elsewhere in the app, or a download that never started. */
+export function pruneMediaSegments(keepIds: Set<string>): void {
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(SEGMENTS_PREFIX) && !keepIds.has(k.slice(SEGMENTS_PREFIX.length))) stale.push(k);
+    }
+    for (const k of stale) localStorage.removeItem(k);
+  } catch {
+    // Unreadable storage: leave it.
+  }
 }
 
 export async function search(
@@ -1114,7 +1234,7 @@ export async function getPrograms(
       minEndDate: from.toISOString(),
       maxStartDate: to.toISOString(),
       sortBy: "StartDate",
-      fields: "Overview",
+      fields: "Overview,Genres",
       enableImages: "false",
       enableUserData: "false",
       enableTotalRecordCount: "false",

@@ -1,0 +1,155 @@
+/* Settings: the panes, their rows and controls. Loaded after styles.css. */
+
+/* ---------- Panes ---------- */
+/* The pane list down the left and the chosen pane beside it, the way a
+   desktop preferences window is laid out. */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 172px minmax(0, 660px);
+  gap: 24px;
+  align-items: start;
+}
+/* Stays put while a long pane scrolls. #content scrolls under the floating
+   top bar, so the list rests just below that rather than at the very top. */
+.settings-panes {
+  position: sticky;
+  top: calc(var(--topbar-h) + 12px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-pane-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-base);
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+.settings-pane-tab:hover { background: var(--bg-hover); color: var(--text); }
+.settings-pane-tab.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.settings-pane-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.settings-pane[hidden] { display: none; }
+.settings-pane .settings-block:last-child { margin-bottom: 0; }
+
+/* A narrow window has no room for a column of names: the list becomes a strip
+   across the top that scrolls sideways if it has to. */
+@media (max-width: 860px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .settings-panes {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .settings-pane-tab { padding: 7px 12px; }
+}
+
+/* ---------- Rows ---------- */
+/* The words take the room that's left and wrap; the control keeps its size. */
+.settings-row > div:first-child { min-width: 0; flex: 1 1 auto; }
+.settings-row > .switch, .settings-row > .segmented, .settings-row > .btn, .settings-row > .sync-pill { flex-shrink: 0; }
+.settings-row .sub { overflow-wrap: anywhere; }
+/* A value shown beside a button, such as the station mix in force. */
+.settings-actions .settings-value { min-width: 0; }
+
+/* ---------- Switch ---------- */
+/* A checkbox drawn as a track and a thumb. The input itself covers the track,
+   invisible, so the click target, focus and Space all stay the browser's. */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.switch-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--control-bg, var(--bg));
+  border: 1px solid var(--border);
+  pointer-events: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+.switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 0.15s, background 0.15s;
+}
+.switch-input:checked + .switch-track { background: var(--accent-strong); border-color: transparent; }
+.switch-input:checked + .switch-track::after { transform: translateX(18px); background: #fff; }
+.switch-input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch-input:disabled { cursor: default; }
+.switch-input:disabled + .switch-track { opacity: 0.5; }
+
+/* ---------- Segmented control ---------- */
+/* Radio buttons side by side in one recessed trough, the chosen one raised. */
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 10px;
+  background: var(--control-bg, var(--bg));
+  border: 1px solid var(--border);
+}
+.segment { position: relative; display: block; }
+.segment input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.segment span {
+  display: block;
+  padding: 5px 14px;
+  border-radius: 7px;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  white-space: nowrap;
+  pointer-events: none;
+  transition: background 0.12s, color 0.12s;
+}
+.segment input:hover + span { color: var(--text); }
+.segment input:checked + span { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.segment input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ---------- Status ---------- */
+/* The dot in the Connected / Offline pill takes the pill's own colour. */
+.status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+/* The mpv line under the wordmark in About. */
+.about-block .about-row + .settings-row { margin-top: 8px; }

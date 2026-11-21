@@ -27,7 +27,17 @@
   --warn: #fbbf24;
   --warn-border: rgba(251, 191, 36, 0.35);
   --warn-bg: rgba(251, 191, 36, 0.08);
+  /* The same colours as marks rather than words: a dot, an icon, a badge's
+     ground. In the dark theme they are the text colours; the light theme is
+     where the two part (see there). */
+  --accent-mark: var(--accent);
+  --danger-mark: var(--danger);
+  --ok-mark: var(--ok);
+  --warn-mark: var(--warn);
 
+  /* The sidebar's own surface: a step up from the page, a step short of a
+     card (the Apple app's Theme.sidebar). */
+  --sidebar-bg: #121219;
   --topbar-bg: rgba(14, 14, 20, 0.85);
   /* Fully opaque: the bar sits over page content in windowed mode and over the
      picture in fullscreen, and any bleed-through of either reads as a bug. */
@@ -49,7 +59,9 @@
   --shadow-lg: 0 14px 40px rgba(0, 0, 0, 0.5);
   --btn-hover-filter: brightness(1.15);
 
-  --radius: 12px;
+  --radius: 14px;
+  /* The strip under the top bar while the server can't be reached. */
+  --offline-h: 52px;
   --sidebar-w: 232px;
   --player-h: 72px;
   /* The top bar floats over the page, so its height is a layout constant
@@ -96,7 +108,19 @@
   --warn: #b45309;
   --warn-border: rgba(180, 83, 9, 0.35);
   --warn-bg: rgba(180, 83, 9, 0.08);
+  /* The Apple app's light palette is the dark one unchanged (#8B5CF6,
+     #EF4444, #34D399, #FBBF24). As words on this theme's near-white those
+     measure 4.2, 3.8, 1.9 and 1.7 to 1, all short of the 4.5 small text
+     needs, so --accent, --danger, --ok and --warn above keep their darker
+     values, and --accent-strong stays a step darker than --accent so a
+     pressed button still reads as pressed. Apple's values are used where the
+     colour is a mark and not a word. */
+  --accent-mark: #8b5cf6;
+  --danger-mark: #ef4444;
+  --ok-mark: #34d399;
+  --warn-mark: #fbbf24;
 
+  --sidebar-bg: #f1f1f7;
   --topbar-bg: rgba(247, 247, 251, 0.85);
   /* Not redefined here on purpose: the player bar sits over video, and stays
      on its dark values in both themes — see the comment on #player-bar. */
@@ -172,6 +196,7 @@ button {
 .card:focus-visible,
 .btn:focus-visible,
 .nav-item:focus-visible,
+.account-btn:focus-visible,
 .menu button:focus-visible,
 .ep-row:focus-visible,
 .channel-row:focus-visible,
@@ -202,11 +227,11 @@ button {
 #sidebar {
   width: var(--sidebar-w);
   flex-shrink: 0;
-  background: var(--bg-raised);
+  background: var(--sidebar-bg);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: 18px 12px;
+  padding: 18px 12px 12px;
   gap: 6px;
 }
 
@@ -231,11 +256,38 @@ button {
 .wordmark { font-weight: 600; }
 .wordmark b { font-weight: 800; color: var(--accent); }
 
-.sidebar-footer .foot-version { display: flex; align-items: center; gap: 7px; }
-.sidebar-footer .foot-version img { width: 15px; height: 15px; opacity: 0.75; }
+/* The foot of the sidebar: the account control, and the build under it. */
+.sidebar-footer {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+.account-btn {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 12px;
+  text-align: left;
+  color: var(--text-dim);
+  transition: background 0.12s;
+}
+.account-btn:hover,
+.account-btn.active { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.account-btn .avatar { width: 28px; height: 28px; flex-shrink: 0; }
+.account-btn > .ico { flex-shrink: 0; opacity: 0.7; }
+.account-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.account-name, .account-server { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-name { color: var(--text); font-size: var(--fs-sm); font-weight: 600; }
+.account-server { font-size: var(--fs-eyebrow); }
+.sidebar-footer .foot-version {
+  padding: 6px 10px 0;
+  font-size: var(--fs-micro);
+  opacity: 0.7;
+}
 .sidebar-footer .foot-line {
   display: flex; align-items: center; gap: 6px;
-  margin-top: 5px;
+  margin-top: 2px;
   font-size: var(--fs-eyebrow);
 }
 .sidebar-footer .foot-dot {
@@ -243,7 +295,7 @@ button {
   background: var(--text-dim);
   flex-shrink: 0;
 }
-.sidebar-footer .foot-line.ok .foot-dot { background: var(--ok); }
+.sidebar-footer .foot-line.ok .foot-dot { background: var(--ok-mark); }
 /* Static, deliberately. This dot used to pulse for as long as a download or a
    sync was outstanding — hours, for a big queue — and on WebKitGTK every
    frame of even an 8px animation repaints the whole window: measured
@@ -251,29 +303,49 @@ button {
    cost the UI thread 61 % of a core, the web process 19 % and ~1.8 W. The
    ring and the text beside it say "working" without a single frame. */
 .sidebar-footer .foot-line.busy .foot-dot {
-  background: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--accent-mark);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-mark) 35%, transparent);
 }
 .sidebar-footer .foot-line.warn { color: var(--warn); }
-.sidebar-footer .foot-line.warn .foot-dot { background: var(--warn); }
+.sidebar-footer .foot-line.warn .foot-dot { background: var(--warn-mark); }
 
 #nav { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow-y: auto; }
 
+/* 40px rows with a 12px corner, as the iPad's sidebar draws them. The selected
+   row is a neutral fill — 8% of the text colour — with its label in the
+   normal text colour; only the icon takes the accent. */
 .nav-item {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 9px 12px;
-  border-radius: 9px;
-  color: var(--text-dim);
+  height: 40px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  border-radius: 12px;
+  color: var(--text-body);
   text-align: left;
   font-weight: 500;
   transition: background 0.12s, color 0.12s;
   width: 100%;
 }
 .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+.nav-item .nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-item:hover { background: var(--bg-hover); color: var(--text); }
-.nav-item.active { background: var(--accent-soft); color: var(--accent); }
+.nav-item.active { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.nav-item.active svg { color: var(--accent-mark); }
+/* Downloads in flight or waiting. Still, like every other status mark here. */
+.nav-badge {
+  flex-shrink: 0;
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-eyebrow);
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 .nav-sep {
   font-size: var(--fs-eyebrow);
   text-transform: uppercase;
@@ -282,8 +354,6 @@ button {
   opacity: 0.6;
   padding: 14px 12px 5px;
 }
-
-.sidebar-footer { font-size: var(--fs-xs); color: var(--text-dim); padding: 8px 12px 0; }
 
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
 
@@ -382,7 +452,6 @@ button {
   transition: border-color 0.15s;
 }
 #search-input:focus { border-color: var(--accent); }
-#topbar-user { margin-left: auto; color: var(--text-dim); font-size: var(--fs-sm); display: flex; align-items: center; gap: 10px; }
 .avatar {
   width: 30px; height: 30px; border-radius: 50%;
   background: var(--accent-soft); color: var(--accent);
@@ -1041,6 +1110,7 @@ img.art.has-ph {
 .menu button:hover { background: var(--bg-hover); }
 .menu button.danger { color: var(--danger); }
 .menu-back { color: var(--text-dim); font-size: var(--fs-xs) !important; }
+.menu .menu-rule { height: 1px; background: var(--border); margin: 5px 8px; }
 /* Card menus float above clipping ancestors (posters, scrolling rows). */
 .menu-fixed { position: fixed; right: auto; bottom: auto; z-index: 90; }
 .menu .menu-label { font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); padding: 8px 12px 4px; }
@@ -1291,22 +1361,33 @@ img.art.has-ph {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: var(--fs-xs); color: var(--text-dim);
 }
-#offline-pill {
-  display: inline-flex; align-items: center; gap: 8px;
-  font-size: var(--fs-xs); font-weight: 600; color: var(--warn);
-  border: 1px solid var(--warn-border);
-  background: var(--warn-bg);
-  padding: 4px 6px 4px 12px; border-radius: 999px;
-  white-space: nowrap;
+/* A full-width band under the top bar, the way the Mac's sits against its
+   content. The top bar floats, so the band is placed rather than laid out,
+   and the page pads itself past it. */
+#offline-strip {
+  position: absolute;
+  top: var(--topbar-h); left: 0; right: 0;
+  z-index: 59;
+  height: var(--offline-h);
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 28px;
+  background: var(--sidebar-bg);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
-#offline-pill[hidden] { display: none; }
-.offline-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--warn);
-  /* No pulse: see .foot-dot above for what a perpetual animation costs. The
-     pill is up for as long as the machine is offline, which is exactly when
-     it's most likely to be on battery. */
-}
+#offline-strip[hidden] { display: none; }
+/* The page measures everything it hangs from the top bar — its own padding,
+   the heroes' pull back up under the bar, sticky headers — with --topbar-h.
+   While the strip is up, that measure grows by the strip, for the page only
+   (67px is --topbar-h's own value; a property can't be defined from itself). */
+#offline-strip:not([hidden]) + #content { --topbar-h: calc(67px + var(--offline-h)); }
+/* No pulse: see .foot-dot above for what a perpetual animation costs. The
+   strip is up for as long as the machine is offline, which is exactly when
+   it's most likely to be on battery. */
+.offline-ico { width: 18px; height: 18px; flex-shrink: 0; color: var(--warn-mark); }
+.offline-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.offline-text strong { font-size: var(--fs-sm); font-weight: 600; }
+.offline-text span { font-size: var(--fs-xs); color: var(--text-dim); }
 .offline-screen {
   max-width: 460px; margin: 10vh auto 0; text-align: center;
 }
@@ -1453,12 +1534,210 @@ img.art.has-ph {
   height: var(--player-h);
   background: var(--player-bg);
   border-top: 1px solid var(--border);
-  display: flex;
+  /* Two rows beside the title, the Apple player's bottom band folded into
+     the bar: the timeline and its clocks, then the transport and the pills.
+     Back and the title slot span both rows. */
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-rows: 22px 38px;
+  align-content: center;
   align-items: center;
-  gap: 16px;
+  column-gap: 16px;
+  row-gap: 2px;
   padding: 0 20px;
   z-index: 100;
 }
+#player-bar > #pb-exit { grid-column: 1; grid-row: 1 / 3; }
+#player-bar > .pb-title { grid-column: 2; grid-row: 1 / 3; }
+#player-bar > .pb-seek { grid-column: 3; grid-row: 1; min-width: 0; }
+#player-bar > .pb-row { grid-column: 3; grid-row: 2; min-width: 0; }
+.pb-row { display: flex; align-items: center; gap: 12px; }
+.pb-pills { display: flex; align-items: center; gap: 6px; margin-left: auto; min-width: 0; }
+
+/* Pills: labelled capsules, lit while their card is open. */
+.pb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--player-icon);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s;
+}
+.pb-pill:hover { background: rgba(255, 255, 255, 0.16); color: var(--player-icon-hover); }
+.pb-pill.on { background: var(--accent-strong); color: #fff; }
+.pb-pill-glyph { display: inline-flex; }
+.pb-pill-glyph svg { width: 16px; height: 16px; display: block; }
+.pb-pill-label { font-variant-numeric: tabular-nums; }
+/* The "…" pill carries no label; keep it round-ended at the glyph's width. */
+#pb-more { padding: 0 9px; }
+/* Too narrow for the words: the glyphs carry on alone. The Up Next card
+   takes most of the title slot's extra width from this row, so it gets the
+   same treatment sooner. */
+@media (max-width: 1300px) {
+  .pb-pill-label { display: none; }
+  .pb-pill { padding: 0 9px; }
+}
+@media (max-width: 1720px) {
+  #player-bar.upnext .pb-pill-label { display: none; }
+  #player-bar.upnext .pb-pill { padding: 0 9px; }
+}
+
+/* ---------- Cards ---------- */
+/* The band a card is drawn in: the strip above the bar that the backend has
+   taken the video off (see `toggleBarCard`). It is as tall as its card and no
+   taller, and wears the bar's own dark palette in both themes. */
+#player-cards {
+  --text: #ececf4;
+  --text-dim: #9a9ab0;
+  --bg-hover: #1e1e2a;
+  --bg-raised: #16161f;
+  --border: #262635;
+  color: var(--text);
+  position: fixed;
+  left: 0; right: 0;
+  bottom: var(--player-h);
+  z-index: 100;
+  background: var(--player-bg);
+  border-top: 1px solid var(--border);
+  padding: 12px 0;
+  display: flex;
+}
+#player-cards.hidden { display: none; }
+.pb-card {
+  width: 340px;
+  max-width: calc(100vw - 40px);
+  flex-shrink: 0;
+  background: #1b1b26;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.pb-card.wide { width: 620px; }
+.pb-card-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 44px;
+  padding: 0 10px 0 16px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.pb-card-head h4 { flex: 1; font-size: var(--fs-sm); font-weight: 700; }
+.pb-card-glyph { display: inline-flex; color: var(--text-dim); }
+.pb-card-glyph svg { width: 17px; height: 17px; display: block; }
+.pb-card-close {
+  width: 26px; height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.pb-card-close:hover { background: rgba(255, 255, 255, 0.2); }
+.pb-card-body {
+  padding: 6px;
+  overflow-y: auto;
+  max-height: min(420px, calc(100vh - var(--player-h) - 190px));
+}
+.pb-card-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pb-card-row:hover { background: rgba(255, 255, 255, 0.08); }
+.pb-card-row:disabled { opacity: 0.45; cursor: default; }
+.pb-card-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.pb-card-title { font-size: var(--fs-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-card-detail { font-size: var(--fs-eyebrow); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-card-tick { color: var(--accent); display: inline-flex; flex-shrink: 0; }
+.pb-card-row.selected .pb-card-title { color: #c4b5fd; }
+.pb-card-section {
+  padding: 10px 10px 4px;
+  font-size: var(--fs-eyebrow);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+.pb-card-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 10px 8px; }
+.pb-chip {
+  height: 28px;
+  padding: 0 11px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.pb-chip:hover { background: rgba(255, 255, 255, 0.17); }
+.pb-chip.on { background: var(--accent-strong); color: #fff; }
+.pb-card-note { padding: 8px 10px 6px; font-size: var(--fs-eyebrow); line-height: 1.45; color: var(--text-dim); }
+
+/* The Info card: what's playing, then the stream's facts in three groups. */
+.pb-info-top { display: flex; gap: 14px; padding: 10px 10px 4px; }
+.pb-info-poster {
+  width: 84px; height: 126px;
+  border-radius: 9px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--bg-hover);
+  display: flex; align-items: center; justify-content: center;
+}
+.pb-info-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pb-info-text { min-width: 0; flex: 1; }
+.pb-info-text h3 { font-size: var(--fs-base); font-weight: 700; line-height: 1.25; }
+.pb-info-kicker { font-size: var(--fs-eyebrow); font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.8px; margin-top: 6px; }
+.pb-info-kicker:first-child { margin-top: 0; }
+.pb-info-facts { font-size: var(--fs-xs); color: var(--text-dim); margin-top: 3px; }
+.pb-info-prog { font-size: var(--fs-sm); font-weight: 600; margin-top: 2px; }
+.pb-info-overview {
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: #c9c9da;
+  margin-top: 7px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+.pb-info-grid {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr) 118px minmax(0, 1fr);
+  gap: 5px 14px;
+  padding: 2px 10px 6px;
+  font-size: var(--fs-xs);
+}
+.pb-info-grid .pb-info-label { color: var(--text-dim); }
+.pb-info-grid .pb-info-value { font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Player-bar panels (quality, speed/subtitle delay) overlay the bar itself —
    the only place guaranteed not to be covered by the embedded X11 video. */
 .pb-panel {
@@ -1537,8 +1816,7 @@ body.video-fs #shell { visibility: hidden; }
 /* Given a height of its own rather than taking its content's: the frame preview
    and the Up Next card both overlay this slot, and both need room to sit in. */
 #player-bar .pb-title {
-  flex: 0 1 260px;
-  min-width: 90px;
+  width: clamp(150px, 17vw, 260px);
   height: 56px;
   overflow: hidden;
   position: relative;
@@ -1626,17 +1904,19 @@ body.video-fs #shell { visibility: hidden; }
   background: var(--player-bg);
 }
 .pb-upnext.on { display: flex; }
+/* An episode: the show and its number above the episode's own name. */
+.pb-title.kicker-first .pb-subtitle { order: -1; }
 /* Hold the slot at full width while the card is up — far wider than the plain
    title slot ever gets. A countdown, a thumbnail, a show's name and two
    buttons in 13px type need the room to be read from a couch. */
-#player-bar.upnext .pb-title { flex: 0 0 520px; min-width: 520px; }
+#player-bar.upnext .pb-title { width: 520px; }
 /* The window can be dragged down to 900px; the card gives up width, then its
    thumbnail, before anything else in the bar has to. */
 @media (max-width: 1400px) {
-  #player-bar.upnext .pb-title { flex: 0 0 420px; min-width: 420px; }
+  #player-bar.upnext .pb-title { width: 420px; }
 }
 @media (max-width: 1100px) {
-  #player-bar.upnext .pb-title { flex: 0 0 330px; min-width: 330px; }
+  #player-bar.upnext .pb-title { width: 330px; }
   #player-bar .pb-upnext-thumb.on { display: none; }
 }
 .pb-upnext-thumb {
@@ -1809,7 +2089,7 @@ body.video-fs #shell { visibility: hidden; }
 #player-bar .btn.icon {
   border: none;
   background: transparent;
-  padding: 9px;
+  padding: 7px;
   border-radius: 50%;
   color: var(--player-icon);
   transition: background 0.12s, color 0.12s, transform 0.08s;
@@ -1844,18 +2124,44 @@ body.video-fs #shell { visibility: hidden; }
 .pb-live {
   display: none;
   align-items: center;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: 999px;
   font-size: var(--fs-eyebrow);
   text-transform: uppercase;
   letter-spacing: 1.2px;
-  font-weight: 700;
-  color: var(--danger);
+  font-weight: 800;
+  background: var(--danger);
+  color: #fff;
 }
 #player-bar.live .pb-live { display: inline-flex; }
-#player-bar.live .pb-scrub,
-#player-bar.live #pb-pos,
-#player-bar.live #pb-dur,
 #player-bar.live #pb-back,
 #player-bar.live #pb-fwd { display: none; }
+/* With no programme to measure against, there is nothing to draw a line of. */
+#player-bar.live:not(.live-prog) .pb-scrub,
+#player-bar.live:not(.live-prog) #pb-pos,
+#player-bar.live:not(.live-prog) #pb-dur { display: none; }
+/* With one, the track shows how far through it is: read-only, no thumb. */
+#player-bar.live-prog .pb-range { pointer-events: none; }
+#player-bar.live-prog .pb-range::-webkit-slider-thumb { opacity: 0; }
+#player-bar.live-prog #pb-dur { cursor: default; }
+
+/* Intro and credits, marked on the track under the chapter ticks. */
+.pb-segments {
+  position: absolute;
+  left: 0; right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 5px;
+  pointer-events: none;
+  z-index: 1;
+}
+.pb-segments i {
+  position: absolute;
+  top: 0; bottom: 0;
+  border-radius: 3px;
+  background: rgba(167, 139, 250, 0.55);
+}
 
 /* The scrubber and the two things drawn against it: chapter marks, and the
    time readout that follows the pointer. Both need a positioned box around the
@@ -2316,3 +2622,127 @@ h1.page-title { font-size: var(--fs-2xl); margin-bottom: 20px; }
 /* How far through the programme on now. Static: redrawn when the panel is. */
 .pb-ch-progress { display: block; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .pb-ch-progress > span { display: block; height: 100%; background: var(--accent); }
+
+/* ---------- Parity with the Apple app's browsing screens ---------- */
+
+/* Spotlight: chevrons at the edges, there when the pointer or focus is. */
+.hero-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px; height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 3;
+}
+.hero-nav.prev { left: 14px; }
+.hero-nav.next { right: 14px; }
+.hero-stage:hover .hero-nav,
+.hero-nav:focus-visible { opacity: 1; }
+.hero-nav:hover { background: rgba(0, 0, 0, 0.65); }
+
+/* A show's episodes left to watch, on its poster. */
+.badge.unplayed {
+  background: var(--accent-strong);
+  color: #fff;
+  font-size: var(--fs-eyebrow);
+  font-weight: 700;
+  min-width: 22px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Library: the name filter at the end of the bar. */
+.lib-filter { width: 220px; margin-left: auto; }
+.search-scopes { margin-bottom: 18px; }
+.search-music:not(:empty) { margin-bottom: 26px; }
+
+/* Title page. */
+.detail-tagline { font-size: var(--fs-base); font-style: italic; color: var(--text-body); }
+.detail-actions .btn.active .ico { color: var(--warn); }
+.ep-count { font-size: var(--fs-sm); color: var(--text-dim); margin: 2px 0 10px; }
+
+/* Person page. */
+.person-head { display: flex; gap: 28px; align-items: flex-start; margin-bottom: 30px; }
+.person-portrait {
+  width: 170px; height: 255px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--noart-bg);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: var(--shadow);
+}
+.person-portrait img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.person-info { min-width: 0; max-width: 820px; }
+.person-info .page-title { margin-bottom: 6px; }
+.person-facts { color: var(--text-dim); font-size: var(--fs-sm); margin-bottom: 14px; }
+.person-bio { color: var(--text-body); line-height: 1.6; white-space: pre-line; }
+.person-bio.clamped {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+}
+.person-more {
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ---------- Downloads: storage line and group summaries ---------- */
+/* "42 items · 120 GB · 310 GB free · Paused" under the page title. */
+.dl-title .page-title { margin-bottom: 4px; }
+.dl-storage {
+  margin-bottom: 18px;
+  font-size: var(--fs-sm); color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+/* "2 seasons · 14 episodes · 9.8 GB · 3 unwatched" under a show's or a
+   season's breadcrumb, pulled up into the gap the breadcrumb leaves. */
+.dl-summary {
+  margin: -12px 0 18px;
+  font-size: var(--fs-sm); color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Live TV: page head, zebra rows, fetch banner ---------- */
+.guide-page-head .page-title { margin-bottom: 4px; }
+/* Keeps its line while empty, so the guide doesn't shift when it fills in. */
+.guide-sub {
+  min-height: 1.4em; margin-bottom: 14px;
+  font-size: var(--fs-sm); color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+/* Every other lane tinted, so a programme far along a row is still read
+   against the right channel. The channel column stays opaque: it is sticky
+   and the lanes scroll underneath it. */
+.guide-row:nth-child(even) .guide-lane { background: color-mix(in srgb, var(--text) 3.5%, transparent); }
+.guide-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 10px; padding: 8px 12px;
+  border: 1px solid var(--warn-border); border-radius: 8px;
+  background: var(--warn-bg); color: var(--warn);
+  font-size: var(--fs-sm);
+}
+.guide-banner[hidden] { display: none; }
+.guide-dlg-genres { margin-top: 10px; font-size: var(--fs-xs); color: var(--text-dim); }
+/* The subtitle line adds to what sits above the grid. */
+.guide-scroll { max-height: calc(100vh - var(--topbar-h) - 210px); }
+#content.has-player .guide-scroll { max-height: calc(100vh - var(--topbar-h) - var(--player-h) - 210px); }

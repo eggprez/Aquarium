@@ -138,6 +138,10 @@ pub struct Player {
     /// the video is shrunk by the bar height to keep the bar clickable
     /// (HTML can never draw over the X11 video child window).
     pub bar_reveal: AtomicBool,
+    /// Extra CSS pixels cut off the bottom of the video, above the bar, for
+    /// the card a player pill opens (see `player_set_card_band`). Zero when
+    /// no card is open.
+    pub card_band: std::sync::atomic::AtomicU32,
     /// Bumped on every play(); lets a finished session detect it has been
     /// superseded so it doesn't clobber the replacement's state.
     epoch: Arc<AtomicU64>,
@@ -225,6 +229,7 @@ impl Player {
             status: Arc::new(StdMutex::new(Status::default())),
             viewport_full: AtomicBool::new(false),
             bar_reveal: AtomicBool::new(false),
+            card_band: std::sync::atomic::AtomicU32::new(0),
             epoch: Arc::new(AtomicU64::new(0)),
             idle: StdMutex::new(None),
             next_available: AtomicBool::new(false),
@@ -392,6 +397,7 @@ impl Player {
 
         self.viewport_full.store(false, Ordering::SeqCst);
         self.bar_reveal.store(false, Ordering::SeqCst);
+        self.card_band.store(0, Ordering::SeqCst);
 
         // The video surface is the only video output now — there is no
         // mpv-owned window to fall back to — so playback simply cannot start

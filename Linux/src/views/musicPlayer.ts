@@ -6,6 +6,7 @@
 // Nothing here animates on its own: the scrubber and the lyric highlight move
 // when a status tick arrives (once a second) and not in between, so a page
 // left playing costs a repaint a second rather than one a frame.
+import * as api from "../api";
 import * as m from "../musicApi";
 import * as audio from "../audio";
 import { el, clear, art, toast, openActionMenu, type MenuAction } from "../ui";
@@ -195,6 +196,20 @@ function buildNowPlaying(): HTMLElement {
   const tLeft = el("span");
   const shuffle = iconButton("shuffle", "Shuffle", () => void audio.setShuffle(!audio.isShuffled()), "np-toggle");
   const prev = iconButton("prev", "Previous", () => void audio.previous());
+  const prevCh = iconButton("prev", "Previous Chapter", () => void audio.skipChapter(-1));
+  const nextCh = iconButton("next", "Next Chapter", () => void audio.skipChapter(1));
+  const favBtn = iconButton("starOutline", "Add to Favorites", async () => {
+    const item = audio.current();
+    if (!item) return;
+    const fav = !item.UserData?.IsFavorite;
+    try {
+      await api.setFavorite(item.Id, fav);
+      item.UserData = { ...(item.UserData ?? {}), IsFavorite: fav };
+      sync();
+    } catch (e) {
+      report(e);
+    }
+  }, "np-toggle np-fav");
   const back = iconButton("back15", "Back 15 seconds", () => void audio.skip(-15));
   const playBtn = iconButton("play", "Play/Pause", () => void audio.togglePause(), "np-play");
   const fwd = iconButton("fwd30", "Forward 30 seconds", () => void audio.skip(30));
@@ -226,8 +241,8 @@ function buildNowPlaying(): HTMLElement {
     cover,
     el("div", { class: "np-meta" }, [title, sub, chapter]),
     el("div", { class: "np-scrub" }, [scrub.root, el("div", { class: "np-times" }, [tPos, tLeft])]),
-    el("div", { class: "np-transport" }, [shuffle, prev, back, playBtn, fwd, next, repeat]),
-    el("div", { class: "np-extras" }, [vol.root, speed, soundCheck, sleepBtn, more]),
+    el("div", { class: "np-transport" }, [shuffle, prev, prevCh, back, playBtn, fwd, nextCh, next, repeat]),
+    el("div", { class: "np-extras" }, [favBtn, vol.root, speed, soundCheck, sleepBtn, more]),
   ]);
   const root = el("div", { id: "now-playing", class: "hidden", role: "dialog", "aria-label": "Now Playing" }, [
     backdrop,
@@ -330,6 +345,15 @@ function buildNowPlaying(): HTMLElement {
     repeat.title = q.repeat === "off" ? "Repeat: off" : q.repeat === "all" ? "Repeat: all" : "Repeat: this song";
     for (const b of [shuffle, prev, next, repeat]) b.toggleAttribute("hidden", book);
     for (const b of [back, fwd]) b.toggleAttribute("hidden", !book);
+    // A book with chapter marks steps through them from either end.
+    for (const b of [prevCh, nextCh]) b.toggleAttribute("hidden", !book || !item.Chapters?.length);
+    const fav = !!item.UserData?.IsFavorite;
+    swapIcon(favBtn, fav ? "star" : "starOutline");
+    favBtn.classList.toggle("on", fav);
+    favBtn.title = fav ? "Remove from Favorites" : "Add to Favorites";
+    favBtn.setAttribute("aria-label", favBtn.title);
+    // Starring is the server's to record.
+    favBtn.toggleAttribute("hidden", api.isOffline());
     speed.toggleAttribute("hidden", !book);
     speed.textContent = `${audio.bookSpeed()}×`;
     soundCheck.toggleAttribute("hidden", book);

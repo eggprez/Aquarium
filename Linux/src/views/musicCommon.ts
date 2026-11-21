@@ -7,7 +7,7 @@ import * as m from "../musicApi";
 import * as audio from "../audio";
 import { buildStation } from "../stations";
 import { smartPlaylistSongs, getSmartPlaylists } from "../smartPlaylists";
-import { downloadMusicAction } from "./musicDownloads";
+import { downloadActions, downloadMark, localAlbumRoute, localArtistRoute } from "./musicDownloads";
 import { el, art, toast, openDialog, attachContextMenu, openActionMenu, type MenuAction, noart } from "../ui";
 
 // ---------- Icons the shared set doesn't have ----------
@@ -40,6 +40,9 @@ export const MI = {
   mute: `<path ${F} d="M4 9.5v5h3.5L12 19V5L7.5 9.5H4z"/><path ${S} d="m15.5 10 5 4m0-4-5 4"/>`,
   edit: `<path ${S} d="M4 20h4L19 9l-4-4L4 16z"/><path ${S} d="m13.5 6.5 4 4"/>`,
   mix: `<path ${S} d="M12 4v5m0 6v5M5.5 4v9m0 4v3M18.5 4v3m0 4v9"/><circle ${S} cx="12" cy="12" r="2"/><circle ${S} cx="5.5" cy="15" r="2"/><circle ${S} cx="18.5" cy="9" r="2"/>`,
+  downloaded: `<circle ${S} cx="12" cy="12" r="8.5"/><path ${S} stroke-width="2" d="M12 7.6v8M8.6 12.4l3.4 3.4 3.4-3.4"/>`,
+  star: `<path ${F} d="M12 3.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L12 16.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/>`,
+  starOutline: `<path ${S} d="M12 3.6l2.5 5.3 5.8.7-4.3 4 1.1 5.7L12 16.5l-5.1 2.8 1.1-5.7-4.3-4 5.8-.7z"/>`,
   smart: `<path ${S} d="M12 3.5l1.9 4.6 4.6 1.9-4.6 1.9L12 16.5l-1.9-4.6L5.5 10l4.6-1.9z"/><path ${S} d="M18 15l.9 2.1 2.1.9-2.1.9L18 21l-.9-2.1-2.1-.9 2.1-.9z"/>`,
 };
 export type MusicIcon = keyof typeof MI;
@@ -233,6 +236,22 @@ export function musicActions(item: any, opts: ActionOpts = {}): (MenuAction | nu
   const isSong = item.Type === "Audio";
   const isBook = item.Type === "AudioBook";
   const fav = !!item.UserData?.IsFavorite;
+  if (api.isOffline()) {
+    // With no server, only what the device can do by itself: play what is
+    // here, go to the on-device pages, and give the space back.
+    const local: (MenuAction | null)[] = [
+      { label: "Play", icon: "play", run: () => playThing(item) },
+      { label: "Play Next", run: async () => audio.playNext(await songsOf(item)).catch(report) },
+      { label: "Play Later", run: async () => audio.playLater(await songsOf(item)).catch(report) },
+    ];
+    if (isSong && !opts.hideGoTo) {
+      const album = localAlbumRoute(item), artist = localArtistRoute(item);
+      if (album) local.push({ label: "Go to Album", run: () => void (location.hash = album) });
+      if (artist) local.push({ label: "Go to Artist", icon: "people", run: () => void (location.hash = artist) });
+    }
+    local.push(...downloadActions(item));
+    return local;
+  }
   const out: (MenuAction | null)[] = [
     { label: "Play", icon: "play", run: () => playThing(item) },
     isSong || isBook ? null : { label: "Shuffle", icon: "shuffle", run: () => playThing(item, { shuffle: true }) },
@@ -262,7 +281,7 @@ export function musicActions(item: any, opts: ActionOpts = {}): (MenuAction | nu
     const artist = item.AlbumArtists?.[0] ?? item.ArtistItems?.[0];
     if (artist?.Id) out.push({ label: "Go to Artist", icon: "people", run: () => void (location.hash = `#/music/artist/${artist.Id}`) });
   }
-  out.push(downloadMusicAction(item));
+  out.push(...downloadActions(item));
   if (isSong) out.push({ label: "Song Info", run: () => void showSongInfo(item) });
   if (opts.onRemove) out.push({ label: "Remove from Playlist", icon: "trash", danger: true, run: opts.onRemove });
   return out;
@@ -323,7 +342,16 @@ export async function showSongInfo(song: any): Promise<void> {
 // ---------- Cards ----------
 
 /** A square cover card: album, playlist, genre, book. Artists are round. */
-export function musicCard(item: any, opts: { sub?: string; onOpen?: () => void } = {}): HTMLElement {
+export function musicCard(item: any, opts: {
+  sub?: string;
+  onOpen?: () => void;
+  /** What the cover's play button does, when it isn't "ask the server". */
+  onPlay?: () => void;
+  /** The context menu, likewise. */
+  actions?: () => (MenuAction | null)[];
+  /** False where the whole page is downloads and a mark says nothing. */
+  mark?: boolean;
+} = {}): HTMLElement {
   const round = item.Type === "MusicArtist";
   const target = routeFor(item);
   const open = opts.onOpen ?? (() => target && (location.hash = target));
@@ -346,9 +374,11 @@ export function musicCard(item: any, opts: { sub?: string; onOpen?: () => void }
           "aria-label": `Play ${item.Name ?? ""}`,
           onClick: (ev: MouseEvent) => {
             ev.stopPropagation();
-            void playThing(item);
+            if (opts.onPlay) opts.onPlay();
+            else void playThing(item);
           },
         }, [mi("play", 18)]),
+    opts.mark === false ? null : downloadMark(item),
   ]);
   const card = el("div", {
     class: `mu-card${round ? " artist" : ""}`,
@@ -367,7 +397,7 @@ export function musicCard(item: any, opts: { sub?: string; onOpen?: () => void }
     el("div", { class: "mu-card-title" }, [item.Name ?? ""]),
     sub ? el("div", { class: "mu-card-sub" }, [sub]) : null,
   ]);
-  if (item.Type !== "MusicGenre") attachContextMenu(card, item.Name ?? null, () => musicActions(item));
+  if (item.Type !== "MusicGenre") attachContextMenu(card, item.Name ?? null, opts.actions ?? (() => musicActions(item)));
   return card;
 }
 
@@ -443,6 +473,7 @@ export function songRow(song: any, opts: SongRowOpts = {}): HTMLElement {
       el("div", { class: "mu-song-title" }, [
         song.Name ?? "",
         song.UserData?.IsFavorite ? el("span", { class: "mu-fav", title: "Favorite" }, ["★"]) : null,
+        downloadMark(song),
       ]),
       sub.length ? el("div", { class: "mu-song-sub" }, [sub.join(" · ")]) : null,
     ]),
@@ -611,4 +642,20 @@ export function playButtons(item: any, opts: { station?: boolean; songs?: () => 
 export function link(text: string, hash: string | null): HTMLElement | string {
   if (!hash) return text;
   return el("a", { class: "mu-link", href: hash }, [text]);
+}
+
+/** A biography or a blurb, held to five lines until asked for the rest. The
+ *  button goes away when the text fits without it. */
+export function aboutText(text: string): HTMLElement {
+  const p = el("p", { class: "mu-about clamped" }, [text]);
+  const toggle = el("button", { class: "mu-link mu-about-more", "aria-expanded": "false" }, ["More"]);
+  toggle.addEventListener("click", () => {
+    const open = p.classList.toggle("clamped");
+    toggle.textContent = open ? "More" : "Less";
+    toggle.setAttribute("aria-expanded", open ? "false" : "true");
+  });
+  requestAnimationFrame(() => {
+    if (p.isConnected && p.scrollHeight <= p.clientHeight + 1) toggle.remove();
+  });
+  return el("div", { class: "mu-about-box" }, [p, toggle]);
 }
