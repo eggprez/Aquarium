@@ -15,8 +15,9 @@
 //  glyphs turn from white to the page's colour, so the wordmark and the
 //  title never sit on top of a line of text.
 //
-//  A foldable keeps `AppTopBar`: its status strips and the front screen's
-//  dead touch strip are what that bar is built around.
+//  A foldable floats it too, in the frame `AppTopBar` would have taken
+//  (`TopBarFrame`): clear of the front screen's dead touch strip, on the
+//  inside screen's status strip when that screen is held upright.
 
 #if os(iOS)
 import SwiftUI
@@ -30,14 +31,20 @@ struct PhoneHeroBar: View {
     let page: Page
     /// Whether the artwork has gone from under the bar — see `isPast`.
     let overPage: Bool
-    /// The status bar's height, which the blur reaches up through.
-    let topInset: CGFloat
 
     @Environment(\.popPage) private var popPage
     @Environment(\.dismiss) private var dismiss
 
-    /// Whether these pages float this bar rather than drawing `AppTopBar`.
-    static var applies: Bool { Metrics.phoneLayout && !FoldState.shared.isFoldable }
+    /// Whether these pages float this bar: every phone, a foldable on
+    /// either of its screens included. An iPad floats its own
+    /// (`padBarSurface`); a Mac has the window's toolbar.
+    static var applies: Bool { Metrics.phoneLayout }
+
+    /// How far the artwork reaches up to run under the bar: through the
+    /// status bar (`topInset`, measured outside the scroll view that ignores
+    /// it) and the bar's own row — see `TopBarFrame.layoutHeight`.
+    @MainActor
+    static func bleed(topInset: CGFloat) -> CGFloat { topInset + TopBarFrame.layoutHeight() }
 
     /// How far a page scrolls before the artwork has left the bar: most of
     /// Home's hero, most of a title's. Measured in points scrolled.
@@ -50,9 +57,8 @@ struct PhoneHeroBar: View {
 
     var body: some View {
         content
-            .padding(.horizontal, Metrics.gutter)
-            .frame(height: bar)
-            .frame(maxWidth: .infinity)
+            // The glyphs' hit areas are 44 points tall and fill the bar.
+            .modifier(TopBarFrame(height: bar, row: 44, bottom: 0))
             .background(alignment: .top) { blur }
             .animation(.easeInOut(duration: 0.25), value: overPage)
     }
@@ -89,9 +95,9 @@ struct PhoneHeroBar: View {
     }
 
     /// Over the artwork only the status bar's strip; over the page, down
-    /// past the bar's row — see `HeroBarBlur`.
+    /// past the bar's row — see `BarBlur`.
     private var blur: some View {
-        HeroBarBlur(overPage: overPage, topInset: topInset, strip: max(0, topInset - 12))
+        BarBlur(overPage: overPage, barHeight: TopBarFrame.layoutHeight(height: bar))
     }
 
     private var brand: some View {

@@ -243,13 +243,22 @@ wash now run up under the window toolbar instead of starting below a band, and
 the same two-step blur sits pinned beneath the toolbar (the window-colour wash
 across the top of the hero is gone).
 
+**Built 2026-11-21, every solid bar** (`BarBlur` in `Views/HeroBarBlur.swift`,
+`TopBarFrame` in `Views/Components.swift`). No page draws a solid band any
+more. The iPhone Duo floats `PhoneHeroBar` on Home and title pages too, on
+both screens, in the frame its solid bar took — below the front screen's
+dead touch strip, on the inside screen's status strip when held upright —
+with the artwork reaching up by that much. Search and Live TV keep
+`AppTopBar` with the blur under it instead of the band and hairline (Live
+TV's header stands above the guide rather than over it, so there the blur
+has only the page under it).
+
 **To do:**
 
 - The untinted blur is the backdrop's `variableBlur` filter, which UIKit
   does not publish (looked up by name, with a paler masked blur if it ever
   stops answering); on the Mac it goes on `NSVisualEffectView`'s backdrop
   layer, which AppKit builds only after the first layout. Watch App Review.
-- The iPhone Duo keeps the solid `AppTopBar` (its status strips and dead
-  touch strip).
 - Check dark mode and a real iPhone by eye (iPhone MANUAL.md, "The floating
-  top bar").
+  top bar"), and the Duo's inside screen held upright on hardware (the
+  simulator's hinge was checked closed, half-open and open, sideways).
