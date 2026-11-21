@@ -235,12 +235,21 @@ poster's colours, and it ends at the bottom of the status bar. Once the
 artwork has scrolled away the blur reaches past the bar's row, the glyphs
 turn the page's colour, and a title page shows its name beside Back.
 
+**Built 2026-11-20, iPad and Mac** (`Views/HeroBarBlur.swift`). The iPad's
+floating bar used to gain a tinted band with a hairline once the page scrolled;
+it now has the same untinted blur, thin under the clock over artwork and
+deeper once the page is under it. On the Mac, Home's hero and a title page's
+wash now run up under the window toolbar instead of starting below a band, and
+the same two-step blur sits pinned beneath the toolbar (the window-colour wash
+across the top of the hero is gone).
+
 **To do:**
 
 - The untinted blur is the backdrop's `variableBlur` filter, which UIKit
   does not publish (looked up by name, with a paler masked blur if it ever
-  stops answering). Watch App Review for it.
+  stops answering); on the Mac it goes on `NSVisualEffectView`'s backdrop
+  layer, which AppKit builds only after the first layout. Watch App Review.
 - The iPhone Duo keeps the solid `AppTopBar` (its status strips and dead
-  touch strip). The iPad already floats its own bar; the two could share.
+  touch strip).
 - Check dark mode and a real iPhone by eye (iPhone MANUAL.md, "The floating
   top bar").

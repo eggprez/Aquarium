@@ -115,3 +115,16 @@ for the same Jellyfin server), which the test Mac cannot run.
    expect the "certificate couldn't be verified" refusal, not a quiet http try.
 7. In Seerr, delete this user's session (or wait 30 days), then open Requests:
    it loads without asking anything.
+
+## T1. Home and title pages under the toolbar (added 2026-11-20)
+
+The hero and a title page's wash reach the top of the window; the toolbar has
+no band of its own, only `HeroBarBlur` pinned beneath it.
+
+1. Home over a bright hero (Big Buck Bunny's sky): the window title and the
+   toolbar buttons read, and the picture is sharp below the toolbar.
+2. Scroll Home: once the hero has gone, the shelves blur out under the
+   toolbar (no grey band) and the title never sits on a line of text.
+3. A title page: no band between the toolbar and the header's wash; scrolled,
+   the facts blur out under the toolbar.
+4. Repeat in light appearance, and with the window not key.

@@ -21,6 +21,14 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
   -only-testing:AquariumTests/PadMetricsTests … CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-
 ```
 
+## The floating bar's blur (added 2026-11-20)
+
+| Function | Test | Kind | Status |
+|---|---|---|---|
+| Untinted variable blur under the bar (filter found, no tint, no mask) | PadHeroBarBlurTests.testVariableBlurUsesTheUntintedFilter, …testMaskIsOpaqueAtTheTopAndClearAtTheBottom | unit | pass |
+| Bar keeps its place and answers once the page scrolls under the blur | PadHomeTests.testBarStaysUsableOnceThePageScrollsUnderIt | UI | pass |
+| What the blur looks like over artwork and over the page | MANUAL.md, "The floating bar's blur" | manual | manual |
+
 ## Shell and navigation
 
 | Function | Test | Kind | Status |

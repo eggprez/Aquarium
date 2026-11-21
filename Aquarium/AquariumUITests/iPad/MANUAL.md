@@ -170,3 +170,16 @@ for the same Jellyfin server), which the test Mac cannot run.
    expect the "certificate couldn't be verified" refusal, not a quiet http try.
 7. In Seerr, delete this user's session (or wait 30 days), then open Requests:
    it loads without asking anything.
+
+## The floating bar's blur (added 2026-11-20)
+
+`padBarSurface` is now the phone's untinted blur (`HeroBarBlur`) instead of a
+tinted band with a hairline. Only an eye can judge it.
+
+1. Home over a bright hero: the clock reads, the strip behind it takes the
+   poster's colours, and nothing below the status bar is blurred.
+2. Scroll Home until shelves pass under the bar: the blur reaches past the
+   wordmark's row with no grey band or hairline, and no line of text shows
+   through behind the wordmark or the discs.
+3. A title page long enough to scroll: the same, with the title beside Back.
+4. Repeat in light mode.
