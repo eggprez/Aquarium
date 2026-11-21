@@ -7,13 +7,21 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-npx tauri icon Aquarium.svg
-
-# The small variant replaces the full design at 32 px.
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-npx tauri icon src-tauri/icons/aquarium-small.svg -o "$tmp" -p 32 >/dev/null
-cp "$tmp/32x32.png" src-tauri/icons/32x32.png
+
+# GNOME draws its running-app dot under the icon, and a tile that fills its
+# square hides it: the app icons carry the artwork at 86% with a transparent
+# margin. The in-app logo below stays full-bleed.
+pad() { sed 's|<g id="art">|<g id="art" transform="translate(71.68 71.68) scale(0.86)">|' "$1" > "$2"; }
+pad Aquarium.svg "$tmp/icon.svg"
+pad src-tauri/icons/aquarium-small.svg "$tmp/small.svg"
+
+npx tauri icon "$tmp/icon.svg"
+
+# The small variant replaces the full design at 32 px.
+npx tauri icon "$tmp/small.svg" -o "$tmp/out" -p 32 >/dev/null
+cp "$tmp/out/32x32.png" src-tauri/icons/32x32.png
 
 # The webview shows the logo at 30–56 CSS px on HiDPI screens; ship the vector.
 cp Aquarium.svg public/aquarium-logo.svg
