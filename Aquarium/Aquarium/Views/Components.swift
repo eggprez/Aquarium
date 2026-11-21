@@ -2610,7 +2610,7 @@ struct AppTopBar<Content: View>: View {
         // in mid-air. The surface is the untinted blur every bar over
         // artwork has (`BarBlur`), not a band of the page's colour.
         .background(alignment: .top) {
-            BarBlur(overPage: overPage, barHeight: TopBarFrame.layoutHeight(height: height))
+            BarBlur(progress: overPage ? 1 : 0, barHeight: TopBarFrame.layoutHeight(height: height))
         }
     }
 }
@@ -2866,13 +2866,13 @@ extension View {
 #if os(iOS)
 extension View {
     /// The surface under an iPad's floating bar: the untinted blur the
-    /// phone's bar has (`HeroBarBlur`) — under the clock only while the bar
-    /// sits over artwork, and down past the bar's row once the page has
-    /// scrolled up under it. Home and a title page both draw their bar this
+    /// phone's bar has (`HeroBarBlur`) — under the clock only at the very
+    /// top of the page, and growing down past the bar's row as soon as the
+    /// page moves (`scroll`). Home and a title page both draw their bar this
     /// way. `topInset` is the status bar the blur reaches up through.
-    func padBarSurface(filled: Bool, topInset: CGFloat) -> some View {
+    func padBarSurface(scroll: BarScroll, topInset: CGFloat) -> some View {
         background(alignment: .top) {
-            HeroBarBlur(overPage: filled, topInset: topInset, strip: topInset)
+            HeroBarBlur(scroll: scroll, topInset: topInset, strip: topInset)
         }
     }
 }

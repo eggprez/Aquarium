@@ -19,7 +19,7 @@ final class PhoneHeroBarUnitTests: PhoneUnitTestCase {
         view.layoutIfNeeded()
         let filters = view.subviews.first?.layer.filters ?? []
         XCTAssertFalse(filters.isEmpty, "no variable-blur filter on the backdrop")
-        XCTAssertNil(view.layer.mask, "fell back to the masked, tinted blur")
+        XCTAssertTrue(view.usesFilter, "fell back to the masked, tinted blur")
         for tint in view.subviews.dropFirst() {
             XCTAssertEqual(tint.alpha, 0, "the blur's tint is showing")
         }
@@ -92,6 +92,69 @@ final class PhoneHeroBarUnitTests: PhoneUnitTestCase {
         XCTAssertEqual(view.reach, BarBlur.least)
     }
 
+    /// The blur is the thin one only at the very top of the page: it is the
+    /// whole one once the page has moved `BarScroll.distance` points, part
+    /// of the way there in between, and thin again back at the top. Pulling
+    /// the page down past its top leaves it thin.
+    func testBlurFollowsTheFirstPointsOfScrolling() {
+        XCTAssertEqual(BarScroll.progress(offset: 0), 0)
+        XCTAssertEqual(BarScroll.progress(offset: -40), 0, "rubber-banding past the top moved the blur")
+        XCTAssertEqual(BarScroll.progress(offset: BarScroll.distance / 2), 0.5)
+        XCTAssertEqual(BarScroll.progress(offset: BarScroll.distance), 1)
+        XCTAssertEqual(BarScroll.progress(offset: 900), 1)
+        XCTAssertLessThanOrEqual(BarScroll.distance, Metrics.topBar,
+                                 "the blur should be whole before the page has moved a bar's height")
+        let scroll = BarScroll()
+        XCTAssertEqual(scroll.progress, 0)
+        scroll.set(offset: 500)
+        XCTAssertEqual(scroll.progress, 1)
+        scroll.set(offset: 0)
+        XCTAssertEqual(scroll.progress, 0, "the blur did not go back at the top of the page")
+    }
+
+    /// One blur that grows, not two crossfaded: on an iPhone 17 (59 of
+    /// status bar, a 44-point bar, 22 past its foot) it goes from the 47
+    /// points under the clock to all 125, and its strength with it. Its
+    /// view is taller than that by `BarBlur.margin`, which it fades out in.
+    func testBarBlurGrowsFromTheStripToTheWholeBar() {
+        let under = BarBlur.overhang + BarBlur.margin
+        let rest = BlurShape(radius: 5, fullUntil: 0.35, clearBottom: 44 + 12 + under, least: BarBlur.least)
+        let height: CGFloat = 59 + 44 + under
+        let whole: CGFloat = 59 + 44 + BarBlur.overhang
+        let top = BlurShape.blend(rest, BarBlur.scrolled, progress: 0, height: height)
+        XCTAssertEqual(top, BlurShape.Drawn(radius: 5, fullUntil: 0.35, reach: 47))
+        let moved = BlurShape.blend(rest, BarBlur.scrolled, progress: 1, height: height)
+        XCTAssertEqual(moved, BlurShape.Drawn(radius: 18, fullUntil: 0.75, reach: whole))
+        let half = BlurShape.blend(rest, BarBlur.scrolled, progress: 0.5, height: height)
+        XCTAssertEqual(half.reach, 86)
+        XCTAssertEqual(half.radius, 11.5)
+        XCTAssertEqual(half.fullUntil, 0.55, accuracy: 0.0001)
+        // Out of range is the nearer end; no second blur is no change.
+        XCTAssertEqual(BlurShape.blend(rest, BarBlur.scrolled, progress: 3, height: height), moved)
+        XCTAssertEqual(BlurShape.blend(rest, nil, progress: 1, height: height), top)
+
+        // The view itself, on a foldable's front screen (68 and 22 past).
+        let view = VariableBlurView(radius: 5, fullUntil: 0.35)
+        view.frame = CGRect(x: 0, y: 0, width: 466, height: 68 + under)
+        view.set(radius: 5, fullUntil: 0.35, clearBottom: 68 + 12 + under, least: BarBlur.least,
+                 scrolled: BarBlur.scrolled, progress: 0)
+        view.layoutIfNeeded()
+        XCTAssertEqual(view.reach, BarBlur.least)
+        view.set(radius: 5, fullUntil: 0.35, clearBottom: 68 + 12 + under, least: BarBlur.least,
+                 scrolled: BarBlur.scrolled, progress: 1)
+        view.layoutIfNeeded()
+        XCTAssertEqual(view.reach, 90)
+        XCTAssertEqual(view.drawn.radius, 18)
+        // The view fades out under the blur and is gone by its own foot:
+        // it ended in a line across the artwork (soft above, sharp below).
+        XCTAssertNotNil(view.mask, "the blur's view has no fade at its foot")
+        XCTAssertEqual(view.fadeStops.from, 90 / (68 + under), accuracy: 0.0001)
+        XCTAssertEqual(view.fadeStops.to, 1, accuracy: 0.0001)
+        XCTAssertEqual(BarBlur.margin, VariableBlurView.fadeLength)
+        XCTAssertFalse(view.isHidden)
+        XCTAssertTrue(view.usesFilter, "fell back to the masked blur while growing")
+    }
+
     /// The frame the bar takes below the status bar, which is what a page's
     /// artwork reaches up by: the bar and the front screen's dead touch strip
     /// where there is no status strip, nothing where the bar is the strip.
@@ -118,7 +181,8 @@ final class PhoneHeroBarUnitTests: PhoneUnitTestCase {
     }
 
     /// The bar turns from white to the page's colour only once the artwork
-    /// has gone from under it: Home's hero is the taller of the two.
+    /// has gone from under it: Home's hero is the taller of the two. (The
+    /// blur does not wait for that — `testBlurFollowsTheFirstPointsOfScrolling`.)
     func testThresholdsSitPastTheArtwork() {
         XCTAssertGreaterThan(PhoneHeroBar.threshold(home: true), PhoneHeroBar.threshold(home: false))
         XCTAssertGreaterThan(PhoneHeroBar.threshold(home: false), Metrics.topBar)

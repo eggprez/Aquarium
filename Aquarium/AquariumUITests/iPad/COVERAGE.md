@@ -26,8 +26,9 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 | Function | Test | Kind | Status |
 |---|---|---|---|
 | Untinted variable blur under the bar (filter found, no tint, no mask) | PadHeroBarBlurTests.testVariableBlurUsesTheUntintedFilter, …testMaskIsOpaqueAtTheTopAndClearAtTheBottom | unit | pass |
+| Blur is the status strip at the top of the page and grows past the bar as the page moves | PadHeroBarBlurTests.testBlurGrowsFromTheStatusStripAsThePageMoves | unit | pass |
 | Bar keeps its place and answers once the page scrolls under the blur | PadHomeTests.testBarStaysUsableOnceThePageScrollsUnderIt | UI | pass |
-| What the blur looks like over artwork and over the page | MANUAL.md, "The floating bar's blur" | manual | manual |
+| What the blur looks like at the top of the page, while it grows, and over the page | MANUAL.md, "The floating bar's blur" | manual | manual |
 
 ## Shell and navigation
 

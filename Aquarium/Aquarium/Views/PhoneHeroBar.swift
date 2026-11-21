@@ -8,12 +8,12 @@
 //
 //  The blur has no tint of its own, so it takes the colours of whatever is
 //  under it instead of laying a grey or white band across the picture, and
-//  over the artwork it stops at the bottom of the status bar: enough to keep
-//  the clock readable on a bright poster, and nothing over a face below it.
-//  Once the artwork has scrolled out from under the bar and there is page
-//  text there instead, the blur reaches down past the bar's row and the
-//  glyphs turn from white to the page's colour, so the wordmark and the
-//  title never sit on top of a line of text.
+//  at the very top of the page it stops at the bottom of the status bar:
+//  enough to keep the clock readable on a bright poster, and nothing over a
+//  face below it. As soon as the page moves off its top the blur grows down
+//  past the bar's row (`BarScroll`), so the wordmark and the title never sit
+//  on top of a line of text; and once the artwork has scrolled out from
+//  under the bar the glyphs turn from white to the page's colour.
 //
 //  A foldable floats it too, in the frame `AppTopBar` would have taken
 //  (`TopBarFrame`): clear of the front screen's dead touch strip, on the
@@ -30,7 +30,11 @@ struct PhoneHeroBar: View {
 
     let page: Page
     /// Whether the artwork has gone from under the bar — see `isPast`.
+    /// What the glyphs' colour goes by; the blur goes by `scroll`.
     let overPage: Bool
+    /// How far the page has moved off its top, which is what the blur
+    /// follows.
+    let scroll: BarScroll
 
     @Environment(\.popPage) private var popPage
     @Environment(\.dismiss) private var dismiss
@@ -94,10 +98,10 @@ struct PhoneHeroBar: View {
         }
     }
 
-    /// Over the artwork only the status bar's strip; over the page, down
-    /// past the bar's row — see `BarBlur`.
+    /// At the top of the page only the status bar's strip; once it has
+    /// moved, down past the bar's row — see `BarBlur`.
     private var blur: some View {
-        BarBlur(overPage: overPage, barHeight: TopBarFrame.layoutHeight(height: bar))
+        ScrollingBarBlur(scroll: scroll, barHeight: TopBarFrame.layoutHeight(height: bar))
     }
 
     private var brand: some View {

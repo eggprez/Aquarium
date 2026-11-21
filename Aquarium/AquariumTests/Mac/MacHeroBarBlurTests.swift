@@ -33,6 +33,32 @@ final class MacHeroBarBlurTests: MacUnitTestCase {
         XCTAssertNil(blur.layer?.mask, "fell back to the masked blur")
     }
 
+    /// At the top of the page only the toolbar's strip is blurred; as soon
+    /// as the page moves the blur grows past the toolbar's foot (2026-11-21:
+    /// it used to wait for the hero to scroll away, and crossfaded).
+    func testBlurGrowsFromTheToolbarStripAsThePageMoves() {
+        let blur = VariableBlurView(radius: 6, fullUntil: 0.4)
+        let under = HeroBarBlur.overhang + HeroBarBlur.margin
+        blur.frame = NSRect(x: 0, y: 0, width: 600, height: 52 + under)
+        blur.set(clearBottom: under, scrolled: HeroBarBlur.scrolled, progress: 0)
+        XCTAssertEqual(blur.drawn, BlurShape.Drawn(radius: 6, fullUntil: 0.4, reach: 52))
+        blur.set(clearBottom: under, scrolled: HeroBarBlur.scrolled,
+                 progress: BarScroll.progress(offset: BarScroll.distance / 2))
+        XCTAssertEqual(blur.drawn.reach, 63)
+        XCTAssertEqual(blur.drawn.radius, 12)
+        blur.set(clearBottom: under, scrolled: HeroBarBlur.scrolled, progress: 1)
+        XCTAssertEqual(blur.drawn.reach, 52 + HeroBarBlur.overhang)
+        XCTAssertEqual(blur.drawn.radius, 18)
+        // Its foot fades out, so it does not end in a line across the hero.
+        XCTAssertNil(blur.maskImage)
+        blur.fadeLength = HeroBarBlur.margin
+        blur.layoutSubtreeIfNeeded()
+        blur.layout()
+        XCTAssertNotNil(blur.maskImage, "the blur's view has no fade at its foot")
+        XCTAssertEqual(BarScroll.progress(offset: -30), 0)
+        XCTAssertEqual(BarScroll.progress(offset: 400), 1)
+    }
+
     /// The mask is a column one pixel wide, opaque at the top.
     func testMaskIsOpaqueAtTheTopAndClearAtTheBottom() throws {
         let mask = try XCTUnwrap(VariableBlurFilter.mask(height: 50, fullUntil: 0.4))

@@ -264,6 +264,21 @@ status bar come up to the same 47: an iPhone SE had 8 points of blur, a
 notched iPhone 35, an iPhone 15 or 16 42. An iPhone 17 and the Pros are
 unchanged.
 
+**Changed 2026-11-21, the thin blur is for the top of the page only, and it
+grows instead of crossfading.** The blur kept to the strip under the clock
+until the hero had scrolled right out from under the bar (420 points on
+Home, 330 on a title; 180 and 80 on an iPad; a hero's height on a Mac), and
+then crossfaded to the whole one, which stuttered: a system blur that is
+partly transparent stops blurring, so the fade passed through a moment of
+no blur. Now it is one blur whose reach and strength follow the first 32
+points of scrolling (`BarScroll`), under the finger and back again, on
+iPhone, the Duo, iPad and Mac. The glyphs still turn from white to the
+page's colour, and the wordmark or title still arrives, where they did.
+With the strong blur now over artwork, its view also fades out at the foot:
+the filter leaves what it does not blur slightly soft, which drew a line
+across the picture where the view stopped. Seen on the Duo simulator; the
+iPad and the Mac were built and unit-tested but not looked at.
+
 **To do:**
 
 - The untinted blur is the backdrop's `variableBlur` filter, which UIKit

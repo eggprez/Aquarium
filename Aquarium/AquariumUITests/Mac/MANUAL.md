@@ -123,8 +123,13 @@ no band of its own, only `HeroBarBlur` pinned beneath it.
 
 1. Home over a bright hero (Big Buck Bunny's sky): the window title and the
    toolbar buttons read, and the picture is sharp below the toolbar.
-2. Scroll Home: once the hero has gone, the shelves blur out under the
-   toolbar (no grey band) and the title never sits on a line of text.
+2. Scroll Home slowly (changed 2026-11-21): the blur grows past the
+   toolbar's foot within about 32 points of scrolling and shrinks the same
+   way back at the top — one blur growing, no flash and no crossfade, and
+   no line across the hero where it stops (its foot fades out; not yet
+   seen on a Mac, 2026-11-21). Once
+   the hero has gone, the shelves blur out under the toolbar (no grey band)
+   and the title never sits on a line of text.
 3. A title page: no band between the toolbar and the header's wash; scrolled,
    the facts blur out under the toolbar.
 4. Repeat in light appearance, and with the window not key.

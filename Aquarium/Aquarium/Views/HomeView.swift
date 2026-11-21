@@ -270,15 +270,13 @@ struct HomeView: View {
         //
         // Over it, pinned to the window rather than the picture, the blur the
         // phone and the iPad have (`HeroBarBlur`): only the toolbar's strip
-        // over the artwork, and past the toolbar's foot once the page is
-        // under it, so the title never sits on a line of text.
+        // at the top of the page, and past the toolbar's foot as soon as the
+        // page moves, so the title never sits on a line of text.
         ZStack(alignment: .top) {
             scroll(bleed: EdgeInsets(top: macTopInset, leading: 0, bottom: 0, trailing: 0))
                 .ignoresSafeArea(.container, edges: .top)
-                .modifier(MacHeroScrollWatcher(isPast: $macScrolled) { width in
-                    HeroCarousel.height(forWidth: width) - 40
-                })
-            HeroBarBlur(overPage: macScrolled || (heroItems.isEmpty && hero == nil), topInset: macTopInset)
+                .modifier(BarScrollWatcher(scroll: barScroll))
+            HeroBarBlur(scroll: barScroll, whole: heroItems.isEmpty && hero == nil, topInset: macTopInset)
                 .ignoresSafeArea(.container, edges: .top)
         }
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { macTopInset = $0 }
@@ -290,13 +288,17 @@ struct HomeView: View {
     #if os(macOS)
     /// The window toolbar's height, which the hero reaches up through.
     @State private var macTopInset: CGFloat = 0
-    /// Whether the hero has scrolled out from under the toolbar.
-    @State private var macScrolled = false
+    /// How far the page has moved off its top, for the toolbar's blur.
+    @State private var barScroll = BarScroll()
     #endif
 
     #if os(iOS)
-    /// Whether the phone's hero has scrolled out from under its bar.
+    /// Whether the phone's hero has scrolled out from under its bar, which
+    /// is when its glyphs take the page's colour.
     @State private var phoneScrolled = false
+    /// How far the page has moved off its top, for the bar's blur — the
+    /// phone's and the iPad's.
+    @State private var barScroll = BarScroll()
 
     /// A phone's Home: the hero runs up to the top of the screen and the bar
     /// floats over it — see `PhoneHeroBar`. The same arrangement as `padHome`,
@@ -309,11 +311,13 @@ struct HomeView: View {
                 .ignoresSafeArea(.container, edges: .top)
                 .modifier(PhoneHeroScrollWatcher(threshold: PhoneHeroBar.threshold(home: true),
                                                  isPast: $phoneScrolled))
+                .modifier(BarScrollWatcher(scroll: barScroll))
             PhoneHeroBar(
                 page: .home(search: { app.push(.search("")) },
                             refresh: { Task { await reload(fresh: true) } },
                             isRefreshing: isRefreshing),
-                overPage: phoneScrolled
+                overPage: phoneScrolled,
+                scroll: barScroll
             )
         }
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
@@ -323,15 +327,15 @@ struct HomeView: View {
     /// the scroll view that ignores it — see `padHome`.
     @State private var padTopInset: CGFloat = 0
     /// Whether the hero has scrolled up under the bar, which is when the
-    /// bar earns a surface and the wordmark.
+    /// bar earns the wordmark. Its surface comes sooner — `barScroll`.
     @State private var padScrolled = false
     @Environment(\.sidebarToggle) private var sidebarToggle
     /// The way back to a collapsed sidebar — see `SidebarToggle`.
     private var showSidebar: (() -> Void)? { sidebarToggle?.show }
 
     /// An iPad's Home: the hero runs up under the status bar and the bar
-    /// floats over it — glass discs on the artwork, and only once the page
-    /// has scrolled a surface of its own with the wordmark on it. The phone
+    /// floats over it — glass discs on the artwork, a surface of its own as
+    /// soon as the page moves, and the wordmark once it has scrolled. The phone
     /// floats its own bar the same way — see `phoneHome`.
     ///
     /// The scroll view ignores the top of the safe area; the stack around
@@ -342,6 +346,7 @@ struct HomeView: View {
             scroll(bleed: EdgeInsets(top: padTopInset + Metrics.topBar, leading: 0, bottom: 0, trailing: 0))
                 .ignoresSafeArea(.container, edges: .top)
                 .modifier(HeroScrollWatcher(threshold: 180, isPast: $padScrolled))
+                .modifier(BarScrollWatcher(scroll: barScroll))
             padBar
         }
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
@@ -381,7 +386,7 @@ struct HomeView: View {
         }
         .padding(.horizontal, Metrics.gutter)
         .frame(height: Metrics.topBar)
-        .padBarSurface(filled: padScrolled, topInset: padTopInset)
+        .padBarSurface(scroll: barScroll, topInset: padTopInset)
         .animation(.easeOut(duration: 0.2), value: padScrolled)
     }
     #endif
