@@ -176,10 +176,14 @@ for the same Jellyfin server), which the test Mac cannot run.
 `padBarSurface` is now the phone's untinted blur (`HeroBarBlur`) instead of a
 tinted band with a hairline. Only an eye can judge it.
 
-1. Home over a bright hero: the clock reads, the strip behind it takes the
-   poster's colours, and nothing below the status bar is blurred.
-2. Scroll Home until shelves pass under the bar: the blur reaches past the
-   wordmark's row with no grey band or hairline, and no line of text shows
-   through behind the wordmark or the discs.
+1. Home over a bright hero, not scrolled: the clock reads, the strip behind
+   it takes the poster's colours, and nothing below the status bar is blurred.
+2. Drag Home up slowly (changed 2026-11-21): the blur grows down under the
+   finger and reaches past the bar within about 32 points, and shrinks the
+   same way on the way back — one blur growing, no flash and no crossfade,
+   and no line across the artwork where it stops.
+   Further on, when shelves pass under the bar, there is no grey band or
+   hairline, and no line of text shows through behind the wordmark or the
+   discs.
 3. A title page long enough to scroll: the same, with the title beside Back.
 4. Repeat in light mode.

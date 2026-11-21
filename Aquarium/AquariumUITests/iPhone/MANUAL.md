@@ -271,13 +271,19 @@ eye can say the bubble sits right.
 the artwork sit and that the title arrives on scroll, and a unit test checks
 the blur filter is found; only an eye can judge the blur itself.
 
-1. Home with a bright hero (a yellow or white poster): the clock and battery
-   are readable, the blur behind them takes the poster's colours (no grey or
-   white band), and the picture is sharp from the bottom of the status bar
-   down — a face under the wordmark is not blurred.
-2. Scroll Home until posters pass under the bar: the blur reaches past the
-   wordmark's row, the wordmark and buttons turn from white to the page's
-   colour, and no line of text shows through behind them.
+1. Home with a bright hero (a yellow or white poster), not scrolled: the
+   clock and battery are readable, the blur behind them takes the poster's
+   colours (no grey or white band), and the picture is sharp from the bottom
+   of the status bar down — a face under the wordmark is not blurred.
+2. Drag Home up slowly (changed 2026-11-21): the blur grows down under the
+   finger and covers the whole bar within about 32 points, well before the
+   hero has gone; let go and drag back, and it shrinks the same way. It is
+   one blur growing — no flash, no moment with no blur, no second band
+   fading in — and at every point its foot melts into the picture: no
+   line across the artwork where the blur stops (pick a detailed hero). Flick the page and tap the status bar to return: the same.
+   Further on, once posters pass under the bar, the wordmark and buttons
+   turn from white to the page's colour, and no line of text shows through
+   behind them at any point.
 3. A title page: the same over its artwork with only Back in the bar;
    scrolled, the title appears beside Back on the blur.
 4. Both again in dark mode, and on a real iPhone (the blur is a system

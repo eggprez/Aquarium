@@ -15,10 +15,27 @@ final class PadHeroBarBlurTests: PadUnitTestCase {
         view.frame = CGRect(x: 0, y: 0, width: 1032, height: 98)
         view.layoutIfNeeded()
         XCTAssertFalse((view.subviews.first?.layer.filters ?? []).isEmpty, "no variable-blur filter on the backdrop")
-        XCTAssertNil(view.layer.mask, "fell back to the masked, tinted blur")
+        XCTAssertTrue(view.usesFilter, "fell back to the masked, tinted blur")
         for tint in view.subviews.dropFirst() {
             XCTAssertEqual(tint.alpha, 0, "the blur's tint is showing")
         }
+    }
+
+    /// At the top of the page only the status bar's strip is blurred; once
+    /// the page has moved the blur reaches past the bar (2026-11-21: it used
+    /// to wait for the hero to scroll away, and crossfaded when it did).
+    func testBlurGrowsFromTheStatusStripAsThePageMoves() {
+        let inset: CGFloat = 24, bar = Metrics.topBar
+        let whole = inset + bar + BarBlur.overhang
+        // The view is taller than the blur ever gets, so it never ends in a line.
+        let height = whole + BarBlur.margin
+        let rest = BlurShape(radius: 5, fullUntil: 0.35, clearBottom: height - inset)
+        XCTAssertEqual(BlurShape.blend(rest, BarBlur.scrolled, progress: 0, height: height).reach, inset)
+        XCTAssertEqual(BlurShape.blend(rest, BarBlur.scrolled, progress: 1, height: height).reach, whole)
+        let half = BlurShape.blend(rest, BarBlur.scrolled, progress: BarScroll.progress(offset: BarScroll.distance / 2),
+                                   height: height)
+        XCTAssertEqual(half.reach, (inset + whole) / 2)
+        XCTAssertEqual(half.radius, 11.5)
     }
 
     /// The mask is a column one pixel wide, opaque at the top.

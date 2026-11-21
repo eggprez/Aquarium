@@ -124,8 +124,10 @@ struct ItemDetailView: View {
                         .ignoresSafeArea(.container, edges: .top)
                         .modifier(PhoneHeroScrollWatcher(threshold: PhoneHeroBar.threshold(home: false),
                                                          isPast: $phoneScrolled))
+                        .modifier(BarScrollWatcher(scroll: barScroll))
                     PhoneHeroBar(page: .detail(title: navigationTitle),
-                                 overPage: phoneScrolled)
+                                 overPage: phoneScrolled,
+                                 scroll: barScroll)
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
             } else {
@@ -135,6 +137,7 @@ struct ItemDetailView: View {
                 ZStack(alignment: .top) {
                     scroll()
                         .ignoresSafeArea(.container, edges: .top)
+                        .modifier(BarScrollWatcher(scroll: barScroll))
                     padBar
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
@@ -172,15 +175,15 @@ struct ItemDetailView: View {
         #else
         // The page reaches up under the toolbar, which has no surface of its
         // own, and the blur the phone and the iPad have sits pinned beneath
-        // it (`HeroBarBlur`): the header's wash shows through, and once the
-        // page has scrolled under the toolbar the blur deepens so the title
-        // never sits on a line of text. `padContentInset` keeps the header
-        // clear of the toolbar.
+        // it (`HeroBarBlur`): the header's wash shows through, and as soon
+        // as the page moves the blur deepens so the title never sits on a
+        // line of text. `padContentInset` keeps the header clear of the
+        // toolbar.
         ZStack(alignment: .top) {
             scroll()
                 .ignoresSafeArea(.container, edges: .top)
-                .modifier(MacHeroScrollWatcher(isPast: $macScrolled) { _ in 80 })
-            HeroBarBlur(overPage: macScrolled, topInset: macTopInset)
+                .modifier(BarScrollWatcher(scroll: barScroll))
+            HeroBarBlur(scroll: barScroll, topInset: macTopInset)
                 .ignoresSafeArea(.container, edges: .top)
         }
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { macTopInset = $0 }
@@ -320,8 +323,8 @@ struct ItemDetailView: View {
     /// The window toolbar's height, read from outside the scroll view that
     /// ignores it.
     @State private var macTopInset: CGFloat = 0
-    /// Whether the page has scrolled up under the toolbar.
-    @State private var macScrolled = false
+    /// How far the page has moved off its top, for the toolbar's blur.
+    @State private var barScroll = BarScroll()
     #endif
 
     #if os(iOS)
@@ -332,12 +335,16 @@ struct ItemDetailView: View {
     /// What the top of the screen keeps for the clock, read from outside the
     /// scroll view that ignores it — see `body`. iPad only.
     @State private var padTopInset: CGFloat = 0
-    /// Whether the phone's artwork has scrolled out from under its bar.
+    /// Whether the phone's artwork has scrolled out from under its bar,
+    /// which is when its glyphs take the page's colour.
     @State private var phoneScrolled = false
+    /// How far the page has moved off its top, for the bar's blur — the
+    /// phone's and the iPad's.
+    @State private var barScroll = BarScroll()
 
     /// An iPad's bar: the way back and, once the header has gone past, the
     /// title — floating over the header's wash, with a surface of its own
-    /// only after the page has scrolled. See `padBarSurface`.
+    /// as soon as the page moves. See `padBarSurface`.
     private var padBar: some View {
         HStack(spacing: 8) {
             if let showSidebar {
@@ -364,7 +371,7 @@ struct ItemDetailView: View {
         }
         .padding(.horizontal, Metrics.gutter)
         .frame(height: Metrics.topBar)
-        .padBarSurface(filled: scrolledPastHero, topInset: padTopInset)
+        .padBarSurface(scroll: barScroll, topInset: padTopInset)
         .animation(.easeInOut(duration: 0.2), value: scrolledPastHero)
     }
 
