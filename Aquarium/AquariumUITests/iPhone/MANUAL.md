@@ -286,6 +286,10 @@ the blur filter is found; only an eye can judge the blur itself.
    Closed, the wordmark and buttons sit below the 24-point dead strip with
    the hero behind them; open, they clear the status pill's column; open and
    held upright, they sit on the status strip's line beside the pill.
+   In every pose the top of the hero is blurred before the page scrolls
+   (2026-11-21: closed, and open held sideways, there was no blur at all
+   until it did). Closed, the blur covers the dead strip and eases out
+   behind the wordmark; a face at the wordmark's height is still sharp.
 6. Search and Live TV (2026-11-21): the bar is the blur, not a band. On
    Search, results scrolled under the bar show through it smeared, with no
    hairline; on Live TV the header has only the page under it.
