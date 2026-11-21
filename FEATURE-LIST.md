@@ -253,6 +253,17 @@ with the artwork reaching up by that much. Search and Live TV keep
 TV's header stands above the guide rather than over it, so there the blur
 has only the page under it).
 
+**Fixed 2026-11-21, no blur on the Duo until the page scrolled.** Over
+artwork the blur covered only what the status bar took above the bar, and on
+the Duo's front screen and its inside screen held sideways that is nothing
+(the safe area's top is zero), so the bar had no blur until the page had
+scrolled past the hero. The blur over artwork is now never shorter than 47
+points (`BarBlur.least`, what an iPhone 17 has): there it starts at the top
+of the screen and eases out behind the bar's row. Phones with a shorter
+status bar come up to the same 47: an iPhone SE had 8 points of blur, a
+notched iPhone 35, an iPhone 15 or 16 42. An iPhone 17 and the Pros are
+unchanged.
+
 **To do:**
 
 - The untinted blur is the backdrop's `variableBlur` filter, which UIKit

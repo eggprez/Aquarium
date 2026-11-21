@@ -65,6 +65,33 @@ final class PhoneHeroBarUnitTests: PhoneUnitTestCase {
         XCTAssertTrue(view.isHidden, "a blur with nothing above its clear part should hide")
     }
 
+    /// Where the status bar takes no room above the bar — a foldable's front
+    /// screen (the bar and its 24-point touch strip, 68) and its inside
+    /// screen held sideways (the bar alone, 44) — the blur over artwork
+    /// still shows: it was hidden there until the page scrolled.
+    func testBarBlurIsNeverShorterThanItsLeast() {
+        let clear = { (bar: CGFloat) in bar + 12 }
+        // An iPhone 17: 59 of status bar above a 44-point bar. Unchanged,
+        // as is a Pro with 62.
+        XCTAssertEqual(VariableBlurView.reach(height: 103, clearBottom: clear(44), least: BarBlur.least), 47)
+        XCTAssertEqual(VariableBlurView.reach(height: 106, clearBottom: clear(44), least: BarBlur.least), 50)
+        // A foldable's front screen: nothing above the bar and its strip.
+        XCTAssertEqual(VariableBlurView.reach(height: 68, clearBottom: clear(68), least: BarBlur.least), BarBlur.least)
+        // Its inside screen sideways: the whole bar, which is shorter.
+        XCTAssertEqual(VariableBlurView.reach(height: 44, clearBottom: clear(44), least: BarBlur.least), 44)
+        // Its inside screen upright, where the bar is the 82-point strip.
+        XCTAssertEqual(VariableBlurView.reach(height: 82, clearBottom: clear(0), least: BarBlur.least), 70)
+        // An iPhone SE: 20 of status bar, which left 8 points of blur.
+        XCTAssertEqual(VariableBlurView.reach(height: 64, clearBottom: clear(44), least: BarBlur.least), BarBlur.least)
+
+        let view = VariableBlurView(radius: 5, fullUntil: 0.35, clearBottom: 80, least: BarBlur.least)
+        view.frame = CGRect(x: 0, y: 0, width: 466, height: 68)
+        view.layoutIfNeeded()
+        XCTAssertFalse(view.isHidden, "no blur on a foldable's front screen until the page scrolls")
+        XCTAssertTrue(view.usesFilter, "fell back to the masked blur")
+        XCTAssertEqual(view.reach, BarBlur.least)
+    }
+
     /// The frame the bar takes below the status bar, which is what a page's
     /// artwork reaches up by: the bar and the front screen's dead touch strip
     /// where there is no status strip, nothing where the bar is the strip.

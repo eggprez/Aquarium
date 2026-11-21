@@ -60,14 +60,27 @@ struct HeroBarBlur: View {
 /// the bottom, stays clear but for 12 points of easing, and what sits in it
 /// is white with a shadow. Over the page the whole of it is, reaching 22
 /// points past the bar so a title never sits on a line of text.
+///
+/// Where the status bar takes little or no room above the bar — a
+/// foldable's front screen and its inside screen held sideways, where the
+/// safe area's top is zero, and a phone with a 20-point status bar — that
+/// strip would be a sliver or nothing, and the bar had no blur at all until
+/// the page scrolled. So the blur is never shorter than `least`: there it
+/// starts at the top of the screen all the same and eases out behind the
+/// bar's row.
 struct BarBlur: View {
     let overPage: Bool
     /// The bar's own row — how much of the bottom stays clear over artwork.
     let barHeight: CGFloat
 
+    /// The shortest the blur over artwork gets: what an iPhone 17 has under
+    /// its clock (59 points of status bar, less the 12 of easing), so that
+    /// phone and the taller ones are as they were.
+    static let least: CGFloat = 47
+
     var body: some View {
         ZStack(alignment: .top) {
-            VariableBlur(radius: 5, fullUntil: 0.35, clearBottom: barHeight + 12)
+            VariableBlur(radius: 5, fullUntil: 0.35, clearBottom: barHeight + 12, least: Self.least)
                 .opacity(overPage ? 0 : 1)
             VariableBlur(radius: 18, fullUntil: 0.75)
                 .padding(.bottom, -22)
@@ -91,13 +104,16 @@ struct VariableBlur: UIViewRepresentable {
     /// its height by the layout and only knows how much of it to leave
     /// clear — see `BarBlur`.
     var clearBottom: CGFloat = 0
+    /// The fewest points blurred from the top, whatever `clearBottom` asks
+    /// for (or the whole view, if it is shorter than this) — see `BarBlur`.
+    var least: CGFloat = 0
 
     func makeUIView(context: Context) -> VariableBlurView {
-        VariableBlurView(radius: radius, fullUntil: fullUntil, clearBottom: clearBottom)
+        VariableBlurView(radius: radius, fullUntil: fullUntil, clearBottom: clearBottom, least: least)
     }
 
     func updateUIView(_ view: VariableBlurView, context: Context) {
-        view.set(radius: radius, fullUntil: fullUntil, clearBottom: clearBottom)
+        view.set(radius: radius, fullUntil: fullUntil, clearBottom: clearBottom, least: least)
     }
 }
 
@@ -105,13 +121,15 @@ final class VariableBlurView: UIVisualEffectView {
     private var radius: CGFloat
     private var fullUntil: CGFloat
     private var clearBottom: CGFloat
+    private var least: CGFloat
     private var lastHeight: CGFloat = -1
     private(set) var usesFilter = false
 
-    init(radius: CGFloat, fullUntil: CGFloat, clearBottom: CGFloat = 0) {
+    init(radius: CGFloat, fullUntil: CGFloat, clearBottom: CGFloat = 0, least: CGFloat = 0) {
         self.radius = radius
         self.fullUntil = fullUntil
         self.clearBottom = clearBottom
+        self.least = least
         super.init(effect: UIBlurEffect(style: .regular))
         isUserInteractionEnabled = false
     }
@@ -120,11 +138,13 @@ final class VariableBlurView: UIVisualEffectView {
 
     /// New numbers from the view that owns this one: a bar's row changes
     /// height when a foldable changes pose, and the blur above it follows.
-    func set(radius: CGFloat, fullUntil: CGFloat, clearBottom: CGFloat) {
-        guard radius != self.radius || fullUntil != self.fullUntil || clearBottom != self.clearBottom else { return }
+    func set(radius: CGFloat, fullUntil: CGFloat, clearBottom: CGFloat, least: CGFloat = 0) {
+        guard radius != self.radius || fullUntil != self.fullUntil
+                || clearBottom != self.clearBottom || least != self.least else { return }
         self.radius = radius
         self.fullUntil = fullUntil
         self.clearBottom = clearBottom
+        self.least = least
         lastHeight = -1
         setNeedsLayout()
     }
@@ -141,9 +161,19 @@ final class VariableBlurView: UIVisualEffectView {
         apply()
     }
 
+    /// How many points from the top are blurred: what is left above the
+    /// clear part, and never fewer than `least` (or the whole view, if it
+    /// is shorter than that).
+    static func reach(height: CGFloat, clearBottom: CGFloat, least: CGFloat) -> CGFloat {
+        max(height - clearBottom, min(least, height))
+    }
+
+    /// The same for this view as it is laid out.
+    var reach: CGFloat { Self.reach(height: bounds.height, clearBottom: clearBottom, least: least) }
+
     private func apply() {
-        // Nothing above the clear part: nothing to blur.
-        let reach = bounds.height - clearBottom
+        // Nothing above the clear part and no least: nothing to blur.
+        let reach = self.reach
         isHidden = reach <= 0
         guard reach > 0 else { return }
         let endAt = reach / bounds.height
