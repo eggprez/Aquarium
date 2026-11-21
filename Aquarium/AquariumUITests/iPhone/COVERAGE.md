@@ -25,7 +25,7 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | CarPlay: only the audio entitlement is held (never combined with video); the bundle carries `FJCarPlayVideo`; none on the Mac | PhoneCarPlayConfigTests | unit | pass |
 | App Store export is signed by hand, with a named profile for the app, Live Activities, watch app and watch widgets | PhoneCarPlayConfigTests.testAppStoreExportNamesAProfileForEveryBundle | unit | pass |
 | CarPlay Video tab on HomeView or a video car; the app appears on HomeView at all | — | manual | MANUAL.md (CarPlay, step 2) |
-| Floating bar's blur uses the untinted variable-blur filter (not the fallback); the bar floats on phones and not on a foldable; its colour thresholds | PhoneHeroBarUnitTests | unit | pass |
+| Floating bar's blur uses the untinted variable-blur filter (not the fallback); the bar floats on every phone, foldable included; its colour thresholds; the blur's mask leaves the bar's row clear over artwork; a blur with nothing above its clear part hides; the bar's layout height follows the fold | PhoneHeroBarUnitTests | unit | pass |
 | `PlayerTime.format/spoken` | PhoneFormattingTests.testPlayerTime | unit | pass |
 | `Quality.choices/label/shortLabel/snapped/rungIndex/cap/smallerStream/untouchedRung` | PhoneFormattingTests (quality group) | unit | pass |
 | `DownloadQualities.named/menuLabel`, catalogue keys | PhoneFormattingTests | unit | pass |
@@ -152,9 +152,9 @@ the other four on the standard phone).
 |---|---|---|---|
 | Rows: My Media, Continue Watching, On Now, Next Up, Latest per library | testHomeShowsTheBaselineRows | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Bar (Search, Refresh) and hero fit | testHomeBarAndHeroFitTheScreen | UI, layout | pass (17, SE, Pro Max, Duo) |
-| Floating bar: the hero runs up under it, the wordmark and buttons sit below the clock and above the hero's Play (not on the Duo, which keeps the solid bar) | PhoneHeroBarTests.testHomeHeroRunsUpUnderTheBar | UI, layout | pass (17, SE, Pro Max); skip on Duo (solid bar) |
+| Floating bar: the hero runs up under it, the wordmark and buttons sit below the clock (the dead touch strip on the Duo) and above the hero's Play | PhoneHeroBarTests.testHomeHeroRunsUpUnderTheBar | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Floating bar stays put and tappable while Home scrolls | PhoneHeroBarTests.testHomeBarStaysWhileThePageScrolls | UI | pass (17) |
-| The blur under the clock: untinted, takes the artwork's colours, deepens once scrolled | — | manual | MANUAL.md (The floating top bar) |
+| The blur under the clock: untinted, takes the artwork's colours, deepens once scrolled; the same blur under Search's and Live TV's bars | — | manual | MANUAL.md (The floating top bar) |
 | Hero Details, hero paging | testHeroDetailsOpensTheTitle, testHeroSwipesToTheNextPage | UI | pass (17) |
 | Refresh | testRefreshKeepsHome | UI | pass (17) |
 | Continue Watching card → title with progress | testContinueWatchingCardOpensTheTitle | UI | pass (17) |
@@ -190,7 +190,7 @@ the other four on the standard phone).
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Floating bar: the artwork runs up under it, Back clears the clock, the title arrives in the bar once scrolled, Back leaves | PhoneHeroBarTests.testTitleArtworkRunsUpUnderTheBarAndTheTitleArrivesOnScroll | UI, layout | pass (17, SE, Pro Max); skip on Duo (solid bar) |
+| Floating bar: the artwork runs up under it, Back clears the clock, the title arrives in the bar once scrolled, Back leaves | PhoneHeroBarTests.testTitleArtworkRunsUpUnderTheBarAndTheTitleArrivesOnScroll | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Film page facts and actions fit | testFilmPageShowsItsFacts | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Action row one line | testActionRowIsOneLine | UI, layout | pass (17, SE, Pro Max, Duo) (R-2c20fe6-row) |
 | Favourite, Mark watched (server) | testFavouriteButtonReachesTheServer, testMarkWatchedFromTheMoreMenu | UI | pass (17) |

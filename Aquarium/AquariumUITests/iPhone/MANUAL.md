@@ -282,5 +282,11 @@ the blur filter is found; only an eye can judge the blur itself.
    scrolled, the title appears beside Back on the blur.
 4. Both again in dark mode, and on a real iPhone (the blur is a system
    filter; a simulator draws it, but check the real thing for banding).
-5. The iPhone Duo keeps the solid bar on both screens.
+5. The iPhone Duo (added 2026-11-21): the same bar floats on both screens.
+   Closed, the wordmark and buttons sit below the 24-point dead strip with
+   the hero behind them; open, they clear the status pill's column; open and
+   held upright, they sit on the status strip's line beside the pill.
+6. Search and Live TV (2026-11-21): the bar is the blur, not a band. On
+   Search, results scrolled under the bar show through it smeared, with no
+   hairline; on Live TV the header has only the page under it.
 

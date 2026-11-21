@@ -2,8 +2,8 @@
 //  the artwork runs up to the top of the screen under it, its buttons stay
 //  clear of the clock and of the hero's own buttons, it stays put while the
 //  page scrolls, and a title page's name turns up in it once the artwork has
-//  gone. The foldable keeps the solid bar (see DuoPoseTests), so these skip
-//  there.
+//  gone. The foldable floats it too, clear of its front screen's dead touch
+//  strip (DuoPoseTests checks the strip itself).
 
 #if os(iOS)
 import XCTest
@@ -12,11 +12,18 @@ final class PhoneHeroBarTests: PhoneUITestCase {
     private func any(_ id: String) -> XCUIElement { app.descendants(matching: .any).matching(identifier: id).firstMatch }
 
     /// Where the status bar ends: 20 points on the home-button SE, 44 or
-    /// more on everything with a notch or an island.
-    private var statusBarBottom: CGFloat { device == .small ? 20 : 44 }
+    /// more on everything with a notch or an island. The Duo's front screen
+    /// keeps its clock in a column down the side; the top 24 points are the
+    /// dead touch strip the bar stays below.
+    private var statusBarBottom: CGFloat {
+        switch device {
+        case .small: 20
+        case .duo: 24
+        default: 44
+        }
+    }
 
     func testHomeHeroRunsUpUnderTheBar() throws {
-        try skipOnDuo("the foldable keeps the solid bar")
         launchHome()
         let window = app.windows.firstMatch.frame
         let hero = any(TestID.Home.hero)
@@ -54,7 +61,6 @@ final class PhoneHeroBarTests: PhoneUITestCase {
     }
 
     func testTitleArtworkRunsUpUnderTheBarAndTheTitleArrivesOnScroll() throws {
-        try skipOnDuo("the foldable keeps the solid bar")
         launchHome()
         _ = try openFixture("show.long")
         let window = app.windows.firstMatch.frame

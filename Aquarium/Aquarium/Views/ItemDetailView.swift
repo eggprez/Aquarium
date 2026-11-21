@@ -117,21 +117,17 @@ struct ItemDetailView: View {
         Group {
             if PhoneHeroBar.applies {
                 // The artwork runs up to the top of the screen and the bar
-                // floats over it — see `PhoneHeroBar`. A foldable keeps the
-                // solid bar below.
+                // floats over it — see `PhoneHeroBar`. On a foldable too,
+                // in the frame its solid bar took (`TopBarFrame`).
                 ZStack(alignment: .top) {
                     scroll()
                         .ignoresSafeArea(.container, edges: .top)
                         .modifier(PhoneHeroScrollWatcher(threshold: PhoneHeroBar.threshold(home: false),
                                                          isPast: $phoneScrolled))
                     PhoneHeroBar(page: .detail(title: navigationTitle),
-                                 overPage: phoneScrolled,
-                                 topInset: padTopInset)
+                                 overPage: phoneScrolled)
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
-            } else if Metrics.phoneLayout {
-                scroll()
-                    .safeAreaInset(edge: .top, spacing: 0) { topBar }
             } else {
                 // An iPad's bar floats over the page instead, and the page
                 // reaches up under the clock — the same arrangement as Home.
@@ -307,12 +303,13 @@ struct ItemDetailView: View {
     @State private var padHeaderWidth: CGFloat = 0
 
     /// How far down the content starts: on an iPad or a phone the clock and
-    /// the floating bar (a foldable's solid bar is already outside the
-    /// page), on the Mac the window's toolbar, which has no surface over
-    /// this page (see `body`) and which the header's wash runs up under.
+    /// the floating bar (a foldable's bar takes a frame of its own — see
+    /// `PhoneHeroBar.bleed`), on the Mac the window's toolbar, which has no
+    /// surface over this page (see `body`) and which the header's wash runs
+    /// up under.
     private var padContentInset: CGFloat {
         #if os(iOS)
-        Metrics.phoneLayout && !PhoneHeroBar.applies ? 0 : padTopInset + Metrics.topBar
+        Metrics.phoneLayout ? PhoneHeroBar.bleed(topInset: padTopInset) : padTopInset + Metrics.topBar
         #else
         macTopInset > 0 ? macTopInset : 52
         #endif
@@ -371,26 +368,6 @@ struct ItemDetailView: View {
         .animation(.easeInOut(duration: 0.2), value: scrolledPastHero)
     }
 
-    /// The way back, and — once the artwork carrying it has gone past — what
-    /// this page is. Nothing here changes the bar's height, so the title can
-    /// come and go without anything moving.
-    private var topBar: some View {
-        AppTopBar {
-            HStack(spacing: 4) {
-                BarBackButton()
-                    .accessibilityIdentifier(TestID.Detail.back)
-                if scrolledPastHero {
-                    Text(navigationTitle)
-                        .font(.headline)
-                        .foregroundStyle(Theme.text)
-                        .lineLimit(1)
-                        .transition(.opacity)
-                        .accessibilityIdentifier(TestID.Detail.barTitle)
-                }
-            }
-            .animation(.easeInOut(duration: 0.2), value: scrolledPastHero)
-        }
-    }
     #endif
 
     /// The page, and — where there is one to place — the arrival that put it
@@ -718,7 +695,7 @@ struct ItemDetailView: View {
         #if os(iOS)
         if Metrics.phoneLayout {
             HeroHeader(item: item, style: .detail,
-                       topBleed: PhoneHeroBar.applies ? padTopInset + Metrics.topBar : 0)
+                       topBleed: PhoneHeroBar.bleed(topInset: padTopInset))
                 .id(Self.topAnchor)
                 .testAnchor(TestID.Detail.hero)
             details(item)

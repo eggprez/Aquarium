@@ -230,9 +230,6 @@ struct HomeView: View {
         if PhoneHeroBar.applies {
             phoneHome
                 .toolbar(.hidden, for: .navigationBar)
-        } else if Metrics.phoneLayout {
-            scroll()
-                .toolbar(.hidden, for: .navigationBar)
         } else {
             padHome
                 .toolbar(.hidden, for: .navigationBar)
@@ -303,11 +300,12 @@ struct HomeView: View {
 
     /// A phone's Home: the hero runs up to the top of the screen and the bar
     /// floats over it — see `PhoneHeroBar`. The same arrangement as `padHome`,
-    /// with the phone's own bar. A foldable keeps the solid `AppTopBar`
-    /// that `scroll` adds instead.
+    /// with the phone's own bar. A foldable's too, on either screen: the bar
+    /// takes the frame its solid one did (`TopBarFrame`), and the hero
+    /// reaches up by that much.
     private var phoneHome: some View {
         ZStack(alignment: .top) {
-            scroll(bleed: EdgeInsets(top: padTopInset + Metrics.topBar, leading: 0, bottom: 0, trailing: 0))
+            scroll(bleed: EdgeInsets(top: PhoneHeroBar.bleed(topInset: padTopInset), leading: 0, bottom: 0, trailing: 0))
                 .ignoresSafeArea(.container, edges: .top)
                 .modifier(PhoneHeroScrollWatcher(threshold: PhoneHeroBar.threshold(home: true),
                                                  isPast: $phoneScrolled))
@@ -315,8 +313,7 @@ struct HomeView: View {
                 page: .home(search: { app.push(.search("")) },
                             refresh: { Task { await reload(fresh: true) } },
                             isRefreshing: isRefreshing),
-                overPage: phoneScrolled,
-                topInset: padTopInset
+                overPage: phoneScrolled
             )
         }
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
@@ -335,8 +332,7 @@ struct HomeView: View {
     /// An iPad's Home: the hero runs up under the status bar and the bar
     /// floats over it — glass discs on the artwork, and only once the page
     /// has scrolled a surface of its own with the wordmark on it. The phone
-    /// keeps its solid `AppTopBar`, whose reasons — the island, the clock
-    /// sitting on a different picture every few seconds — are a phone's.
+    /// floats its own bar the same way — see `phoneHome`.
     ///
     /// The scroll view ignores the top of the safe area; the stack around
     /// it does not, so its own geometry says how much was ignored, and the
@@ -652,43 +648,6 @@ struct HomeView: View {
             wasBackgrounded = false
             Task { await reload() }
         }
-        #if os(iOS)
-        // The bar is part of the screen rather than something drawn over it:
-        // everything that scrolls arrives underneath it and is gone, and the
-        // page starts where the bar ends.
-        //
-        // A phone's. An iPad's bar floats over the hero instead — see
-        // `padHome` — so here it is nothing, which takes no room.
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if Metrics.phoneLayout, !PhoneHeroBar.applies {
-                AppTopBar {
-                    HStack(spacing: 0) {
-                        BrandMark()
-                        Spacer(minLength: 12)
-                        HStack(spacing: 10) {
-                            // Search lives here rather than in a tab of its
-                            // own: it opens over Home, with the field already
-                            // active.
-                            Button {
-                                app.push(.search(""))
-                            } label: {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.body.weight(.semibold))
-                                    .barButtonDisc(size: 36)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Search")
-                            .accessibilityIdentifier(TestID.Home.search)
-                            RefreshButton(isRefreshing: isRefreshing) {
-                                Task { await reload(fresh: true) }
-                            }
-                            .accessibilityIdentifier(TestID.Home.refresh)
-                        }
-                    }
-                }
-            }
-        }
-        #endif
         .testAnchor(TestID.Home.root)
     }
 

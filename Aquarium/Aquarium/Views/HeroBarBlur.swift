@@ -1,9 +1,10 @@
 //  HeroBarBlur.swift
 //  Aquarium
 //
-//  The blur behind a bar that floats over artwork: the phone's and the
-//  iPad's own bars (`PhoneHeroBar`, `padBarSurface`) and the Mac's window
-//  toolbar over Home's hero (`HeroHeader`).
+//  The blur behind a bar that floats over artwork: the phone's own bars
+//  (`PhoneHeroBar`, `AppTopBar`, through `BarBlur`), the iPad's
+//  (`padBarSurface`) and the Mac's window toolbar over Home's hero
+//  (`HeroHeader`).
 //
 //  It has no tint of its own, so it takes the colours of whatever is under
 //  it instead of laying a grey or white band across the picture. Over the
@@ -50,35 +51,83 @@ struct HeroBarBlur: View {
     }
 }
 
+/// The surface under a bar that is fitted below the status bar and whose
+/// fill reaches up through it — `AppTopBar` and `PhoneHeroBar`. Drawn as
+/// the bar's background with the safe area ignored, so it is as tall as the
+/// status bar and the bar together without either being measured (the
+/// measuring is what `AppTopBar` documents as unreliable). Over artwork only
+/// the status bar's strip is blurred: the bar's own row, `barHeight` from
+/// the bottom, stays clear but for 12 points of easing, and what sits in it
+/// is white with a shadow. Over the page the whole of it is, reaching 22
+/// points past the bar so a title never sits on a line of text.
+struct BarBlur: View {
+    let overPage: Bool
+    /// The bar's own row — how much of the bottom stays clear over artwork.
+    let barHeight: CGFloat
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            VariableBlur(radius: 5, fullUntil: 0.35, clearBottom: barHeight + 12)
+                .opacity(overPage ? 0 : 1)
+            VariableBlur(radius: 18, fullUntil: 0.75)
+                .padding(.bottom, -22)
+                .opacity(overPage ? 1 : 0)
+        }
+        .ignoresSafeArea(edges: [.top, .horizontal])
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 /// A blur that is strongest at the top and gone by the bottom, with no tint
 /// of its own: what shows through is the page's own colours, smeared.
 struct VariableBlur: UIViewRepresentable {
     var radius: CGFloat
-    /// How far down, as a fraction of the height, the blur stays at full
-    /// strength before easing out.
+    /// How far down, as a fraction of the blurred height, the blur stays at
+    /// full strength before easing out.
     var fullUntil: CGFloat = 0.45
+    /// Points at the bottom of the view left unblurred: the blur eases out
+    /// above them. Zero blurs to the bottom edge. For a view that is handed
+    /// its height by the layout and only knows how much of it to leave
+    /// clear — see `BarBlur`.
+    var clearBottom: CGFloat = 0
 
     func makeUIView(context: Context) -> VariableBlurView {
-        VariableBlurView(radius: radius, fullUntil: fullUntil)
+        VariableBlurView(radius: radius, fullUntil: fullUntil, clearBottom: clearBottom)
     }
 
-    func updateUIView(_ view: VariableBlurView, context: Context) {}
+    func updateUIView(_ view: VariableBlurView, context: Context) {
+        view.set(radius: radius, fullUntil: fullUntil, clearBottom: clearBottom)
+    }
 }
 
 final class VariableBlurView: UIVisualEffectView {
-    private let radius: CGFloat
-    private let fullUntil: CGFloat
+    private var radius: CGFloat
+    private var fullUntil: CGFloat
+    private var clearBottom: CGFloat
     private var lastHeight: CGFloat = -1
-    private var usesFilter = false
+    private(set) var usesFilter = false
 
-    init(radius: CGFloat, fullUntil: CGFloat) {
+    init(radius: CGFloat, fullUntil: CGFloat, clearBottom: CGFloat = 0) {
         self.radius = radius
         self.fullUntil = fullUntil
+        self.clearBottom = clearBottom
         super.init(effect: UIBlurEffect(style: .regular))
         isUserInteractionEnabled = false
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    /// New numbers from the view that owns this one: a bar's row changes
+    /// height when a foldable changes pose, and the blur above it follows.
+    func set(radius: CGFloat, fullUntil: CGFloat, clearBottom: CGFloat) {
+        guard radius != self.radius || fullUntil != self.fullUntil || clearBottom != self.clearBottom else { return }
+        self.radius = radius
+        self.fullUntil = fullUntil
+        self.clearBottom = clearBottom
+        lastHeight = -1
+        setNeedsLayout()
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -93,7 +142,13 @@ final class VariableBlurView: UIVisualEffectView {
     }
 
     private func apply() {
-        if let filter = VariableBlurFilter.make(radius: radius, height: bounds.height, fullUntil: fullUntil),
+        // Nothing above the clear part: nothing to blur.
+        let reach = bounds.height - clearBottom
+        isHidden = reach <= 0
+        guard reach > 0 else { return }
+        let endAt = reach / bounds.height
+        if let filter = VariableBlurFilter.make(radius: radius, height: bounds.height,
+                                                fullUntil: fullUntil * endAt, endAt: endAt),
            let backdrop = subviews.first {
             backdrop.layer.filters = [filter]
             for sub in subviews.dropFirst() { sub.alpha = 0 }
@@ -101,7 +156,7 @@ final class VariableBlurView: UIVisualEffectView {
             layer.mask = nil
         } else {
             usesFilter = false
-            layer.mask = VariableBlurFilter.fallbackMask(bounds: bounds, fullUntil: fullUntil)
+            layer.mask = VariableBlurFilter.fallbackMask(bounds: bounds, fullUntil: fullUntil * endAt, endAt: endAt)
         }
     }
 }
@@ -279,13 +334,14 @@ private extension CALayer {
 /// The private filter, and the mask both versions fall back to.
 enum VariableBlurFilter {
     /// The backdrop's variable blur, masked to be full strength down to
-    /// `fullUntil` of the height and gone at the bottom. Nil if the class
+    /// `fullUntil` of the height and gone at `endAt` of it (the bottom, by
+    /// default; anything below `endAt` is left as it is). Nil if the class
     /// or the filter type is no longer there.
-    static func make(radius: CGFloat, height: CGFloat, fullUntil: CGFloat) -> NSObject? {
+    static func make(radius: CGFloat, height: CGFloat, fullUntil: CGFloat, endAt: CGFloat = 1) -> NSObject? {
         guard let type = NSClassFromString("CAFilter") as? NSObject.Type,
               let filter = type.perform(NSSelectorFromString("filterWithType:"), with: "variableBlur")?
                   .takeUnretainedValue() as? NSObject,
-              let mask = mask(height: height, fullUntil: fullUntil) else { return nil }
+              let mask = mask(height: height, fullUntil: fullUntil, endAt: endAt) else { return nil }
         filter.setValue(radius, forKey: "inputRadius")
         filter.setValue(mask, forKey: "inputMaskImage")
         filter.setValue(true, forKey: "inputNormalizeEdges")
@@ -296,26 +352,37 @@ enum VariableBlurFilter {
     /// column one pixel wide: the filter stretches it across. Top-down on
     /// both platforms — the filter reads the image in its own rows, not the
     /// view's coordinates.
-    static func mask(height: CGFloat, fullUntil: CGFloat) -> CGImage? {
+    static func mask(height: CGFloat, fullUntil: CGFloat, endAt: CGFloat = 1) -> CGImage? {
         let rows = max(1, Int(height.rounded(.up)))
         guard let context = CGContext(data: nil, width: 1, height: rows, bitsPerComponent: 8, bytesPerRow: 0,
                                       space: CGColorSpaceCreateDeviceRGB(),
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         let black = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
         let clear = CGColor(red: 0, green: 0, blue: 0, alpha: 0)
+        let (colors, locations) = stops(fullUntil: fullUntil, endAt: endAt, opaque: black, clear: clear)
         guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                        colors: [black, black, clear] as CFArray,
-                                        locations: [0, fullUntil, 1]) else { return nil }
+                                        colors: colors as CFArray, locations: locations) else { return nil }
         // A bitmap context's origin is the bottom row; the image's first
         // row is the top, so the opaque end is drawn at the far end here.
         context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: CGFloat(rows)), end: .zero, options: [])
         return context.makeImage()
     }
 
-    static func fallbackMask(bounds: CGRect, fullUntil: CGFloat) -> CAGradientLayer {
+    /// Opaque to `fullUntil`, clear from `endAt`; one stop each when the
+    /// blur runs to the bottom, a fourth clear stop at the bottom when not.
+    static func stops(fullUntil: CGFloat, endAt: CGFloat, opaque: CGColor, clear: CGColor) -> ([CGColor], [CGFloat]) {
+        let full = min(max(fullUntil, 0), 1)
+        let end = min(max(endAt, full), 1)
+        if end >= 1 { return ([opaque, opaque, clear], [0, full, 1]) }
+        return ([opaque, opaque, clear, clear], [0, full, end, 1])
+    }
+
+    static func fallbackMask(bounds: CGRect, fullUntil: CGFloat, endAt: CGFloat = 1) -> CAGradientLayer {
         let gradient = CAGradientLayer()
-        gradient.colors = [CGColor(gray: 0, alpha: 1), CGColor(gray: 0, alpha: 1), CGColor(gray: 0, alpha: 0)]
-        gradient.locations = [0, NSNumber(value: Double(fullUntil)), 1]
+        let (colors, locations) = stops(fullUntil: fullUntil, endAt: endAt,
+                                        opaque: CGColor(gray: 0, alpha: 1), clear: CGColor(gray: 0, alpha: 0))
+        gradient.colors = colors
+        gradient.locations = locations.map { NSNumber(value: Double($0)) }
         #if os(macOS)
         // An AppKit layer's y runs upward unless the view is flipped.
         gradient.startPoint = CGPoint(x: 0.5, y: 1)

@@ -2578,6 +2578,11 @@ struct AppTopBar<Content: View>: View {
     /// heading *is* this bar — nothing else on the page names it — can ask for
     /// more, the way a large title would have taken more.
     var height: CGFloat = Metrics.topBar
+    /// Whether page text is under the bar rather than artwork — see
+    /// `BarBlur`. True for the pages that draw this bar: Search and Live TV
+    /// have no artwork to run under it. The pages that do (Home, a title)
+    /// float `PhoneHeroBar` instead.
+    var overPage: Bool = true
     @ViewBuilder var content: Content
 
     /// The way back to an iPad's collapsed sidebar — see `SidebarToggle`.
@@ -2585,58 +2590,82 @@ struct AppTopBar<Content: View>: View {
     @Environment(\.sidebarToggle) private var sidebarToggle
     private var showSidebar: (() -> Void)? { sidebarToggle?.show }
 
-    /// A foldable's inside screen held upright has a status strip deeper
-    /// than a phone's and empty but for the pill in its trailing corner —
-    /// see `FoldState.statusStrip`. There the bar *is* the strip: it rises
-    /// to the top of the screen, its content sits on the pill's line with
-    /// the buttons stopping just short of the pill, and the page starts
-    /// where the strip ends. Nil everywhere else, where the bar is fitted
-    /// below the status bar as usual.
-    private var strip: CGFloat? { FoldState.shared.statusStrip }
-
-    /// The front screen held upright: the safe area says the top is free,
-    /// and the status bar still takes the first 24 points of taps — see
-    /// `FoldState.frontTouchStrip`. The bar grows by that much and its
-    /// content keeps to the bottom, below the strip. Zero elsewhere.
-    private var touch: CGFloat { FoldState.shared.frontTouchStrip }
-
-    /// The bar's content is 36 points tall (the button discs).
-    private static var contentHalf: CGFloat { 18 }
-    /// Breathing room between the last button and the pill.
-    private static var pillGap: CGFloat { 10 }
-
     var body: some View {
-        let side = Metrics.gutter + Metrics.cornerClearance
         HStack(spacing: 8) {
             if let showSidebar {
                 SidebarToggleButton(action: showSidebar)
             }
             content
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, side)
-        .padding(.trailing, strip == nil ? 0 : max(0, FoldState.statusPillReach + Self.pillGap - side))
-        .padding(.bottom, strip.map { $0 - FoldState.statusPillLine - Self.contentHalf } ?? 9)
-        .frame(height: strip ?? (height + touch), alignment: .bottom)
-        .padding(.top, -(strip ?? 0))
-        // The bar is fitted below the status bar and its fill is what
+        // The discs are 36 points tall, kept 9 up from the bar's foot.
+        .modifier(TopBarFrame(height: height, row: 36, bottom: 9))
+        // The bar is fitted below the status bar and its surface is what
         // reaches up past it. Measuring the inset instead — a
         // GeometryReader inside an `ignoresSafeArea`, which is the usual
         // trick — reports zero as often as not, and a bar built on that
-        // number puts the wordmark through the middle of the clock. The fill
-        // reaches out to the sides as well: on a foldable's front screen the
-        // page stops short of the tab bar's column and the hero under this
-        // bar does not, so a bar that stopped with the page ended in mid-air.
-        .background {
-            Theme.background.ignoresSafeArea(edges: [.top, .horizontal])
+        // number puts the wordmark through the middle of the clock. The
+        // surface reaches out to the sides as well: on a foldable's front
+        // screen the page stops short of the tab bar's column and the hero
+        // under this bar does not, so a bar that stopped with the page ended
+        // in mid-air. The surface is the untinted blur every bar over
+        // artwork has (`BarBlur`), not a band of the page's colour.
+        .background(alignment: .top) {
+            BarBlur(overPage: overPage, barHeight: TopBarFrame.layoutHeight(height: height))
         }
-        // The one thing separating an opaque bar from the artwork under it.
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Theme.border)
-                .frame(height: 0.5)
-                .ignoresSafeArea(edges: .horizontal)
-        }
+    }
+}
+
+/// The frame the bars that draw themselves share — `AppTopBar` and the
+/// floating `PhoneHeroBar` — so a foldable's screens get the same answer
+/// from both.
+///
+/// A foldable's inside screen held upright has a status strip deeper than a
+/// phone's and empty but for the pill in its trailing corner — see
+/// `FoldState.statusStrip`. There the bar *is* the strip: it rises to the
+/// top of the screen, its content sits on the pill's line with the buttons
+/// stopping just short of the pill, and the page starts where the strip
+/// ends. Nil everywhere else, where the bar is fitted below the status bar
+/// as usual.
+///
+/// The front screen held upright: the safe area says the top is free, and
+/// the status bar still takes the first 24 points of taps — see
+/// `FoldState.frontTouchStrip`. The bar grows by that much and its content
+/// keeps to the bottom, below the strip. Zero elsewhere.
+struct TopBarFrame: ViewModifier {
+    /// The bar's height on an ordinary phone.
+    var height: CGFloat = Metrics.topBar
+    /// How tall the content's row is (36 for button discs, 44 for the
+    /// floating bar's bare glyphs).
+    var row: CGFloat
+    /// How far up from the bar's foot the row sits, where the bar is fitted
+    /// below the status bar. On the status strip the row sits on the pill's
+    /// line instead.
+    var bottom: CGFloat
+
+    private var strip: CGFloat? { FoldState.shared.statusStrip }
+    private var touch: CGFloat { FoldState.shared.frontTouchStrip }
+    /// Breathing room between the last button and the pill.
+    private static var pillGap: CGFloat { 10 }
+
+    /// How much of the layout the bar takes below the top safe-area inset:
+    /// nothing on the status strip, where the bar is the inset; the bar and
+    /// the dead touch strip on the front screen; the bar everywhere else.
+    /// What a page's artwork reaches up by, with the inset, to run under
+    /// the bar — see `PhoneHeroBar.bleed`.
+    @MainActor
+    static func layoutHeight(height: CGFloat = Metrics.topBar) -> CGFloat {
+        FoldState.shared.statusStrip == nil ? height + FoldState.shared.frontTouchStrip : 0
+    }
+
+    func body(content: Content) -> some View {
+        let side = Metrics.gutter + Metrics.cornerClearance
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, side)
+            .padding(.trailing, strip == nil ? 0 : max(0, FoldState.statusPillReach + Self.pillGap - side))
+            .padding(.bottom, strip.map { $0 - FoldState.statusPillLine - row / 2 } ?? bottom)
+            .frame(height: strip ?? (height + touch), alignment: .bottom)
+            .padding(.top, -(strip ?? 0))
     }
 }
 
