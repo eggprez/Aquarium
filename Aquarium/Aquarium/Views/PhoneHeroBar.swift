@@ -88,20 +88,10 @@ struct PhoneHeroBar: View {
         }
     }
 
-    /// Two blurs, crossfaded: over the artwork only the status bar's strip;
-    /// over the page, down past the bar's row.
+    /// Over the artwork only the status bar's strip; over the page, down
+    /// past the bar's row — see `HeroBarBlur`.
     private var blur: some View {
-        ZStack(alignment: .top) {
-            VariableBlur(radius: 5, fullUntil: 0.35)
-                .frame(height: max(0, topInset - 12))
-                .opacity(overPage ? 0 : 1)
-            VariableBlur(radius: 18, fullUntil: 0.75)
-                .frame(height: topInset + bar + 22)
-                .opacity(overPage ? 1 : 0)
-        }
-        .offset(y: -topInset)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        HeroBarBlur(overPage: overPage, topInset: topInset, strip: max(0, topInset - 12))
     }
 
     private var brand: some View {
@@ -176,88 +166,4 @@ struct PhoneHeroScrollWatcher: ViewModifier {
     }
 }
 
-/// A blur that is strongest at the top and gone by the bottom,
-/// with no tint of its own: what shows through is the page's own colours,
-/// smeared.
-///
-/// Built on the backdrop layer's variable-blur filter — the one the system
-/// draws under its own bars — which UIKit does not publish, so it is looked
-/// up by name. Should that name ever stop answering, the view keeps the
-/// ordinary tinted blur and fades it out with a gradient mask instead, which
-/// is paler but still keeps the clock and the bar readable.
-struct VariableBlur: UIViewRepresentable {
-    var radius: CGFloat
-    /// How far down, as a fraction of the height, the blur stays at full
-    /// strength before easing out.
-    var fullUntil: CGFloat = 0.45
-
-    func makeUIView(context: Context) -> VariableBlurView {
-        VariableBlurView(radius: radius, fullUntil: fullUntil)
-    }
-
-    func updateUIView(_ view: VariableBlurView, context: Context) {}
-}
-
-final class VariableBlurView: UIVisualEffectView {
-    private let radius: CGFloat
-    private let fullUntil: CGFloat
-    private var lastHeight: CGFloat = -1
-    private var usesFilter = false
-
-    init(radius: CGFloat, fullUntil: CGFloat) {
-        self.radius = radius
-        self.fullUntil = fullUntil
-        super.init(effect: UIBlurEffect(style: .regular))
-        isUserInteractionEnabled = false
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        // The tint and the grain come back on a trait change; keep them out.
-        if usesFilter { for sub in subviews.dropFirst() { sub.alpha = 0 } }
-        guard bounds.height > 0, bounds.height != lastHeight else {
-            (layer.mask as? CAGradientLayer)?.frame = bounds
-            return
-        }
-        lastHeight = bounds.height
-        apply()
-    }
-
-    private func apply() {
-        if let type = NSClassFromString("CAFilter") as? NSObject.Type,
-           let filter = type.perform(NSSelectorFromString("filterWithType:"), with: "variableBlur")?
-               .takeUnretainedValue() as? NSObject,
-           let backdrop = subviews.first,
-           let mask = Self.mask(height: bounds.height, fullUntil: fullUntil) {
-            filter.setValue(radius, forKey: "inputRadius")
-            filter.setValue(mask, forKey: "inputMaskImage")
-            filter.setValue(true, forKey: "inputNormalizeEdges")
-            backdrop.layer.filters = [filter]
-            for sub in subviews.dropFirst() { sub.alpha = 0 }
-            usesFilter = true
-            layer.mask = nil
-        } else {
-            usesFilter = false
-            let gradient = CAGradientLayer()
-            gradient.colors = [UIColor.black.cgColor, UIColor.black.cgColor, UIColor.clear.cgColor]
-            gradient.locations = [0, NSNumber(value: Double(fullUntil)), 1]
-            gradient.frame = bounds
-            layer.mask = gradient
-        }
-    }
-
-    /// Opaque where the blur is at full strength, then easing to nothing.
-    private static func mask(height: CGFloat, fullUntil: CGFloat) -> CGImage? {
-        let size = CGSize(width: 1, height: max(1, height))
-        let image = UIGraphicsImageRenderer(size: size).image { ctx in
-            let colours = [UIColor.black.cgColor, UIColor.black.cgColor, UIColor.clear.cgColor] as CFArray
-            guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colours,
-                                            locations: [0, fullUntil, 1]) else { return }
-            ctx.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: size.height), options: [])
-        }
-        return image.cgImage
-    }
-}
 #endif

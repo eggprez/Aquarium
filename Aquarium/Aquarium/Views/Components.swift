@@ -2836,21 +2836,14 @@ extension View {
 
 #if os(iOS)
 extension View {
-    /// The surface under an iPad's floating bar: nothing while it sits over
-    /// artwork, and a blur with a hairline once the page has scrolled up
-    /// under it. Home and a title page both draw their bar this way.
-    func padBarSurface(filled: Bool) -> some View {
-        background {
-            if filled {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .overlay(Theme.background.opacity(0.6))
-                    .overlay(alignment: .bottom) {
-                        Rectangle().fill(Theme.border).frame(height: 0.5)
-                    }
-                    .ignoresSafeArea(edges: .top)
-                    .transition(.opacity)
-            }
+    /// The surface under an iPad's floating bar: the untinted blur the
+    /// phone's bar has (`HeroBarBlur`) — under the clock only while the bar
+    /// sits over artwork, and down past the bar's row once the page has
+    /// scrolled up under it. Home and a title page both draw their bar this
+    /// way. `topInset` is the status bar the blur reaches up through.
+    func padBarSurface(filled: Bool, topInset: CGFloat) -> some View {
+        background(alignment: .top) {
+            HeroBarBlur(overPage: filled, topInset: topInset, strip: topInset)
         }
     }
 }

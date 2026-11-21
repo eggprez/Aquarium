@@ -161,6 +161,23 @@ final class PadHomeTests: PadUITestCase {
         app.element(TestID.Search.root).waitToExist(20)
     }
 
+    /// Scrolled, the bar keeps its place over the page and its buttons still
+    /// answer: the blur that comes in behind it (2026-11-20, `padBarSurface`)
+    /// takes no touches. The blur itself is checked by eye (MANUAL.md).
+    func testBarStaysUsableOnceThePageScrollsUnderIt() {
+        launchHome()
+        let search = app.button(TestID.Home.search)
+        search.waitToExist(30)
+        let top = search.frame.minY
+        app.swipeUp()
+        app.swipeUp()
+        XCTAssertEqual(search.frame.minY, top, accuracy: 1, "Search moved with the page")
+        XCTAssertTrue(app.element(TestID.Common.brand).waitForExistence(timeout: 5), "no wordmark in the bar once scrolled")
+        attachScreenshot("iPad bar scrolled")
+        search.padTap()
+        app.element(TestID.Search.root).waitToExist(20)
+    }
+
     func testCardOpensItsTitle() throws {
         let film = try fx.item("film.long_direct")
         launchHome()

@@ -174,7 +174,20 @@ struct ItemDetailView: View {
             .testAnchor(TestID.Detail.root)
             .testAnchor(TestID.Detail.page(itemId))
         #else
-        scroll()
+        // The page reaches up under the toolbar, which has no surface of its
+        // own, and the blur the phone and the iPad have sits pinned beneath
+        // it (`HeroBarBlur`): the header's wash shows through, and once the
+        // page has scrolled under the toolbar the blur deepens so the title
+        // never sits on a line of text. `padContentInset` keeps the header
+        // clear of the toolbar.
+        ZStack(alignment: .top) {
+            scroll()
+                .ignoresSafeArea(.container, edges: .top)
+                .modifier(MacHeroScrollWatcher(isPast: $macScrolled) { _ in 80 })
+            HeroBarBlur(overPage: macScrolled, topInset: macTopInset)
+                .ignoresSafeArea(.container, edges: .top)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { macTopInset = $0 }
             .screenTitle(navigationTitle)
             // A season's own name goes in the subtitle, under the show's in
             // the title bar — the level and the level above it, the way a
@@ -301,9 +314,17 @@ struct ItemDetailView: View {
         #if os(iOS)
         Metrics.phoneLayout && !PhoneHeroBar.applies ? 0 : padTopInset + Metrics.topBar
         #else
-        52
+        macTopInset > 0 ? macTopInset : 52
         #endif
     }
+    #endif
+
+    #if os(macOS)
+    /// The window toolbar's height, read from outside the scroll view that
+    /// ignores it.
+    @State private var macTopInset: CGFloat = 0
+    /// Whether the page has scrolled up under the toolbar.
+    @State private var macScrolled = false
     #endif
 
     #if os(iOS)
@@ -346,7 +367,7 @@ struct ItemDetailView: View {
         }
         .padding(.horizontal, Metrics.gutter)
         .frame(height: Metrics.topBar)
-        .padBarSurface(filled: scrolledPastHero)
+        .padBarSurface(filled: scrolledPastHero, topInset: padTopInset)
         .animation(.easeInOut(duration: 0.2), value: scrolledPastHero)
     }
 

@@ -18,6 +18,10 @@ struct HeroCarousel: View {
     /// The title on screen, kept current for whoever else wants to start it —
     /// the toolbar's Play Featured, in `HomeView`.
     @Binding var featured: BaseItem?
+    /// How far the picture reaches up under the window's toolbar — see
+    /// `HeroHeader.topBleed`. The pager and the chevrons stay in the band
+    /// below it.
+    var topBleed: CGFloat = 0
 
     @State private var index = 0
     @State private var isHovering = false
@@ -52,7 +56,7 @@ struct HeroCarousel: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             if let current {
-                HeroHeader(item: current, heroHeight: height, availableWidth: width)
+                HeroHeader(item: current, topBleed: topBleed, heroHeight: height, availableWidth: width)
                     .id(current.Id)
                     .transition(.opacity)
             }
@@ -67,7 +71,7 @@ struct HeroCarousel: View {
                 }
             }
         }
-        .frame(height: height)
+        .frame(height: height + topBleed)
         .frame(maxWidth: .infinity)
         .background(WidthReader(width: $width))
         .overlay(alignment: .leading) {

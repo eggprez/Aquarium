@@ -265,11 +265,37 @@ struct HomeView: View {
         // colour beneath them (see `HeroHeader.toolbarBlend`) so the controls
         // stay legible in either appearance and there is no hard edge where
         // the chrome used to stop and the picture used to start.
-        scroll()
-            .screenTitle("Home")
-            .toolbarBackground(.hidden, for: .windowToolbar)
+        //
+        // The scroll view ignores the top of the safe area so the picture
+        // reaches the top of the window; the stack around it does not, so its
+        // own geometry says how tall the toolbar is, and the hero is told to
+        // reach up by that much — the iPad's arrangement (see `padHome`).
+        //
+        // Over it, pinned to the window rather than the picture, the blur the
+        // phone and the iPad have (`HeroBarBlur`): only the toolbar's strip
+        // over the artwork, and past the toolbar's foot once the page is
+        // under it, so the title never sits on a line of text.
+        ZStack(alignment: .top) {
+            scroll(bleed: EdgeInsets(top: macTopInset, leading: 0, bottom: 0, trailing: 0))
+                .ignoresSafeArea(.container, edges: .top)
+                .modifier(MacHeroScrollWatcher(isPast: $macScrolled) { width in
+                    HeroCarousel.height(forWidth: width) - 40
+                })
+            HeroBarBlur(overPage: macScrolled || (heroItems.isEmpty && hero == nil), topInset: macTopInset)
+                .ignoresSafeArea(.container, edges: .top)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { macTopInset = $0 }
+        .screenTitle("Home")
+        .toolbarBackground(.hidden, for: .windowToolbar)
         #endif
     }
+
+    #if os(macOS)
+    /// The window toolbar's height, which the hero reaches up through.
+    @State private var macTopInset: CGFloat = 0
+    /// Whether the hero has scrolled out from under the toolbar.
+    @State private var macScrolled = false
+    #endif
 
     #if os(iOS)
     /// Whether the phone's hero has scrolled out from under its bar.
@@ -359,7 +385,7 @@ struct HomeView: View {
         }
         .padding(.horizontal, Metrics.gutter)
         .frame(height: Metrics.topBar)
-        .padBarSurface(filled: padScrolled)
+        .padBarSurface(filled: padScrolled, topInset: padTopInset)
         .animation(.easeOut(duration: 0.2), value: padScrolled)
     }
     #endif
@@ -502,9 +528,9 @@ struct HomeView: View {
                     }
                     #else
                     if !heroItems.isEmpty {
-                        HeroCarousel(items: heroItems, featured: $featured)
+                        HeroCarousel(items: heroItems, featured: $featured, topBleed: bleed.top)
                     } else if let hero {
-                        HeroHeader(item: hero)
+                        HeroHeader(item: hero, topBleed: bleed.top)
                             .onAppear { featured = hero }
                             .onChange(of: hero.Id) { _, _ in featured = hero }
                             .testAnchor(TestID.Home.hero)
@@ -537,7 +563,7 @@ struct HomeView: View {
                 #elseif os(iOS)
                 .padding(.top, heroItems.isEmpty ? bleed.top + 12 : 0)
                 #else
-                .padding(.top, hero == nil ? 12 : 0)
+                .padding(.top, hero == nil ? bleed.top + 12 : 0)
                 #endif
                 #if os(tvOS)
                 // At least the 60 points of overscan a television may crop:
@@ -1439,9 +1465,6 @@ struct HeroHeader: View {
             edgeScrim
             legibilityScrim
             pageBlend
-            #if os(macOS)
-            toolbarBlend
-            #endif
         }
         .frame(height: artHeight)
     }
@@ -1488,27 +1511,6 @@ struct HeroHeader: View {
         #endif
     }
 
-    #if os(macOS)
-    /// The join to the toolbar, which has no surface of its own over this page
-    /// (see `HomeView.body`): the top of the picture rises out of the window
-    /// colour, so the title and the buttons in the toolbar sit on something
-    /// that is nearly the window in either appearance, and the picture is
-    /// fully itself by the time the toolbar ends. Measured in points from the
-    /// top rather than as a fraction, because the toolbar is the same height
-    /// whatever the hero is.
-    private var toolbarBlend: LinearGradient {
-        let reach: CGFloat = 96 / max(artHeight, 1)
-        return LinearGradient(
-            stops: [
-                .init(color: Theme.background.opacity(0.92), location: 0.00),
-                .init(color: Theme.background.opacity(0.55), location: reach * 0.45),
-                .init(color: Theme.background.opacity(0.18), location: reach * 0.75),
-                .init(color: .clear, location: reach),
-            ],
-            startPoint: .top, endPoint: .bottom
-        )
-    }
-    #endif
 
     /// How wide the text block is allowed to get before it wraps. Two-thirds of
     /// the screen on a television — 620 points there is a column narrow enough

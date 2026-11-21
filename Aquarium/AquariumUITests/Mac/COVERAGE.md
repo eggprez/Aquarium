@@ -12,6 +12,15 @@ end); **pass** / **fail** / **xfail** (kept with `XCTExpectFailure("bug: …")`)
 Test names in `Class.test…` form; `Bug…` names are regressions, each citing its source
 in a comment.
 
+## Home and title pages under the toolbar (added 2026-11-20)
+
+| Function | Test | Kind | Status |
+|---|---|---|---|
+| Variable blur finds the backdrop once AppKit has built it; mask runs opaque to clear | `MacHeroBarBlurTests.testVariableBlurFindsTheBackdropOnceAppKitHasBuiltIt`, `testMaskIsOpaqueAtTheTopAndClearAtTheBottom` | unit | built |
+| Home's hero runs up under the toolbar; Play below the toolbar; Refresh still answers when scrolled | `MacDeepWaterUITests.testHomeHeroRunsUpUnderTheToolbar`, `testHomeHeroBleedsAndCarriesAWhitePlay` | UI | built |
+| A title page's wash reaches the top; the poster starts under the toolbar | `MacDeepWaterUITests.testTitlePageRunsUpUnderTheToolbar` | UI | built |
+| What the blur looks like (thin over artwork, deeper over the page) | MANUAL T1 | manual | manual |
+
 ## App and Dock — `MacAppDelegate.swift`
 
 | Function | Test | Kind | Status |
