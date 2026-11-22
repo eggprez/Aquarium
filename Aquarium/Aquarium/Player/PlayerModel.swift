@@ -65,6 +65,18 @@ struct StartMeta: Sendable {
     /// which for a quality change is seamless and for a subtitle is twelve
     /// seconds of the old stream with none, under a menu saying it is on.
     var forTracks: Bool = false
+    /// A download left for the server's stream of the same title, for a
+    /// soundtrack the download doesn't carry: the stream is wanted though a
+    /// copy is on the device, and the track asked for stands though the
+    /// title is, to the player, a new one.
+    var leavingDownloadForTrack: Bool = false
+    /// A quality somebody picked from the menu, as against one Auto moved
+    /// to. Loaded straight away for the same reason: handed over, the old
+    /// stream played on for twelve seconds and more while the new one was
+    /// lined up behind it, and a choice that changes nothing for that long
+    /// reads as a choice that didn't take. Auto's own moves, which nobody
+    /// is waiting on, are still handed over without a break in the picture.
+    var atOnce: Bool = false
     /// Adaptive quality's announcement of the move this stream is. The start
     /// clears whatever notice was up, so it is shown from there: put up
     /// before the reopen, it was cleared again before it was ever drawn.
@@ -90,6 +102,11 @@ struct StreamOptions: Sendable {
     /// `nil` leaves it to the server; `-1` for the subtitle means none.
     var audioStreamIndex: Int?
     var subtitleStreamIndex: Int?
+    /// Which of the title's versions (its media sources), where it has
+    /// several and one was picked. `nil` leaves it to the server, which
+    /// plays the first. Carried through a reopen of the same title; dropped
+    /// for any other, whose versions are its own.
+    var mediaSourceId: String?
 }
 
 /// One entry in a track menu. `avIndex` (here, the engine's track id) says the
@@ -102,10 +119,33 @@ struct TrackOption: Identifiable, Hashable, Sendable {
     var label: String
     var language: String?
     var isForced: Bool
+    /// On a download: a track the copy on this device doesn't hold in any
+    /// form, to be had only by leaving it for the server's stream.
+    var streamOnly = false
 
     var needsNewStream: Bool { avIndex == nil }
     var id: Int { serverIndex ?? -(( avIndex ?? 0) + 1) }
 }
+
+#if !os(tvOS)
+/// Something picked on a download that the download can't give: a soundtrack
+/// or a subtitle it doesn't carry, or one of the server's qualities. Each
+/// means leaving the copy on this device for a stream, which is asked first.
+enum StreamSwitch: Equatable, Sendable {
+    case audio(TrackOption)
+    case subtitle(TrackOption)
+    /// A rung of the Quality card: `nil` is Direct.
+    case quality(Int?)
+}
+
+/// One of a download's subtitle files, read into lines: which download and
+/// which of its files, so it is shown over that download and no other.
+struct SidecarOverlay: Equatable, Sendable {
+    var recordId: String
+    var index: Int
+    var cues: [SubtitleCue]
+}
+#endif
 
 /// One selectable track as the engine lists it, the shape the menus are
 /// built on, made from `EngineTrack` on every engine.
@@ -136,6 +176,29 @@ final class PlayerModel {
 
     var isActive = false { didSet { holdScreenAwake() } }
     var isPaused = false { didSet { holdScreenAwake() } }
+    /// The outgoing stream has been stopped for a reopen and nothing is
+    /// loaded yet: `isPaused` is true because of that, not because anyone
+    /// paused. See `play(item:options:meta:)`.
+    var outgoingQuiesced = false
+    /// Whether the reopen now on its way was asked to come back paused.
+    var reopensPaused = false
+    /// When the title already playing was last reopened — for a quality, a
+    /// track, a recovery — or nil for a fresh start. See `handleStreamFailure`.
+    var sameTitleReopenedAt: Date?
+    /// The title the server has been sent a start report for in this
+    /// viewing. A start is what adds to Jellyfin's PlayCount, so a reopen of
+    /// that same title — quality, track, recovery — reports progress
+    /// instead. See `reportStreamOpened`.
+    var startReportedItemId: String?
+    /// A quality chosen on the way in — the title page's Play at a Set
+    /// Quality — held for this sitting: the player shows that rung rather
+    /// than Auto, and Auto doesn't climb away from it. The saved preference
+    /// is left as it was, so the next title opens the way it always would.
+    /// See `qualitySelection` and `adaptsQuality`.
+    var qualityPinned = false
+    /// The title whose stream failed near its end and was reopened reading
+    /// only a little way ahead. See `recoverFromMissingTail`.
+    var tailRetryItemId: String?
     /// Waiting on the network, or opening: the spinner.
     var isBuffering = false
     /// Between asking for a stream and its first frame.
@@ -190,6 +253,19 @@ final class PlayerModel {
     var tracks: [EngineTrack] = []
 
     var speed: Double = 1 { didSet { engine?.rate = speed } }
+
+    // Watching together — see PlayerModel+Group.swift.
+    /// The group that owns the transport, while one does.
+    @ObservationIgnored weak var group: (any GroupTransport)?
+    /// What the group last asked for.
+    @ObservationIgnored var groupOrder: GroupOrder?
+    /// The order has to be carried out (again) at the stream's next first
+    /// frame: it arrived, or the stream was reopened, with nothing open.
+    @ObservationIgnored var groupOrderAwaitsFrame = false
+    /// A jump the group ordered hasn't put a frame up yet.
+    @ObservationIgnored var groupSeekLanding = false
+    @ObservationIgnored var groupPlayTask: Task<Void, Never>?
+    @ObservationIgnored var groupDriftTask: Task<Void, Never>?
     var volume: Double = 1 {
         didSet {
             engine?.volume = volume
@@ -248,7 +324,13 @@ final class PlayerModel {
     #if os(iOS)
     /// Picture in Picture is starting or up: the picture is the floating
     /// window's, so going to the background mustn't let go of the video track.
-    var pictureInPictureHoldsPicture = false
+    var pictureInPictureHoldsPicture = false {
+        didSet {
+            // The floating window shows the sample layer as it is framed, so
+            // Fill goes off for as long as the window is up: see `applyFraming`.
+            if oldValue != pictureInPictureHoldsPicture, engine?.kind == .mpv { applyFraming() }
+        }
+    }
     #endif
 
     // MARK: - Internals
@@ -308,6 +390,14 @@ final class PlayerModel {
     var resolvingGeneration: Int?
     /// Whether subtitles are lifted clear of a transport bar.
     var subtitlesRaised = false
+    #if !os(tvOS)
+    /// A download's subtitle file being drawn by the app itself, over an
+    /// engine that can't take a file in. See `SubtitleFileOverlay`.
+    var sidecarOverlay: SidecarOverlay?
+    /// Something picked on a download that only a stream can give, waiting
+    /// on the answer to "switch to streaming?". See `StreamSwitch`.
+    var streamSwitchRequest: StreamSwitch?
+    #endif
 
     var client: JellyfinClient { .shared }
     var prefs: Preferences { .shared }
@@ -318,6 +408,10 @@ final class PlayerModel {
     @ObservationIgnored var stallCounted = false
     /// Times a stall that goes on. See `noteBuffering`.
     @ObservationIgnored var stallWatch: Task<Void, Never>?
+    /// The watch for what the engine doesn't report. See `watchProgress`.
+    @ObservationIgnored var progressWatch: Task<Void, Never>?
+    /// The stream now being opened is one Auto stepped down to.
+    @ObservationIgnored var openingAfterAutoDrop = false
     /// The speed check is timing the connection before this stream opens;
     /// the quality pill turns a wheel meanwhile.
     var isCheckingSpeed = false
@@ -359,7 +453,6 @@ final class PlayerModel {
     /// The next title's stream, asked for before this one ends.
     var prefetched: PrefetchedNext?
     var prefetchAttempted = false
-    var preparedStream: (any PreparedStream)?
     struct PrefetchedNext {
         var itemId: String
         var source: PlaybackSource
@@ -617,6 +710,7 @@ final class PlayerModel {
         case .buffering(let waiting):
             isBuffering = waiting || isOpening
             noteBuffering(waiting)
+            if !isOpening { group?.streamStalled(waiting) }
 
         case .seeking:
             break
@@ -664,6 +758,7 @@ final class PlayerModel {
 
         case .firstFrame:
             onFirstFrame()
+            groupStreamSettled()
 
         case .noPicture:
             onNoPicture()
@@ -742,14 +837,26 @@ final class PlayerModel {
 
     func togglePlayPause() { isPaused ? resume() : pause() }
 
+    /// Pause, play and jump are the viewer's. While people are watching
+    /// together they are asked of the group, which answers everyone at once
+    /// (`follow`); otherwise they are done.
     func pause() {
+        if let group { group.viewerPaused() } else { pauseNow() }
+    }
+
+    func resume() {
+        if let group { group.viewerResumed() } else { resumeNow() }
+    }
+
+    /// Pause this stream, whoever asked.
+    func pauseNow() {
         engine?.pause()
         isPaused = true
         postNowPlayingRate()
         Task { await reportNow() }
     }
 
-    func resume() {
+    func resumeNow() {
         reactivateAudioSession()
         engine?.play()
         isPaused = false
@@ -760,6 +867,10 @@ final class PlayerModel {
     func seek(to seconds: Double) {
         guard isActive else { return }
         let target = duration > 0 ? min(max(0, seconds), duration - 0.5) : max(0, seconds)
+        if let group {
+            group.viewerSeeked(to: target)
+            return
+        }
         adaptive.noteSeek()
         position = target
         engine?.seek(to: target)
@@ -779,7 +890,10 @@ final class PlayerModel {
     /// closing reports would be sent with the new account's token.
     @discardableResult
     func stop(reason: String = "stop", tellServer: Bool = true) -> Task<Void, Never> {
-        Task { await finish(userRequested: true, reason: reason, tellServer: tellServer) }
+        // Closing the player is leaving Watch Together.
+        SharePlayCoordinator.shared.playerClosed()
+        SyncPlayCoordinator.shared.playerClosed()
+        return Task { await finish(userRequested: true, reason: reason, tellServer: tellServer) }
     }
 
     /// `generation`, for a caller outside that has to act on the stream it saw
@@ -949,4 +1063,18 @@ final class PlayerModel {
 
     /// The item behind what is on screen, wherever it came from.
     var infoItem: BaseItem? { fullItem ?? item ?? externalChannel?.item }
+
+    /// Whether anything waits behind what is playing: the hand-made queue,
+    /// the series' next episode, or the next download. A film on its own and
+    /// a show's last episode have nothing to stop before.
+    var hasUpNext: Bool { !queue.isEmpty || upNext != nil || upNextLocalId != nil }
+
+    /// What "stop after this" is called: an episode where it is one.
+    var stopAfterTitle: String {
+        var episode = item?.isEpisode == true
+        #if !os(tvOS)
+        if isLocal, let id = localRecordId { episode = DownloadManager.shared.record(for: id)?.isEpisode == true }
+        #endif
+        return episode ? "Stop after this episode" : "Stop after this"
+    }
 }

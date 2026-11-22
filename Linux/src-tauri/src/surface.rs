@@ -261,6 +261,12 @@ struct Layout {
 }
 
 impl Layout {
+    /// The height `apply` asks for out of `avail`: the overlay less the trim,
+    /// never below 1.
+    fn want(&self, avail: i32) -> i32 {
+        (avail - self.trim.get()).max(1)
+    }
+
     /// `avail` is the overlay's logical height. Applied from an idle rather
     /// than inline: GTK discards a resize queued from inside allocation, and
     /// this runs from `size-allocate`.
@@ -268,7 +274,7 @@ impl Layout {
         if self.pip.get() {
             return;
         }
-        let want = (avail - self.trim.get()).max(1);
+        let want = self.want(avail);
         if debug_enabled() {
             eprintln!(
                 "aquarium: layout: avail {avail} trim {} → want {want} (requested {}, allocated {})",
@@ -546,6 +552,21 @@ struct Geom {
     h: u32,
     /// Physical pixels of the fullscreen control strip cut out of the bottom.
     bar: u32,
+}
+
+impl Geom {
+    /// Logical px the video leaves clear at the bottom (the player-bar
+    /// reserve plus the revealed fullscreen strip), and of that the strip
+    /// alone. Physical px in, logical px out.
+    fn trims(&self, scale: i32) -> (i32, i32) {
+        let trim = self.win_h.saturating_sub(self.h) as i32 + self.bar as i32;
+        (trim / scale, self.bar as i32 / scale)
+    }
+
+    /// Fullscreen with the controls tucked away: the pointer is hidden.
+    fn hides_cursor(&self) -> bool {
+        self.h >= self.win_h && self.bar == 0
+    }
 }
 
 pub struct Surface {
@@ -1289,12 +1310,21 @@ fn intended_alloc<'a>(
     overlay: &'a gtk::Overlay,
     alloc: &gtk::Allocation,
 ) -> (&'a gtk::Widget, gtk::Allocation) {
-    if layout.pip.get() {
-        return (widget, *alloc);
-    }
     let ov = overlay.allocation();
-    let h = (ov.height() - layout.trim.get()).max(1);
-    (overlay.upcast_ref(), gtk::Allocation::new(0, 0, ov.width(), h))
+    match intended_rect(layout, ov.width(), ov.height()) {
+        None => (widget, *alloc),
+        Some((x, y, w, h)) => (overlay.upcast_ref(), gtk::Allocation::new(x, y, w, h)),
+    }
+}
+
+/// The arithmetic of [`intended_alloc`], without GTK: `None` in
+/// picture-in-picture (the widget's own allocation stands), otherwise the
+/// rectangle in the overlay's coordinates, `trim` off the bottom.
+fn intended_rect(layout: &Layout, overlay_w: i32, overlay_h: i32) -> Option<(i32, i32, i32, i32)> {
+    if layout.pip.get() {
+        return None;
+    }
+    Some((0, 0, overlay_w, (overlay_h - layout.trim.get()).max(1)))
 }
 
 fn connect_wl_backend(w: &Wl, layout: &Rc<Layout>, overlay: &gtk::Overlay) {
@@ -1353,14 +1383,14 @@ fn apply_geom(ui: &Ui, geom: Geom) {
     // asked for, plus the strip the revealed fullscreen bar sits in. Physical
     // px in, logical px out — the render callback works in physical pixels off
     // the allocation it actually gets, so rounding here cannot desync them.
-    let trim = geom.win_h.saturating_sub(geom.h) as i32 + geom.bar as i32;
+    let (trim_css, bar_css) = geom.trims(scale);
     // `geom.h` is the true unclipped height regardless of bar-reveal state —
     // in fullscreen it's always the whole window (the bar is cut from it by
     // blitting, not by shrinking what mpv fits to); in windowed mode it's the
     // window minus the permanent reserve, where clip is always zero anyway.
     ui.video.borrow_mut().full = geom.h as i32;
-    ui.layout.trim.set(trim / scale);
-    ui.layout.bar_css.set(geom.bar as i32 / scale);
+    ui.layout.trim.set(trim_css);
+    ui.layout.bar_css.set(bar_css);
     ui.layout.apply(&ui.widget, ui.overlay.allocated_height());
     match &ui.backend {
         Backend::Gl { area } => area.queue_render(),
@@ -1373,7 +1403,7 @@ fn apply_geom(ui: &Ui, geom: Geom) {
             }
         }
     }
-    set_video_cursor(&ui.widget, geom.h >= geom.win_h && geom.bar == 0);
+    set_video_cursor(&ui.widget, geom.hides_cursor());
 }
 
 /// Fullscreen with the controls hidden is the one state where the pointer has
@@ -1810,26 +1840,12 @@ fn connect_input(area: &gtk::Widget, video: Rc<RefCell<Video>>) {
                 D::Right => send_input(&video, "keypress WHEEL_RIGHT"),
                 D::Smooth => {
                     let (dx, dy) = ev.delta();
-                    let (mut ax, mut ay) = smooth.get();
-                    ax += dx;
-                    ay += dy;
-                    while ay >= 1.0 {
-                        send_input(&video, "keypress WHEEL_DOWN");
-                        ay -= 1.0;
+                    let (ax, ay) = smooth.get();
+                    let (wheels, left) = wheel_steps((ax + dx, ay + dy));
+                    for w in wheels {
+                        send_input(&video, &format!("keypress {w}"));
                     }
-                    while ay <= -1.0 {
-                        send_input(&video, "keypress WHEEL_UP");
-                        ay += 1.0;
-                    }
-                    while ax >= 1.0 {
-                        send_input(&video, "keypress WHEEL_RIGHT");
-                        ax -= 1.0;
-                    }
-                    while ax <= -1.0 {
-                        send_input(&video, "keypress WHEEL_LEFT");
-                        ax += 1.0;
-                    }
-                    smooth.set((ax, ay));
+                    smooth.set(left);
                 }
                 _ => {}
             }
@@ -1852,6 +1868,52 @@ fn connect_input(area: &gtk::Widget, video: Rc<RefCell<Video>>) {
             glib::Propagation::Stop
         }
     });
+}
+
+/// Whole wheel clicks out of accumulated smooth-scroll units `(x, y)`, in the
+/// order they are sent, and the fraction carried over to the next event.
+fn wheel_steps(acc: (f64, f64)) -> (Vec<&'static str>, (f64, f64)) {
+    let (mut ax, mut ay) = acc;
+    let mut out = Vec::new();
+    while ay >= 1.0 {
+        out.push("WHEEL_DOWN");
+        ay -= 1.0;
+    }
+    while ay <= -1.0 {
+        out.push("WHEEL_UP");
+        ay += 1.0;
+    }
+    while ax >= 1.0 {
+        out.push("WHEEL_RIGHT");
+        ax -= 1.0;
+    }
+    while ax <= -1.0 {
+        out.push("WHEEL_LEFT");
+        ax += 1.0;
+    }
+    (out, (ax, ay))
+}
+
+/// Which third of the picture a double-tap at `x` landed in.
+fn tap_side(x: f64, width: f64) -> &'static str {
+    if x < width / 3.0 {
+        "left"
+    } else if x > width * 2.0 / 3.0 {
+        "right"
+    } else {
+        "middle"
+    }
+}
+
+/// A finished pinch at `scale`: out past 1.15, in under 0.87, else nothing.
+fn pinch_gesture(scale: f64) -> Option<&'static str> {
+    if scale > 1.15 {
+        Some("pinch-out")
+    } else if scale < 0.87 {
+        Some("pinch-in")
+    } else {
+        None
+    }
 }
 
 /// Touchscreen gestures over the picture: double-tap the left or right third
@@ -1882,13 +1944,7 @@ fn connect_touch_gestures(area: &gtk::Widget, video: Rc<RefCell<Video>>) {
             }
             let width = g.widget().map(|w| w.allocated_width()).unwrap_or(0) as f64;
             if n_press >= 2 && width > 0.0 {
-                let side = if x < width / 3.0 {
-                    "left"
-                } else if x > width * 2.0 / 3.0 {
-                    "right"
-                } else {
-                    "middle"
-                };
+                let side = tap_side(x, width);
                 send_input(&video, &format!("script-message aquarium-gesture doubletap {side}"));
             } else if n_press == 1 {
                 send_input(&video, "script-message aquarium-gesture tap");
@@ -1925,11 +1981,8 @@ fn connect_touch_gestures(area: &gtk::Widget, video: Rc<RefCell<Video>>) {
     pinch.connect_end({
         let video = video.clone();
         move |_g, _seq| {
-            let scale = last_scale.replace(1.0);
-            if scale > 1.15 {
-                send_input(&video, "script-message aquarium-gesture pinch-out");
-            } else if scale < 0.87 {
-                send_input(&video, "script-message aquarium-gesture pinch-in");
+            if let Some(g) = pinch_gesture(last_scale.replace(1.0)) {
+                send_input(&video, &format!("script-message aquarium-gesture {g}"));
             }
         }
     });
@@ -1939,4 +1992,179 @@ fn connect_touch_gestures(area: &gtk::Widget, video: Rc<RefCell<Video>>) {
     std::mem::forget(taps);
     std::mem::forget(hold);
     std::mem::forget(pinch);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gtk::gdk::keys::constants as k;
+    use gtk::gdk::ModifierType as M;
+
+    fn layout(trim: i32, pip: bool) -> Layout {
+        Layout { trim: Cell::new(trim), bar_css: Cell::new(0), requested: Cell::new(0), pip: Cell::new(pip) }
+    }
+
+    #[test]
+    fn windowed_geometry_leaves_the_player_bar_clear() {
+        let size = |w, h| tauri::PhysicalSize { width: w, height: h };
+        assert_eq!(BAR_HEIGHT_CSS, 72.0);
+        assert_eq!(geometry(size(1280, 800), 1.0, true), (0, 0, 1280, 728));
+        assert_eq!(geometry(size(2880, 1920), 2.0, true), (0, 0, 2880, 1776));
+        // Fractional scales round the reserve up, never into the bar.
+        assert_eq!(geometry(size(1600, 1000), 1.25, true), (0, 0, 1600, 910));
+        assert_eq!(geometry(size(1280, 800), 1.0, false), (0, 0, 1280, 800));
+        // A window smaller than the bar still gets a 1px surface, not zero.
+        assert_eq!(geometry(size(0, 50), 1.0, true), (0, 0, 1, 1));
+    }
+
+    /// Size comes from the overlay, never from the widget's own (possibly
+    /// stale) allocation (CLAUDE.md invariant: any video geometry path goes
+    /// through `intended_alloc`).
+    #[test]
+    fn the_intended_rectangle_is_the_overlay_less_the_trim() {
+        assert_eq!(intended_rect(&layout(36, false), 1440, 900), Some((0, 0, 1440, 864)));
+        assert_eq!(intended_rect(&layout(0, false), 1440, 900), Some((0, 0, 1440, 900)));
+        // Never zero or negative, which would be no buffer at all.
+        assert_eq!(intended_rect(&layout(1000, false), 1440, 900), Some((0, 0, 1440, 1)));
+        // In picture-in-picture the widget fills its own window.
+        assert_eq!(intended_rect(&layout(36, true), 1440, 900), None);
+    }
+
+    #[test]
+    fn the_layout_asks_for_the_overlay_less_the_trim() {
+        assert_eq!(layout(36, false).want(900), 864);
+        assert_eq!(layout(0, false).want(900), 900);
+        assert_eq!(layout(950, false).want(900), 1);
+    }
+
+    #[test]
+    fn trims_are_physical_in_and_logical_out() {
+        // Windowed at scale 2: the 144 px reserve is 72 logical px.
+        let windowed = Geom { win_h: 1920, h: 1776, bar: 0 };
+        assert_eq!(windowed.trims(2), (72, 0));
+        assert!(!windowed.hides_cursor());
+        // Fullscreen with the bar revealed: the strip is cut out of the video.
+        let revealed = Geom { win_h: 1920, h: 1920, bar: 144 };
+        assert_eq!(revealed.trims(2), (72, 72));
+        assert!(!revealed.hides_cursor(), "the bar is there to point at");
+        // Fullscreen, controls tucked away: nothing to point at.
+        let tucked = Geom { win_h: 1920, h: 1920, bar: 0 };
+        assert_eq!(tucked.trims(2), (0, 0));
+        assert!(tucked.hides_cursor());
+        // A caller height above the window (a resize between two reads) is
+        // no trim, not a negative one.
+        assert_eq!(Geom { win_h: 800, h: 900, bar: 0 }.trims(1), (0, 0));
+    }
+
+    #[test]
+    fn mouse_buttons_map_to_mpv_names() {
+        assert_eq!(mbtn_name(1), Some("MBTN_LEFT"));
+        assert_eq!(mbtn_name(2), Some("MBTN_MID"));
+        assert_eq!(mbtn_name(3), Some("MBTN_RIGHT"));
+        assert_eq!(mbtn_name(8), Some("MBTN_BACK"));
+        assert_eq!(mbtn_name(9), Some("MBTN_FORWARD"));
+        for b in [0, 4, 5, 6, 7, 10] {
+            assert_eq!(mbtn_name(b), None, "button {b}");
+        }
+    }
+
+    #[test]
+    fn named_keys_use_mpv_spellings() {
+        for (key, name) in [
+            (k::Escape, "ESC"),
+            (k::Return, "ENTER"),
+            (k::KP_Enter, "KP_ENTER"),
+            (k::BackSpace, "BS"),
+            (k::Tab, "TAB"),
+            (k::ISO_Left_Tab, "TAB"),
+            (k::Delete, "DEL"),
+            (k::Insert, "INS"),
+            (k::Home, "HOME"),
+            (k::End, "END"),
+            (k::Page_Up, "PGUP"),
+            (k::Page_Down, "PGDWN"),
+            (k::Left, "LEFT"),
+            (k::Right, "RIGHT"),
+            (k::Up, "UP"),
+            (k::Down, "DOWN"),
+            (k::space, "SPACE"),
+            (k::F1, "F1"),
+            (k::F12, "F12"),
+            (k::F24, "F24"),
+        ] {
+            assert_eq!(mpv_key_name(key), Some((name.to_string(), true)), "{name}");
+        }
+    }
+
+    /// Character keys are the produced text: Shift+2 is `@`, not `Shift+2`.
+    #[test]
+    fn character_keys_are_their_text() {
+        assert_eq!(mpv_key_name(k::a), Some(("a".to_string(), false)));
+        assert_eq!(mpv_key_name(k::A), Some(("A".to_string(), false)));
+        assert_eq!(mpv_key_name(k::at), Some(("@".to_string(), false)));
+        assert_eq!(mpv_key_name(k::bracketleft), Some(("[".to_string(), false)));
+        assert_eq!(mpv_key_name(k::Shift_L), None, "a bare modifier has no name");
+    }
+
+    #[test]
+    fn modifiers_prefix_in_mpv_order_and_shift_only_named_keys() {
+        assert_eq!(build_key_command(k::a, M::empty()).as_deref(), Some("a"));
+        assert_eq!(build_key_command(k::a, M::CONTROL_MASK).as_deref(), Some("Ctrl+a"));
+        assert_eq!(
+            build_key_command(k::Left, M::CONTROL_MASK | M::MOD1_MASK | M::SUPER_MASK | M::SHIFT_MASK).as_deref(),
+            Some("Ctrl+Alt+Meta+Shift+LEFT")
+        );
+        assert_eq!(build_key_command(k::Right, M::META_MASK).as_deref(), Some("Meta+RIGHT"));
+        // The shifted glyph already says Shift.
+        assert_eq!(build_key_command(k::A, M::SHIFT_MASK).as_deref(), Some("A"));
+        assert_eq!(build_key_command(k::Shift_L, M::SHIFT_MASK), None);
+    }
+
+    /// Touchpad scrolling arrives in fractions; whole clicks go to mpv and the
+    /// rest waits for the next event.
+    #[test]
+    fn smooth_scrolling_adds_up_to_whole_wheel_clicks() {
+        assert_eq!(wheel_steps((0.0, 0.4)), (vec![], (0.0, 0.4)));
+        let (out, left) = wheel_steps((0.0, 2.25));
+        assert_eq!(out, ["WHEEL_DOWN", "WHEEL_DOWN"]);
+        assert!((left.1 - 0.25).abs() < 1e-9 && left.0 == 0.0);
+        let (out, left) = wheel_steps((-1.5, -1.0));
+        assert_eq!(out, ["WHEEL_UP", "WHEEL_LEFT"]);
+        assert!((left.0 + 0.5).abs() < 1e-9 && left.1 == 0.0);
+        assert_eq!(wheel_steps((1.0, 0.0)).0, ["WHEEL_RIGHT"]);
+        // Carried across events: two halves make a click.
+        let (_, carry) = wheel_steps((0.0, 0.5));
+        assert_eq!(wheel_steps((carry.0, carry.1 + 0.5)).0, ["WHEEL_DOWN"]);
+    }
+
+    #[test]
+    fn a_double_tap_skips_by_the_third_it_lands_in() {
+        assert_eq!(tap_side(10.0, 900.0), "left");
+        assert_eq!(tap_side(299.0, 900.0), "left");
+        assert_eq!(tap_side(450.0, 900.0), "middle");
+        assert_eq!(tap_side(300.0, 900.0), "middle");
+        assert_eq!(tap_side(600.0, 900.0), "middle");
+        assert_eq!(tap_side(601.0, 900.0), "right");
+    }
+
+    #[test]
+    fn a_pinch_switches_fit_and_fill_past_a_dead_zone() {
+        assert_eq!(pinch_gesture(1.5), Some("pinch-out"));
+        assert_eq!(pinch_gesture(0.5), Some("pinch-in"));
+        for s in [1.0, 1.15, 0.87, 1.1, 0.9] {
+            assert_eq!(pinch_gesture(s), None, "{s}");
+        }
+    }
+
+    #[test]
+    fn diagnostics_follow_the_environment() {
+        let want = matches!(std::env::var("AQUARIUM_SURFACE_TEST").as_deref(), Ok("1") | Ok("true"));
+        assert_eq!(debug_enabled(), want);
+    }
+
+    #[test]
+    fn picture_in_picture_opens_at_sixteen_by_nine() {
+        assert_eq!(PIP_W * 9, PIP_H * 16);
+        assert!(PIP_TITLE.contains("Picture in Picture"));
+    }
 }

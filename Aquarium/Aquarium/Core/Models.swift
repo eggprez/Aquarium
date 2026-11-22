@@ -200,7 +200,7 @@ struct BaseItem: Codable, Hashable, Sendable, Identifiable {
         case Album, AlbumId, AlbumPrimaryImageTag, AlbumArtist, AlbumArtists
         case ArtistItems, Artists, MediaType, HasLyrics, NormalizationGain
         case GenreItems, Chapters, PlaylistItemId, Trickplay
-        case RemoteTrailers, LocalTrailerCount, ProductionLocations
+        case RemoteTrailers, LocalTrailerCount, ProductionLocations, ProviderIds
         case type = "Type"
     }
     var Id: String = ""
@@ -293,6 +293,11 @@ struct BaseItem: Codable, Hashable, Sendable, Identifiable {
     /// YouTube addresses — and how many trailer files sit beside the film on
     /// the server. Detail endpoint only; see `JellyfinClient.trailers(for:)`.
     var RemoteTrailers: [MediaUrl]?
+    /// The title's ids elsewhere ("Tmdb", "Imdb", "Tvdb"), asked for only on
+    /// the detail page. Seerr knows titles by their TMDB id, so this is how a
+    /// library page finds its counterpart there.
+    var ProviderIds: [String: String]?
+    var tmdbId: Int? { ProviderIds?.first { $0.key.lowercased() == "tmdb" }.flatMap { Int($0.value) } }
     var LocalTrailerCount: Int?
     /// On a person, where they were born — the one thing Jellyfin files here
     /// for them. Detail endpoint only.
@@ -351,7 +356,10 @@ struct BaseItem: Codable, Hashable, Sendable, Identifiable {
     }
     var isSeries: Bool { kind == "Series" }
     var isSeason: Bool { kind == "Season" }
-    var isFolderLike: Bool { ["Series", "Season", "BoxSet", "Folder", "CollectionFolder"].contains(kind) }
+    var isFolderLike: Bool { ["Series", "Season", "BoxSet", "Folder", "CollectionFolder", "PhotoAlbum"].contains(kind) }
+    /// A folder or a photo album: it opens as what is inside it, since it has
+    /// nothing of its own to play and a title page with a Play is no use.
+    var opensAsContainer: Bool { kind == "Folder" || kind == "PhotoAlbum" }
     var userData: UserData { UserData ?? .init() }
     var runtimeSeconds: Double { Double(RunTimeTicks ?? 0) / 10_000_000 }
 
@@ -361,9 +369,26 @@ struct BaseItem: Codable, Hashable, Sendable, Identifiable {
     ///
     /// Season 0 is where Jellyfin files specials, which is what it calls them.
     var episodeLabel: String? {
-        guard let e = IndexNumber else { return nil }
-        guard let s = ParentIndexNumber else { return "Episode \(e)" }
+        Self.episodeLabel(season: ParentIndexNumber, episode: IndexNumber)
+    }
+
+    /// The same label from the two numbers alone, for whatever remembers an
+    /// episode without keeping the item — a download's record does.
+    static func episodeLabel(season: Int?, episode: Int?) -> String? {
+        guard let e = episode else { return nil }
+        guard let s = season else { return "Episode \(e)" }
         return s == 0 ? "Specials: Episode \(e)" : "Season \(s): Episode \(e)"
+    }
+
+    /// The line under a programme's title in a guide: the episode's own
+    /// name where the listing has one, else its number — "S5 E12", or
+    /// "Episode 12" with no season — and nothing for a film or a one-off.
+    /// Short, since a guide cell is a few words wide.
+    var programmeEpisodeLine: String? {
+        if let name = EpisodeTitle?.trimmingCharacters(in: .whitespaces), !name.isEmpty { return name }
+        guard let e = IndexNumber else { return nil }
+        guard let s = ParentIndexNumber, s > 0 else { return "Episode \(e)" }
+        return "S\(s) E\(e)"
     }
 
     /// How far through the item the user is, 0...1, or nil when it hasn't been

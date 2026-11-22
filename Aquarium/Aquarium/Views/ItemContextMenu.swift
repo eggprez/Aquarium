@@ -140,11 +140,14 @@ struct NextUpChoiceDialog: ViewModifier {
                 app.addingToNextUp = nil
                 Task { await NextUpAdding.add(item, from: .lastWatched, client: client, app: app) }
             }
+            .accessibilityIdentifier(TestID.Shell.nextUpFromLastWatched)
             Button("Add from First Episode", role: .destructive) {
                 app.addingToNextUp = nil
                 Task { await NextUpAdding.add(item, from: .firstEpisode, client: client, app: app) }
             }
+            .accessibilityIdentifier(TestID.Shell.nextUpFromFirstEpisode)
             Button("Cancel", role: .cancel) { app.addingToNextUp = nil }
+                .accessibilityIdentifier(TestID.Shell.nextUpCancel)
         } message: { _ in
             Text("From the first episode marks every episode unwatched on the server, and clears play counts and saved positions.")
         }
@@ -275,6 +278,7 @@ struct ItemMenu: View {
         Button { playChannel() } label: {
             Label("Watch", systemImage: "play.fill")
         }
+        .accessibilityIdentifier(TestID.Item.menuWatchChannel)
         // A playlist channel has no item on the server behind it, so there is
         // nothing to star. See `IPTVSource`.
         if item.ExternalStreamURL == nil { favoriteButton }
@@ -291,6 +295,7 @@ struct ItemMenu: View {
                 Label(item.progressFraction != nil ? "Resume" : "Play", systemImage: "play.fill")
             }
             .macShortcut(.return, modifiers: .command)
+            .accessibilityIdentifier(TestID.Item.menuPlay)
             // Only where there is something to go back past. On anything not
             // started this is the button above it under a second name.
             if item.progressFraction != nil {
@@ -299,6 +304,7 @@ struct ItemMenu: View {
                 } label: {
                     Label("Play from Beginning", systemImage: "gobackward")
                 }
+                .accessibilityIdentifier(TestID.Item.menuPlayFromBeginning)
             }
             #if !os(tvOS)
             // The queue — see `PlayerModel.queueNext`. Not a channel: live
@@ -319,6 +325,7 @@ struct ItemMenu: View {
                 Label("Play Next Episode", systemImage: "play.fill")
             }
             .macShortcut(.return, modifiers: .command)
+            .accessibilityIdentifier(TestID.Item.menuPlayNextEpisode)
             #if !os(tvOS)
             // A season's episodes, in order, as one entry each — resolved
             // when the button is pressed, like Play Next Episode above.
@@ -328,11 +335,13 @@ struct ItemMenu: View {
                 } label: {
                     Label("Play Season Next", systemImage: "text.line.first.and.arrowtriangle.forward")
                 }
+                .accessibilityIdentifier(TestID.Item.menuPlaySeasonNext)
                 Button {
                     Task { await queueSeason(next: false) }
                 } label: {
                     Label("Play Season Later", systemImage: "text.line.last.and.arrowtriangle.forward")
                 }
+                .accessibilityIdentifier(TestID.Item.menuPlaySeasonLater)
             }
             #endif
         }
@@ -347,12 +356,14 @@ struct ItemMenu: View {
         } label: {
             Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
         }
+        .accessibilityIdentifier(TestID.Item.menuPlayNext)
         Button {
             player.queueLater(items)
             app.toast("Added to Up Next", tone: .ok)
         } label: {
             Label("Play Later", systemImage: "text.line.last.and.arrowtriangle.forward")
         }
+        .accessibilityIdentifier(TestID.Item.menuPlayLater)
     }
 
     private func queueSeason(next: Bool) async {
@@ -413,6 +424,7 @@ struct ItemMenu: View {
             } label: {
                 Label(detailsLabel, systemImage: "info.circle")
             }
+            .accessibilityIdentifier(TestID.Item.menuDetails)
         }
         #if os(macOS)
         // Its own window, with its own Back — see `ItemWindow`.
@@ -422,12 +434,14 @@ struct ItemMenu: View {
             Label("Open in New Window", systemImage: "macwindow.badge.plus")
         }
         .keyboardShortcut("o", modifiers: [.command, .option])
+        .accessibilityIdentifier(TestID.Item.menuOpenInNewWindow)
         Button {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(item.title, forType: .string)
         } label: {
             Label("Copy Title", systemImage: "doc.on.doc")
         }
+        .accessibilityIdentifier(TestID.Item.menuCopyTitle)
         #endif
         if item.isEpisode {
             if let seriesId = item.SeriesId, !seriesId.isEmpty {
@@ -448,6 +462,7 @@ struct ItemMenu: View {
                     Image(systemName: "tv")
                     #endif
                 }
+                .accessibilityIdentifier(TestID.Item.menuGoToShow)
             }
             if let seasonId = item.SeasonId, !seasonId.isEmpty {
                 Button {
@@ -455,6 +470,7 @@ struct ItemMenu: View {
                 } label: {
                     Label(seasonLabel, systemImage: "rectangle.stack")
                 }
+                .accessibilityIdentifier(TestID.Item.menuGoToSeason)
             }
         }
     }
@@ -489,6 +505,7 @@ struct ItemMenu: View {
             Label(watchedLabel, systemImage: item.userData.played ? "arrow.uturn.backward.circle" : "checkmark.circle")
         }
         .macShortcut("u", modifiers: [.command, .shift])
+        .accessibilityIdentifier(TestID.Item.menuWatched)
 
         // Taking a show off Next Up, on the server, without marking anything
         // watched — see `JellyfinClient.removeFromNextUp`.
@@ -498,6 +515,7 @@ struct ItemMenu: View {
             } label: {
                 Label("Remove from Next Up", systemImage: "eye.slash")
             }
+            .accessibilityIdentifier(TestID.Item.menuRemoveFromNextUp)
         }
 
         // The other way: a show onto Next Up, on the server — see
@@ -509,6 +527,7 @@ struct ItemMenu: View {
             } label: {
                 Label(item.isSeries ? "Add to Next Up" : "Add Show to Next Up", systemImage: "text.badge.plus")
             }
+            .accessibilityIdentifier(TestID.Item.menuAddToNextUp)
         }
     }
 
@@ -529,6 +548,7 @@ struct ItemMenu: View {
             )
         }
         .macShortcut("d", modifiers: .command)
+        .accessibilityIdentifier(TestID.Item.menuFavorite)
     }
 
     private func toggleFavorite() async {
@@ -569,6 +589,7 @@ struct ItemMenu: View {
                     } label: {
                         Label("Show in Finder", systemImage: "folder")
                     }
+                    .accessibilityIdentifier(TestID.Item.menuShowInFinder)
                 }
                 #endif
                 Button(role: .destructive) {
@@ -577,12 +598,14 @@ struct ItemMenu: View {
                 } label: {
                     Label("Delete Download", systemImage: "trash")
                 }
+                .accessibilityIdentifier(TestID.Item.menuDeleteDownload)
             } else if DownloadManager.shared.isQueuedOrRunning(item.Id) {
                 Button {
                     app.show(.downloads)
                 } label: {
                     Label("Show Download Progress", systemImage: "arrow.down.circle.dotted")
                 }
+                .accessibilityIdentifier(TestID.Item.menuShowDownloadProgress)
             } else {
                 Menu {
                     #if os(macOS)
@@ -596,7 +619,9 @@ struct ItemMenu: View {
                         set: { if let quality = $0 { download(quality) } }
                     )) {
                         ForEach(DownloadQualities.all) { quality in
-                            Text(quality.label).tag(Optional(quality))
+                            DownloadChoiceLabel(quality.label, size: sizeText(quality))
+                                .accessibilityIdentifier(TestID.Item.menuDownloadQuality(TestID.key(quality.label)))
+                                .tag(Optional(quality))
                         }
                     }
                     .pickerStyle(.inline)
@@ -607,14 +632,25 @@ struct ItemMenu: View {
                     // every row onto two lines — six rows became twelve, taller
                     // than a small phone has room for under the row being held.
                     ForEach(DownloadQualities.all) { quality in
-                        Button(quality.menuLabel) { download(quality) }
+                        Button { download(quality) } label: {
+                            DownloadChoiceLabel(quality.menuLabel, size: sizeText(quality))
+                        }
+                        .accessibilityIdentifier(TestID.Item.menuDownloadQuality(TestID.key(quality.label)))
                     }
                     #endif
                 } label: {
                     Label("Download", systemImage: "arrow.down.circle")
                 }
+                .accessibilityIdentifier(TestID.Item.menuDownload)
             }
         }
+    }
+
+    /// About what this would add at `quality`, from the item as the grid has
+    /// it, the library copy, or a page that has shown it. A grid's item has
+    /// no file, so without either of those an encode's size is all there is.
+    private func sizeText(_ quality: DownloadQuality) -> String? {
+        DownloadSizes.text(DownloadSizes.shared.bytes([item], quality: quality))
     }
 
     /// The same disk-space gate the detail page applies, reporting rather than

@@ -79,9 +79,12 @@ extension View {
                     onChoose(current, alternative)
                 }
                 .keyboardShortcut(index == 0 ? KeyboardShortcut.defaultAction : nil)
+                .accessibilityIdentifier(TestID.Downloads.spacePromptUse(alternative.label))
             }
             Button("Download Anyway", role: .destructive) { onChoose(current, current.requested) }
+                .accessibilityIdentifier(TestID.Downloads.spacePromptAnyway)
             Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier(TestID.Downloads.spacePromptCancel)
         } message: { current in
             let count = current.items.count
             Text("\(count) item\(count == 1 ? "" : "s") at \(current.requested.label) needs about \(Format.bytes(current.verdict.needed)), and there is \(Format.bytes(current.verdict.free)) free where downloads are kept.")

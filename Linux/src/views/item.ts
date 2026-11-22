@@ -34,6 +34,8 @@ import {
   ambientTint,
 } from "../ui";
 import { getCached, setCached, itemSignature } from "../cache";
+import { tmdbIdOf } from "../seerr";
+import { seerrItemHooks, seerrLikeThis } from "./requests";
 
 interface ItemData {
   item: any;
@@ -83,7 +85,9 @@ export function fetchItemData(itemId: string): Promise<ItemData> {
 }
 
 function itemDataSignature(d: ItemData): string {
-  return itemSignature([d.item, d.playTarget, ...d.seasons]);
+  // The TMDB id is part of it: a page cached before the item carried one is
+  // drawn again once it does, so what Seerr adds to the page can appear.
+  return `${itemSignature([d.item, d.playTarget, ...d.seasons])}|${tmdbIdOf(d.item) ?? ""}`;
 }
 
 function metaChips(item: any): HTMLElement {
@@ -188,6 +192,10 @@ function detailExtras(root: HTMLElement, item: any): void {
       else slot.replaceWith(section("More like this", cardRow(items)));
     })
     .catch(() => slot.remove());
+
+  // And from Seerr, what is like it but not here yet.
+  const likeThis = seerrLikeThis(item, (id) => api.getItem(id));
+  if (likeThis) root.append(likeThis);
 }
 
 /** The star on a title's page: in or out of Favorites, said either way. */
@@ -673,6 +681,12 @@ function paintItem(page: HTMLElement, data: ItemData): void {
   ambientTint(hero, backdrop ?? poster);
   root.append(hero);
   attachParallax(hero, backdropLayerEl);
+
+  // What Seerr adds, where one is connected: seasons of this show, or films
+  // of this collection, that aren't in the library and can be asked for.
+  // Nothing at all otherwise.
+  const requests = seerrItemHooks(item);
+  if (requests) root.append(requests);
 
   if (item.Type !== "Series") {
     detailExtras(root, item);

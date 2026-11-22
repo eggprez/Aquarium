@@ -80,6 +80,7 @@ struct LoginView: View {
             // The code is polled for as long as it is on screen. Changing the
             // secret — a fresh code after an expiry — restarts the loop.
             .task(id: quick?.secret) { await waitForApproval() }
+            .testAnchor(TestID.Login.root)
     }
 
     @ViewBuilder
@@ -103,6 +104,7 @@ struct LoginView: View {
                     card
                     if addingAccount {
                         Button("Cancel") { app.isAddingAccount = false }
+                            .accessibilityIdentifier(TestID.Login.cancel)
                             #if os(tvOS)
                             .appButtonStyle()
                             #else
@@ -168,6 +170,7 @@ struct LoginView: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
+                    .accessibilityIdentifier(TestID.Login.error)
             }
             macButtons
             if !addingAccount {
@@ -242,11 +245,8 @@ struct LoginView: View {
                     .interpolation(.high)
                     .scaledToFit()
                     .frame(width: 64, height: 64)
-                HStack(spacing: 0) {
-                    Text("Aqua").fontWeight(.semibold)
-                    Text("rium").fontWeight(.heavy).foregroundStyle(Theme.accent)
-                }
-                .font(.title2)
+                Wordmark(font: .title2)
+                    .accessibilityIdentifier(TestID.Login.wordmark)
                 Text("A Jellyfin client")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -274,6 +274,7 @@ struct LoginView: View {
                         HStack(spacing: 8) {
                             AccountAvatar(account: account, size: 24)
                             Text(account.userName.isEmpty ? "Unnamed user" : account.userName)
+                                .accessibilityIdentifier(TestID.Login.account(account.accountKey))
                             Text(account.serverLabel)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -286,6 +287,7 @@ struct LoginView: View {
                 .contextMenu(forSelectionType: String.self) { keys in
                     if let account = offered.first(where: { keys.contains($0.accountKey) }) {
                         Button("Continue as \(account.userName)") { takeUp(account) }
+                            .accessibilityIdentifier(TestID.Login.accountMenuContinue)
                     }
                 } primaryAction: { keys in
                     if let account = offered.first(where: { keys.contains($0.accountKey) }) { takeUp(account) }
@@ -300,8 +302,10 @@ struct LoginView: View {
                         if let account = offered.first(where: { $0.accountKey == selectedAccount }) { takeUp(account) }
                     }
                     .disabled(selectedAccount == nil || app.switchingTo != nil)
+                    .accessibilityIdentifier(TestID.Login.accountContinue)
                 }
             }
+            .testAnchor(TestID.Login.accounts)
         }
     }
 
@@ -327,6 +331,7 @@ struct LoginView: View {
                 .disabled(probe != nil)
                 .focused($focused, equals: .address)
                 .onSubmit { Task { await connect() } }
+                .accessibilityIdentifier(TestID.Login.serverField)
 
             if probe == nil {
                 Text("The address you open Jellyfin at in a browser — for example http://192.168.1.10:8096 or https://jellyfin.example.com.")
@@ -342,9 +347,12 @@ struct LoginView: View {
                 if quickConnectOffered {
                     Picker("Sign In With:", selection: $mode) {
                         Text("Password").tag(Mode.password)
+                            .accessibilityIdentifier(TestID.Login.modeOption("password"))
                         Text("Quick Connect").tag(Mode.quickConnect)
+                            .accessibilityIdentifier(TestID.Login.modeOption("quickConnect"))
                     }
                     .pickerStyle(.segmented)
+                    .accessibilityIdentifier(TestID.Login.modePicker)
                 }
 
                 switch mode {
@@ -358,11 +366,13 @@ struct LoginView: View {
                         // sign-in form and offers to fill it — and to save it
                         // afterwards.
                         .textContentType(.username)
+                        .accessibilityIdentifier(TestID.Login.username)
                     SecureField("Password:", text: $password)
                         .textFieldStyle(.roundedBorder)
                         .focused($focused, equals: .password)
                         .onSubmit { Task { await signIn() } }
                         .textContentType(.password)
+                        .accessibilityIdentifier(TestID.Login.password)
                 case .quickConnect:
                     macQuickConnect(probe)
                 }
@@ -370,6 +380,7 @@ struct LoginView: View {
         }
         .formStyle(.columns)
         .defaultFocus($focused, .address)
+        .testAnchor(TestID.Login.form)
     }
 
     // MARK: Servers, as a table
@@ -416,6 +427,7 @@ struct LoginView: View {
                                     Text(choice.name)
                                         .lineLimit(1)
                                         .truncationMode(.middle)
+                                        .accessibilityIdentifier(knownServerAddresses.contains(choice.address) ? TestID.Login.knownServer(choice.address) : TestID.Login.discoveredServer(choice.address))
                                     Text(choice.detail)
                                         .foregroundStyle(.secondary)
                                 }
@@ -427,6 +439,7 @@ struct LoginView: View {
                         .contextMenu(forSelectionType: String.self) { keys in
                             if let server = keys.first {
                                 Button("Connect") { connect(to: server) }
+                                    .accessibilityIdentifier(TestID.Login.serverMenuConnect)
                             }
                         } primaryAction: { keys in
                             if let server = keys.first { connect(to: server) }
@@ -439,6 +452,7 @@ struct LoginView: View {
                     HStack(spacing: 6) {
                         if isDiscovering {
                             ProgressView().controlSize(.mini)
+                                .accessibilityIdentifier(TestID.Login.discovering)
                             Text(choices.isEmpty ? "Looking on your network…" : "Still looking on your network…")
                         } else {
                             Text("Double-click a server to connect to it.")
@@ -495,6 +509,7 @@ struct LoginView: View {
                             HStack(spacing: 8) {
                                 AccountAvatar(account: SavedSession(server: probe.server, userId: user.Id, userName: user.name, deviceId: ""), size: 22)
                                 Text(user.name)
+                                    .accessibilityIdentifier(TestID.Login.user(user.Id))
                                 if user.HasPassword == false {
                                     Text("No password")
                                         .foregroundStyle(.secondary)
@@ -507,6 +522,7 @@ struct LoginView: View {
                     .contextMenu(forSelectionType: String.self) { ids in
                         if let user = people.first(where: { ids.contains($0.Id) }) {
                             Button("Sign In as \(user.name)") { choose(user) }
+                                .accessibilityIdentifier(TestID.Login.userMenuSignIn)
                         }
                     } primaryAction: { ids in
                         if let user = people.first(where: { ids.contains($0.Id) }) { choose(user) }
@@ -532,29 +548,33 @@ struct LoginView: View {
                         Text(Self.spaced(quick.code))
                             .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
                             .foregroundStyle(quickExpired ? .secondary : .primary)
-                            .textSelection(.enabled)
                             .contentTransition(.numericText())
                             .animation(.default, value: quick.code)
                             .accessibilityLabel("Quick Connect code \(quick.code.map(String.init).joined(separator: " "))")
+                            .accessibilityIdentifier(TestID.Login.quickConnectCode)
                         Button("Copy Code") {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(quick.code, forType: .string)
                         }
                         .disabled(quickExpired)
+                        .accessibilityIdentifier(TestID.Login.quickConnectCopy)
                     } else {
                         ProgressView()
                             .controlSize(.small)
                             .frame(height: 40)
+                            .accessibilityIdentifier(TestID.Login.quickConnectLoading)
                     }
                 }
                 if quickExpired {
                     Text("That code has expired.")
                         .font(.callout)
                         .foregroundStyle(.orange)
+                        .accessibilityIdentifier(TestID.Login.quickConnectExpired)
                 } else if quick != nil {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.mini)
                         Text("Waiting for the code to be approved…")
+                            .accessibilityIdentifier(TestID.Login.quickConnectWaiting)
                     }
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -567,6 +587,7 @@ struct LoginView: View {
         } label: {
             Text("Code:")
         }
+        .testAnchor(TestID.Login.quickConnectPanel)
     }
 
     // MARK: Banner and buttons
@@ -578,27 +599,33 @@ struct LoginView: View {
             HStack(spacing: 10) {
                 Text(probe.serverName ?? probe.server)
                     .fontWeight(.semibold)
+                    .accessibilityIdentifier(TestID.Login.serverName)
                 Label(probe.secure ? "Encrypted" : "Not Encrypted", systemImage: probe.secure ? "lock.fill" : "lock.open")
                     .font(.caption)
                     .foregroundStyle(probe.secure ? .green : .orange)
                     .help(probe.secure
                           ? "Your password and access token are never sent in the clear."
                           : "Anything on the network path can read your access token and what you watch.")
+                    .accessibilityIdentifier(TestID.Login.serverSecurity)
             }
             Text(probe.version.map { "Jellyfin \($0) · \(probe.server)" } ?? probe.server)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+                .accessibilityIdentifier(TestID.Login.serverDetail)
             if !probe.secure {
                 Text("This connection isn't encrypted. Anything on the network path can read your access token and what you watch — fine on a home network, worth fixing if the server is reachable from outside it.")
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(TestID.Login.serverInsecureWarning)
             }
             Button("Use a Different Server…") { useDifferentServer() }
                 .controlSize(.small)
                 .padding(.top, 2)
+                .accessibilityIdentifier(TestID.Login.differentServer)
         }
+        .testAnchor(TestID.Login.serverBanner)
     }
 
     /// Bottom-right, the Mac way: Cancel with Escape, the one thing to do
@@ -608,15 +635,18 @@ struct LoginView: View {
             Spacer()
             if isProbing || isSigningIn || isStartingQuick {
                 ProgressView().controlSize(.small)
+                    .accessibilityIdentifier(TestID.Login.busy)
             }
             if addingAccount {
                 Button("Cancel") { app.isAddingAccount = false }
                     .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier(TestID.Login.cancel)
             }
             if probe == nil {
                 Button("Connect") { Task { await connect() } }
                     .keyboardShortcut(.defaultAction)
                     .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty || isProbing)
+                    .accessibilityIdentifier(TestID.Login.connect)
             } else if mode == .quickConnect {
                 // The code signs in by itself; the only thing to press is for
                 // a fresh one once the server has forgotten the last.
@@ -624,6 +654,7 @@ struct LoginView: View {
                     Button("Get New Code") { Task { await startQuickConnect() } }
                         .keyboardShortcut(.defaultAction)
                         .disabled(isStartingQuick)
+                        .accessibilityIdentifier(TestID.Login.quickConnectNewCode)
                 }
             } else {
                 Button("Sign In") {
@@ -638,6 +669,7 @@ struct LoginView: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(username.isEmpty || isSigningIn)
+                .accessibilityIdentifier(TestID.Login.signIn)
             }
         }
         .buttonStyle(.bordered)
@@ -647,7 +679,7 @@ struct LoginView: View {
     #if !os(macOS)
     private var card: some View {
         VStack(alignment: .leading, spacing: 14) {
-            field("Server address", text: $address, placeholder: "jellyfin.example.com", isSecure: false)
+            field("Server address", text: $address, placeholder: "jellyfin.example.com", isSecure: false, id: TestID.Login.serverField)
                 .disabled(probe != nil)
                 .focused($focused, equals: .address)
                 .submitLabel(.go)
@@ -673,7 +705,7 @@ struct LoginView: View {
                 userPicker(probe)
                 switch mode {
                 case .password:
-                    field("Username", text: $username, placeholder: "", isSecure: false)
+                    field("Username", text: $username, placeholder: "", isSecure: false, id: TestID.Login.username)
                         .focused($focused, equals: .username)
                         .submitLabel(.next)
                         .onSubmit { focused = .password }
@@ -684,7 +716,7 @@ struct LoginView: View {
                         // The pair of them, so a password manager sees a sign-in
                         // form and offers to fill it — and to save it afterwards.
                         .textContentType(.username)
-                    field("Password", text: $password, placeholder: "", isSecure: true)
+                    field("Password", text: $password, placeholder: "", isSecure: true, id: TestID.Login.password)
                         .focused($focused, equals: .password)
                         .submitLabel(.go)
                         .onSubmit { Task { await signIn() } }
@@ -699,6 +731,7 @@ struct LoginView: View {
                     .font(.footnote)
                     .foregroundStyle(Theme.danger)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(TestID.Login.error)
             }
 
             actionButton
@@ -730,6 +763,7 @@ struct LoginView: View {
         } message: { found in
             Text("\(found.server) didn't answer over https, only over plain http. Your password and everything you watch would cross the internet unencrypted — and a network that blocks secure connections looks exactly like this. Only continue if you know this server has no https.")
         }
+        .testAnchor(TestID.Login.form)
     }
 
     private var header: some View {
@@ -742,11 +776,8 @@ struct LoginView: View {
                 .scaledToFit()
                 .frame(width: 76, height: 76)
                 .padding(.bottom, 2)
-            HStack(spacing: 0) {
-                Text("Aqua").fontWeight(.semibold)
-                Text("rium").fontWeight(.heavy).foregroundStyle(Theme.accent)
-            }
-            .font(.largeTitle)
+            Wordmark(font: .largeTitle)
+                .accessibilityIdentifier(TestID.Login.wordmark)
             Text("A Jellyfin client")
                 .font(.subheadline)
                 .foregroundStyle(Theme.textDim)
@@ -782,6 +813,7 @@ struct LoginView: View {
                             .background(Theme.hover, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                     .rowButtonStyle()
+                    .accessibilityIdentifier(TestID.Login.account(account.accountKey))
                 }
                 Text("Or sign in to another account below.")
                     .font(.caption)
@@ -794,6 +826,7 @@ struct LoginView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Theme.border, lineWidth: 0.5)
             )
+            .testAnchor(TestID.Login.accounts)
         }
     }
 
@@ -828,6 +861,7 @@ struct LoginView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isProbing)
+                    .accessibilityIdentifier(TestID.Login.knownServer(server))
                 }
             }
         }
@@ -906,6 +940,7 @@ struct LoginView: View {
                     }
                     .rowButtonStyle()
                     .disabled(isSigningIn)
+                    .accessibilityIdentifier(TestID.Login.user(user.Id))
                 }
                 if matches.count > Self.userRows {
                     // The code panel has no username field to type in.
@@ -946,7 +981,7 @@ struct LoginView: View {
                     Text(discovered.isEmpty ? "Looking on your network…" : "On your network")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(Theme.textDim)
-                    if isDiscovering { ProgressView().controlSize(.mini) }
+                    if isDiscovering { ProgressView().controlSize(.mini).accessibilityIdentifier(TestID.Login.discovering) }
                 }
                 ForEach(discovered) { server in
                     Button {
@@ -976,6 +1011,7 @@ struct LoginView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isProbing)
+                    .accessibilityIdentifier(TestID.Login.discoveredServer(server.address))
                 }
             }
             .animation(.easeOut(duration: 0.2), value: discovered)
@@ -1011,20 +1047,24 @@ struct LoginView: View {
                         .contentTransition(.numericText())
                         .animation(.default, value: quick.code)
                         .accessibilityLabel("Quick Connect code \(quick.code.map(String.init).joined(separator: " "))")
+                        .accessibilityIdentifier(TestID.Login.quickConnectCode)
                 } else {
                     ProgressView()
                         .frame(height: codePointSize)
+                        .accessibilityIdentifier(TestID.Login.quickConnectLoading)
                 }
                 if quickExpired {
                     Text("That code has expired.")
                         .font(.footnote)
                         .foregroundStyle(Theme.warn)
+                        .accessibilityIdentifier(TestID.Login.quickConnectExpired)
                 } else if quick != nil {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
                         Text("Waiting for the code to be approved…")
                             .font(.footnote)
                             .foregroundStyle(Theme.textDim)
+                            .accessibilityIdentifier(TestID.Login.quickConnectWaiting)
                     }
                 }
             }
@@ -1036,6 +1076,7 @@ struct LoginView: View {
                 .foregroundStyle(Theme.textDim)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .testAnchor(TestID.Login.quickConnectPanel)
     }
 
     /// A phone's card is a column; a television's is wider, so that the
@@ -1088,6 +1129,7 @@ struct LoginView: View {
         .buttonStyle(.plain)
         .foregroundStyle(Theme.accent)
         .focused($focused, equals: .modeSwitch)
+        .accessibilityIdentifier(TestID.Login.modeSwitch)
     }
 
     #endif
@@ -1156,30 +1198,36 @@ struct LoginView: View {
                 Text(probe.serverName ?? probe.server)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.text)
+                    .accessibilityIdentifier(TestID.Login.serverName)
                 Spacer()
                 StatusPill(text: probe.secure ? "HTTPS" : "HTTP", tone: probe.secure ? .ok : .warn)
+                    .testAnchor(TestID.Login.serverSecurity)
             }
             Text(probe.version.map { "Jellyfin \($0) · \(probe.server)" } ?? probe.server)
                 .font(.caption)
                 .foregroundStyle(Theme.textDim)
+                .accessibilityIdentifier(TestID.Login.serverDetail)
             if !probe.secure {
                 Text("This connection isn't encrypted. Anything on the network path can read your access token and what you watch — fine on a home network, worth fixing if the server is reachable from outside it.")
                     .font(.caption)
                     .foregroundStyle(Theme.warn)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(TestID.Login.serverInsecureWarning)
             }
             Button("Use a different server") { useDifferentServer() }
             .font(.caption)
             .buttonStyle(.plain)
             .foregroundStyle(Theme.accent)
+            .accessibilityIdentifier(TestID.Login.differentServer)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.hover, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .testAnchor(TestID.Login.serverBanner)
     }
 
     @ViewBuilder
-    private func field(_ label: String, text: Binding<String>, placeholder: String, isSecure: Bool) -> some View {
+    private func field(_ label: String, text: Binding<String>, placeholder: String, isSecure: Bool, id: String) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(label)
                 .font(.caption.weight(.medium))
@@ -1187,8 +1235,10 @@ struct LoginView: View {
             Group {
                 if isSecure {
                     SecureField(placeholder, text: text)
+                        .accessibilityIdentifier(id)
                 } else {
                     TextField(placeholder, text: text)
+                        .accessibilityIdentifier(id)
                 }
             }
             .textFieldStyle(.plain)
@@ -1213,6 +1263,7 @@ struct LoginView: View {
             .buttonStyle(.borderedProminent)
             .tint(Theme.accentStrong)
             .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty || isProbing)
+            .accessibilityIdentifier(TestID.Login.connect)
         } else if mode == .quickConnect {
             // The code signs in by itself; the only thing to press is for a
             // fresh one once the server has forgotten the last.
@@ -1225,6 +1276,7 @@ struct LoginView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accentStrong)
                 .disabled(isStartingQuick)
+                .accessibilityIdentifier(TestID.Login.quickConnectNewCode)
             }
         } else {
             Button {
@@ -1235,6 +1287,7 @@ struct LoginView: View {
             .buttonStyle(.borderedProminent)
             .tint(Theme.accentStrong)
             .disabled(username.isEmpty || isSigningIn)
+            .accessibilityIdentifier(TestID.Login.signIn)
         }
     }
 
@@ -1252,7 +1305,7 @@ struct LoginView: View {
         Text(title)
             .frame(maxWidth: .infinity)
             .overlay(alignment: .leading) {
-                if busy { ProgressView().controlSize(.small) }
+                if busy { ProgressView().controlSize(.small).accessibilityIdentifier(TestID.Login.busy) }
             }
     }
     #endif
@@ -1262,6 +1315,9 @@ struct LoginView: View {
     private func useDifferentServer() {
         probe = nil
         users = []
+        // A name and password typed for the last server are not this one's.
+        username = ""
+        password = ""
         quick = nil
         quickExpired = false
         quickConnectOffered = false

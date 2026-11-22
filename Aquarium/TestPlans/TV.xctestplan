@@ -1,0 +1,32 @@
+{
+  "configurations": [
+    {
+      "id": "AD151F77-2399-5461-A91A-6B42631A1E59",
+      "name": "Default",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "defaultTestExecutionTimeAllowance": 600,
+    "environmentVariableEntries": [
+      {
+        "key": "AQUARIUM_SUITE",
+        "value": "tv"
+      }
+    ],
+    "maximumTestExecutionTimeAllowance": 1800,
+    "testTimeoutsEnabled": true,
+    "uiTestingScreenshotsLifetime": "keepNever"
+  },
+  "testTargets": [
+    {
+      "parallelizable": false,
+      "target": {
+        "containerPath": "container:Aquarium.xcodeproj",
+        "identifier": "FE11A5D00000000000000840",
+        "name": "AquariumUITests"
+      }
+    }
+  ],
+  "version": 1
+}

@@ -68,14 +68,17 @@ struct ListenNowView: View {
                     SkeletonShelf(squareWidth: MusicMetrics.tileWidth)
                 }
                 .padding(.top, 12)
+                .testAnchor(TestID.Music.loading)
             } else if let error, isBare {
                 ErrorState(error: error) { Task { await reload() } }
+                    .testAnchor(TestID.Music.error)
             } else if isBare {
                 EmptyState(
                     symbol: "music.note.list",
                     title: "Nothing to suggest yet",
                     message: "Once your music library has been scanned, and once you've played a few things, this page fills in with what to play next."
                 )
+                .testAnchor(TestID.Music.empty)
             } else {
                 LazyVStack(alignment: .leading, spacing: Metrics.shelfSpacing) {
                     greeting
@@ -93,11 +96,13 @@ struct ListenNowView: View {
                                                 .contentShape(Rectangle())
                                         }
                                         .buttonStyle(PosterButtonStyle())
+                                        .accessibilityIdentifier(TestID.Stations.card(station.id))
                                     }
                                 }
                                 .padding(.horizontal, Metrics.gutter)
                             }
                         }
+                        .testAnchor(TestID.Stations.shelf)
                     }
                     SongColumnsShelf(title: "Your Top Songs", items: topSongs, ranked: true) { song in
                         music.play(topSongs, startingAt: topSongs.position(of: song) ?? 0, title: "Top Songs")
@@ -118,6 +123,7 @@ struct ListenNowView: View {
             }
         }
         .refreshable { await reload() }
+        .testAnchor(TestID.Music.listenNow)
     }
 
     /// The time of day, and under it the one button that needs no choosing
@@ -128,19 +134,21 @@ struct ListenNowView: View {
             Text(Self.greetingText())
                 .font(.largeTitle.weight(.bold))
                 .foregroundStyle(Theme.text)
+                .accessibilityIdentifier(TestID.Music.greeting)
             Button {
-                Task { await surpriseMe() }
+                Task { await shuffleAll() }
             } label: {
                 if isMixing {
                     ProgressView().controlSize(.small)
                 } else {
-                    Label("Surprise Me", systemImage: "shuffle")
+                    Label(MusicMixes.shuffleAllTitle, systemImage: "shuffle")
                 }
             }
             .appButtonStyle(prominent: true)
             .buttonBorderShape(.capsule)
             .controlSize(.small)
             .disabled(isMixing)
+            .accessibilityIdentifier(TestID.Music.shuffleAll)
         }
         .padding(.horizontal, Metrics.gutter)
     }
@@ -164,16 +172,14 @@ struct ListenNowView: View {
         if result.isLocal { app.toast("The server didn't answer — mixed from your downloads", tone: .info) }
     }
 
-    /// A mix with nothing picked first. One of the stations the page already
-    /// worked out from what this account plays, chosen at random — and for an
-    /// account that hasn't played or starred anything yet, a random album is
-    /// as good a seed as any.
-    private func surpriseMe() async {
+    /// The whole library in a random order. A mix like one song is the
+    /// player's Instant Mix.
+    private func shuffleAll() async {
         isMixing = true
         defer { isMixing = false }
-        let result = await MusicMixes.startSurprise()
-        if result.isLocal, result.started { app.toast("The server didn't answer — mixed from your downloads", tone: .info) }
-        guard result.started else { return app.toast("Nothing in the library to build a mix from yet", tone: .error) }
+        let result = await MusicMixes.shuffleAll()
+        if result.isLocal, result.started { app.toast("The server didn't answer — shuffling your downloads", tone: .info) }
+        guard result.started else { return app.toast("Nothing in the library to shuffle yet", tone: .error) }
     }
 
     private func reload() async {

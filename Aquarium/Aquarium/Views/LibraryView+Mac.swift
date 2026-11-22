@@ -71,12 +71,30 @@ struct LibrarySelectionMenu: View {
 
     private var selected: [BaseItem] { items.filter { selection.contains($0.Id) } }
 
+    /// Which of the four actions a selection is offered. Static for the unit tests.
+    struct Offers: Equatable {
+        var markWatched: Bool
+        var markUnwatched: Bool
+        var addFavorite: Bool
+        var removeFavorite: Bool
+    }
+
+    static func offers(for chosen: [BaseItem]) -> Offers {
+        Offers(
+            markWatched: chosen.contains { !$0.userData.played },
+            markUnwatched: chosen.contains { $0.userData.played },
+            addFavorite: chosen.contains { !$0.userData.isFavorite },
+            removeFavorite: chosen.contains { $0.userData.isFavorite }
+        )
+    }
+
     var body: some View {
         let chosen = selected
-        let anyUnwatched = chosen.contains { !$0.userData.played }
-        let anyWatched = chosen.contains { $0.userData.played }
-        let anyNotFavorite = chosen.contains { !$0.userData.isFavorite }
-        let anyFavorite = chosen.contains { $0.userData.isFavorite }
+        let offers = Self.offers(for: chosen)
+        let anyUnwatched = offers.markWatched
+        let anyWatched = offers.markUnwatched
+        let anyNotFavorite = offers.addFavorite
+        let anyFavorite = offers.removeFavorite
 
         if anyUnwatched {
             Button {
@@ -84,6 +102,7 @@ struct LibrarySelectionMenu: View {
             } label: {
                 Label("Mark as Watched", systemImage: "checkmark.circle")
             }
+            .accessibilityIdentifier(TestID.Library.selectionMarkWatched)
         }
         if anyWatched {
             Button {
@@ -91,6 +110,7 @@ struct LibrarySelectionMenu: View {
             } label: {
                 Label("Mark as Unwatched", systemImage: "arrow.uturn.backward.circle")
             }
+            .accessibilityIdentifier(TestID.Library.selectionMarkUnwatched)
         }
         if anyNotFavorite {
             Button {
@@ -98,6 +118,7 @@ struct LibrarySelectionMenu: View {
             } label: {
                 Label("Add to Favorites", systemImage: "star")
             }
+            .accessibilityIdentifier(TestID.Library.selectionAddFavorite)
         }
         if anyFavorite {
             Button {
@@ -105,6 +126,7 @@ struct LibrarySelectionMenu: View {
             } label: {
                 Label("Remove from Favorites", systemImage: "star.slash")
             }
+            .accessibilityIdentifier(TestID.Library.selectionRemoveFavorite)
         }
     }
 
@@ -151,6 +173,7 @@ struct LibrarySelectionToolbarMenu: View {
             Label("\(selection.count) Selected", systemImage: "checkmark.circle")
         }
         .help("Act on the \(selection.count) selected item\(selection.count == 1 ? "" : "s")")
+        .accessibilityIdentifier(TestID.Library.selectionMenu)
     }
 }
 
@@ -170,21 +193,30 @@ struct LibraryNoResults: View {
         } description: {
             Text(description)
         } actions: {
-            Button(hasFilters ? "Clear Filters" : "Clear Search", action: clear)
+            Button(Self.clearLabel(hasFilters: hasFilters), action: clear)
+                .accessibilityIdentifier(TestID.Library.noResultsClear)
         }
         .frame(maxWidth: .infinity, minHeight: 240)
+        .testAnchor(TestID.Library.noResults)
     }
 
-    private var title: String {
+    private var title: String { Self.title(searchTerm: searchTerm) }
+
+    private var description: String { Self.description(searchTerm: searchTerm, hasFilters: hasFilters) }
+
+    // Statics for the unit tests.
+    static func title(searchTerm: String) -> String {
         searchTerm.isEmpty ? "No Results" : "No Results for “\(searchTerm)”"
     }
 
-    private var description: String {
+    static func description(searchTerm: String, hasFilters: Bool) -> String {
         switch (searchTerm.isEmpty, hasFilters) {
         case (false, true): "Nothing in this library matches the search and the filters."
         case (false, false): "Check the spelling or try a different search."
         default: "Nothing in this library matches the filters."
         }
     }
+
+    static func clearLabel(hasFilters: Bool) -> String { hasFilters ? "Clear Filters" : "Clear Search" }
 }
 #endif

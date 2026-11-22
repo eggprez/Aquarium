@@ -18,8 +18,11 @@ mod power;
 mod prefs;
 mod progress;
 mod secret;
+mod seerr;
 mod server;
 mod theme;
+#[cfg(test)]
+mod test_support;
 mod video_thread;
 mod wl;
 
@@ -285,6 +288,60 @@ async fn jf_bitrate_test(size: u32) -> Result<f64, String> {
     server::bitrate_test(size).await
 }
 
+// ---------- Seerr, from this side of the IPC boundary ----------
+// The same arrangement as Jellyfin's: the webview names a path and gets a
+// status and a body back. Seerr's session cookie stays in this process (see
+// `seerr.rs`); none of these commands returns it.
+
+/// Whether this account has a Seerr server, and what may be shown of it.
+#[tauri::command(async)]
+fn seerr_status() -> Value {
+    seerr::status()
+}
+
+#[tauri::command]
+async fn seerr_probe(address: String) -> Result<Value, String> {
+    seerr::probe(&address).await
+}
+
+/// Sign in to Seerr with Quick Connect, as the Jellyfin account in use.
+#[tauri::command]
+async fn seerr_connect(server: String) -> Result<Value, String> {
+    seerr::connect(&server).await
+}
+
+/// The fallback for a Seerr with no Quick Connect. The password goes to Seerr
+/// once and is kept nowhere.
+#[tauri::command]
+async fn seerr_connect_password(server: String, username: String, password: String) -> Result<Value, String> {
+    seerr::connect_with_password(&server, &username, &password).await
+}
+
+#[tauri::command]
+async fn seerr_reconnect() -> Result<Value, String> {
+    seerr::reconnect().await
+}
+
+#[tauri::command]
+async fn seerr_disconnect() -> Result<Value, String> {
+    Ok(seerr::disconnect().await)
+}
+
+/// Bring the remembered permissions and server settings up to date.
+#[tauri::command]
+async fn seerr_refresh() -> Result<Value, String> {
+    Ok(seerr::refresh().await)
+}
+
+#[tauri::command]
+async fn seerr_request(
+    path: String,
+    method: Option<String>,
+    body: Option<Value>,
+) -> Result<Value, String> {
+    seerr::request(&path, method, body).await
+}
+
 /// Wake a live stream up before mpv is pointed at it.
 ///
 /// A channel from a user's own playlist is very often not a file but a
@@ -467,12 +524,17 @@ async fn player_set_track(
     kind: String,
     track: Value,
 ) -> Result<(), String> {
-    let prop = match kind.as_str() {
-        "audio" => "aid",
-        "sub" => "sid",
-        _ => return Err("unknown track kind".into()),
-    };
+    let prop = track_property(&kind)?;
     player.send(json!(["set_property", prop, track])).await
+}
+
+/// The mpv property behind a track kind from the frontend.
+fn track_property(kind: &str) -> Result<&'static str, String> {
+    match kind {
+        "audio" => Ok("aid"),
+        "sub" => Ok("sid"),
+        _ => Err("unknown track kind".into()),
+    }
 }
 
 #[tauri::command]
@@ -591,28 +653,45 @@ fn resize_video_surface(app: &AppHandle) {
         height: 800,
     });
     let scale = win.scale_factor().unwrap_or(1.0);
+    let ((x, y, w, h), bar) = video_layout(size, scale, full, reveal);
     if full {
-        // Fullscreen: the surface always covers the window, and the revealed
-        // bar is cut out of it, so the picture never moves when the controls
-        // come and go. Windowed mode still reserves the strip by resizing —
-        // there the bar is permanent, and letterboxing above it is right.
-        let (x, y, w, h) = surface::geometry(size, scale, false);
         e.resize(x, y, w, h);
         // A card is only ever open with the bar up, so its band sits on
         // top of the bar's strip.
-        let bar = if reveal {
-            ((surface::BAR_HEIGHT_CSS + band) * scale).ceil() as u32
-        } else {
-            0
-        };
+        let bar = if reveal { bar + (band * scale).ceil() as u32 } else { 0 };
         e.set_bottom_clip(w, h, bar);
     } else {
-        let (x, y, w, h) = surface::geometry(size, scale, !full || reveal);
         // The bar's own strip is reserved by the size; the card's band is
         // clipped, never more than leaves a sliver of picture.
         let clip = ((band * scale).ceil() as u32).min((h as u32).saturating_sub(1));
         e.set_bottom_clip(w, h, clip);
         e.resize(x, y, w, h);
+    }
+}
+
+/// The video geometry for a window `size` at `scale`, and the physical px of
+/// fullscreen bar to clip off its bottom.
+///
+/// Fullscreen: the surface always covers the window, and the revealed bar is
+/// cut out of it, so the picture never moves when the controls come and go.
+/// Windowed mode still reserves the strip by resizing — there the bar is
+/// permanent, and letterboxing above it is right.
+fn video_layout(
+    size: tauri::PhysicalSize<u32>,
+    scale: f64,
+    full: bool,
+    reveal: bool,
+) -> ((i16, i16, u16, u16), u32) {
+    if full {
+        let geom = surface::geometry(size, scale, false);
+        let bar = if reveal {
+            (surface::BAR_HEIGHT_CSS * scale).ceil() as u32
+        } else {
+            0
+        };
+        (geom, bar)
+    } else {
+        (surface::geometry(size, scale, !full || reveal), 0)
     }
 }
 
@@ -690,22 +769,33 @@ fn restore_window_size(win: &tauri::WebviewWindow) {
         return;
     };
 
-    // GTK works in logical pixels; the monitor ceiling and the configured
-    // floor have to be expressed the same way before they can be applied.
-    let scale = win.scale_factor().unwrap_or(1.0).max(0.1);
-    let (max_w, max_h) = match win.current_monitor() {
-        Ok(Some(m)) => (
-            (m.size().width as f64 / scale).round() as i32,
-            (m.size().height as f64 / scale).round() as i32,
-        ),
-        _ => (i32::MAX, i32::MAX),
+    let monitor = match win.current_monitor() {
+        Ok(Some(m)) => Some((m.size().width, m.size().height)),
+        _ => None,
     };
-    let w = (w as i32).clamp((MIN_WIDTH_CSS as i32).min(max_w), max_w);
-    let h = (h as i32).clamp((MIN_HEIGHT_CSS as i32).min(max_h), max_h);
+    let (w, h) = clamp_window_size(w, h, win.scale_factor().unwrap_or(1.0), monitor);
 
     if let Ok(gtk_win) = win.gtk_window() {
         gtk::prelude::GtkWindowExt::resize(&gtk_win, w, h);
     }
+}
+
+/// A saved windowed size, clamped to what a monitor of `monitor` physical px
+/// at `scale` can show and to the configured minimum. GTK works in logical
+/// pixels; the monitor ceiling and the configured floor have to be expressed
+/// the same way before they can be applied.
+fn clamp_window_size(w: i64, h: i64, scale: f64, monitor: Option<(u32, u32)>) -> (i32, i32) {
+    let scale = scale.max(0.1);
+    let (max_w, max_h) = match monitor {
+        Some((mw, mh)) => (
+            (mw as f64 / scale).round() as i32,
+            (mh as f64 / scale).round() as i32,
+        ),
+        None => (i32::MAX, i32::MAX),
+    };
+    let w = (w as i32).clamp((MIN_WIDTH_CSS as i32).min(max_w), max_w);
+    let h = (h as i32).clamp((MIN_HEIGHT_CSS as i32).min(max_h), max_h);
+    (w, h)
 }
 
 /// Set once the user has answered the "downloads are still running" prompt, so
@@ -856,6 +946,32 @@ fn progress_pending_ids() -> Vec<String> {
     progress::pending_item_ids()
 }
 
+/// `AQUARIUM_TEST_REPLAY`: `"<url>|<start>"` switches to that stream at that
+/// position (5 s if the position doesn't parse); anything else replays
+/// `play_url` (the `AQUARIUM_TEST_PLAY` file) at 5 s.
+fn replay_target(replay: &str, play_url: &str) -> (String, f64) {
+    match replay.rsplit_once('|') {
+        Some((u, s)) => (u.to_string(), s.parse::<f64>().unwrap_or(5.0)),
+        None => (play_url.to_string(), 5.0),
+    }
+}
+
+/// `AQUARIUM_TEST_SEQUENCE` as `(seconds to wait, step)` pairs. Each step is
+/// `<seconds after start>:<what>`; one without a colon is skipped, a time that
+/// doesn't parse counts as 0, and a time earlier than the one before runs at
+/// once.
+fn test_sequence(seq: &str) -> Vec<(u64, String)> {
+    let mut last = 0u64;
+    let mut out = Vec::new();
+    for step in seq.split(',') {
+        let Some((t, what)) = step.split_once(':') else { continue };
+        let t: u64 = t.trim().parse().unwrap_or(0);
+        out.push((t.saturating_sub(last), what.trim().to_string()));
+        last = t;
+    }
+    out
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// `--search-provider`: answer GNOME Shell's search and leave (no window).
 pub fn run_search_provider() {
@@ -995,6 +1111,7 @@ pub fn run() {
                         volume: None,
                         ctx: None,
                         user_agent: None,
+                        subtitles: Vec::new(),
                     };
                     if let Err(e) = player.play(handle.clone(), req).await {
                         eprintln!("aquarium: test playback failed: {e}");
@@ -1005,13 +1122,10 @@ pub fn run() {
                     // to switch to a different stream/position.
                     if let Ok(replay) = std::env::var("AQUARIUM_TEST_REPLAY") {
                         tokio::time::sleep(std::time::Duration::from_secs(6)).await;
-                        let (url2, start2) = match replay.rsplit_once('|') {
-                            Some((u, s)) => (u.to_string(), s.parse::<f64>().unwrap_or(5.0)),
-                            None => (
-                                std::env::var("AQUARIUM_TEST_PLAY").unwrap_or_default(),
-                                5.0,
-                            ),
-                        };
+                        let (url2, start2) = replay_target(
+                            &replay,
+                            &std::env::var("AQUARIUM_TEST_PLAY").unwrap_or_default(),
+                        );
                         let req2 = player::PlayRequest {
                             url: url2,
                             title: Some("Aquarium replay test".into()),
@@ -1020,6 +1134,7 @@ pub fn run() {
                             volume: None,
                             ctx: None,
                             user_agent: None,
+                            subtitles: Vec::new(),
                         };
                         if let Err(e) = player.play(handle.clone(), req2).await {
                             eprintln!("aquarium: replay test failed: {e}");
@@ -1042,13 +1157,9 @@ pub fn run() {
             if let Ok(seq) = std::env::var("AQUARIUM_TEST_SEQUENCE") {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    let mut last = 0u64;
-                    for step in seq.split(',') {
-                        let Some((t, what)) = step.split_once(':') else { continue };
-                        let t: u64 = t.trim().parse().unwrap_or(0);
-                        tokio::time::sleep(std::time::Duration::from_secs(t.saturating_sub(last))).await;
-                        last = t;
-                        let what = what.trim();
+                    for (wait, what) in test_sequence(&seq) {
+                        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                        let what = what.as_str();
                         eprintln!("aquarium: test sequence: {what}");
                         let player = handle.state::<player::Player>();
                         let win = handle.get_webview_window("main");
@@ -1096,6 +1207,7 @@ pub fn run() {
                                     volume: None,
                                     ctx: None,
                                     user_agent: None,
+                                    subtitles: Vec::new(),
                                 };
                                 if let Err(e) = player.play(handle.clone(), req).await {
                                     eprintln!("aquarium: test sequence: play failed: {e}");
@@ -1172,6 +1284,14 @@ pub fn run() {
             jf_image,
             jf_ping,
             jf_bitrate_test,
+            seerr_status,
+            seerr_probe,
+            seerr_connect,
+            seerr_connect_password,
+            seerr_reconnect,
+            seerr_disconnect,
+            seerr_refresh,
+            seerr_request,
             theme::system_color_scheme,
             player_play,
             player_stop,
@@ -1220,4 +1340,336 @@ pub fn run() {
                 app.state::<audio::AudioPlayer>().stop_sync();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{sandbox, sign_in, Body, FakeServer, Resp, TEST_TOKEN};
+
+    fn mock() -> tauri::App<tauri::test::MockRuntime> {
+        tauri::test::mock_builder()
+            .manage(player::Player::new())
+            .manage(audio::AudioPlayer::new())
+            .manage(downloads::DlManager::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app")
+    }
+
+    fn size(w: u32, h: u32) -> tauri::PhysicalSize<u32> {
+        tauri::PhysicalSize { width: w, height: h }
+    }
+
+    #[test]
+    fn the_debug_log_gets_timestamped_lines() {
+        let _s = sandbox();
+        debug_log_line("hello from a test");
+        ui_log("clicked".into());
+        let log = crate::test_support::debug_log();
+        let line = log.lines().find(|l| l.ends_with("hello from a test")).expect("line written");
+        let ts = line.strip_prefix('[').and_then(|r| r.split_once(']')).map(|(t, _)| t).unwrap();
+        assert!(ts.parse::<u64>().unwrap() > 1_700_000_000, "{line}");
+        assert!(log.lines().any(|l| l.ends_with("] ui: clicked")));
+        assert!(now_ms() > 1_700_000_000_000);
+    }
+
+    #[test]
+    fn config_saves_merge_and_load_back() {
+        let _s = sandbox();
+        config_save(json!({ "theme": "dark", "server_id": "pinned" })).unwrap();
+        // A stale page without server_id must not drop it.
+        config_save(json!({ "theme": "light" })).unwrap();
+        let cfg = config_load();
+        assert_eq!(cfg["theme"], json!("light"));
+        assert_eq!(crate::test_support::config_on_disk()["server_id"], json!("pinned"));
+        // The token never reaches the page.
+        assert!(cfg.get("token").is_none());
+        // Nor can the page write the backend's own keys.
+        config_save(json!({ "token": "from-the-page", "accounts": [{ "key": "x" }] })).unwrap();
+        let disk = crate::test_support::config_on_disk();
+        assert!(disk.get("token").is_none() && disk.get("accounts").is_none(), "{disk}");
+    }
+
+    #[test]
+    fn app_info_describes_this_install() {
+        let _s = sandbox();
+        let info = app_info();
+        assert_eq!(info["version"], json!(jellyfin::CLIENT_VERSION));
+        assert!(info["mpv"].as_str().is_some_and(|s| !s.is_empty()));
+        assert!(info["downloads_dir"].as_str().is_some_and(|s| !s.is_empty()));
+        assert_eq!(info["server_secure"], json!(false), "no server");
+        assert_eq!(info["server_pinned"], json!(false));
+        assert!(info["revocation_pending"].is_boolean());
+        assert!(info["token_storage"].is_string());
+    }
+
+    #[test]
+    fn a_user_agent_is_set_only_when_given() {
+        let built = |ua: Option<&str>| {
+            with_user_agent(jellyfin::http().get("http://example.invalid/x"), ua).build().unwrap()
+        };
+        assert_eq!(
+            built(Some("  VLC/3.0.20 LibVLC/3.0.20 ")).headers().get(reqwest::header::USER_AGENT).unwrap(),
+            "VLC/3.0.20 LibVLC/3.0.20"
+        );
+        // Blank or absent: the request carries none, so the client's own
+        // Aquarium/<version> is what goes out.
+        assert!(built(Some("   ")).headers().get(reqwest::header::USER_AGENT).is_none());
+        assert!(built(None).headers().get(reqwest::header::USER_AGENT).is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_source_reads_files_and_unwraps_gzip() {
+        let dir = std::env::temp_dir().join(format!("aquarium-src-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let plain = dir.join("list.m3u");
+        std::fs::write(&plain, "#EXTM3U\n#EXTINF:-1,One\nhttp://x/1\n").unwrap();
+        assert!(fetch_source(plain.to_string_lossy().into(), None).await.unwrap().starts_with("#EXTM3U"));
+        let as_url = format!("  file://{}  ", plain.display());
+        assert!(fetch_source(as_url, None).await.unwrap().contains("One"));
+
+        // Gzip is sniffed from the bytes, not the name.
+        let gz = dir.join("guide.xml");
+        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        std::io::Write::write_all(&mut enc, b"<tv><channel id=\"a\"/></tv>").unwrap();
+        std::fs::write(&gz, enc.finish().unwrap()).unwrap();
+        assert_eq!(fetch_source(gz.to_string_lossy().into(), None).await.unwrap(), "<tv><channel id=\"a\"/></tv>");
+
+        let empty = dir.join("empty.m3u");
+        std::fs::write(&empty, " \n\t").unwrap();
+        assert!(fetch_source(empty.to_string_lossy().into(), None).await.unwrap_err().contains("returned nothing"));
+        assert!(fetch_source(dir.join("missing").to_string_lossy().into(), None)
+            .await
+            .unwrap_err()
+            .starts_with("Couldn't open"));
+        assert_eq!(fetch_source("   ".into(), None).await, Err("No address given".to_string()));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn fetch_source_fetches_over_http_with_the_given_user_agent() {
+        let server = FakeServer::start(|r| match r.path() {
+            "/list.m3u" => Resp::bytes(200, "audio/x-mpegurl", b"#EXTM3U\n".to_vec()),
+            "/huge.xml" => Resp::body(200, Body::Short { declared: 300 * 1024 * 1024, sent: b"<tv>".to_vec() }),
+            _ => Resp::status(404),
+        });
+        let text = fetch_source(format!("{}/list.m3u", server.url), Some("Kodi/20".into())).await.unwrap();
+        assert_eq!(text, "#EXTM3U\n");
+        assert_eq!(server.requests_to("/list.m3u")[0].header("user-agent"), Some("Kodi/20"));
+        let err = fetch_source(format!("{}/nope", server.url), None).await.unwrap_err();
+        assert!(err.contains("404"), "{err}");
+        // A declared length over the cap is refused before anything is read.
+        let err = fetch_source(format!("{}/huge.xml", server.url), None).await.unwrap_err();
+        assert!(err.contains("too large"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn resolve_stream_leaves_non_http_addresses_alone() {
+        assert_eq!(resolve_stream("  rtsp://cam/1 ".into(), None).await, Ok("rtsp://cam/1".to_string()));
+    }
+
+    /// A playlist is handed to mpv at its final address, so neither of mpv's
+    /// two opens repeats the redirect chain.
+    #[tokio::test]
+    async fn resolve_stream_returns_a_playlists_final_address() {
+        let server = FakeServer::start(|r| match r.path() {
+            "/live/1" => Resp::status(302).header("Location", "/hls/1/index.m3u8"),
+            "/hls/1/index.m3u8" => Resp::bytes(200, "application/vnd.apple.mpegurl", b"#EXTM3U\n".to_vec()),
+            "/ts/1" => Resp::bytes(200, "video/mp2t", vec![0x47; 188]),
+            _ => Resp::status(404),
+        });
+        let got = resolve_stream(format!("{}/live/1", server.url), Some("VLC/3".into())).await.unwrap();
+        assert_eq!(got, format!("{}/hls/1/index.m3u8", server.url));
+        assert_eq!(server.requests_to("/live/1")[0].header("user-agent"), Some("VLC/3"));
+        // A raw transport stream keeps the address it was given.
+        let ts = format!("{}/ts/1", server.url);
+        assert_eq!(resolve_stream(ts.clone(), None).await, Ok(ts));
+    }
+
+    /// A refused address won't improve by asking again: one request, then
+    /// the error.
+    #[tokio::test]
+    async fn resolve_stream_gives_up_at_once_on_a_client_error() {
+        let server = FakeServer::start(|_| Resp::status(404));
+        let err = resolve_stream(format!("{}/live/2", server.url), None).await.unwrap_err();
+        assert!(err.contains("404"), "{err}");
+        assert_eq!(server.requests().len(), 1);
+    }
+
+    /// A cold channel answers 500 while its session comes up; that is
+    /// retried rather than handed to mpv.
+    #[tokio::test]
+    async fn resolve_stream_retries_a_server_error() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let c = calls.clone();
+        let server = FakeServer::start(move |_| {
+            if c.fetch_add(1, Ordering::SeqCst) == 0 {
+                Resp::status(500)
+            } else {
+                Resp::bytes(200, "application/x-mpegurl", b"#EXTM3U\n".to_vec())
+            }
+        });
+        let url = format!("{}/live/3.m3u8", server.url);
+        assert_eq!(resolve_stream(url.clone(), None).await, Ok(url));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn track_kinds_map_to_mpv_properties() {
+        assert_eq!(track_property("audio"), Ok("aid"));
+        assert_eq!(track_property("sub"), Ok("sid"));
+        assert_eq!(track_property("video"), Err("unknown track kind".to_string()));
+    }
+
+    /// Windowed, the bar is always reserved; fullscreen, the surface covers
+    /// the window and the revealed bar is clipped out of it, so the picture
+    /// does not move when the controls come and go.
+    #[test]
+    fn the_video_layout_follows_the_viewport() {
+        let s = size(2880, 1920);
+        assert_eq!(video_layout(s, 2.0, false, false), ((0, 0, 2880, 1776), 0));
+        assert_eq!(video_layout(s, 2.0, false, true), ((0, 0, 2880, 1776), 0));
+        assert_eq!(video_layout(s, 2.0, true, false), ((0, 0, 2880, 1920), 0));
+        assert_eq!(video_layout(s, 2.0, true, true), ((0, 0, 2880, 1920), 144));
+        assert_eq!(video_layout(size(1280, 800), 1.25, true, true), ((0, 0, 1280, 800), 90));
+    }
+
+    /// The saved size is clamped to the monitor, so a figure that once grew
+    /// on every restart until the window could not be created cannot come
+    /// back (regression: the stored size grew by the decorations each quit and
+    /// crossed the 16384 px texture limit).
+    #[test]
+    fn a_saved_window_size_is_clamped_to_the_monitor_and_the_minimum() {
+        let monitor = Some((2880, 1920));
+        assert_eq!(clamp_window_size(1300, 850, 2.0, monitor), (1300, 850));
+        assert_eq!(clamp_window_size(40_000, 17_000, 2.0, monitor), (1440, 960));
+        assert_eq!(clamp_window_size(10, 10, 2.0, monitor), (MIN_WIDTH_CSS as i32, MIN_HEIGHT_CSS as i32));
+        // A monitor smaller than the minimum wins over the minimum.
+        assert_eq!(clamp_window_size(1300, 850, 1.0, Some((800, 500))), (800, 500));
+        // No monitor known: only the floor applies.
+        assert_eq!(clamp_window_size(1300, 850, 1.0, None), (1300, 850));
+        assert_eq!(clamp_window_size(-5, 0, 1.0, None), (900, 600));
+        // A nonsense scale is treated as 0.1 rather than dividing by zero.
+        assert_eq!(clamp_window_size(100_000, 100_000, 0.0, Some((100, 100))), (1000, 1000));
+    }
+
+    #[test]
+    fn the_minimum_size_matches_tauri_conf() {
+        let conf: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let win = &conf["app"]["windows"][0];
+        assert_eq!(win["minWidth"].as_f64(), Some(MIN_WIDTH_CSS));
+        assert_eq!(win["minHeight"].as_f64(), Some(MIN_HEIGHT_CSS));
+    }
+
+    #[test]
+    fn the_window_size_lives_in_the_config_dir() {
+        assert_eq!(window_size_path(), config::config_dir().join("window.json"));
+    }
+
+    #[test]
+    fn replay_targets() {
+        assert_eq!(replay_target("1", "/tmp/a.mkv"), ("/tmp/a.mkv".to_string(), 5.0));
+        assert_eq!(replay_target("http://x/b|30", "/tmp/a.mkv"), ("http://x/b".to_string(), 30.0));
+        assert_eq!(replay_target("a|b|12.5", ""), ("a|b".to_string(), 12.5));
+        assert_eq!(replay_target("http://x/c|soon", ""), ("http://x/c".to_string(), 5.0));
+    }
+
+    /// The CLAUDE.md example, as waits between steps.
+    #[test]
+    fn the_test_sequence_is_absolute_times_turned_into_waits() {
+        let steps = test_sequence("7:fs,11:bar,15:nobar,18:nofs,22:pip,29:nopip");
+        let want: Vec<(u64, String)> = [(7, "fs"), (4, "bar"), (4, "nobar"), (3, "nofs"), (4, "pip"), (7, "nopip")]
+            .iter()
+            .map(|(t, s)| (*t, s.to_string()))
+            .collect();
+        assert_eq!(steps, want);
+    }
+
+    #[test]
+    fn odd_test_sequence_steps() {
+        assert_eq!(test_sequence(""), vec![]);
+        assert_eq!(test_sequence("fs,3:bar"), vec![(3, "bar".to_string())], "no colon: skipped");
+        assert_eq!(
+            test_sequence(" 2 : stop , x:play ,5:min,4:unmin"),
+            vec![(2, "stop".to_string()), (0, "play".to_string()), (5, "min".to_string()), (0, "unmin".to_string())]
+        );
+    }
+
+    #[tokio::test]
+    async fn player_commands_with_nothing_playing() {
+        let app = mock();
+        assert_eq!(player_seek(app.state(), 10.0, true).await, Err("no active playback".to_string()));
+        assert_eq!(player_pause_toggle(app.state()).await, Err("no active playback".to_string()));
+        assert_eq!(player_mpv_command(app.state(), vec![json!("cycle"), json!("pause")]).await, Err("no active playback".to_string()));
+        assert_eq!(player_set_track(app.state(), "video".into(), json!(1)).await, Err("unknown track kind".to_string()));
+        assert_eq!(player_set_track(app.state(), "sub".into(), json!("no")).await, Err("no active playback".to_string()));
+        assert_eq!(player_get_properties(app.state(), vec!["hwdec-current".into()]).await, Ok(json!({})));
+        assert_eq!(player_stop(app.state()).await, Ok(()));
+        assert!(!player_status(app.state()).active);
+        player_set_next_available(app.state(), true);
+        assert!(app.state::<player::Player>().next_available());
+    }
+
+    #[tokio::test]
+    async fn audio_commands_with_nothing_playing() {
+        let app = mock();
+        assert_eq!(audio_command(app.state(), vec![json!("cycle"), json!("pause")]).await, Err("nothing is playing".to_string()));
+        assert_eq!(audio_set_next(app.state(), None).await, Ok(()));
+        assert!(!audio_status(app.state()).active);
+        audio_set_queue(app.state(), vec![audio::AudioTrack { item_id: "a".into(), ..Default::default() }], 0, true, false);
+        let q = app.state::<audio::AudioPlayer>().queue();
+        assert_eq!(q.entries.len(), 1);
+        assert!(app.state::<audio::AudioPlayer>().can_next());
+    }
+
+    #[test]
+    fn audio_devices_are_name_and_description_objects() {
+        for d in audio_devices() {
+            assert!(d["name"].as_str().is_some_and(|s| !s.is_empty()), "{d}");
+            assert!(d["description"].as_str().is_some_and(|s| !s.is_empty()), "{d}");
+        }
+    }
+
+    #[test]
+    fn download_and_progress_commands_on_an_empty_install() {
+        let _s = sandbox();
+        let app = mock();
+        assert!(downloads_list(app.state()).is_empty());
+        assert!(download_delete("../escape".into()).is_err(), "ids are checked before use as paths");
+        assert_eq!(progress_pending(), 0);
+        assert!(progress_pending_ids().is_empty());
+        assert!(!network_metered());
+        let _ = disk_free();
+        download_cancel(app.state(), "nothing".into());
+        download_pause(app.state(), "nothing".into());
+    }
+
+    #[test]
+    fn a_local_watch_state_is_queued_for_the_signed_in_user() {
+        let _s = sandbox();
+        sign_in("http://127.0.0.1:9");
+        progress_store_local("abc".into(), 1234, false);
+        assert_eq!(progress_pending(), 1);
+        assert_eq!(progress_pending_ids(), vec!["abc".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn progress_sync_needs_a_server_a_user_and_a_token() {
+        let _s = sandbox();
+        assert_eq!(progress_sync().await, Err("not connected to a server".to_string()));
+        config::merge(json!({ "server": "http://127.0.0.1:9" })).unwrap();
+        assert_eq!(progress_sync().await, Err("not signed in".to_string()));
+        config::merge(json!({ "user_id": "u" })).unwrap();
+        assert_eq!(progress_sync().await, Err("not signed in".to_string()));
+        secret::store(TEST_TOKEN).unwrap();
+        // Signed in to a server that isn't there: verification fails.
+        assert!(progress_sync().await.is_err());
+    }
+
+    #[test]
+    fn switching_to_an_unknown_account_fails() {
+        let _s = sandbox();
+        assert!(account_switch("nobody|nowhere".into()).is_err());
+        assert!(accounts_list().is_array() || accounts_list().is_object());
+    }
 }

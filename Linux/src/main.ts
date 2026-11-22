@@ -81,6 +81,8 @@ import { renderItem } from "./views/item";
 import { renderLiveTv } from "./views/livetv";
 import { renderDownloads, updateDownloadProgress } from "./views/downloads";
 import { renderSettings } from "./views/settings";
+import { renderRequests, renderRequestTitle } from "./views/requests";
+import * as seerr from "./seerr";
 import { renderMusic } from "./views/music";
 import { renderBooks } from "./views/books";
 import { wireMusicPlayer } from "./views/musicPlayer";
@@ -98,7 +100,9 @@ const ICONS: Record<string, string> = {
   music: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5.5l10-2V16"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>',
   musicLibrary: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="4" height="16" rx="1"/><rect x="9" y="4" width="4" height="16" rx="1"/><path d="m16 5 3.5 1L16.5 20 13 19"/></svg>',
   books: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h9.5a3 3 0 0 1 3 3v12H8a3 3 0 0 1-3-3z"/><path d="M5 16.5a3 3 0 0 1 3-3h9.5"/></svg>',
+  collections: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="2"/><path d="M6 5.5h12M8.5 2h7"/></svg>',
   favorites: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 4.5 2.35 4.9 5.15.7-3.8 3.75.95 5.15L12 16.6l-4.65 2.4.95-5.15L4.5 10.1l5.15-.7z"/></svg>',
+  requests: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="13" height="13" rx="2"/><path d="M8 3.5h10.5a2 2 0 0 1 2 2V16"/><path d="M9.5 10.5v6M6.5 13.5h6"/></svg>',
 };
 
 let playerActive = false;
@@ -375,7 +379,7 @@ function updateBackButton(): void {
 }
 
 // Pages that can't render without the server.
-const SERVER_PAGES = ["home", "lib", "item", "person", "livetv", "search", "favorites", "music", "books"];
+const SERVER_PAGES = ["home", "lib", "item", "person", "livetv", "search", "favorites", "music", "books", "requests", "request"];
 
 // The strip above every page carries Retry, so this screen only has to say
 // what is missing and point at what still works.
@@ -472,6 +476,8 @@ async function route(): Promise<void> {
       case "search": await renderSearch(content, decodeURIComponent(arg)); break;
       case "music": await renderMusic(content, arg); break;
       case "books": await renderBooks(content, arg); break;
+      case "requests": await renderRequests(content); break;
+      case "request": await renderRequestTitle(content, arg); break;
       default: await renderHome(content);
     }
   } catch (e: any) {
@@ -574,6 +580,10 @@ function paintNav(views: any[] | null): void {
           v.Name,
           v.CollectionType === "movies" ? ICONS.movies : v.CollectionType === "tvshows" ? ICONS.tv : ICONS.folder,
         ]);
+      // Jellyfin's box sets, where the server has any: its Collections view
+      // is a library of them, and each opens as a grid of what is in it.
+      const collections = views.find((v) => v.CollectionType === "boxsets");
+      if (collections) libraries.push([`#/lib/${collections.Id}`, "Collections", ICONS.collections]);
       group("Libraries", [...libraries, ...listening]);
       // Only servers that actually have a Live TV library get the entry:
       // without a tuner configured, the page can never say anything but "no
@@ -583,7 +593,11 @@ function paintNav(views: any[] | null): void {
       if (hasLiveTv || api.getConfig()?.livetv_source === "custom") {
         group("Live", [["#/livetv", "Live TV", ICONS.livetv]]);
       }
-      group("You", [["#/favorites", "Favorites", ICONS.favorites], downloads]);
+      const yours: Row[] = [["#/favorites", "Favorites", ICONS.favorites]];
+      // Only while a Seerr server is connected (Settings → Requests): without
+      // one the page could only say so.
+      if (seerr.isConnected()) yours.push(["#/requests", seerr.PAGE_TITLE, ICONS.requests]);
+      group("You", [...yours, downloads]);
     }
   }
 
@@ -814,6 +828,9 @@ async function showShell(): Promise<void> {
   void wireMusicPlayer();
   buildNav();
   updateOfflineStrip();
+  // Whether this account has a Seerr server. Asked behind the first page:
+  // when the answer is yes, `aquarium-seerr-changed` redraws what shows it.
+  void seerr.loadStatus();
   // Reopen where the last session left off. Only on a cold start with no hash
   // — a hash already in the URL is a deliberate destination and wins.
   if (!location.hash) {
@@ -840,6 +857,8 @@ function showLogin(): void {
   // must never paint a previous session's cached screens before its own
   // requests have landed.
   clearCache();
+  // Nor anything of the Seerr server the last account asked through.
+  seerr.forgetStatus();
   $("shell").classList.add("hidden");
   $("login-root").classList.remove("hidden");
   renderLogin($("login-root"), showShell);
@@ -870,6 +889,7 @@ function showAddAccount(): void {
 async function enterAccount(): Promise<void> {
   if (playerActive) await playerCtl.stop().catch(() => {});
   clearCache();
+  seerr.forgetStatus();
   history.replaceState(null, "", "#/home");
   const s = api.getSession();
   await showShell();
@@ -3403,7 +3423,17 @@ function toggleShortcuts(): void {
   const close = openDialog({
     title: "Keyboard shortcuts",
     body,
-    actions: [{ label: "Close", primary: true }],
+    // Close does not run onDismiss (that is Escape and the scrim), so it
+    // clears the closer itself, or the next "?" would only clear it.
+    actions: [
+      {
+        label: "Close",
+        primary: true,
+        run: () => {
+          shortcutsOpen = null;
+        },
+      },
+    ],
     onDismiss: () => {
       shortcutsOpen = null;
     },
@@ -3582,6 +3612,26 @@ async function boot(): Promise<void> {
   // request rather than waiting for the next visit.
   document.addEventListener("aquarium-next-up-changed", () => {
     if (atHome() && !playerActive) route();
+  });
+
+  // A Seerr server was connected, disconnected, or its session ran out or
+  // came back: the sidebar gains or loses Requests, and a page that shows
+  // something of Seerr's is drawn again.
+  let seerrShown = seerr.isConnected();
+  document.addEventListener(seerr.SEERR_CHANGED, () => {
+    const now = seerr.isConnected();
+    if (now === seerrShown) return;
+    seerrShown = now;
+    if ($("shell").classList.contains("hidden")) return;
+    paintNav(getCached<any[]>(VIEWS_CACHE_KEY) ?? null);
+    const page = (location.hash || "#/home").match(/^#\/([^/]*)/)?.[1] ?? "home";
+    if (page === "requests" || page === "request") void route();
+    else if (["search", "item", "lib"].includes(page) && !playerActive) void route();
+  });
+  // A request was made or withdrawn somewhere: the Requests page asks again.
+  document.addEventListener(seerr.SEERR_REQUESTS_CHANGED, () => {
+    const page = (location.hash || "#/home").match(/^#\/([^/]*)/)?.[1] ?? "home";
+    if (page === "requests") void route();
   });
 
   document.addEventListener("aquarium-account-switch", (ev) => {

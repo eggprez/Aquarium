@@ -68,7 +68,7 @@ final class PlayerChromeState {
     /// The speed to go back to when the hold ends.
     @ObservationIgnored var speedBeforeHold: Double = 1
 
-    enum PanelAnchor: Hashable { case info, more }
+    enum PanelAnchor: Hashable { case info, channels, more }
 
     enum ChromeMenu: Hashable {
         case audio, subtitles, quality, upNext, more
@@ -119,12 +119,13 @@ final class PlayerChromeState {
     }
 
     /// Hide after the Settings interval, unless something says to stay: a
-    /// pause, an open panel, a scrub in progress, or VoiceOver, whose user is
-    /// finding the controls by touch.
+    /// pause, an open panel, a scrub in progress, a stream still loading, or
+    /// VoiceOver, whose user is finding the controls by touch.
     func scheduleHide(_ context: HideContext) {
         hideTask?.cancel()
         hideTask = nil
-        guard context.mayHide, scrub == nil, !panelOpen, !menuOpen, context.hideAfter > 0 else { return }
+        guard context.mayHide, !context.isLoading, scrub == nil, !panelOpen, !menuOpen,
+              context.hideAfter > 0 else { return }
         let after = context.hideAfter
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(after))
@@ -139,6 +140,10 @@ final class PlayerChromeState {
         var voiceOver: Bool
         var hideAfter: Double
         var hasError: Bool
+        /// The stream is opening or waiting on the network. The controls
+        /// that are up stay up, and their clock starts once there is a
+        /// picture moving; a tap still puts them away.
+        var isLoading = false
 
         var mayHide: Bool { !isPaused && !voiceOver && !hasError }
     }
@@ -283,7 +288,17 @@ struct PlayerChrome: View {
         let after = prefs.hideControlsAfter
         #endif
         return .init(isPaused: player.isPaused, voiceOver: voiceOver,
-                     hideAfter: after, hasError: player.errorMessage != nil)
+                     hideAfter: after, hasError: player.errorMessage != nil, isLoading: isLoading)
+    }
+
+    /// Opening, or stopped for the network: on an iPhone or iPad the
+    /// controls wait for the picture before their clock runs.
+    private var isLoading: Bool {
+        #if os(iOS)
+        player.isActive && (player.isOpening || player.isBuffering)
+        #else
+        false
+        #endif
     }
 
     /// Whether the clock says the controls are up: a finger's on iOS, the
@@ -386,6 +401,7 @@ struct PlayerChrome: View {
 
             if chrome.holdingDoubleSpeed {
                 HoldSpeedBadge()
+                    .testAnchor(TestID.Player.hudDoubleSpeed)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .padding(.top, compact ? 64 : 88)
                     .transition(.opacity)
@@ -451,7 +467,9 @@ struct PlayerChrome: View {
         }
         .onAppear { mac.pictureInPicture = pictureInPicture }
         #endif
-        .onChange(of: player.isPaused) { _, _ in chrome.scheduleHide(hideContext) }
+        // A pause holds the controls and so does a stream still loading;
+        // either ending starts their clock.
+        .onChange(of: [player.isPaused, isLoading]) { _, _ in chrome.scheduleHide(hideContext) }
         .onChange(of: chrome.panel) { _, open in
             if open == nil { interact() } else { chrome.holdControls() }
         }
@@ -532,9 +550,12 @@ struct PlayerChrome: View {
     /// and Up Next sit above the bottom band when it is up and at the foot of
     /// the picture when it isn't.
     /// On a television the prompts step aside for the panel and for a scrub
-    /// waiting on its click, since a click is what they answer to.
+    /// waiting on its click, since a click is what they answer to. Elsewhere
+    /// they step aside for an open card, which otherwise drew over Skip Intro
+    /// and left half a button showing under it.
     private var promptsMayShow: Bool {
-        !(PlayerMetrics.television && (chrome.panelOpen || chrome.scrub != nil))
+        if PlayerMetrics.television { return !(chrome.panelOpen || chrome.scrub != nil) }
+        return !chrome.menuOpen
     }
 
     @ViewBuilder
@@ -551,6 +572,7 @@ struct PlayerChrome: View {
                 ProgressView()
                     .controlSize(.large)
                     .tint(.white)
+                    .accessibilityIdentifier(TestID.Player.buffering)
                     .padding(34)
                     .playerGlass(cornerRadius: 30)
                     .allowsHitTesting(false)
@@ -610,10 +632,14 @@ struct PlayerChrome: View {
 }
 
 extension PlayerChromeState.PanelAnchor {
-    /// The pill a page's popover hangs off: the Info pill for Info, the "…"
-    /// button for the pages opened from its menu.
+    /// The pill a page's popover hangs off: the Info pill for Info, the
+    /// Channels pill for the line-up, the "…" button for anything else.
     static func anchor(for tab: PlayerTab) -> Self {
-        tab == .info ? .info : .more
+        switch tab {
+        case .info: .info
+        case .channels: .channels
+        default: .more
+        }
     }
 }
 

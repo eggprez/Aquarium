@@ -13,7 +13,10 @@
  * play triangle and the filled star — say so themselves.
  */
 
-const STROKE = 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
+// No stroke-width here: the 1.8 default is on the <svg> (iconSvg) and inherited,
+// so an icon that adds its own weight after STROKE gets it. Two
+// stroke-width attributes on one element keep the first.
+const STROKE = 'fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"';
 const SOLID = 'fill="currentColor" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"';
 
 const STAR_PATH = "m12 3.7 2.55 5.17 5.7.83-4.13 4.02.98 5.68L12 16.72l-5.1 2.68.98-5.68L3.75 9.7l5.7-.83z";
@@ -53,7 +56,7 @@ export type IconName = keyof typeof PATHS;
 
 /** The raw `<svg>` markup, for the few places that need a string. */
 export function iconSvg(name: IconName): string {
-  return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${PATHS[name] ?? PATHS.error}</svg>`;
+  return `<svg viewBox="0 0 24 24" stroke-width="1.8" aria-hidden="true" focusable="false">${PATHS[name] ?? PATHS.error}</svg>`;
 }
 
 /**

@@ -2,8 +2,17 @@
 xcuserdata/
 *.xcarchive
 DerivedData/
+# Results of Aquarium/Tools/run-tests.sh
+Aquarium/TestResults/
 .DS_Store
 .claude/
 
 # SwiftPM scratch inside the vendored package
 Aquarium/Vendor/MPVKit/.build/
+
+# The test runner app (Aquarium/Tools/TestRunner)
+Aquarium/Tools/TestRunner/.build/
+/Aquarium Tests.app/
+
+# Stray coverage data from test runs
+*.profraw

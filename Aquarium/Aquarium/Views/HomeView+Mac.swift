@@ -18,6 +18,10 @@ struct HeroCarousel: View {
     /// The title on screen, kept current for whoever else wants to start it —
     /// the toolbar's Play Featured, in `HomeView`.
     @Binding var featured: BaseItem?
+    /// How far the picture reaches up under the window's toolbar — see
+    /// `HeroHeader.topBleed`. The pager and the chevrons stay in the band
+    /// below it.
+    var topBleed: CGFloat = 0
 
     @State private var index = 0
     @State private var isHovering = false
@@ -41,7 +45,10 @@ struct HeroCarousel: View {
     /// the middle out of it, held between a height that still fits a title
     /// and two buttons and one that doesn't push the first shelf off a
     /// laptop's screen.
-    private var height: CGFloat {
+    private var height: CGFloat { Self.height(forWidth: width) }
+
+    /// `height`, as a static for the unit tests.
+    static func height(forWidth width: CGFloat) -> CGFloat {
         guard width > 0 else { return HeroHeader.height }
         return min(520, max(280, (width / 2.4).rounded()))
     }
@@ -49,7 +56,7 @@ struct HeroCarousel: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             if let current {
-                HeroHeader(item: current, heroHeight: height, availableWidth: width)
+                HeroHeader(item: current, topBleed: topBleed, heroHeight: height, availableWidth: width)
                     .id(current.Id)
                     .transition(.opacity)
             }
@@ -64,12 +71,13 @@ struct HeroCarousel: View {
                 }
             }
         }
-        .frame(height: height)
+        .frame(height: height + topBleed)
         .frame(maxWidth: .infinity)
         .background(WidthReader(width: $width))
         .overlay(alignment: .leading) {
             if items.count > 1 {
                 ShelfPagingButton(direction: .back) { turn(by: -1) }
+                    .accessibilityIdentifier(TestID.Home.heroPrevious)
                     .padding(.leading, 10)
                     .opacity(showsChevrons ? 1 : 0)
             }
@@ -77,6 +85,7 @@ struct HeroCarousel: View {
         .overlay(alignment: .trailing) {
             if items.count > 1 {
                 ShelfPagingButton(direction: .forward) { turn(by: 1) }
+                    .accessibilityIdentifier(TestID.Home.heroNext)
                     .padding(.trailing, 10)
                     .opacity(showsChevrons ? 1 : 0)
             }
@@ -93,6 +102,7 @@ struct HeroCarousel: View {
         .onKeyPress(.rightArrow) { turn(by: 1); return .handled }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Featured")
+        .accessibilityIdentifier(TestID.Home.hero)
         .onReceive(ticker) { _ in
             guard !reduceMotion, !isHovering, !isFocused, items.count > 1 else { return }
             withAnimation(.easeInOut(duration: 0.6)) {
@@ -121,8 +131,14 @@ struct HeroCarousel: View {
     private func turn(by offset: Int) {
         guard items.count > 1 else { return }
         withAnimation(.easeInOut(duration: 0.35)) {
-            index = (index + offset + items.count) % items.count
+            index = Self.turned(index, by: offset, count: items.count)
         }
+    }
+
+    /// One page along, wrapping at either end. Static for the unit tests.
+    static func turned(_ index: Int, by offset: Int, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        return ((index + offset) % count + count) % count
     }
 
     /// Everything but the page on screen, pulled into the image cache, at the
@@ -156,6 +172,7 @@ struct HeroCarousel: View {
                 .buttonStyle(.plain)
                 .help(HeroHeader.displayTitle(of: items[position]))
                 .accessibilityLabel("Show \(HeroHeader.displayTitle(of: items[position]))")
+                .accessibilityIdentifier(TestID.Home.heroDot(position))
             }
         }
         .padding(.horizontal, 8)
@@ -164,6 +181,7 @@ struct HeroCarousel: View {
         .padding(.trailing, Metrics.gutter)
         .padding(.bottom, 12)
         .animation(.easeOut(duration: 0.25), value: index)
+        .testAnchor(TestID.Home.heroCurrentPage(index))
     }
 
     /// What else is in the bar, as a row of its backdrops in the corner: the
@@ -192,11 +210,13 @@ struct HeroCarousel: View {
                 .help(HeroHeader.displayTitle(of: items[position]))
                 .accessibilityLabel("Show \(HeroHeader.displayTitle(of: item))")
                 .accessibilityAddTraits(position == index ? [.isButton, .isSelected] : .isButton)
+                .accessibilityIdentifier(TestID.Home.heroThumb(item.Id))
             }
         }
         .padding(.trailing, Metrics.gutter)
         .padding(.bottom, 38)
         .animation(.easeOut(duration: 0.25), value: index)
+        .testAnchor(TestID.Home.heroCurrentPage(index))
     }
 }
 

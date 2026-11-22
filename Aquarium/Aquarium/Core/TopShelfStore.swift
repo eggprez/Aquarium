@@ -6,6 +6,7 @@
 #if os(tvOS)
 
 import Foundation
+import OSLog
 import TVServices
 
 enum TopShelf {
@@ -33,6 +34,15 @@ enum TopShelf {
         await Writer.shared.publish(Array(zip(items, sources)))
     }
 
+    /// Home's Next Up, once its load is over: `nil` when that load failed.
+    /// A failed load publishes nothing, so the shelf keeps what it last had
+    /// rather than being emptied by a request that didn't come back — on a
+    /// launch with no saved Home, the list on hand then is an empty one.
+    static func publishHomeNextUp(_ items: [BaseItem]?) async {
+        guard let items else { return }
+        await publish(items)
+    }
+
     /// Ask the server for Next Up and publish it, for when Home isn't there
     /// to: after playback ends. A title opened from the shelf itself or a deep
     /// link can be watched without Home ever being on screen, and the shelf
@@ -58,6 +68,10 @@ enum TopShelf {
 private actor Writer {
     static let shared = Writer()
 
+    /// Writes into the group container used to fail without a word on
+    /// hardware (see `TopShelfPaths.directory`); they are logged now.
+    static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Aquarium", category: "topshelf")
+
     private let fm = FileManager.default
 
     /// Bumped by `clear()`. A publish waits on poster downloads, and a
@@ -72,7 +86,13 @@ private actor Writer {
               let manifest = TopShelfPaths.manifest
         else { return }
 
-        try? fm.createDirectory(at: imagesDir, withIntermediateDirectories: true)
+        sweepLegacy()
+        do {
+            try fm.createDirectory(at: imagesDir, withIntermediateDirectories: true)
+        } catch {
+            Self.log.error("can't make the shelf's folder: \(error.localizedDescription, privacy: .public)")
+            return
+        }
 
         var entries: [TopShelfSnapshot.Entry] = []
         for (item, source) in items {
@@ -99,7 +119,13 @@ private actor Writer {
         let snapshot = TopShelfSnapshot(entries: entries, generated: Date())
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        try? data.write(to: manifest, options: .atomic)
+        do {
+            try data.write(to: manifest, options: .atomic)
+        } catch {
+            Self.log.error("can't write the shelf: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        Self.log.info("shelf written: \(entries.count, privacy: .public) of \(items.count, privacy: .public) posters")
 
         prune(keeping: Set(entries.map(\.image)), in: imagesDir)
         TVTopShelfContentProvider.topShelfContentDidChange()
@@ -109,7 +135,14 @@ private actor Writer {
         generation += 1
         guard let dir = TopShelfPaths.directory else { return }
         try? fm.removeItem(at: dir)
+        sweepLegacy()
         TVTopShelfContentProvider.topShelfContentDidChange()
+    }
+
+    /// The folder older builds wrote to. Only the simulator ever let them.
+    private func sweepLegacy() {
+        guard let old = TopShelfPaths.legacyDirectory, fm.fileExists(atPath: old.path) else { return }
+        try? fm.removeItem(at: old)
     }
 
     /// Posters the shelf no longer names. Left alone, a season of nightly

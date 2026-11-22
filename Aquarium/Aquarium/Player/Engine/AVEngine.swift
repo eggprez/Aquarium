@@ -73,6 +73,12 @@ final class AVEngine: PlaybackEngine {
     /// See `watchForPicture`.
     private var pictureWatchdog: Task<Void, Never>?
 
+    /// The restarts in a downloaded stream and how late the sound has run
+    /// since the last seek; see `StreamSeams`.
+    private var seamSlip = SeamSlip()
+    /// Fires as playback reaches a hole in a downloaded stream.
+    private var gapObserver: Any?
+
     private var timeObserver: Any?
     private var statusObservers: Set<AnyCancellable> = []
     /// Lives as long as the engine does, unlike `statusObservers`, which is
@@ -131,13 +137,19 @@ final class AVEngine: PlaybackEngine {
 
     // MARK: - Streams
 
+    /// `EngineLoadRequest.readAhead` for the stream now loaded; zero is
+    /// AVFoundation's own choice.
+    private var readAhead: Double = 0
+
     func load(_ request: EngineLoadRequest) {
         loadGeneration &+= 1
         let mine = loadGeneration
         currentURL = request.url
         loadedLive = request.live
+        readAhead = request.readAhead ?? 0
         hints = request.hints
         hadFirstFrame = false
+        findSeams(in: request.url)
         // A stored offset is built into the stream as it opens rather than
         // applied to it a moment later, so nothing is ever handed to the
         // player at the wrong offset first.
@@ -205,7 +217,8 @@ final class AVEngine: PlaybackEngine {
         // encoder that falls momentarily behind real time. Live gets the
         // same: how far behind the broadcast you are is decided by where you
         // join the playlist, not by how much is downloaded ahead.
-        newItem.preferredForwardBufferDuration = 0
+        // Unless the model asked for a ceiling: see `EngineLoadRequest.readAhead`.
+        newItem.preferredForwardBufferDuration = readAhead
         // Left alone, AVPlayer joins a live stream at the edge and then,
         // after every rebuffer, resumes from where it stopped — so each stall
         // pushes the playhead further behind until it is behind the oldest
@@ -266,6 +279,7 @@ final class AVEngine: PlaybackEngine {
         currentURL = nil
         composed = nil
         teardownObservers()
+        removeGapObserver()
         pendingSeek = nil
         seekWatchdog?.cancel()
         seekWatchdog = nil
@@ -388,8 +402,10 @@ final class AVEngine: PlaybackEngine {
         loadGeneration &+= 1
         currentURL = request.url
         loadedLive = request.live
+        readAhead = request.readAhead ?? 0
         hints = request.hints
         hadFirstFrame = false
+        findSeams(in: request.url)
         sourceAsset = asset
         composed = nil
 
@@ -550,6 +566,7 @@ final class AVEngine: PlaybackEngine {
             target = clamped.seconds
         }
         hadFirstFrame = false
+        seamSlip.reset()
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
                     toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
             guard let self, finished else { return }
@@ -727,6 +744,11 @@ final class AVEngine: PlaybackEngine {
                 ? avItem.currentMediaSelection.selectedMediaOption(in: group).flatMap { group.options.firstIndex(of: $0) }
                 : composed?.subtitle
             for (i, option) in group.options.enumerated() {
+                // AVFoundation lists a "CC" option for any HLS stream whose
+                // manifest doesn't rule captions out, and the server's never
+                // does: a row that ticks and shows nothing. Kept for a
+                // channel, the one place captions do ride in the picture.
+                if option.mediaType == .closedCaption, !loadedLive { continue }
                 list.append(EngineTrack(
                     id: i, kind: .subtitle, title: option.displayName, manifestName: await Self.manifestName(of: option),
                     language: option.extendedLanguageTag ?? option.locale?.identifier,
@@ -1021,6 +1043,72 @@ final class AVEngine: PlaybackEngine {
         deliver(.buffering(buffering))
     }
 
+    /// Read a downloaded stream's seams for the stream now loading. Nothing
+    /// to find in anything but a package on this device.
+    private func findSeams(in url: URL) {
+        seamSlip = SeamSlip()
+        removeGapObserver()
+        guard url.isFileURL, url.pathExtension.lowercased() == "movpkg" else { return }
+        let mine = loadGeneration
+        Task {
+            let seams = await StreamSeams.seams(inPackage: url)
+            guard loadGeneration == mine, !seams.isEmpty else { return }
+            seamSlip.seams = seams
+            watchForGaps()
+        }
+    }
+
+    private func removeGapObserver() {
+        if let gapObserver { player.removeTimeObserver(gapObserver) }
+        gapObserver = nil
+    }
+
+    /// Step over the holes in a downloaded stream as playback reaches them.
+    ///
+    /// A hole is a segment the server handed over half-written: neither its
+    /// picture nor its sound is on this device past the point it was cut.
+    /// Left to play, the sound of the next segment starts at once and runs
+    /// that far ahead of a picture that has nothing to show. There is nothing
+    /// there to wait for, so the playhead goes straight to where the stream
+    /// picks up — a jump cut, which is what the hole honestly is.
+    private func watchForGaps() {
+        let starts = seamSlip.gapStarts
+        guard !starts.isEmpty else { return }
+        let times = starts.map { NSValue(time: CMTime(seconds: $0, preferredTimescale: 600)) }
+        gapObserver = player.addBoundaryTimeObserver(forTimes: times, queue: .main) { [weak self] in
+            MainActor.assumeIsolated { self?.stepOverGap() }
+        }
+    }
+
+    private func stepOverGap() {
+        guard !holding, player.timeControlStatus == .playing else { return }
+        let now = player.currentTime().seconds
+        guard now.isFinite, let landing = seamSlip.landing(past: now) else { return }
+        Self.log.notice("hole in the download at \(now, format: .fixed(precision: 1), privacy: .public); stepping to \(landing, format: .fixed(precision: 1), privacy: .public)")
+        seamSlip.reset()
+        player.seek(to: CMTime(seconds: landing, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    /// Put the sound back on the picture once a downloaded stream's seams
+    /// have carried it far enough off.
+    ///
+    /// AVPlayer plays the audio either side of an encoder restart end to end,
+    /// whether the two overlap or leave a hole, so each one crossed leaves
+    /// the sound behind the picture or ahead of it (see `StreamSeams`). A
+    /// seek makes it read the timestamps again, which is all skipping forward
+    /// and back ever did to cure it; this is that seek, to the frame already
+    /// showing. It costs a blink — about 70 ms on a package — so it waits
+    /// until the slip is past what reads as in sync rather than spending one
+    /// on every seam.
+    private func reanchorIfSoundHasSlipped(at time: CMTime) {
+        guard time.seconds.isFinite, seamSlip.advance(to: time.seconds) else { return }
+        let slip = seamSlip.slip
+        seamSlip.reset()
+        guard player.timeControlStatus == .playing else { return }
+        Self.log.notice("sound \(Int((abs(slip) * 1000).rounded()), privacy: .public) ms \(slip > 0 ? "late" : "early", privacy: .public) after seams; re-anchoring at \(time.seconds, format: .fixed(precision: 1), privacy: .public)")
+        player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
     private func tick(_ time: CMTime) {
         guard let avItem = playerItem else { return }
         // A stream still opening at a position sits at the position it was
@@ -1029,6 +1117,7 @@ final class AVEngine: PlaybackEngine {
         // to the server as this item's resume point.
         if !holding {
             deliver(.position(time.seconds.isFinite ? time.seconds : 0))
+            reanchorIfSoundHasSlipped(at: time)
         }
         let d = avItem.duration.seconds
         // A live HLS stream has no meaningful duration; the seekable range

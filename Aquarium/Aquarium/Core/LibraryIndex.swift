@@ -5,7 +5,9 @@
 //  asks the server what has changed. Library grids, a show's seasons and a
 //  season's episodes are answered from the copy — at once, and with the server
 //  unreachable — and posters, logos and episode stills are saved alongside it
-//  so a grid never has to wait on a picture it has shown before.
+//  so a grid never has to wait on a picture it has shown before. Music and
+//  audiobook libraries are not in the copy, but on iPhone and iPad their album
+//  and book covers are saved with the rest — see `audioCoverURLs`.
 //
 //  What "what has changed" costs, because Jellyfin has no feed of it:
 //
@@ -27,6 +29,11 @@
 
 import Foundation
 import Observation
+#if os(iOS) || os(tvOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 @MainActor
 @Observable
@@ -89,9 +96,9 @@ final class LibraryIndex {
     /// next sync.
     nonisolated static var directory: URL {
         #if os(tvOS)
-        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let base = AppDirectory.url(.cachesDirectory)
         #else
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let base = AppDirectory.url(.applicationSupportDirectory)
         #endif
         return base.appending(path: "LibraryCopy", directoryHint: .isDirectory)
     }
@@ -590,9 +597,9 @@ final class LibraryIndex {
         return f
     }()
 
-    /// Libraries whose contents this client shows. Music and the like are out
-    /// of scope everywhere else, so they are here too; Live TV is not a
-    /// library of items at all.
+    /// Libraries whose items the copy keeps. Music and audiobooks have screens
+    /// of their own that read the server (only their covers are saved — see
+    /// `audioCoverURLs`); Live TV is not a library of items at all.
     static func isIndexable(_ view: BaseItem) -> Bool {
         let excluded = ["boxsets", "playlists", "music", "audiobooks", "books", "podcasts", "livetv"]
         guard let type = view.CollectionType else { return true }
@@ -665,36 +672,124 @@ final class LibraryIndex {
 
     // MARK: - Artwork
 
-    /// Save every poster, logo and episode still that isn't on disk yet.
-    /// Backdrops are left to be saved as they are seen: they are the large
-    /// ones, and most are never looked at.
+    /// Save every poster, logo and episode still that isn't on disk yet, then
+    /// the backdrop of every film and show — what the banner at the top of
+    /// Home draws, at the size it draws it on this screen — so the banner is
+    /// still a picture when the server can't be reached. Backdrops go last:
+    /// they are the large ones, and a page of posters is what most screens
+    /// need first.
     private func startArtwork() {
         guard isEnabled, isReady, artworkTask == nil else { return }
         let urls = artworkURLs()
         artworkTask = Task {
-            await saveArtwork(urls)
+            var all = urls
+            #if os(iOS)
+            all += await audioCoverURLs()
+            #endif
+            await saveArtwork(all)
             artworkTask = nil
             artworkProgress = nil
         }
     }
 
+    #if os(iOS)
+    /// Every album cover and audiobook cover, so the Music and Books tabs have
+    /// their pictures with no server too.
+    ///
+    /// Music and audiobook libraries are not part of the copy itself — those
+    /// tabs read the server, or the downloads offline — so their covers are
+    /// listed here with one light sweep per library: ids and image tags,
+    /// nothing else, a few hundred bytes an item. A song's cover is filed
+    /// under its album's id and tag (see `MusicArt.url`), so saving the album
+    /// covers every song on it.
+    private func audioCoverURLs() async -> [URL] {
+        let client = JellyfinClient.shared
+        guard !client.isOffline, let userId = client.session?.userId else { return [] }
+        let audioTypes: Set<String> = ["music", "audiobooks", "books"]
+        var libraries = views.filter { $0.CollectionType.map(audioTypes.contains) ?? false }
+        // An untyped folder the shell found to be audiobooks — see
+        // `AppModel.loadLibraries`.
+        if let saved = savedLibraries {
+            for library in saved.music + saved.books where !libraries.contains(where: { $0.Id == library.Id }) {
+                libraries.append(library)
+            }
+        }
+        // The width the shelves and grids ask for, and wide enough for an
+        // album page's header to use as it is.
+        let width = 640
+        var out: [URL] = []
+        for library in libraries {
+            guard !Task.isCancelled else { break }
+            let query: [URLQueryItem] = [
+                .init(name: "ParentId", value: library.Id),
+                .init(name: "Recursive", value: "true"),
+                .init(name: "IncludeItemTypes", value: "MusicAlbum,AudioBook"),
+                .init(name: "EnableImageTypes", value: "Primary"),
+                .init(name: "ImageTypeLimit", value: "1"),
+                .init(name: "EnableUserData", value: "false"),
+            ] + Self.stableOrder
+            // One library the server won't list is no reason to skip the rest.
+            guard let covers = try? await pages(query, userId: userId, pageSize: Self.lightPage, progress: { _, _ in })
+            else { continue }
+            for item in covers {
+                if let url = Artwork.ownPrimary(item, width: width) { out.append(url) }
+            }
+        }
+        return out
+    }
+    #endif
+
     private func artworkURLs() -> [URL] {
         let poster = Int(Metrics.posterWidth * 2)
         let still = Int(Metrics.stillWidth * 2)
+        let hero = Self.heroBackdropWidth
         var out: [URL] = []
+        var backdrops: [URL] = []
         out.reserveCapacity(items.count + items.count / 4)
         for item in items.values {
             switch item.kind {
             case "Episode":
                 if let url = Artwork.ownPrimary(item, width: still) { out.append(url) }
-            case "Movie", "Series":
+            default:
+                // The poster, and the title logo a Home hero draws in place of
+                // typeset text — at the width the hero asks for (see
+                // `HomeView`'s `titleBlock`), so offline it finds this copy
+                // big enough. Collections and loose videos get heroes too; a
+                // season's logo is its show's, filed once under the show.
                 if let url = Artwork.url(item, type: "Primary", width: poster) { out.append(url) }
                 if let url = Artwork.logo(item, width: 700) { out.append(url) }
-            default:
-                if let url = Artwork.url(item, type: "Primary", width: poster) { out.append(url) }
+                // The hero's backdrop too, for films and shows — the kinds the
+                // banner draws from the copy (see `spotlight`).
+                if item.kind == "Movie" || item.kind == "Series", item.BackdropImageTags?.isEmpty == false,
+                   let url = Artwork.url(item, type: "Backdrop", width: hero) {
+                    backdrops.append(url)
+                }
             }
         }
-        return out
+        return out + backdrops
+    }
+
+    /// How wide the banner at the top of Home asks for a backdrop on this
+    /// screen: the screen's long side in pixels, in the steps the loader asks
+    /// in, never less than the hero's fixed width and never past 4K. Any saved
+    /// copy at three quarters of the width asked for or more is used as it is
+    /// (see `ImageLoader`), so this answers the hero however the window or
+    /// the device is turned.
+    @MainActor
+    static var heroBackdropWidth: Int {
+        #if os(iOS)
+        let bounds = UIScreen.main.bounds
+        let points = max(bounds.width, bounds.height)
+        let scale = UIScreen.main.scale
+        #elseif os(macOS)
+        let points = NSScreen.main?.frame.width ?? 1440
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        #else
+        let points: CGFloat = 0
+        let scale: CGFloat = 1
+        #endif
+        let asked = ImageLoader.requestWidth(points: points, displayScale: scale)
+        return max(HeroHeader.backdropWidth, min(3840, asked))
     }
 
     private func saveArtwork(_ urls: [URL]) async {
@@ -851,6 +946,9 @@ final class LibraryIndex {
             guard JellyfinClient.shared.isOffline else { return nil }
             types = ["Movie", "Series", "Video"]
         }
+        // Photo albums aren't indexed (`types` below), so a list that wants
+        // them asks the server — unless there is no server to ask.
+        if types.contains("PhotoAlbum"), !JellyfinClient.shared.isOffline { return nil }
         let key = [
             parentId, types.sorted().joined(separator: ","), query.sortBy, query.sortOrder,
             String(query.unwatched), String(query.favorites), query.genre ?? "",

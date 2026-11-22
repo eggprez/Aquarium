@@ -275,7 +275,9 @@ enum Metrics {
     /// Height of one channel's row in the guide.
     static var guideRowHeight: CGFloat {
         #if os(tvOS)
-        return 96
+        // Three lines from across a room: the show, its episode and the
+        // times. 96 held two, and a series' episode had nowhere to go.
+        return 128
         #elseif os(macOS)
         // A pointer needs no thumb-height row; forty is a two-line table
         // cell, which is what a guide cell holds.
@@ -390,12 +392,12 @@ struct PosterCard: View {
             if showSubtitle {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(cardTitle)
-                        .font(titleFont)
+                        .font(titleFont.titleRole(.show))
                         .lineLimit(titleLines)
-                        .foregroundStyle(Theme.text)
+                        .foregroundStyle(TitleRole.show.color(.page))
                     ForEach(Array(cardLines.enumerated()), id: \.offset) { _, line in
-                        Text(line)
-                            .font(subtitleFont)
+                        Text(line.text)
+                            .font(line.role.map { subtitleFont.titleRole($0) } ?? subtitleFont)
                             .lineLimit(1)
                             // "Season 1: Episode 1" is a few points wider than a
                             // phone's poster column; shrinking it slightly is
@@ -403,7 +405,7 @@ struct PosterCard: View {
                             // Mac, where shrunken type next to unshrunken type
                             // is the thing that reads as wrong.
                             .minimumScaleFactor(subtitleScale)
-                            .foregroundStyle(Theme.textDim)
+                            .foregroundStyle(line.role?.color(.page) ?? Theme.textDim)
                     }
                 }
                 .frame(maxWidth: width ?? .infinity, alignment: .leading)
@@ -413,6 +415,7 @@ struct PosterCard: View {
         // a tile is a thing you select, and a ring around the picture alone
         // leaves the name looking like it belongs to the tile above.
         .macTileState(isSelected: isSelected)
+        .testAnchor(TestID.Item.card(item.Id))
     }
 
     #if os(iOS)
@@ -434,11 +437,14 @@ struct PosterCard: View {
     /// come out at eleven and ten points, which under a 200-point poster is
     /// fine print. `.callout` and `.subheadline` there are the sizes the
     /// system's own media apps set a tile's name and line of facts in.
+    ///
+    /// The weight is not chosen here: a card's heading is a show's name or a
+    /// film's, and `TitleRole.show` sets those the same way everywhere.
     private var titleFont: Font {
         #if os(macOS)
-        .callout.weight(.medium)
+        .callout
         #else
-        .subheadline.weight(.medium)
+        .subheadline
         #endif
     }
 
@@ -576,20 +582,24 @@ struct PosterCard: View {
     /// The lines under the heading. An episode gets two — which one it is,
     /// spelled out, and then what it is called — because "Season 1: Episode 1 ·
     /// Pilot" on one line is what a card this narrow has no room for.
-    private var cardLines: [String] {
-        if let subtitle { return subtitle.isEmpty ? [] : [subtitle] }
+    ///
+    /// Each of the two says which it is, so the label and the name under it
+    /// are not set alike — see `TitleRole`. A line of facts has no role and
+    /// is drawn as it always was.
+    private var cardLines: [(text: String, role: TitleRole?)] {
+        if let subtitle { return subtitle.isEmpty ? [] : [(subtitle, nil)] }
         // The season's own name, now that the heading went to the show.
-        if seasonShowsSeries { return [item.title] }
+        if seasonShowsSeries { return [(item.title, .label)] }
         if item.isEpisode {
-            var lines: [String] = []
-            if let label = item.episodeLabel { lines.append(label) }
+            var lines: [(text: String, role: TitleRole?)] = []
+            if let label = item.episodeLabel { lines.append((label, .label)) }
             // Only when the heading went to the series; otherwise this is the
             // heading again.
-            if item.SeriesName != nil { lines.append(item.title) }
+            if item.SeriesName != nil { lines.append((item.title, .episode)) }
             return lines
         }
         let facts = Format.itemSubtitle(item)
-        return facts.isEmpty ? [] : [facts]
+        return facts.isEmpty ? [] : [(facts, nil)]
     }
 }
 
@@ -743,6 +753,9 @@ struct MediaShelf: View {
 
     @Environment(AppModel.self) private var app
     @Environment(\.posterZoomNamespace) private var zoomNamespace
+    /// The row key UI tests find this shelf by — see `testShelfKey`.
+    @Environment(\.testShelfKey) private var testShelfKey
+    private var shelfKey: String { testShelfKey ?? TestID.key(title) }
     #if os(macOS)
     /// The shelf's own width, measured from the heading row, which spans it.
     @State private var shelfWidth: CGFloat = 0
@@ -760,6 +773,7 @@ struct MediaShelf: View {
                     Spacer()
                     if let seeAll {
                         SeeAllButton(action: seeAll)
+                            .accessibilityIdentifier(TestID.Common.shelfSeeAll(shelfKey))
                     }
                 }
                 .padding(.horizontal, Metrics.gutter)
@@ -770,6 +784,7 @@ struct MediaShelf: View {
                 scroller
                     .focusRegion()
             }
+            .testAnchor(TestID.Common.shelf(shelfKey))
         }
     }
 
@@ -798,17 +813,20 @@ struct MediaShelf: View {
             .animation(.easeOut(duration: 0.12), value: isHoveringTitle)
             .help("See all of \(title)")
             .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier(TestID.Common.shelfHeadingLink(shelfKey))
         } else {
             Text(title)
                 .font(titleFont)
                 .foregroundStyle(Theme.text)
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier(TestID.Common.shelfTitle(shelfKey))
         }
         #else
         Text(title)
             .font(titleFont)
             .foregroundStyle(Theme.text)
             .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier(TestID.Common.shelfTitle(shelfKey))
         #endif
     }
 
@@ -831,6 +849,8 @@ struct MediaShelf: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PosterButtonStyle())
+        .arrivalFocusCard(isFirst: item.Id == items.first?.Id)
+        .accessibilityIdentifier(TestID.Item.card(item.Id))
         .posterZoomSource("\(title)/\(item.Id)", in: zoomNamespace)
         .itemContextMenu(item, allowsOpen: menuOpensDetails, removesFromNextUp: menuRemovesFromNextUp)
         #if os(macOS)
@@ -871,11 +891,13 @@ struct MediaShelf: View {
         .scrollPosition(id: $scrolledID)
         .overlay(alignment: .leading) {
             ShelfPagingButton(direction: .back) { page(by: -layout.count) }
+                .accessibilityIdentifier(TestID.Common.shelfPrevious(shelfKey))
                 .padding(.leading, 4)
                 .opacity(isHovering && canPage(by: -1) ? 1 : 0)
         }
         .overlay(alignment: .trailing) {
             ShelfPagingButton(direction: .forward) { page(by: layout.count) }
+                .accessibilityIdentifier(TestID.Common.shelfNext(shelfKey))
                 .padding(.trailing, 4)
                 .opacity(isHovering && canPage(by: layout.count) ? 1 : 0)
         }
@@ -931,6 +953,21 @@ struct MediaShelf: View {
         #else
         return .title3.weight(.semibold)
         #endif
+    }
+}
+
+/// The row key a `MediaShelf` names itself by for UI tests: its anchor, its
+/// heading and its See All all carry it (see `TestID.Common.shelf`). Set by
+/// the page that draws the shelf; a shelf given none falls back to its
+/// heading. Read by nothing but the identifiers.
+extension EnvironmentValues {
+    @Entry var testShelfKey: String? = nil
+}
+
+extension View {
+    /// Names the shelves inside for UI tests — see `TestShelfKey`.
+    func testShelfKey(_ key: String) -> some View {
+        environment(\.testShelfKey, key)
     }
 }
 
@@ -1023,15 +1060,8 @@ private extension View {
 /// The namespace poster tiles and the pages they open share, so a page can
 /// zoom out of the tile that opened it. Set once by RootView; nil on tvOS,
 /// where the transition is not offered.
-private struct PosterZoomNamespaceKey: EnvironmentKey {
-    static let defaultValue: Namespace.ID? = nil
-}
-
 extension EnvironmentValues {
-    var posterZoomNamespace: Namespace.ID? {
-        get { self[PosterZoomNamespaceKey.self] }
-        set { self[PosterZoomNamespaceKey.self] = newValue }
-    }
+    @Entry var posterZoomNamespace: Namespace.ID? = nil
 }
 
 extension View {
@@ -1308,22 +1338,9 @@ extension View {
         #endif
     }
 
-    /// Artwork that the selector can land on — a poster, a still, a library
-    /// tile. The television's focus ring, and the Mac's hover ring; nothing
-    /// on a phone, where a finger needs no selector drawn for it.
-    @ViewBuilder
-    func posterFocus(radius: CGFloat = Theme.cornerRadius) -> some View {
-        #if os(tvOS)
-        modifier(PosterFocus(radius: radius))
-        #elseif os(macOS)
-        modifier(PosterHover(radius: radius))
-        #else
-        self
-        #endif
-    }
-
-    /// `posterFocus` for the artwork inside a `PosterCard`, whose Mac hover
-    /// is drawn round the whole tile instead — see `macTileState`.
+    /// The television's focus ring for the artwork inside a `PosterCard`.
+    /// On a Mac the hover is drawn round the whole tile instead — see
+    /// `macTileState`.
     @ViewBuilder
     func artworkFocus(radius: CGFloat = Theme.cornerRadius) -> some View {
         #if os(tvOS)
@@ -1639,6 +1656,7 @@ struct SkeletonHero: View {
                 .padding(.bottom, 38)
             }
             .accessibilityHidden(true)
+            .testAnchor(TestID.Common.skeletonHero)
     }
 
     /// The shape of the button that is coming: a capsule the height of a
@@ -1666,14 +1684,18 @@ struct SkeletonShelf: View {
     /// Square covers this wide — Music's and Audiobooks' shelves — rather
     /// than posters, so what loads in is the shape that was waiting for it.
     var squareWidth: CGFloat? = nil
+    /// Off under a heading that is already drawn (Seerr's "Your Requests").
+    var heading: Bool = true
     #if os(macOS)
     @State private var shelfWidth: CGFloat = 0
     #endif
 
     var body: some View {
         VStack(alignment: .leading, spacing: Metrics.shelfTitleSpacing) {
-            SkeletonBar(height: 13, width: 140)
-                .padding(.horizontal, Metrics.gutter)
+            if heading {
+                SkeletonBar(height: 13, width: 140)
+                    .padding(.horizontal, Metrics.gutter)
+            }
             HStack(alignment: .top, spacing: Metrics.rowSpacing) {
                 ForEach(0..<cardCount, id: \.self) { _ in
                     SkeletonCard(width: squareWidth ?? cardWidth, wide: wide, square: squareWidth != nil)
@@ -1687,6 +1709,7 @@ struct SkeletonShelf: View {
             #endif
         }
         .accessibilityHidden(true)
+        .testAnchor(TestID.Common.skeletonShelf)
     }
 
     #if os(macOS)
@@ -1732,6 +1755,7 @@ struct SkeletonList: View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(0..<count, id: \.self) { _ in SkeletonListRow() }
         }
+        .testAnchor(TestID.Common.skeletonList)
     }
 }
 
@@ -1763,6 +1787,7 @@ struct SkeletonGrid: View {
             }
         }
         .padding(.horizontal, Metrics.gutter)
+        .testAnchor(TestID.Common.skeletonGrid)
     }
 }
 
@@ -1887,6 +1912,7 @@ struct MediaGrid: View {
         }
         #endif
         .focusRegion()
+        .testAnchor(TestID.Common.grid)
     }
 
     #if os(macOS)
@@ -1980,6 +2006,8 @@ struct MediaGrid: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(PosterButtonStyle())
+        .arrivalFocusCard(isFirst: item.Id == items.first?.Id)
+        .accessibilityIdentifier(TestID.Item.card(item.Id))
         .posterZoomSource("grid/\(item.Id)", in: zoomNamespace)
         .itemContextMenu(item)
     }
@@ -2105,20 +2133,24 @@ struct EmptyState: View {
         // The system's own empty page, which every Mac app shows.
         ContentUnavailableView {
             Label(title, systemImage: symbol)
+                .accessibilityIdentifier(TestID.Common.emptyStateTitle)
         } description: {
             Text(message)
         } actions: {
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
+                    .accessibilityIdentifier(TestID.Common.emptyStateAction)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 240)
+        .testAnchor(TestID.Common.emptyState)
         #else
         VStack(spacing: 10) {
             Image(systemName: symbol)
                 .font(.system(size: StateSize.glyph(34)))
                 .foregroundStyle(Theme.textDim)
             Text(title).font(.headline).foregroundStyle(Theme.text)
+                .accessibilityIdentifier(TestID.Common.emptyStateTitle)
             Text(message)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
@@ -2127,11 +2159,13 @@ struct EmptyState: View {
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .appButtonStyle()
+                    .accessibilityIdentifier(TestID.Common.emptyStateAction)
                     .padding(.top, 6)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 240)
         .padding(Metrics.gutter)
+        .testAnchor(TestID.Common.emptyState)
         #endif
     }
 }
@@ -2147,13 +2181,16 @@ struct ErrorState: View {
             Label(title, systemImage: "exclamationmark.triangle")
         } description: {
             Text(error)
+                .accessibilityIdentifier(TestID.Common.errorStateMessage)
         } actions: {
             if let retry {
                 Button("Try Again", action: retry)
                     .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier(TestID.Common.errorStateRetry)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 240)
+        .testAnchor(TestID.Common.errorState)
         #else
         VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
@@ -2165,13 +2202,16 @@ struct ErrorState: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textDim)
                 .frame(maxWidth: StateSize.textWidth(460))
+                .accessibilityIdentifier(TestID.Common.errorStateMessage)
             if let retry {
                 Button("Try again", action: retry)
                     .appButtonStyle(prominent: true)
+                    .accessibilityIdentifier(TestID.Common.errorStateRetry)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 240)
         .padding(Metrics.gutter)
+        .testAnchor(TestID.Common.errorState)
         #endif
     }
 }
@@ -2195,6 +2235,7 @@ struct OfflineState: View {
         #if os(macOS)
         ContentUnavailableView {
             Label("Server Offline", systemImage: "wifi.slash")
+                .accessibilityIdentifier(TestID.Shell.offlineScreenTitle)
         } description: {
             Text(Self.message)
         } actions: {
@@ -2202,18 +2243,22 @@ struct OfflineState: View {
                 if let onDownloads {
                     Button("Go to Downloads", action: onDownloads)
                         .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier(TestID.Shell.offlineScreenDownloads)
                 }
                 Button(checking ? "Checking…" : "Retry Connection", action: retry)
                     .disabled(checking)
+                    .accessibilityIdentifier(TestID.Shell.offlineScreenRetry)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .testAnchor(TestID.Shell.offlineScreen)
         #else
         VStack(spacing: 14) {
             Image(systemName: "wifi.slash")
                 .font(.system(size: StateSize.glyph(34)))
                 .foregroundStyle(Theme.warn)
             Text("Server offline").font(.title2.weight(.semibold))
+                .accessibilityIdentifier(TestID.Shell.offlineScreenTitle)
             Text(Self.message)
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
@@ -2223,14 +2268,17 @@ struct OfflineState: View {
                 if let onDownloads {
                     Button("Go to Downloads", action: onDownloads)
                         .appButtonStyle(prominent: true)
+                        .accessibilityIdentifier(TestID.Shell.offlineScreenDownloads)
                 }
                 Button(checking ? "Checking…" : "Retry connection", action: retry)
                     .appButtonStyle()
                     .disabled(checking)
+                    .accessibilityIdentifier(TestID.Shell.offlineScreenRetry)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Metrics.gutter)
+        .testAnchor(TestID.Shell.offlineScreen)
         #endif
     }
 
@@ -2273,6 +2321,7 @@ struct OfflineStrip: View {
         }
         .stripChrome()
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.Shell.offlineBanner)
     }
 
     @ViewBuilder
@@ -2361,6 +2410,7 @@ struct ToastOverlay: View {
             Spacer()
             ForEach(shown) { toast in
                 ToastCard(toast: toast, dismiss: { dismiss(toast) }, hover: { hover($0, toast) })
+                    .testAnchor(TestID.Shell.toast(shown.firstIndex(of: toast) ?? 0))
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -2368,6 +2418,7 @@ struct ToastOverlay: View {
         .padding(.horizontal, 20)
         .animation(.spring(duration: 0.3), value: shown)
         .allowsHitTesting(!shown.isEmpty)
+        .testAnchor(TestID.Shell.toasts)
         #if os(macOS)
         // Escape takes the newest one down.
         .onExitCommand {
@@ -2429,6 +2480,7 @@ private struct ToastCard: View {
                 .font(.subheadline)
                 .foregroundStyle(Theme.text)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(TestID.Shell.toastText)
             #if os(macOS)
             Spacer(minLength: 0)
             Button(action: dismiss) {
@@ -2441,6 +2493,7 @@ private struct ToastCard: View {
             .buttonStyle(.plain)
             .help("Dismiss")
             .accessibilityLabel("Dismiss")
+            .accessibilityIdentifier(TestID.Shell.toastDismiss)
             .opacity(isHovering ? 1 : 0)
             #endif
         }
@@ -2493,16 +2546,12 @@ struct BrandMark: View {
                 .interpolation(.high)
                 .scaledToFit()
                 .frame(width: 24, height: 24)
-            HStack(spacing: 0) {
-                Text("Aqua").fontWeight(.semibold)
-                Text("rium").fontWeight(.heavy).foregroundStyle(Theme.accent)
-            }
-            .font(.title3)
-            .foregroundStyle(Theme.text)
+            Wordmark(font: .title3, color: Theme.text)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Aquarium")
         .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier(TestID.Common.brand)
     }
 }
 
@@ -2529,64 +2578,94 @@ struct AppTopBar<Content: View>: View {
     /// heading *is* this bar — nothing else on the page names it — can ask for
     /// more, the way a large title would have taken more.
     var height: CGFloat = Metrics.topBar
+    /// Whether page text is under the bar rather than artwork — see
+    /// `BarBlur`. True for the pages that draw this bar: Search and Live TV
+    /// have no artwork to run under it. The pages that do (Home, a title)
+    /// float `PhoneHeroBar` instead.
+    var overPage: Bool = true
     @ViewBuilder var content: Content
 
-    /// The way back to an iPad's collapsed sidebar — see `showSidebar`. Nil
-    /// everywhere else.
-    @Environment(\.showSidebar) private var showSidebar
-
-    /// A foldable's inside screen held upright has a status strip deeper
-    /// than a phone's and empty but for the pill in its trailing corner —
-    /// see `FoldState.statusStrip`. There the bar *is* the strip: it rises
-    /// to the top of the screen, its content sits on the pill's line with
-    /// the buttons stopping just short of the pill, and the page starts
-    /// where the strip ends. Nil everywhere else, where the bar is fitted
-    /// below the status bar as usual.
-    private var strip: CGFloat? { FoldState.shared.statusStrip }
-
-    /// The front screen held upright: the safe area says the top is free,
-    /// and the status bar still takes the first 24 points of taps — see
-    /// `FoldState.frontTouchStrip`. The bar grows by that much and its
-    /// content keeps to the bottom, below the strip. Zero elsewhere.
-    private var touch: CGFloat { FoldState.shared.frontTouchStrip }
-
-    /// The bar's content is 36 points tall (the button discs).
-    private static var contentHalf: CGFloat { 18 }
-    /// Breathing room between the last button and the pill.
-    private static var pillGap: CGFloat { 10 }
+    /// The way back to an iPad's collapsed sidebar — see `SidebarToggle`.
+    /// Nil everywhere else.
+    @Environment(\.sidebarToggle) private var sidebarToggle
+    private var showSidebar: (() -> Void)? { sidebarToggle?.show }
 
     var body: some View {
-        let side = Metrics.gutter + Metrics.cornerClearance
         HStack(spacing: 8) {
             if let showSidebar {
                 SidebarToggleButton(action: showSidebar)
             }
             content
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, side)
-        .padding(.trailing, strip == nil ? 0 : max(0, FoldState.statusPillReach + Self.pillGap - side))
-        .padding(.bottom, strip.map { $0 - FoldState.statusPillLine - Self.contentHalf } ?? 9)
-        .frame(height: strip ?? (height + touch), alignment: .bottom)
-        .padding(.top, -(strip ?? 0))
-        // The bar is fitted below the status bar and its fill is what
+        // The discs are 36 points tall, kept 9 up from the bar's foot.
+        .modifier(TopBarFrame(height: height, row: 36, bottom: 9))
+        // The bar is fitted below the status bar and its surface is what
         // reaches up past it. Measuring the inset instead — a
         // GeometryReader inside an `ignoresSafeArea`, which is the usual
         // trick — reports zero as often as not, and a bar built on that
-        // number puts the wordmark through the middle of the clock. The fill
-        // reaches out to the sides as well: on a foldable's front screen the
-        // page stops short of the tab bar's column and the hero under this
-        // bar does not, so a bar that stopped with the page ended in mid-air.
-        .background {
-            Theme.background.ignoresSafeArea(edges: [.top, .horizontal])
+        // number puts the wordmark through the middle of the clock. The
+        // surface reaches out to the sides as well: on a foldable's front
+        // screen the page stops short of the tab bar's column and the hero
+        // under this bar does not, so a bar that stopped with the page ended
+        // in mid-air. The surface is the untinted blur every bar over
+        // artwork has (`BarBlur`), not a band of the page's colour.
+        .background(alignment: .top) {
+            BarBlur(progress: overPage ? 1 : 0, barHeight: TopBarFrame.layoutHeight(height: height))
         }
-        // The one thing separating an opaque bar from the artwork under it.
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Theme.border)
-                .frame(height: 0.5)
-                .ignoresSafeArea(edges: .horizontal)
-        }
+    }
+}
+
+/// The frame the bars that draw themselves share — `AppTopBar` and the
+/// floating `PhoneHeroBar` — so a foldable's screens get the same answer
+/// from both.
+///
+/// A foldable's inside screen held upright has a status strip deeper than a
+/// phone's and empty but for the pill in its trailing corner — see
+/// `FoldState.statusStrip`. There the bar *is* the strip: it rises to the
+/// top of the screen, its content sits on the pill's line with the buttons
+/// stopping just short of the pill, and the page starts where the strip
+/// ends. Nil everywhere else, where the bar is fitted below the status bar
+/// as usual.
+///
+/// The front screen held upright: the safe area says the top is free, and
+/// the status bar still takes the first 24 points of taps — see
+/// `FoldState.frontTouchStrip`. The bar grows by that much and its content
+/// keeps to the bottom, below the strip. Zero elsewhere.
+struct TopBarFrame: ViewModifier {
+    /// The bar's height on an ordinary phone.
+    var height: CGFloat = Metrics.topBar
+    /// How tall the content's row is (36 for button discs, 44 for the
+    /// floating bar's bare glyphs).
+    var row: CGFloat
+    /// How far up from the bar's foot the row sits, where the bar is fitted
+    /// below the status bar. On the status strip the row sits on the pill's
+    /// line instead.
+    var bottom: CGFloat
+
+    private var strip: CGFloat? { FoldState.shared.statusStrip }
+    private var touch: CGFloat { FoldState.shared.frontTouchStrip }
+    /// Breathing room between the last button and the pill.
+    private static var pillGap: CGFloat { 10 }
+
+    /// How much of the layout the bar takes below the top safe-area inset:
+    /// nothing on the status strip, where the bar is the inset; the bar and
+    /// the dead touch strip on the front screen; the bar everywhere else.
+    /// What a page's artwork reaches up by, with the inset, to run under
+    /// the bar — see `PhoneHeroBar.bleed`.
+    @MainActor
+    static func layoutHeight(height: CGFloat = Metrics.topBar) -> CGFloat {
+        FoldState.shared.statusStrip == nil ? height + FoldState.shared.frontTouchStrip : 0
+    }
+
+    func body(content: Content) -> some View {
+        let side = Metrics.gutter + Metrics.cornerClearance
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, side)
+            .padding(.trailing, strip == nil ? 0 : max(0, FoldState.statusPillReach + Self.pillGap - side))
+            .padding(.bottom, strip.map { $0 - FoldState.statusPillLine - row / 2 } ?? bottom)
+            .frame(height: strip ?? (height + touch), alignment: .bottom)
+            .padding(.top, -(strip ?? 0))
     }
 }
 
@@ -2600,29 +2679,27 @@ struct AppTopBar<Content: View>: View {
 /// detail column, which on every page that *does* have a system bar sat
 /// under the system's own toggle: two of them, one above the other. Nil when
 /// the sidebar is showing, and on anything that has no sidebar.
-private struct ShowSidebarKey: EnvironmentKey {
-    static let defaultValue: (() -> Void)? = nil
+///
+/// Handed down as an object whose `show` changes, not as the closure itself:
+/// a page already pushed onto the detail column's stack kept the environment
+/// it was pushed with, so a title page open when the sidebar was hidden
+/// never got the toggle, and nothing on screen brought the sidebar back.
+/// What a page reads off an observed object reaches it wherever it is.
+@MainActor
+@Observable
+final class SidebarToggle {
+    var show: (() -> Void)?
 }
 
 /// The way back from a page a section's stack pushed: that stack's path,
 /// one shorter. Handed down by `RootView` with each stack; nil in a page
 /// shown any other way, where `BarBackButton` uses `dismiss`.
-private struct PopPageKey: EnvironmentKey {
-    static let defaultValue: (() -> Void)? = nil
+extension EnvironmentValues {
+    @Entry var popPage: (() -> Void)? = nil
 }
 
 extension EnvironmentValues {
-    var popPage: (() -> Void)? {
-        get { self[PopPageKey.self] }
-        set { self[PopPageKey.self] = newValue }
-    }
-}
-
-extension EnvironmentValues {
-    var showSidebar: (() -> Void)? {
-        get { self[ShowSidebarKey.self] }
-        set { self[ShowSidebarKey.self] = newValue }
-    }
+    @Entry var sidebarToggle: SidebarToggle? = nil
 }
 
 /// The toggle itself, drawn the way the system draws the one it stands in for.
@@ -2637,6 +2714,7 @@ private struct SidebarToggleButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Show sidebar")
+        .accessibilityIdentifier(TestID.Sidebar.show)
     }
 }
 
@@ -2787,21 +2865,14 @@ extension View {
 
 #if os(iOS)
 extension View {
-    /// The surface under an iPad's floating bar: nothing while it sits over
-    /// artwork, and a blur with a hairline once the page has scrolled up
-    /// under it. Home and a title page both draw their bar this way.
-    func padBarSurface(filled: Bool) -> some View {
-        background {
-            if filled {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .overlay(Theme.background.opacity(0.6))
-                    .overlay(alignment: .bottom) {
-                        Rectangle().fill(Theme.border).frame(height: 0.5)
-                    }
-                    .ignoresSafeArea(edges: .top)
-                    .transition(.opacity)
-            }
+    /// The surface under an iPad's floating bar: the untinted blur the
+    /// phone's bar has (`HeroBarBlur`) — under the clock only at the very
+    /// top of the page, and growing down past the bar's row as soon as the
+    /// page moves (`scroll`). Home and a title page both draw their bar this
+    /// way. `topInset` is the status bar the blur reaches up through.
+    func padBarSurface(scroll: BarScroll, topInset: CGFloat) -> some View {
+        background(alignment: .top) {
+            HeroBarBlur(scroll: scroll, topInset: topInset, strip: topInset)
         }
     }
 }
@@ -2836,6 +2907,7 @@ struct BarBackButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Back")
+        .accessibilityIdentifier(TestID.Common.back)
     }
 }
 #endif
@@ -2858,6 +2930,7 @@ struct PageHeading: View {
             .padding(.horizontal, Metrics.gutter)
             .padding(.top, 12)
             .padding(.bottom, 4)
+            .accessibilityIdentifier(TestID.Common.pageHeading)
     }
 }
 #endif
@@ -2919,6 +2992,9 @@ struct AncestorTrail: View {
     private struct Step: Identifiable {
         let id: String
         let name: String
+        /// The show, or the season: set apart the way they are everywhere
+        /// else, in the link's own colour.
+        let role: TitleRole
     }
 
     var body: some View {
@@ -2936,13 +3012,14 @@ struct AncestorTrail: View {
                         app.navigate(to: .item(step.id))
                     } label: {
                         Text(step.name)
-                            .font(.subheadline.weight(.medium))
+                            .font(Font.subheadline.titleRole(step.role))
                             .foregroundStyle(Theme.link)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
                     .crumbStyle(name: step.name)
                     .accessibilityHint("Opens \(step.name)")
+                    .accessibilityIdentifier(TestID.Item.ancestor(step.id))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2956,10 +3033,10 @@ struct AncestorTrail: View {
         var out: [Step] = []
         if let id = seriesId, id != item.Id,
            let name = item.SeriesName, !name.isEmpty {
-            out.append(Step(id: id, name: name))
+            out.append(Step(id: id, name: name, role: .show))
         }
         if item.isEpisode, let id = seasonId, id != item.Id {
-            out.append(Step(id: id, name: seasonName))
+            out.append(Step(id: id, name: seasonName, role: .label))
         }
         return out
     }

@@ -35,3 +35,15 @@ pub fn watch(app: &AppHandle) {
     // The default monitor is a singleton the process keeps; the handler stays
     // connected for the app's lifetime.
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Until the monitor has answered, nothing holds downloads back.
+    #[test]
+    fn unmetered_until_told_otherwise() {
+        assert_eq!(is_metered(), METERED.load(Ordering::SeqCst));
+        assert!(!is_metered());
+    }
+}

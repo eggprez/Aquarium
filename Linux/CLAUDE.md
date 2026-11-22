@@ -5,6 +5,7 @@ Linux Jellyfin client, in the `Linux/` folder of the Aquarium repo (the Apple ap
 ## Build, install, test
 
 - `npm run build` type-checks and builds the frontend. `cargo test` in `src-tauri/` runs the Rust unit tests.
+- `npm test` runs the Vitest suites (unit, DOM, and QA-server integration that skips when the server is down). `TESTING.md` has the layers, the known-bug expected failures, the function inventory and the manual desktop checklist.
 - `./build-deb.sh` produces the release binary (`src-tauri/target/release/aquarium`) and `aquarium.deb`. Use it (or `npx tauri build`) before any run that shows the UI. A plain `cargo build` has no `custom-protocol` feature, so the webview shows "Could not connect to localhost".
 - Run `./bump-version.sh` before a build meant for installing. apt skips a package at the version that's already installed.
 - Installing needs interactive sudo (`./reinstall.sh --no-build`). Build the .deb and hand that step to the user.

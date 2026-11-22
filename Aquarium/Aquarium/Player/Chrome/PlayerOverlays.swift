@@ -82,6 +82,7 @@ struct PlayerErrorCard: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white.opacity(0.8))
                 .frame(maxWidth: PlayerMetrics.television ? 900 : 420)
+                .accessibilityIdentifier(TestID.Player.errorMessage)
             HStack(spacing: 12) {
                 if player.canRetry {
                     Button(PlayerOverlayText.label(mac: "Try Again", elsewhere: "Try again")) {
@@ -90,6 +91,7 @@ struct PlayerErrorCard: View {
                     .appButtonStyle(prominent: true)
                     .playerDefaultAction()
                     .focused($focused, equals: .retry)
+                    .accessibilityIdentifier(TestID.Player.errorRetry)
                 }
                 // Only for a stream the server is choosing a bitrate for.
                 if player.item != nil {
@@ -98,11 +100,13 @@ struct PlayerErrorCard: View {
                     }
                     .appButtonStyle(prominent: !player.canRetry)
                     .focused($focused, equals: .smaller)
+                    .accessibilityIdentifier(TestID.Player.errorSmallerStream)
                 }
                 Button("Close") { player.stop(reason: "error card closed") }
                     .appButtonStyle()
                     .playerCancelAction()
                     .focused($focused, equals: .close)
+                    .accessibilityIdentifier(TestID.Player.errorClose)
             }
         }
         .padding(PlayerMetrics.television ? 60 : 28)
@@ -113,6 +117,7 @@ struct PlayerErrorCard: View {
         #if os(macOS)
         .focusedValue(\.playerKeysYielded, true)
         #endif
+        .testAnchor(TestID.Player.errorCard)
     }
 }
 
@@ -147,12 +152,14 @@ struct PlayerNoVideoBanner: View {
             .buttonStyle(.plain)
             .help("Dismiss")
             .accessibilityLabel("Dismiss")
+            .accessibilityIdentifier(TestID.Player.noVideoDismiss)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .overlayBackdrop(RoundedRectangle(cornerRadius: PlayerOverlayText.corner, style: .continuous), opacity: 0.6)
         .padding(.horizontal, 16)
         .playerOverlayScheme()
+        .testAnchor(TestID.Player.noVideoBanner)
     }
 }
 
@@ -165,10 +172,30 @@ struct PlayerUpNextCard: View {
     /// download.
     var next: BaseItem?
     var compact = false
+    /// The count as last drawn, for the card to go on saying once there is
+    /// nothing left to count.
+    @State private var lastCount = 0
 
     var body: some View {
-        if PlayerMetrics.television { television } else { handheld }
+        Group {
+            if PlayerMetrics.television { television } else { handheld }
+        }
+        .onChange(of: count, initial: true) { _, count in lastCount = count }
     }
+
+    /// Whole seconds until the next episode starts. The card is still drawn
+    /// while it fades out after its stream has closed, and a closed stream
+    /// has no duration: `secondsRemaining` is infinite then, which `Int`
+    /// traps on. The fading card keeps the number it had.
+    private var count: Int {
+        let seconds = player.secondsRemaining
+        guard seconds.isFinite else { return lastCount }
+        return Int(seconds.rounded(PlayerMetrics.television ? .up : .toNearestOrAwayFromZero))
+    }
+
+    /// With autoplay off the card is an offer, not a countdown: nothing
+    /// starts when the episode ends, so it doesn't say when.
+    private var startsByItself: Bool { player.prefs.autoplayNext }
 
     /// The next episode, counting down to itself: its still beside the
     /// words, and what the remote does about it.
@@ -180,18 +207,17 @@ struct PlayerUpNextCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             VStack(alignment: .leading, spacing: 8) {
-                Text(player.isStartingNext ? "STARTING…" : "UP NEXT IN \(Int(player.secondsRemaining.rounded(.up)))")
+                Text(player.isStartingNext ? "STARTING…" : (startsByItself ? "UP NEXT IN \(count)" : "UP NEXT"))
                     .font(.caption.weight(.heavy))
                     .foregroundStyle(Theme.link)
                 Text(next?.title ?? title)
-                    .font(.headline)
+                    .font(next?.isEpisode == true ? Font.headline.titleRole(.episode) : .headline)
                     .lineLimit(2)
-                if let label = next?.episodeLabel {
-                    Text(label)
-                        .font(.caption)
-                        .foregroundStyle(Theme.textDim)
+                if let next, next.isEpisode, next.episodeLabel != nil {
+                    EpisodeLine.text(for: next, episode: false, font: .caption)
+                        .lineLimit(1)
                 }
-                Text("Click to play now · Menu to stop here")
+                Text(startsByItself ? "Click to play now · Menu to stop here" : "Click to play now · Menu to dismiss")
                     .font(.caption)
                     .foregroundStyle(Theme.textBody)
                     .padding(.top, 4)
@@ -206,35 +232,46 @@ struct PlayerUpNextCard: View {
         )
         .playerOverlayScheme()
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.Player.upNextCard)
     }
 
     private var handheld: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(player.isStartingNext
                  ? "Starting…"
-                 : "Up next · in \(Int(player.secondsRemaining.rounded()))s")
+                 : (startsByItself ? "Up next · in \(count)s" : "Up next"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.75))
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white)
-                .lineLimit(2)
+                .accessibilityIdentifier(TestID.Player.upNextCountdown)
+            Group {
+                if let next, next.isEpisode {
+                    EpisodeLine.text(for: next, font: .subheadline, tone: .picture)
+                } else {
+                    Text(title)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white)
+                }
+            }
+            .lineLimit(2)
             HStack(spacing: 10) {
                 Button(PlayerOverlayText.label(mac: "Play Now", elsewhere: "Play now")) { Task { await player.playNextNow() } }
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.accentStrong)
                     .controlSize(.small)
                     .playerDefaultAction()
+                    .accessibilityIdentifier(TestID.Player.upNextPlay)
                 Button(PlayerOverlayText.label(mac: "Not Now", elsewhere: "Not now")) { player.cancelAutoplay() }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .playerCancelAction()
+                    .accessibilityIdentifier(TestID.Player.upNextCancel)
             }
         }
         .padding(14)
         .frame(maxWidth: compact ? 260 : 320, alignment: .leading)
         .overlayBackdrop(RoundedRectangle(cornerRadius: PlayerOverlayText.corner, style: .continuous), opacity: 0.65)
         .playerOverlayScheme()
+        .testAnchor(TestID.Player.upNextCard)
     }
 }
 
@@ -258,6 +295,7 @@ struct PlayerSkipSegmentButton: View {
             .shadow(color: Theme.accent.opacity(0.5), radius: 20, y: 8)
             .accessibilityElement(children: .combine)
             .accessibilityHint("Click to skip")
+            .accessibilityIdentifier(isOutro ? TestID.Player.skipCredits : TestID.Player.skipIntro)
         } else {
             button
         }
@@ -278,6 +316,7 @@ struct PlayerSkipSegmentButton: View {
         }
         .buttonStyle(.plain)
         .help(isOutro ? "Skip the credits (S)" : "Skip the intro (S)")
+        .accessibilityIdentifier(isOutro ? TestID.Player.skipCredits : TestID.Player.skipIntro)
         .playerOverlayScheme()
     }
 }
@@ -327,6 +366,7 @@ struct BitrateBadge: View {
         .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
         .playerOverlayScheme()
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.Player.bitrateBadge)
     }
 }
 
@@ -397,6 +437,7 @@ struct EdgeLevelIndicator: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(level.kind == .brightness ? "Brightness" : "Volume")
         .accessibilityValue("\(Int((level.level * 100).rounded())) percent")
+        .accessibilityIdentifier(level.kind == .brightness ? TestID.Player.hudBrightness : TestID.Player.hudVolume)
     }
 
     private var symbol: String {

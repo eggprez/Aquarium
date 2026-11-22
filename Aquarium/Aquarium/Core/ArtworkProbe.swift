@@ -23,6 +23,13 @@ enum ArtworkProbe {
         var ok: Bool
     }
 
+    /// The channels that came from the custom playlist. The check sits on the
+    /// Custom playlist page and words its report for a playlist, and the store
+    /// can still hold the server's own channels just after the source changes.
+    static func playlistChannels(_ channels: [BaseItem]) -> [BaseItem] {
+        channels.filter { $0.Id.hasPrefix("iptv-") }
+    }
+
     /// Fetches a sample of channel logos and says what happened to each.
     ///
     /// A sample rather than the lot: with a few hundred channels the answer is

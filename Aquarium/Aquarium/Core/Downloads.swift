@@ -157,6 +157,24 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
         return item
     }
 
+    /// A film or an episode as an item, for the player's Info page when
+    /// nothing fuller is to hand: what it is called and where it sits in its
+    /// show. See `DownloadItemInfo` for the description kept with it.
+    var asVideoItem: BaseItem {
+        var item = BaseItem()
+        item.Id = itemId
+        item.Name = name
+        item.type = type ?? (isEpisode ? "Episode" : "Movie")
+        item.SeriesName = series
+        item.SeriesId = seriesId
+        item.SeasonId = seasonId
+        item.ParentIndexNumber = season
+        item.IndexNumber = episode
+        item.RunTimeTicks = runTimeTicks
+        item.ProductionYear = year
+        return item
+    }
+
     var id: String { itemId }
 
     var isEpisode: Bool { type == "Episode" || (series != nil && type != "Movie") }
@@ -200,7 +218,11 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
         return self != before
     }
 
-    /// Decoded key by key, every one of them optional.
+}
+
+extension DownloadRecord {
+    /// Decoded key by key, every one of them optional. In an extension so
+    /// the memberwise initialiser is still made for us.
     ///
     /// Swift's own `init(from:)` would be shorter and is a trap here: it does
     /// *not* fall back to a property's default value when a key is missing, it
@@ -248,6 +270,7 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
         ownerUserId = try c.decodeIfPresent(String.self, forKey: .ownerUserId)
         verifyFailures = try c.decodeIfPresent(Int.self, forKey: .verifyFailures) ?? 0
         autoRetries = try c.decodeIfPresent(Int.self, forKey: .autoRetries) ?? 0
+        needsMPV = try c.decodeIfPresent(Bool.self, forKey: .needsMPV)
         imageURL = try c.decodeIfPresent(String.self, forKey: .imageURL)
         seasonImageURL = try c.decodeIfPresent(String.self, forKey: .seasonImageURL)
         seriesImageURL = try c.decodeIfPresent(String.self, forKey: .seriesImageURL)
@@ -259,62 +282,15 @@ struct DownloadRecord: Codable, Identifiable, Hashable, Sendable {
         disc = try c.decodeIfPresent(Int.self, forKey: .disc)
     }
 
-    /// The memberwise initialiser, which writing one of our own above takes
-    /// away.
-    init(
-        itemId: String,
-        title: String,
-        name: String,
-        type: String? = nil,
-        series: String? = nil,
-        seriesId: String? = nil,
-        season: Int? = nil,
-        seasonId: String? = nil,
-        episode: Int? = nil,
-        year: Int? = nil,
-        runTimeTicks: Int64 = 0,
-        quality: String = "",
-        fileName: String = "",
-        transport: JellyfinClient.DownloadTransport = .file,
-        sourceURL: String = "",
-        estimatedBytes: Int64? = nil,
-        positionTicks: Int64 = 0,
-        played: Bool = false,
-        imageURL: String? = nil,
-        seasonImageURL: String? = nil,
-        seriesImageURL: String? = nil,
-        album: String? = nil,
-        albumId: String? = nil,
-        artist: String? = nil,
-        track: Int? = nil,
-        disc: Int? = nil
-    ) {
-        self.itemId = itemId
-        self.title = title
-        self.name = name
-        self.type = type
-        self.series = series
-        self.seriesId = seriesId
-        self.season = season
-        self.seasonId = seasonId
-        self.episode = episode
-        self.year = year
-        self.runTimeTicks = runTimeTicks
-        self.quality = quality
-        self.fileName = fileName
-        self.transport = transport
-        self.sourceURL = sourceURL
-        self.estimatedBytes = estimatedBytes
-        self.positionTicks = positionTicks
-        self.played = played
-        self.imageURL = imageURL
-        self.seasonImageURL = seasonImageURL
-        self.seriesImageURL = seriesImageURL
-        self.album = album
-        self.albumId = albumId
-        self.artist = artist
-        self.track = track
-        self.disc = disc
+    /// The transfer in words: "42% · 1.2 GB / ~2.9 GB". The tilde is the whole
+    /// disclosure: past that point the bar is full and the bytes are still
+    /// climbing, and this is what says why.
+    var progressText: String {
+        let received = Format.bytes(receivedBytes)
+        guard let total = progressTotal else { return received }
+        let denominator = (total.estimated ? "~" : "") + Format.bytes(total.bytes)
+        guard let fraction else { return "\(received) / \(denominator)" }
+        return "\(Int(fraction * 100))% · \(received) / \(denominator)"
     }
 
     /// How far along, against the best figure available: the length the server
@@ -455,6 +431,16 @@ final class DownloadManager: NSObject {
     nonisolated static let bundleID = Bundle.main.bundleIdentifier ?? "Aquarium"
 
     nonisolated static let log = Logger(subsystem: bundleID, category: "downloads")
+
+    /// What the background sessions are named after: the bundle identifier,
+    /// and in UI test mode a name of their own, so a test run never picks up
+    /// the transfers of the copy in real use (the Mac shares one container).
+    nonisolated static var sessionPrefix: String {
+        #if DEBUG
+        if TestRuntime.isUITest { return bundleID + ".uitest" }
+        #endif
+        return bundleID
+    }
 
     private(set) var records: [DownloadRecord] = []
     private(set) var queue: [QueuedDownload] = [] {
@@ -671,7 +657,7 @@ final class DownloadManager: NSObject {
 
     @ObservationIgnored
     private lazy var session: URLSession = {
-        let cfg = URLSessionConfiguration.background(withIdentifier: "\(Self.bundleID).downloads")
+        let cfg = URLSessionConfiguration.background(withIdentifier: "\(Self.sessionPrefix).downloads")
         cfg.isDiscretionary = false
         cfg.sessionSendsLaunchEvents = true
         // Left open here and decided per transfer instead: a session's
@@ -716,12 +702,12 @@ final class DownloadManager: NSObject {
     /// system hands back any transfer that was running under it.
     @ObservationIgnored
     private lazy var assetSession: AVAssetDownloadURLSession = makeAssetSession(
-        identifier: "\(Self.bundleID).streamdownloads", allowsCellular: true
+        identifier: "\(Self.sessionPrefix).streamdownloads", allowsCellular: true
     )
 
     @ObservationIgnored
     private lazy var wifiAssetSession: AVAssetDownloadURLSession = makeAssetSession(
-        identifier: "\(Self.bundleID).streamdownloads.wifi", allowsCellular: false
+        identifier: "\(Self.sessionPrefix).streamdownloads.wifi", allowsCellular: false
     )
 
     private var assetSessions: [AVAssetDownloadURLSession] { [assetSession, wifiAssetSession] }
@@ -973,7 +959,7 @@ final class DownloadManager: NSObject {
     /// read from inside view bodies, several times per row, and a path helper
     /// that touches the disk on every draw is not one.
     nonisolated static var rootPath: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        AppDirectory.url(.applicationSupportDirectory)
             // "FellyJin" is the pre-Aquarium name, kept so existing downloads are found
             .appendingPathComponent("FellyJin/Downloads", isDirectory: true)
     }
@@ -1158,6 +1144,12 @@ final class DownloadManager: NSObject {
         // the queue — is described by its record again.
         if record.status != .downloading { liveProgress[record.itemId] = nil }
     }
+
+    #if DEBUG
+    /// Unit tests only: a record put in the list (and its meta.json beside
+    /// its file) as if its transfer had just ended. Nothing else calls it.
+    func installForTesting(_ record: DownloadRecord) { save(record) }
+    #endif
 
     /// Where meta.json files are written. Drained before the app is put away
     /// — see `flushPersisted`.
@@ -1437,8 +1429,16 @@ final class DownloadManager: NSObject {
     /// `completeRecord(matching:)`. Moved over to the new id once the server
     /// has said the old one is gone — never on a guess — and only at the next
     /// launch, when nothing can be playing it.
-    func noteFoundUnderNewId(_ oldId: String, newId: String) {
+    ///
+    /// `confirmedGone` is for a caller the server has already told — the
+    /// sync, whose request for the old id came back 404 — which needs no
+    /// second asking.
+    func noteFoundUnderNewId(_ oldId: String, newId: String, confirmedGone: Bool = false) {
         guard oldId != newId, pendingRekeys[oldId] == nil else { return }
+        if confirmedGone {
+            pendingRekeys[oldId] = newId
+            return
+        }
         Task {
             do {
                 _ = try await JellyfinClient.shared.item(oldId)
@@ -2012,7 +2012,12 @@ final class DownloadManager: NSObject {
         for path in streamPaths {
             try? FileManager.default.removeItem(at: Self.hlsURL(forRelativePath: path))
         }
-        try? FileManager.default.removeItem(at: Self.folder(for: itemId))
+        // On the queue meta.json is written on, and waited for: a write still
+        // queued (cancelling the transfer just saved the record) otherwise
+        // lands while the folder is being removed and leaves it behind, with
+        // meta.json in it, to come back as a download at the next launch.
+        let folder = Self.folder(for: itemId)
+        Self.metaWriter.sync { try? FileManager.default.removeItem(at: folder) }
         DownloadArtwork.forget(itemId: itemId)
         records.removeAll { $0.itemId == itemId }
         recordsRevision &+= 1
@@ -2484,8 +2489,12 @@ final class DownloadManager: NSObject {
             Task {
                 await DownloadSubtitles.fetch(itemId: itemId, into: Self.folder(for: itemId))
                 await DownloadSegments.fetch(itemId: itemId, into: Self.folder(for: itemId))
+                await DownloadItemInfo.fetch(itemId: itemId, into: Self.folder(for: itemId))
             }
         }
+        // Whatever the server cut short on the way down is fetched again
+        // now, while it is certainly in reach. See `DownloadRepair`.
+        Task { await DownloadRepair.mend(itemId) }
     }
 
     /// Marks a downloaded stream as one to keep. AVFoundation's packages sit
@@ -2496,6 +2505,9 @@ final class DownloadManager: NSObject {
     /// folder and are not at risk.
     nonisolated static func keepFromPurge(_ url: URL) {
         #if os(iOS)
+        // The storage manager raises an exception, not an error, for a
+        // package that is not there.
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
         let policy = AVMutableAssetDownloadStorageManagementPolicy()
         policy.priority = .important
         policy.expirationDate = .distantFuture
@@ -2777,6 +2789,7 @@ final class DownloadManager: NSObject {
                 Task {
                     await DownloadSubtitles.fetch(itemId: itemId, into: Self.folder(for: itemId))
                     await DownloadSegments.fetch(itemId: itemId, into: Self.folder(for: itemId))
+                    await DownloadItemInfo.fetch(itemId: itemId, into: Self.folder(for: itemId))
                 }
             }
             return
@@ -2808,6 +2821,7 @@ final class DownloadManager: NSObject {
             Task {
                 await DownloadSubtitles.fetch(itemId: itemId, into: Self.folder(for: itemId))
                 await DownloadSegments.fetch(itemId: itemId, into: Self.folder(for: itemId))
+                await DownloadItemInfo.fetch(itemId: itemId, into: Self.folder(for: itemId))
             }
             return
         }
@@ -2876,6 +2890,16 @@ final class DownloadManager: NSObject {
     /// music library draining it is asked every second or so.
     @concurrent
     private nonisolated static func isPlayable(_ url: URL, strict: Bool = true, audio: Bool = false) async -> Bool {
+        if !strict {
+            // A downloaded stream is a folder of segments. AVURLAsset has been
+            // seen to call anything at a .movpkg address playable, a plain
+            // file of junk and a path with nothing at it included, so what is
+            // there is looked at first.
+            var isFolder: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder), isFolder.boolValue,
+                  let inside = try? FileManager.default.contentsOfDirectory(atPath: url.path), !inside.isEmpty
+            else { return false }
+        }
         let asset = AVURLAsset(url: url)
         do {
             guard try await asset.load(.isPlayable) else { return false }
@@ -3393,6 +3417,8 @@ final class DownloadManager: NSObject {
         persistQueue()
         pump()
         Task { await refreshDescriptions() }
+        // And the downloads made before holes were looked for.
+        DownloadRepair.sweep()
     }
 
     // MARK: - Keeping up with the server
@@ -4362,6 +4388,22 @@ extension DownloadManager: AVAssetDownloadDelegate {
         }
     }
 }
+
+#if DEBUG
+// Unit tests only (AquariumTests/Shared/Download…Tests.swift): the three
+// things a test cannot bring about from outside. Nothing here does anything
+// the manager doesn't already do for itself.
+extension DownloadManager {
+    /// A record put in the way a transfer's start puts one in.
+    func seedForTests(_ record: DownloadRecord) { save(record) }
+    /// What the path monitor would say.
+    func setRouteForTests(satisfied: Bool, cellularOnly: Bool) {
+        pathChanged(satisfied: satisfied, cellularOnly: cellularOnly)
+    }
+    /// The once-a-minute stall sweep, now.
+    func sweepForTests() async { await sweepStalledTransfers() }
+}
+#endif
 
 #endif
 

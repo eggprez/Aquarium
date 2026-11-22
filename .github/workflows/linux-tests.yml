@@ -1,0 +1,145 @@
+name: Linux tests
+
+# The Linux app's test suites (see Linux/TESTING.md). Separate from
+# linux-release.yml, which only builds the .deb on tags.
+on:
+  pull_request:
+    paths:
+      - "Linux/**"
+      - ".github/workflows/linux-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Linux/**"
+      - ".github/workflows/linux-tests.yml"
+  workflow_dispatch:
+
+# Read-only token; actions pinned to commits, as in linux-release.yml.
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # There is no QA Jellyfin server in CI: the integration suites (TypeScript
+  # tests/integration and the Rust qa_tests modules) skip themselves.
+  AQUARIUM_QA_SKIP: "1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    name: TypeScript (Vitest)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: Linux
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Type-check and build
+        run: npm run build
+      - name: Unit, DOM and (skipped) integration tests with coverage
+        run: npx vitest run --coverage --coverage.reporter=text-summary --coverage.reporter=json-summary
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: ts-coverage
+          path: Linux/coverage/coverage-summary.json
+          retention-days: 7
+
+  backend:
+    name: Rust (full crate)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: Linux
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libssl-dev \
+            libdbus-1-dev libmpv-dev libwayland-dev libegl-dev libepoxy-dev xvfb
+      - run: npm ci
+      # tauri::generate_context! needs the built frontend (frontendDist) to
+      # compile, tests included.
+      - run: npm run build
+      # Every module's tests, the GTK/libmpv/Wayland/D-Bus ones included. The
+      # sandbox in src/test_support.rs points HOME/XDG at a temp folder and
+      # D-Bus at a dead socket, so nothing here can reach a real keyring.
+      # Under Xvfb in case a test initialises GTK.
+      - name: cargo test (src-tauri)
+        working-directory: Linux/src-tauri
+        run: xvfb-run -a cargo test --locked -- --test-threads=4
+      - name: cargo test (portable-tests)
+        working-directory: Linux/src-tauri/portable-tests
+        run: cargo test --locked
+
+  # Best effort: the release binary under Xvfb (GtkGLArea backend, Mesa
+  # llvmpipe) auto-playing a generated clip. It proves the app starts, the
+  # webview loads and libmpv configures a video output; it says nothing about
+  # the Wayland subsurface path, which needs a real compositor (manual
+  # checklist in Linux/TESTING.md). Allowed to fail until it has a track record.
+  smoke:
+    name: End-to-end smoke (Xvfb)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: Linux
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libssl-dev \
+            libdbus-1-dev libmpv-dev xvfb ffmpeg dbus-x11
+      - run: npm ci
+      - name: Build release binary
+        run: npx tauri build --no-bundle -- --locked
+      - name: Run with AQUARIUM_TEST_PLAY
+        run: |
+          set -u
+          work="$(mktemp -d)"
+          ffmpeg -loglevel error -f lavfi -i testsrc2=size=640x360:rate=25 \
+            -f lavfi -i sine=frequency=440 -t 20 -c:v libx264 -c:a aac "$work/clip.mkv"
+          mkdir -p "$work/home" "$work/mpv"
+          cp -r src-tauri/mpv-config/. "$work/mpv/"
+          echo "mute=yes" >> "$work/mpv/mpv.conf"
+          export HOME="$work/home" XDG_CONFIG_HOME="$work/home/.config" XDG_DATA_HOME="$work/home/.local/share"
+          export AQUARIUM_VIDEO_BACKEND=gl AQUARIUM_MPV_CONFIG="$work/mpv" AQUARIUM_TEST_PLAY="$work/clip.mkv"
+          export AQUARIUM_TEST_SEQUENCE="8:fs,11:nofs,14:stop"
+          dbus-run-session -- xvfb-run -a -s "-screen 0 1280x800x24" \
+            timeout --preserve-status 25 "$PWD/src-tauri/target/release/aquarium" &> "$work/stderr.log" || true
+          log="$XDG_DATA_HOME/aquarium/debug.log"
+          echo "---- stderr"; tail -n 80 "$work/stderr.log" || true
+          echo "---- debug.log"; cat "$log" || true
+          grep -q "player: vo-configured=true" "$log"
+          if grep -qiE "panicked|SIGSEGV|Aborted" "$work/stderr.log"; then
+            echo "::error::the app crashed"; exit 1
+          fi

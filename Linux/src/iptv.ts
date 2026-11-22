@@ -99,6 +99,18 @@ const LIVE_STREAM_URL = /^(https?|rtsps?|rtmps?|udp|rtp):\/\//i;
  * (`#EXTVLCOPT`, `#EXTGRP`, comments) sit between the two often enough that
  * skipping them is the whole trick.
  */
+/** The comma before an #EXTINF line's display name: the first one outside a
+ *  quoted attribute value (group-title="News, Sport" has one of its own).
+ *  A quote left open falls back to the first comma. */
+function nameComma(line: string): number {
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '"') quoted = !quoted;
+    else if (line[i] === "," && !quoted) return i;
+  }
+  return line.indexOf(",");
+}
+
 export function parseM3u(text: string): IptvChannel[] {
   const out: IptvChannel[] = [];
   const lines = text.split(/\r?\n/);
@@ -110,7 +122,7 @@ export function parseM3u(text: string): IptvChannel[] {
     if (!line) continue;
 
     if (line.toUpperCase().startsWith("#EXTINF")) {
-      const comma = line.indexOf(",");
+      const comma = nameComma(line);
       pending = {
         a: attrs(line),
         name: comma >= 0 ? line.slice(comma + 1).trim() : "",

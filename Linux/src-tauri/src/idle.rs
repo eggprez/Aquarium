@@ -106,11 +106,16 @@ mod tests {
     /// connection that can't be re-established would leave the screen either
     /// permanently awake or never inhibited at all.
     ///
-    /// Needs a session bus with org.freedesktop.ScreenSaver, so it's opt-in:
-    ///   cargo test --lib idle -- --ignored --nocapture
+    /// Needs a session bus with org.freedesktop.ScreenSaver, so it's opt-in
+    /// (the test sandbox otherwise points D-Bus at a socket that isn't there):
+    ///   AQUARIUM_TEST_REAL_DBUS=1 cargo test --lib idle -- --ignored --nocapture
     #[test]
     #[ignore]
     fn inhibitor_cycles() {
+        if !crate::test_support::real_dbus() {
+            eprintln!("skipped: needs AQUARIUM_TEST_REAL_DBUS=1");
+            return;
+        }
         for round in 0..3 {
             let inhibitor = IdleInhibitor::new()
                 .unwrap_or_else(|e| panic!("round {}: Inhibit failed: {}", round, e));
@@ -121,12 +126,28 @@ mod tests {
 
     /// The download inhibitor takes and gives back the session's suspend
     /// lock. Opt-in for the same reason as above:
-    ///   cargo test --lib idle -- --ignored --nocapture
+    ///   AQUARIUM_TEST_REAL_DBUS=1 cargo test --lib idle -- --ignored --nocapture
     #[test]
     #[ignore]
     fn suspend_inhibitor_round_trip() {
+        if !crate::test_support::real_dbus() {
+            eprintln!("skipped: needs AQUARIUM_TEST_REAL_DBUS=1");
+            return;
+        }
         let inhibitor = SuspendInhibitor::new("test").expect("inhibit");
         assert!(matches!(inhibitor, SuspendInhibitor::Gnome { .. }), "expected GNOME's session manager");
         drop(inhibitor);
+    }
+
+    /// With no session or system bus (the test sandbox's dead address), both
+    /// fail with an error rather than hanging or panicking; playback and
+    /// downloads carry on without them.
+    #[test]
+    fn without_a_bus_taking_either_lock_fails_cleanly() {
+        if crate::test_support::real_dbus() {
+            return;
+        }
+        assert!(IdleInhibitor::new().is_err());
+        assert!(SuspendInhibitor::new("test").is_err(), "neither GNOME nor logind should be reachable");
     }
 }

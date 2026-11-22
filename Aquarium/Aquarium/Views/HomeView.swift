@@ -227,8 +227,8 @@ struct HomeView: View {
         // scroll view, and it carries the application's name rather than the
         // page's — "Home" above a hard-edged backdrop is the seam that made the
         // top of this page look bolted on.
-        if Metrics.phoneLayout {
-            scroll()
+        if PhoneHeroBar.applies {
+            phoneHome
                 .toolbar(.hidden, for: .navigationBar)
         } else {
             padHome
@@ -262,26 +262,81 @@ struct HomeView: View {
         // colour beneath them (see `HeroHeader.toolbarBlend`) so the controls
         // stay legible in either appearance and there is no hard edge where
         // the chrome used to stop and the picture used to start.
-        scroll()
-            .screenTitle("Home")
-            .toolbarBackground(.hidden, for: .windowToolbar)
+        //
+        // The scroll view ignores the top of the safe area so the picture
+        // reaches the top of the window; the stack around it does not, so its
+        // own geometry says how tall the toolbar is, and the hero is told to
+        // reach up by that much — the iPad's arrangement (see `padHome`).
+        //
+        // Over it, pinned to the window rather than the picture, the blur the
+        // phone and the iPad have (`HeroBarBlur`): only the toolbar's strip
+        // at the top of the page, and past the toolbar's foot as soon as the
+        // page moves, so the title never sits on a line of text.
+        ZStack(alignment: .top) {
+            scroll(bleed: EdgeInsets(top: macTopInset, leading: 0, bottom: 0, trailing: 0))
+                .ignoresSafeArea(.container, edges: .top)
+                .modifier(BarScrollWatcher(scroll: barScroll))
+            HeroBarBlur(scroll: barScroll, whole: heroItems.isEmpty && hero == nil, topInset: macTopInset)
+                .ignoresSafeArea(.container, edges: .top)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { macTopInset = $0 }
+        .screenTitle("Home")
+        .toolbarBackground(.hidden, for: .windowToolbar)
         #endif
     }
 
+    #if os(macOS)
+    /// The window toolbar's height, which the hero reaches up through.
+    @State private var macTopInset: CGFloat = 0
+    /// How far the page has moved off its top, for the toolbar's blur.
+    @State private var barScroll = BarScroll()
+    #endif
+
     #if os(iOS)
+    /// Whether the phone's hero has scrolled out from under its bar, which
+    /// is when its glyphs take the page's colour.
+    @State private var phoneScrolled = false
+    /// How far the page has moved off its top, for the bar's blur — the
+    /// phone's and the iPad's.
+    @State private var barScroll = BarScroll()
+
+    /// A phone's Home: the hero runs up to the top of the screen and the bar
+    /// floats over it — see `PhoneHeroBar`. The same arrangement as `padHome`,
+    /// with the phone's own bar. A foldable's too, on either screen: the bar
+    /// takes the frame its solid one did (`TopBarFrame`), and the hero
+    /// reaches up by that much.
+    private var phoneHome: some View {
+        ZStack(alignment: .top) {
+            scroll(bleed: EdgeInsets(top: PhoneHeroBar.bleed(topInset: padTopInset), leading: 0, bottom: 0, trailing: 0))
+                .ignoresSafeArea(.container, edges: .top)
+                .modifier(PhoneHeroScrollWatcher(threshold: PhoneHeroBar.threshold(home: true),
+                                                 isPast: $phoneScrolled))
+                .modifier(BarScrollWatcher(scroll: barScroll))
+            PhoneHeroBar(
+                page: .home(search: { app.push(.search("")) },
+                            refresh: { Task { await reload(fresh: true) } },
+                            isRefreshing: isRefreshing),
+                overPage: phoneScrolled,
+                scroll: barScroll
+            )
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
+    }
+
     /// What the top of the screen keeps for the clock, read from outside
     /// the scroll view that ignores it — see `padHome`.
     @State private var padTopInset: CGFloat = 0
     /// Whether the hero has scrolled up under the bar, which is when the
-    /// bar earns a surface and the wordmark.
+    /// bar earns the wordmark. Its surface comes sooner — `barScroll`.
     @State private var padScrolled = false
-    @Environment(\.showSidebar) private var showSidebar
+    @Environment(\.sidebarToggle) private var sidebarToggle
+    /// The way back to a collapsed sidebar — see `SidebarToggle`.
+    private var showSidebar: (() -> Void)? { sidebarToggle?.show }
 
     /// An iPad's Home: the hero runs up under the status bar and the bar
-    /// floats over it — glass discs on the artwork, and only once the page
-    /// has scrolled a surface of its own with the wordmark on it. The phone
-    /// keeps its solid `AppTopBar`, whose reasons — the island, the clock
-    /// sitting on a different picture every few seconds — are a phone's.
+    /// floats over it — glass discs on the artwork, a surface of its own as
+    /// soon as the page moves, and the wordmark once it has scrolled. The phone
+    /// floats its own bar the same way — see `phoneHome`.
     ///
     /// The scroll view ignores the top of the safe area; the stack around
     /// it does not, so its own geometry says how much was ignored, and the
@@ -291,6 +346,7 @@ struct HomeView: View {
             scroll(bleed: EdgeInsets(top: padTopInset + Metrics.topBar, leading: 0, bottom: 0, trailing: 0))
                 .ignoresSafeArea(.container, edges: .top)
                 .modifier(HeroScrollWatcher(threshold: 180, isPast: $padScrolled))
+                .modifier(BarScrollWatcher(scroll: barScroll))
             padBar
         }
         .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
@@ -306,6 +362,7 @@ struct HomeView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Show sidebar")
+                .accessibilityIdentifier(TestID.Sidebar.show)
             }
             if padScrolled {
                 BrandMark()
@@ -321,13 +378,15 @@ struct HomeView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Search")
+            .accessibilityIdentifier(TestID.Home.search)
             RefreshButton(isRefreshing: isRefreshing) {
                 Task { await reload(fresh: true) }
             }
+            .accessibilityIdentifier(TestID.Home.refresh)
         }
         .padding(.horizontal, Metrics.gutter)
         .frame(height: Metrics.topBar)
-        .padBarSurface(filled: padScrolled)
+        .padBarSurface(scroll: barScroll, topInset: padTopInset)
         .animation(.easeOut(duration: 0.2), value: padScrolled)
     }
     #endif
@@ -349,6 +408,7 @@ struct HomeView: View {
             // page answers it through `MacCommandRequests.refresh` below.
             .disabled(isRefreshing)
             .help("Refresh (⌘R)")
+            .accessibilityIdentifier(TestID.Home.refresh)
         }
         ToolbarItem(placement: .primaryAction) {
             Button {
@@ -359,6 +419,7 @@ struct HomeView: View {
             }
             .disabled(featured == nil)
             .help(featured.map { "Play \(HeroHeader.displayTitle(of: $0))" } ?? "Play Featured")
+            .accessibilityIdentifier(TestID.Home.playFeatured)
         }
     }
     #endif
@@ -371,6 +432,7 @@ struct HomeView: View {
         ) {
             Task { await reload(fresh: true) }
         }
+        .accessibilityIdentifier(TestID.Home.refresh)
     }
 
     /// The refresh button in the media bar's top corner: over the artwork,
@@ -433,9 +495,11 @@ struct HomeView: View {
                 }
                 .padding(.bottom, 24)
                 .insetForBleed(bleed)
+                .testAnchor(TestID.Home.loading)
             } else if let error, isBare {
                 ErrorState(error: error) { Task { await load() } }
                     .insetForBleed(bleed)
+                    .testAnchor(TestID.Home.error)
             } else if isBare {
                 EmptyState(
                     symbol: "film.stack",
@@ -443,6 +507,7 @@ struct HomeView: View {
                     message: "Once your Jellyfin libraries have been scanned, what's new and what you've started will show up here."
                 )
                 .insetForBleed(bleed)
+                .testAnchor(TestID.Home.empty)
             } else {
                 LazyVStack(alignment: .leading, spacing: Metrics.shelfSpacing) {
                     #if os(iOS)
@@ -464,11 +529,12 @@ struct HomeView: View {
                     }
                     #else
                     if !heroItems.isEmpty {
-                        HeroCarousel(items: heroItems, featured: $featured)
+                        HeroCarousel(items: heroItems, featured: $featured, topBleed: bleed.top)
                     } else if let hero {
-                        HeroHeader(item: hero)
+                        HeroHeader(item: hero, topBleed: bleed.top)
                             .onAppear { featured = hero }
                             .onChange(of: hero.Id) { _, _ in featured = hero }
+                            .testAnchor(TestID.Home.hero)
                     }
                     #endif
                     // Eager rather than lazy on a television, and inset back
@@ -498,7 +564,7 @@ struct HomeView: View {
                 #elseif os(iOS)
                 .padding(.top, heroItems.isEmpty ? bleed.top + 12 : 0)
                 #else
-                .padding(.top, hero == nil ? 12 : 0)
+                .padding(.top, hero == nil ? bleed.top + 12 : 0)
                 #endif
                 #if os(tvOS)
                 // At least the 60 points of overscan a television may crop:
@@ -587,41 +653,7 @@ struct HomeView: View {
             wasBackgrounded = false
             Task { await reload() }
         }
-        #if os(iOS)
-        // The bar is part of the screen rather than something drawn over it:
-        // everything that scrolls arrives underneath it and is gone, and the
-        // page starts where the bar ends.
-        //
-        // A phone's. An iPad's bar floats over the hero instead — see
-        // `padHome` — so here it is nothing, which takes no room.
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if Metrics.phoneLayout {
-                AppTopBar {
-                    HStack(spacing: 0) {
-                        BrandMark()
-                        Spacer(minLength: 12)
-                        HStack(spacing: 10) {
-                            // Search lives here rather than in a tab of its
-                            // own: it opens over Home, with the field already
-                            // active.
-                            Button {
-                                app.push(.search(""))
-                            } label: {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.body.weight(.semibold))
-                                    .barButtonDisc(size: 36)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Search")
-                            RefreshButton(isRefreshing: isRefreshing) {
-                                Task { await reload(fresh: true) }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        #endif
+        .testAnchor(TestID.Home.root)
     }
 
     /// What's below the media bar: the user's own Jellyfin home rows, in the
@@ -649,6 +681,7 @@ struct HomeView: View {
                 app.show(.music)
                 app.push(.music(.songList(title: "Recently Played", kind: .recentlyPlayed)))
             }
+            .testAnchor(TestID.Home.shelf(TestID.Home.rowMusicRecent))
             AlbumShelf(title: "New Music", items: musicNew) { album in
                 app.show(.music)
                 app.push(.music(.album(album.Id)))
@@ -656,6 +689,7 @@ struct HomeView: View {
                 app.show(.music)
                 app.push(.music(.recentlyAdded))
             }
+            .testAnchor(TestID.Home.shelf(TestID.Home.rowMusicNew))
         }
         #endif
     }
@@ -670,20 +704,25 @@ struct HomeView: View {
             // before the first row of anything to watch.
             if Metrics.phoneLayout {
                 LibraryTilesRow(libraries: app.libraries) { openLibrary($0) }
+                    .testAnchor(TestID.Home.shelf(TestID.Home.rowLibraries))
             } else {
                 LibraryChipsRow(libraries: app.libraries) { openLibrary($0) }
+                    .testAnchor(TestID.Home.shelf(TestID.Home.rowLibraries))
             }
             #elseif os(macOS)
             // The same strip on the Mac, whose sidebar also lists them.
             LibraryChipsRow(libraries: app.libraries) { openLibrary($0) }
+                .testAnchor(TestID.Home.shelf(TestID.Home.rowLibraries))
             #else
             LibraryTilesRow(libraries: app.libraries) { openLibrary($0) }
+                .testAnchor(TestID.Home.shelf(TestID.Home.rowLibraries))
             #endif
         case .resume:
             // Turned off in Settings, the slot draws nothing — Next Up keeps
             // its own place below.
             if !prefs.hidesContinueWatching {
                 MediaShelf(title: "Continue Watching", items: resume, wide: true) { open($0) }
+                    .testShelfKey(TestID.Home.rowResume)
             }
         case .nextUp:
             // Portrait, and a picture of the *season* rather than of the
@@ -699,6 +738,7 @@ struct HomeView: View {
                 menuOpensDetails: true,
                 menuRemovesFromNextUp: true
             ) { openNextUp($0) }
+            .testShelfKey(TestID.Home.rowNextUp)
         case .latest:
             // One row per library, which is how Jellyfin draws this slot too —
             // it is a single setting that expands into as many rows as the
@@ -716,6 +756,7 @@ struct HomeView: View {
                         collectionType: entry.library.CollectionType
                     ))
                 }
+                .testShelfKey(TestID.Home.rowLatest(entry.library.Id))
             }
         case .liveTV:
             // Drawn from the channel list the app already warms at launch
@@ -732,6 +773,7 @@ struct HomeView: View {
             } seeAll: {
                 app.show(.liveTV)
             }
+            .testShelfKey(TestID.Home.rowLiveTV)
         }
     }
 
@@ -866,9 +908,13 @@ struct HomeView: View {
         // screen was doing. The error state is kept for the case it was meant
         // for: nothing came back at all.
         var failure: (any Error)?
+        var nextUpFailed = false
         sections = await sectionsTask
         do { resume = try await resumeTask } catch { failure = error }
-        do { nextUp = try await nextUpTask } catch { failure = failure ?? error }
+        do { nextUp = try await nextUpTask } catch {
+            failure = failure ?? error
+            nextUpFailed = true
+        }
 
         // Both lists fresh is the moment to tidy the episodes Next Up has left
         // behind. Not awaited: it is a write per episode, and the page is not
@@ -893,9 +939,11 @@ struct HomeView: View {
         // moment the app has it. Detached because it fetches a poster per
         // title: the rest of Home must not wait on artwork for a shelf that is
         // somewhere else entirely.
+        // Not after a failed load: that would replace the shelf with whatever
+        // the page had on hand, which can be nothing at all.
         #if os(tvOS)
-        let published = shownNextUp
-        Task.detached { await TopShelf.publish(published) }
+        let published = nextUpFailed ? nil : shownNextUp
+        Task.detached { await TopShelf.publishHomeNextUp(published) }
         #endif
 
         // The bar is settled here rather than at the end: it has everything
@@ -1319,6 +1367,7 @@ struct HeroHeader: View {
             .itemContextMenu(item, allowsOpen: true)
             .accessibilityLabel(Self.displayTitle(of: item))
             .accessibilityHint("Opens the title")
+            .accessibilityIdentifier(TestID.Home.heroBackdrop(item.Id))
             #elseif os(iOS)
             // Edge to edge, under whatever the system keeps at the sides — on
             // a foldable's front screen the tab bar stands in a column down
@@ -1361,6 +1410,7 @@ struct HeroHeader: View {
         // new one per title, so a missing wordmark has to stop being missing
         // when the item under it changes.
         .onChange(of: item.Id) { _, _ in logoUnavailable = false }
+        .testAnchor(TestID.Home.heroPage(item.Id))
     }
 
     /// The artwork and everything that darkens it, at the hero's full size.
@@ -1370,6 +1420,7 @@ struct HeroHeader: View {
                 url: Artwork.url(item, type: "Backdrop", width: backdropWidth)
                     ?? Artwork.url(item, type: "Primary", width: backdropWidth),
                 blurHash: Artwork.hash(item, type: "Backdrop") ?? Artwork.hash(item),
+                focus: Self.backdropFocus,
                 placeholderFill: Theme.heroPlaceholderFill
             )
             .frame(height: artHeight)
@@ -1378,12 +1429,19 @@ struct HeroHeader: View {
             edgeScrim
             legibilityScrim
             pageBlend
-            #if os(macOS)
-            toolbarBlend
-            #endif
         }
         .frame(height: artHeight)
     }
+
+    /// Where the backdrop is cropped from. Jellyfin's backdrops are 16:9, and
+    /// this band is 2.4:1 on an iPad, a Mac or an open foldable, 2.7:1 on a
+    /// television and 3.5:1 on a phone on its side — so between an eighth and
+    /// a half of the picture's height has to go. Centred, a quarter of the top
+    /// went on a phone on its side, which is where a backdrop puts its faces;
+    /// the bottom is the part the page blend dissolves anyway. Taking 15% of
+    /// the overspill from the top and the rest from the bottom keeps the upper
+    /// third, and still leaves a little sky above a head.
+    static let backdropFocus = UnitPoint(x: 0.5, y: 0.15)
 
     /// What to ask the server for. A television is a 1920-point canvas, so a
     /// 1600-wide backdrop was being stretched across it before anything cropped
@@ -1417,27 +1475,6 @@ struct HeroHeader: View {
         #endif
     }
 
-    #if os(macOS)
-    /// The join to the toolbar, which has no surface of its own over this page
-    /// (see `HomeView.body`): the top of the picture rises out of the window
-    /// colour, so the title and the buttons in the toolbar sit on something
-    /// that is nearly the window in either appearance, and the picture is
-    /// fully itself by the time the toolbar ends. Measured in points from the
-    /// top rather than as a fraction, because the toolbar is the same height
-    /// whatever the hero is.
-    private var toolbarBlend: LinearGradient {
-        let reach: CGFloat = 96 / max(artHeight, 1)
-        return LinearGradient(
-            stops: [
-                .init(color: Theme.background.opacity(0.92), location: 0.00),
-                .init(color: Theme.background.opacity(0.55), location: reach * 0.45),
-                .init(color: Theme.background.opacity(0.18), location: reach * 0.75),
-                .init(color: .clear, location: reach),
-            ],
-            startPoint: .top, endPoint: .bottom
-        )
-    }
-    #endif
 
     /// How wide the text block is allowed to get before it wraps. Two-thirds of
     /// the screen on a television — 620 points there is a column narrow enough
@@ -1489,8 +1526,7 @@ struct HeroHeader: View {
 
                 if item.isEpisode, let label = item.episodeLabel {
                     Text(label)
-                        .font(metaFont(strong: true))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .titleRole(.label, font: metaFont(strong: true), tone: .picture)
                         .lineLimit(1)
                 }
 
@@ -1584,6 +1620,7 @@ struct HeroHeader: View {
                 // A long title shrinks a little rather than wrapping to a third
                 // line and pushing the buttons off the artwork.
                 .minimumScaleFactor(0.75)
+                .accessibilityIdentifier(TestID.Home.heroTitle(item.Id))
         }
     }
 
@@ -1705,6 +1742,7 @@ struct HeroHeader: View {
                 .font(.caption.weight(.medium))
                 #endif
                 .foregroundStyle(.white.opacity(0.82))
+                .accessibilityIdentifier(TestID.Home.heroRemaining(item.Id))
         }
         .padding(.top, 2)
     }
@@ -1725,10 +1763,12 @@ struct HeroHeader: View {
             }
             .appButtonStyle(prominent: true)
             .focused($focus, equals: .play)
+            .accessibilityIdentifier(TestID.Home.heroPlay(item.Id))
 
             Button("Details") { app.push(.item(item.Id)) }
                 .appButtonStyle()
                 .focused($focus, equals: .details)
+                .accessibilityIdentifier(TestID.Home.heroDetails(item.Id))
             #elseif os(macOS)
             // A Mac button, in the accent colour, with the hover and the press
             // a Mac button has. Its own style rather than `.borderedProminent`:
@@ -1750,11 +1790,13 @@ struct HeroHeader: View {
             .buttonStyle(MacHeroButtonStyle())
             .controlSize(.large)
             .help("\(playLabel) \(Self.displayTitle(of: item))")
+            .accessibilityIdentifier(TestID.Home.heroPlay(item.Id))
 
             Button("Details") { app.push(.item(item.Id)) }
                 .buttonStyle(MacHeroButtonStyle(prominent: false))
                 .controlSize(.large)
                 .help("Show details for \(Self.displayTitle(of: item))")
+                .accessibilityIdentifier(TestID.Home.heroDetails(item.Id))
             #else
             if Metrics.phoneLayout {
                 Button {
@@ -1766,6 +1808,7 @@ struct HeroHeader: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accentStrong)
+                .accessibilityIdentifier(TestID.Home.heroPlay(item.Id))
             } else {
                 // White on the artwork, not the accent: purple over a
                 // different backdrop every few seconds fights half of them,
@@ -1783,6 +1826,7 @@ struct HeroHeader: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier(TestID.Home.heroPlay(item.Id))
             }
 
             // Not `.bordered`: its fill is drawn for a page background, and over
@@ -1800,6 +1844,7 @@ struct HeroHeader: View {
                     .contentShape(Capsule())
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier(TestID.Home.heroDetails(item.Id))
             #endif
         }
         .padding(.top, 2)
@@ -1991,6 +2036,7 @@ struct HeroCarousel: View {
         // the two.
         .onChange(of: pages.map(\.Id)) { _, _ in position = pages.first?.Id }
         .task(id: items.map(\.Id)) { await prefetch() }
+        .testAnchor(TestID.Home.hero)
     }
 
     /// Everything but the first page, pulled into the image cache. The pages
@@ -2019,6 +2065,7 @@ struct HeroCarousel: View {
         .padding(.bottom, 30)
         .animation(.easeOut(duration: 0.25), value: index)
         .accessibilityHidden(true)
+        .testAnchor(TestID.Home.heroCurrentPage(index))
     }
 }
 #endif
@@ -2049,21 +2096,60 @@ struct HeroCarousel: View {
 
     private var height: CGFloat { HeroHeader.height(forWidth: width) }
 
+    /// Each page's width: the bar's own, and the sides it is laid out over
+    /// — the column under an iPad's sidebar, a foldable's tab column — so
+    /// the picture reaches the screen's edges on every page alike while the
+    /// title and the buttons keep inside them (`HeroHeader.sideInsets`).
+    private var pageWidth: CGFloat {
+        max(1, width + sideInsets.leading + sideInsets.trailing)
+    }
+
+    /// The page the scroll view rests on, as the index the ticker, the dots
+    /// and the thumbnails speak in.
+    private var pagePosition: Binding<Int?> {
+        Binding(get: { index }, set: { if let new = $0 { index = new } })
+    }
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            TabView(selection: $index) {
-                ForEach(Array(items.enumerated()), id: \.element.Id) { position, item in
-                    HeroHeader(
-                        item: item,
-                        topBleed: topBleed,
-                        heroHeight: height,
-                        availableWidth: width,
-                        sideInsets: sideInsets
-                    )
-                    .tag(position)
+            // A paging scroll view rather than a page-style `TabView`. The
+            // page view hands the safe area it is sitting over — an iPad's
+            // sidebar, which the detail column runs under — to whichever
+            // page is at its leading edge when it first lays out, and to no
+            // other; nothing inside the page could undo it. The first title
+            // of every draw sat half a sidebar to the right of the rest,
+            // picture, scrims and text together. Here every page is laid
+            // out the same way: the bar's whole width, starting at its edge.
+            //
+            // An ordinary stack, not a lazy one. Everything a page is laid
+            // out from arrives a pass late — the width, the sides and the
+            // top inset are each measured, and start at zero — and a lazy
+            // stack does not reliably hand the new numbers to pages it has
+            // already built: on an iPad the bar took its real size while
+            // the pages inside stayed as the first pass drew them, six
+            // slivers side by side with their buttons crushed. There are
+            // six pages at most, and a minute of turning builds them all
+            // anyway.
+            ScrollView(.horizontal) {
+                HStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.Id) { position, item in
+                        HeroHeader(
+                            item: item,
+                            topBleed: topBleed,
+                            heroHeight: height,
+                            availableWidth: width,
+                            sideInsets: sideInsets
+                        )
+                        .frame(width: pageWidth)
+                        .id(position)
+                    }
                 }
+                .scrollTargetLayout()
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: pagePosition)
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             .frame(height: height + topBleed)
 
             if items.count > 1 {
@@ -2113,6 +2199,7 @@ struct HeroCarousel: View {
             instant.disablesAnimations = true
             withTransaction(instant) { index = 0 }
         }
+        .testAnchor(TestID.Home.hero)
     }
 
     /// Where you are in the set. The system's own page dots are white on white
@@ -2138,6 +2225,7 @@ struct HeroCarousel: View {
         .padding(.bottom, 12)
         .animation(.easeOut(duration: 0.25), value: index)
         .accessibilityHidden(true)
+        .testAnchor(TestID.Home.heroCurrentPage(index))
     }
 
     /// What else is in the bar, as a row of its backdrops in the corner: the
@@ -2165,11 +2253,13 @@ struct HeroCarousel: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(HeroHeader.displayTitle(of: item))
                 .accessibilityAddTraits(position == index ? [.isButton, .isSelected] : .isButton)
+                .accessibilityIdentifier(TestID.Home.heroThumb(item.Id))
             }
         }
         .padding(.trailing, Metrics.gutter)
         .padding(.bottom, 38)
         .animation(.easeOut(duration: 0.25), value: index)
+        .testAnchor(TestID.Home.heroCurrentPage(index))
     }
 }
 

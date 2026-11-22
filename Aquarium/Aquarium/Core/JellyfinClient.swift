@@ -29,8 +29,35 @@ enum APIError: LocalizedError, Sendable {
         case .identity(let m): m
         case .auth(let m): m
         case .notConfigured: "Not signed in"
-        case .server(let status, let path): "Server error \(status) on \(path)"
+        case .server(let status, let path): Self.plainWords(status: status, path: path)
         case .message(let m): m
+        }
+    }
+
+    /// The status and endpoint, for the log. What a viewer reads is
+    /// `errorDescription`: a status code and an API path mean nothing to
+    /// someone with a remote in their hand.
+    var technicalDescription: String {
+        if case .server(let status, let path) = self { return "Server error \(status) on \(path)" }
+        return errorDescription ?? "Unknown error"
+    }
+
+    /// A refused request in words a viewer can act on.
+    static func plainWords(status: Int, path: String) -> String {
+        let signingIn = path.hasSuffix("/AuthenticateByName")
+        switch status {
+        case 401 where signingIn:
+            return "That user name or password isn't right."
+        case 403 where signingIn:
+            return "This account can't sign in. It's turned off on the server, or not allowed in at this time. Ask the server's administrator."
+        case 401, 403:
+            return "This account isn't allowed to do that."
+        case 404:
+            return "This isn't available to this account, or it's no longer on the server."
+        case 500...:
+            return "The server ran into a problem. Try again in a moment."
+        default:
+            return "The server turned that request down."
         }
     }
 }
@@ -82,7 +109,9 @@ final class JellyfinClient {
     static let shared = JellyfinClient()
 
     static let clientName = "Aquarium"
-    static let clientVersion = "1.0.0"
+    /// The app's own version, as About shows it, so the server's dashboard
+    /// tells one build from another.
+    static let clientVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
 
     let prefs = Preferences.shared
 
@@ -205,8 +234,20 @@ final class JellyfinClient {
         cfg.timeoutIntervalForRequest = timeout
         cfg.waitsForConnectivity = false
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
+        #if DEBUG
+        if let stubs = testProtocolClasses { cfg.protocolClasses = stubs + (cfg.protocolClasses ?? []) }
+        #endif
         return URLSession(configuration: cfg)
     }
+
+    #if DEBUG
+    /// Unit tests only: `URLProtocol` classes put in front of the system's in
+    /// the sessions made from now on, so requests can be answered with canned
+    /// JSON. Set it, then `resetConnections()` to rebuild the sessions; nil
+    /// again and reset to undo. Nothing else sets it. See
+    /// AquariumTests/Shared/Support.
+    nonisolated(unsafe) static var testProtocolClasses: [AnyClass]?
+    #endif
 
     private let decoder = JSONDecoder()
 
@@ -608,16 +649,22 @@ final class JellyfinClient {
             // too little to hang that on: a reverse proxy having a bad moment
             // sends them, and over plain http so can anyone on the path.
             guard await tokenIsRefused(sentToken, server: base) else {
-                throw APIError.server(status: 401, path: path.components(separatedBy: "?")[0])
+                let refused = APIError.server(status: 401, path: path.components(separatedBy: "?")[0])
+                Self.requestLog.notice("\(refused.technicalDescription, privacy: .public)")
+                throw refused
             }
             expireSession()
             throw APIError.auth("Your session has expired — please sign in again")
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw APIError.server(status: http.statusCode, path: path.components(separatedBy: "?")[0])
+            let refused = APIError.server(status: http.statusCode, path: path.components(separatedBy: "?")[0])
+            Self.requestLog.notice("\(refused.technicalDescription, privacy: .public)")
+            throw refused
         }
         return data
     }
+
+    nonisolated static let requestLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Aquarium", category: "api")
 
     /// Whether the server, asked who this token belongs to, says nobody. Any
     /// other outcome — an answer, an error, no reply — is not a refusal.
@@ -1044,6 +1091,7 @@ final class JellyfinClient {
             _ = try? await request("/Sessions/Logout", method: "POST", server: account.server, token: token, countsForOffline: false)
         }
         Keychain.delete(server: account.server, userId: account.userId)
+        SeerrClient.forget(account)
         prefs.forgetAccount(account)
     }
 
@@ -1072,6 +1120,7 @@ final class JellyfinClient {
                 revoked = false
             }
             Keychain.delete(server: s.server, userId: s.userId)
+            SeerrClient.forget(s)
             tokenCache = nil
             prefs.forgetAccount(s)
         }
@@ -1094,6 +1143,8 @@ final class JellyfinClient {
     private func expireSession() {
         guard let s = prefs.session else { return }
         Keychain.delete(server: s.server, userId: s.userId)
+        // The Seerr session was signed in with this Jellyfin one; it goes too.
+        SeerrClient.forget(s)
         tokenCache = nil
         prefs.forgetAccount(s)
         LibraryIndex.shared.wipe()
@@ -1119,7 +1170,7 @@ final class JellyfinClient {
     /// `Trickplay` too, so the player can take the scrubbing thumbnails'
     /// description from the item it already fetched instead of asking for the
     /// whole item a second time. See `trickplayInfo(for:)`.
-    private static let detailFields = itemFields + ",People,Studios,Taglines,Trickplay,RemoteTrailers,LocalTrailerCount,ProductionLocations"
+    private static let detailFields = itemFields + ",People,Studios,Taglines,Trickplay,RemoteTrailers,LocalTrailerCount,ProductionLocations,ProviderIds"
 
     /// `itemFields` without `MediaSources`, for queries that only fill grids
     /// and shelves.
@@ -1677,6 +1728,22 @@ final class JellyfinClient {
 
     /// "More like this" — the server's own recommendation. Purely additive to
     /// the detail page, so callers treat a failure as an empty list.
+    /// What is directly inside a folder or a photo album, sub-albums first:
+    /// its videos, photos and albums, not the audio or books a mixed folder
+    /// can also hold.
+    func children(of parentId: String, limit: Int = 500) async throws -> [BaseItem] {
+        guard let s = prefs.session else { throw APIError.notConfigured }
+        let q = [
+            URLQueryItem(name: "ParentId", value: parentId),
+            URLQueryItem(name: "SortBy", value: "IsFolder,SortName"),
+            URLQueryItem(name: "SortOrder", value: "Ascending"),
+            URLQueryItem(name: "ExcludeItemTypes", value: "Audio,AudioBook,Book,MusicAlbum,MusicArtist"),
+            URLQueryItem(name: "Fields", value: Self.listFields),
+            URLQueryItem(name: "Limit", value: String(limit)),
+        ]
+        return try await get(ItemsResponse.self, "/Items?userId=\(s.userId)&\(Self.encode(q))").items
+    }
+
     func similar(to itemId: String, limit: Int = 12) async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
         return try await get(
@@ -1694,19 +1761,26 @@ final class JellyfinClient {
         ).items
     }
 
-    func episodes(seriesId: String, seasonId: String?) async throws -> [BaseItem] {
+    /// `fromServer` skips the device's copy of the library, for a caller
+    /// that is asking what the server has *now* — the copy may be hours
+    /// behind, still listing an episode under an id the server has dropped.
+    func episodes(seriesId: String, seasonId: String?, fromServer: Bool = false) async throws -> [BaseItem] {
         guard let s = prefs.session else { throw APIError.notConfigured }
-        if let local = LibraryIndex.shared.episodes(seriesId: seriesId, seasonId: seasonId) { return local }
+        if !fromServer, let local = LibraryIndex.shared.episodes(seriesId: seriesId, seasonId: seasonId) { return local }
         var path = "/Shows/\(Self.pathId(seriesId))/Episodes?userId=\(s.userId)&Fields=\(Self.itemFields)"
         if let seasonId { path += "&seasonId=\(seasonId)" }
         return try await get(ItemsResponse.self, path).items
     }
 
+    /// What Search looks for unless told otherwise: titles, and the
+    /// collections and people that lead to them.
+    static let searchTypes = "Movie,Series,Episode,BoxSet,Person"
+
     func search(
         _ term: String,
         startIndex: Int = 0,
         limit: Int = 48,
-        types: String = "Movie,Series,Episode"
+        types: String = JellyfinClient.searchTypes
     ) async throws -> ItemsResponse {
         guard let s = prefs.session else { throw APIError.notConfigured }
         let q = [
@@ -1897,7 +1971,9 @@ final class JellyfinClient {
     func mediaSegments(itemId: String) async throws -> [MediaSegment] {
         guard let r = try? await get(
             MediaSegmentsResponse.self,
-            "/MediaSegments/\(Self.pathId(itemId))?includeSegmentTypes=Intro,Outro"
+            // One parameter per type: the server reads a comma-joined list as
+            // its first entry alone, and the credits never came back.
+            "/MediaSegments/\(Self.pathId(itemId))?includeSegmentTypes=Intro&includeSegmentTypes=Outro"
         ) else { return [] }
         return (r.Items ?? []).map {
             MediaSegment(
@@ -1924,6 +2000,8 @@ final class JellyfinClient {
     /// question for the server rather than something `AVPlayerItem` can be told.
     /// `nil` leaves the choice to the server's own defaults; `-1` for the
     /// subtitle means none, which is Jellyfin's own spelling of off.
+    /// `mediaSourceId` is the version they are counted in, and the server
+    /// ignores them without it — see `PlaybackInfoBody.MediaSourceId`.
     func resolvePlayback(
         itemId: String,
         maxBitrate: Int? = nil,
@@ -1933,6 +2011,7 @@ final class JellyfinClient {
         fullEncode: Bool = false,
         audioStreamIndex: Int? = nil,
         subtitleStreamIndex: Int? = nil,
+        mediaSourceId: String? = nil,
         audio: Bool = false,
         engine: PlaybackEngineKind = .platformDefault
     ) async throws -> PlaybackSource {
@@ -1976,7 +2055,8 @@ final class JellyfinClient {
             EnableDirectStream: !forceTranscode,
             EnableTranscoding: true,
             AudioStreamIndex: audioStreamIndex,
-            SubtitleStreamIndex: subtitleStreamIndex
+            SubtitleStreamIndex: subtitleStreamIndex,
+            MediaSourceId: (mediaSourceId?.isEmpty ?? true) ? nil : mediaSourceId
         )
         // A live channel is given the time it takes — see `patientTimeout`.
         // And a slow tuner is not the server being gone, so it is not counted
@@ -1986,7 +2066,8 @@ final class JellyfinClient {
             countsForOffline: !live, patient: live
         )
         let info = try await Self.decode(PlaybackInfoResponse.self, from: data)
-        guard let ms = info.MediaSources?.first else {
+        // The version asked for, where the server lists more than that one.
+        guard let ms = mediaSourceId.flatMap({ id in info.MediaSources?.first { $0.Id == id } }) ?? info.MediaSources?.first else {
             throw APIError.message("No playable media source returned by the server")
         }
         let playSessionId = info.PlaySessionId ?? UUID().uuidString
@@ -2035,6 +2116,9 @@ final class JellyfinClient {
                 throw APIError.message("The server returned a stream URL this client couldn't parse")
             }
             var stream = fullEncode ? Self.withoutStreamCopy(url) : url
+            if !fullEncode, !live, maxBitrate == nil {
+                stream = Self.copyingVideoOfUnknownBitrate(stream, source: ms)
+            }
             stream = Self.carrying(
                 audioStreamIndex: audioStreamIndex,
                 subtitleStreamIndex: subtitleStreamIndex,
@@ -2091,6 +2175,7 @@ final class JellyfinClient {
                 fullEncode: fullEncode,
                 audioStreamIndex: audioStreamIndex,
                 subtitleStreamIndex: subtitleStreamIndex,
+                mediaSourceId: mediaSourceId,
                 audio: audio,
                 engine: engine
             ), escalated.isTranscode {
@@ -2163,6 +2248,39 @@ final class JellyfinClient {
               let uri = lines[(tag + 1)...].first(where: { !$0.isEmpty && !$0.hasPrefix("#") })
         else { return nil }
         return URL(string: uri, relativeTo: master)?.absoluteURL
+    }
+
+    /// Let a remux copy a picture whose bitrate the file doesn't state.
+    ///
+    /// The server writes `VideoBitrate` (the profile's ceiling less the audio)
+    /// into every stream address, and when it starts the encode it copies the
+    /// video only if the stream's own bitrate is known and under that figure.
+    /// A Matroska file often states no per-stream bitrate, so its H.264 —
+    /// which the address itself says needs nothing but a new container — was
+    /// re-encoded instead, at the 200 Mbps ceiling, which VideoToolbox refuses
+    /// outright: the stream never started.
+    ///
+    /// Files only, and only where nothing about the picture needs work: no rung chosen (that
+    /// cap is the point of a rung), no video reason in `TranscodeReasons`, and
+    /// no subtitle burnt in. Then the figure is a cap on a copy, and without
+    /// it the copy goes ahead.
+    nonisolated static func copyingVideoOfUnknownBitrate(_ url: URL, source: MediaSource) -> URL {
+        guard let video = source.streams.first(where: { $0.type == "Video" }), video.BitRate == nil,
+              var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              var query = parts.percentEncodedQueryItems
+        else { return url }
+        func value(_ name: String) -> String? {
+            query.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.value?.removingPercentEncoding
+        }
+        guard let reasons = value("TranscodeReasons")?.split(separator: ",").map(String.init), !reasons.isEmpty
+        else { return url }
+        let pictureReasons: Set<String> = ["RefFramesNotSupported", "AnamorphicVideoNotSupported", "InterlacedVideoNotSupported"]
+        guard !reasons.contains(where: { $0.hasPrefix("Video") || pictureReasons.contains($0) }) else { return url }
+        if value("SubtitleMethod")?.lowercased() == "encode",
+           let index = value("SubtitleStreamIndex").flatMap(Int.init), index >= 0 { return url }
+        query.removeAll { $0.name.caseInsensitiveCompare("VideoBitrate") == .orderedSame }
+        parts.percentEncodedQueryItems = query
+        return parts.url ?? url
     }
 
     /// Take away the server's freedom to copy a bitstream through, so both
@@ -2267,6 +2385,15 @@ final class JellyfinClient {
         /// written into the body would be answering a question nobody asked.
         let AudioStreamIndex: Int?
         let SubtitleStreamIndex: Int?
+        /// Which version of the title the two indexes above are counted in.
+        /// Not a nicety: the server applies a chosen audio or subtitle track
+        /// only to the source this names, and with no name it applies them
+        /// to none — the stream comes back with the file's default track and
+        /// an address saying so. It looked as though it worked because the
+        /// server remembers, per person and title, the track the progress
+        /// reports name, and that is the reported one: the first pick of a
+        /// track was ignored and every pick after it honoured.
+        let MediaSourceId: String?
     }
 
     // MARK: - Playback reporting

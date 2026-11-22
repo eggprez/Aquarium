@@ -82,21 +82,6 @@ extension JellyfinClient {
     /// for an audiobook its chapters.
     nonisolated static let musicDetailFields = musicFields + ",Overview,MediaSources,Chapters,GenreItems,Studios"
 
-    private static let musicImages = "&EnableImageTypes=Primary,Backdrop,Logo&ImageTypeLimit=1"
-
-    // MARK: - Libraries
-
-    /// The music and audiobook libraries the account can see. Jellyfin files
-    /// audiobooks under the `books` library type — the same one ebooks use —
-    /// so both spellings are taken.
-    func musicViews() async throws -> (music: [BaseItem], books: [BaseItem]) {
-        let all = try await views()
-        return (
-            music: all.filter { $0.CollectionType == "music" },
-            books: all.filter { $0.CollectionType == "books" || $0.CollectionType == "audiobooks" }
-        )
-    }
-
     // MARK: - One query for most of it
 
     /// The knobs every music list shares. Everything is optional; what is left
@@ -128,13 +113,23 @@ extension JellyfinClient {
         var excludeItemIds: [String] = []
     }
 
+    /// What to ask the server to sort by. A song's `SortName` is not its
+    /// title: Jellyfin builds it from the disc and track numbers first
+    /// ("0001 - Code Monkey"), so "by name" put every first track ahead of
+    /// every second one, and the A–Z index — which reads the list as being
+    /// in title order — landed nowhere near its letter. Songs by name are by
+    /// `Name`.
+    static func sortBy(_ sort: MusicSort, types: String) -> String {
+        sort == .name && types == "Audio" ? "Name" : sort.rawValue
+    }
+
     func music(_ q: MusicQuery) async throws -> ItemsResponse {
         guard let s = prefs.session else { throw APIError.notConfigured }
         var items: [URLQueryItem] = [
             .init(name: "userId", value: s.userId),
             .init(name: "IncludeItemTypes", value: q.types),
             .init(name: "Recursive", value: q.recursive ? "true" : "false"),
-            .init(name: "SortBy", value: q.sort.rawValue),
+            .init(name: "SortBy", value: Self.sortBy(q.sort, types: q.types)),
             .init(name: "SortOrder", value: (q.descending ?? q.sort.descending) ? "Descending" : "Ascending"),
             .init(name: "Fields", value: q.fields),
             .init(name: "StartIndex", value: String(q.startIndex)),
@@ -165,14 +160,20 @@ extension JellyfinClient {
     /// Artists with an album to their name, which is the list a music library
     /// means by "Artists" — the other list, everyone who has ever been credited
     /// on a track, is twice as long and mostly guest features.
+    ///
+    /// `itemTypes` counts artists from those items alone: "Audio" for
+    /// musicians, "AudioBook" for authors. An audiobook's author is an album
+    /// artist too and so is every band; a library's `parentId` separates them
+    /// only where there is one library of each kind.
     func albumArtists(
         parentId: String? = nil, startIndex: Int = 0, limit: Int = 200,
         favorites: Bool = false, searchTerm: String? = nil, sort: MusicSort = .name,
-        nameLessThan: String? = nil
+        nameLessThan: String? = nil, itemTypes: String? = nil
     ) async throws -> ItemsResponse {
         try await artists(
             path: "/Artists/AlbumArtists", parentId: parentId, startIndex: startIndex,
-            limit: limit, favorites: favorites, searchTerm: searchTerm, sort: sort, nameLessThan: nameLessThan
+            limit: limit, favorites: favorites, searchTerm: searchTerm, sort: sort, nameLessThan: nameLessThan,
+            includeItemTypes: itemTypes
         )
     }
 
@@ -189,7 +190,8 @@ extension JellyfinClient {
 
     private func artists(
         path: String, parentId: String?, startIndex: Int, limit: Int,
-        favorites: Bool, searchTerm: String?, sort: MusicSort, nameLessThan: String? = nil
+        favorites: Bool, searchTerm: String?, sort: MusicSort, nameLessThan: String? = nil,
+        includeItemTypes: String? = nil
     ) async throws -> ItemsResponse {
         guard let s = prefs.session else { throw APIError.notConfigured }
         var q: [URLQueryItem] = [
@@ -203,6 +205,7 @@ extension JellyfinClient {
             .init(name: "ImageTypeLimit", value: "1"),
         ]
         if let parentId { q.append(.init(name: "ParentId", value: parentId)) }
+        if let includeItemTypes { q.append(.init(name: "IncludeItemTypes", value: includeItemTypes)) }
         if favorites { q.append(.init(name: "IsFavorite", value: "true")) }
         if let searchTerm, !searchTerm.isEmpty { q.append(.init(name: "SearchTerm", value: searchTerm)) }
         if let nameLessThan { q.append(.init(name: "NameLessThan", value: nameLessThan.lowercased())) }

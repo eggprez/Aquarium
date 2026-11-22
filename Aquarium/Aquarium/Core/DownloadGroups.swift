@@ -53,6 +53,11 @@ struct DownloadSeries: Identifiable, Hashable, Sendable {
 }
 
 enum DownloadGroups {
+    /// The headings over the two grids when both are shown. "Movies", as the
+    /// rest of the app and the Linux app say it, not "Films".
+    static let showsHeading = "Shows"
+    static let moviesHeading = "Movies"
+
     /// Which show a record belongs to. Falls back to the name so records made
     /// before series ids were stored still group rather than each becoming a
     /// show of one.

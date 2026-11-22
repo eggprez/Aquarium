@@ -27,8 +27,24 @@
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-      shouldUseLaunchSchemeArgsEnv = "YES"
-      shouldAutocreateTestPlan = "YES">
+      shouldUseLaunchSchemeArgsEnv = "YES">
+      <TestPlans>
+         <TestPlanReference
+            reference = "container:TestPlans/Unit.xctestplan" default = "YES">
+         </TestPlanReference>
+         <TestPlanReference
+            reference = "container:TestPlans/iPhone.xctestplan">
+         </TestPlanReference>
+         <TestPlanReference
+            reference = "container:TestPlans/iPad.xctestplan">
+         </TestPlanReference>
+         <TestPlanReference
+            reference = "container:TestPlans/Mac.xctestplan">
+         </TestPlanReference>
+         <TestPlanReference
+            reference = "container:TestPlans/TV.xctestplan">
+         </TestPlanReference>
+      </TestPlans>
       <Testables>
          <TestableReference
             skipped = "NO">
@@ -37,6 +53,16 @@
                BlueprintIdentifier = "FE11A5D00000000000000740"
                BuildableName = "AquariumTests.xctest"
                BlueprintName = "AquariumTests"
+               ReferencedContainer = "container:Aquarium.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "FE11A5D00000000000000840"
+               BuildableName = "AquariumUITests.xctest"
+               BlueprintName = "AquariumUITests"
                ReferencedContainer = "container:Aquarium.xcodeproj">
             </BuildableReference>
          </TestableReference>

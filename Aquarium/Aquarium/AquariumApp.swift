@@ -18,6 +18,10 @@ import CarPlay
 
 @main
 struct AquariumApp: App {
+    /// UI test mode, when a test launched the app — see Core/TestMode.swift.
+    /// First, so it runs before the properties below create the singletons.
+    private let testMode: Void = TestMode.prepare()
+
     @State private var app = AppModel.shared
     @State private var client = JellyfinClient.shared
     @State private var prefs = Preferences.shared
@@ -79,10 +83,15 @@ struct AquariumApp: App {
     }
     #endif
 
-    #if os(tvOS) && DEBUG
+    #if os(tvOS)
     init() {
+        #if DEBUG
         // Remote presses from a script — see Player/TV/RemoteDebugHook.swift.
         RemoteDebugHook.start()
+        #endif
+        // A film shared from a FaceTime call on this Apple TV, or one moved
+        // here from an iPhone — see Core/SharePlay.swift.
+        Launch.afterFirstFrame { SharePlayCoordinator.shared.start() }
     }
     #endif
 
@@ -250,7 +259,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             || key.hasPrefix("nextup_known_") || key.hasPrefix("nextup_checked_") {
             defaults.removeObject(forKey: key)
         }
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let base = AppDirectory.url(.applicationSupportDirectory)
         try? FileManager.default.removeItem(at: base.appendingPathComponent("ContentAlerts", isDirectory: true))
         BGTaskScheduler.shared.cancelAllTaskRequests()
     }

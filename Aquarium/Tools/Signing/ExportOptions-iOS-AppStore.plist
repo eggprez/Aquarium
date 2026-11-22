@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- iOS App Store / TestFlight export, signed by hand rather than by
+	     Xcode's managed profiles. Apple's "Preparing your iOS app for CarPlay
+	     development" asks a CarPlay app to name its provisioning profile
+	     itself. The four profiles below were made in the developer portal on
+	     2026-11-20 against the "Apple Distribution" certificate in this Mac's
+	     keychain; they expire 2027-11-20.
+	     Use:  xcodebuild -exportArchive -archivePath <iOS archive>
+	             -exportOptionsPlist Tools/Signing/ExportOptions-iOS-AppStore.plist
+	             -exportPath <folder> -allowProvisioningUpdates
+	     Change `destination` to `export` to get the .ipa locally instead. -->
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>destination</key>
+	<string>upload</string>
+	<key>manageAppVersionAndBuildNumber</key>
+	<true/>
+	<key>teamID</key>
+	<string>6S26L64S3C</string>
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>Apple Distribution</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>scottai.FellyJin</key>
+		<string>Aquarium iOS App Store</string>
+		<key>scottai.FellyJin.LiveActivities</key>
+		<string>Aquarium LiveActivities App Store</string>
+		<key>scottai.FellyJin.watchkitapp</key>
+		<string>Aquarium Watch App Store</string>
+		<key>scottai.FellyJin.watchkitapp.widgets</key>
+		<string>Aquarium Watch Widgets App Store</string>
+	</dict>
+</dict>
+</plist>

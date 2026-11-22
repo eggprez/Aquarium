@@ -1,0 +1,20 @@
+name: Probe
+options:
+  bundleIdPrefix: qa.probe
+targets:
+  Probe:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources: [Sources]
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
+      CODE_SIGN_IDENTITY: "-"
+      SWIFT_VERSION: 5
+schemes:
+  Probe:
+    build:
+      targets:
+        Probe: all
+    test:
+      targets: [Probe]

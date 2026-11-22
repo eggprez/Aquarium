@@ -24,8 +24,9 @@ struct PlayerStreamRows {
 
     // MARK: The file
 
-    /// Empty for a channel and for a download: neither has a Jellyfin media
-    /// source behind it, and a column of blanks says less than no column.
+    /// Empty for a channel, which has no Jellyfin media source behind it: a
+    /// column of blanks says less than no column. A download's is the file
+    /// it was made from, as kept by `DownloadItemInfo`.
     var file: [Row] {
         guard let source else { return [] }
         let video = source.streams.first { $0.type == "Video" }
@@ -139,12 +140,18 @@ struct PlayerStreamRows {
             let ms = player.appliedAudioDelayMilliseconds
             rows.append(("Audio delay", "\(ms > 0 ? "+" : "")\(ms) ms"))
         }
-        if let id = player.selectedAudioTrack, let track = player.audioTracks.first(where: { $0.id == id }) {
-            rows.append(("Audio track", track.label))
+        // By the names the Audio and Subtitles cards use, which are the
+        // server's: the engine's own name for a track with no language is
+        // "Unknown", and it has no track at all for a subtitle the app or
+        // the server draws.
+        let audioChoices = player.audioOptions
+        if let id = player.selectedAudioOption, let option = audioChoices.first(where: { $0.id == id }) {
+            rows.append(("Audio track", option.label))
         }
-        if let id = player.selectedSubtitleTrack, let track = player.subtitleTracks.first(where: { $0.id == id }) {
-            rows.append(("Subtitles", track.label))
-        } else if !player.subtitleTracks.isEmpty {
+        let subtitleChoices = player.subtitleOptions
+        if let id = player.selectedSubtitleOption, let option = subtitleChoices.first(where: { $0.id == id }) {
+            rows.append(("Subtitles", option.label))
+        } else if !subtitleChoices.isEmpty {
             rows.append(("Subtitles", "Off"))
         }
         if let chapter = player.chapterName(at: player.position) {

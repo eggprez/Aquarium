@@ -42,6 +42,9 @@ const ACCOUNT: &str = "jellyfin-access-token";
 /// A token whose sign-out couldn't reach the server yet. Parked here so the
 /// revocation can be retried instead of silently leaving a live session behind.
 const PENDING_ACCOUNT: &str = "jellyfin-pending-revocation";
+/// A Jellyfin account's session on a Seerr server (see `seerr.rs`), one item
+/// per account: `seerr-session:<account key>`.
+const SEERR_ACCOUNT: &str = "seerr-session";
 /// The Secret Service alias for the collection we store in — on GNOME that
 /// resolves to the user's login keyring.
 const TARGET: &str = "default";
@@ -63,6 +66,9 @@ struct State {
     /// without this each of those was another keyring read, and another
     /// unlock prompt while the keyring was locked.
     pending: Option<Option<Value>>,
+    /// Seerr sessions already looked up, by account key, misses and failed
+    /// lookups included: every Seerr request reads its session from here.
+    seerr: Vec<(String, Option<String>)>,
 }
 
 /// Held across the blocking Secret Service call on purpose: a second caller
@@ -73,7 +79,18 @@ static STATE: Mutex<State> = Mutex::new(State {
     token: None,
     backend: None,
     pending: None,
+    seerr: Vec::new(),
 });
+
+/// Test hook: forget everything cached about the keyring.
+#[cfg(test)]
+pub fn reset_for_tests() {
+    let mut s = STATE.lock().unwrap_or_else(|p| p.into_inner());
+    s.token = None;
+    s.backend = None;
+    s.pending = None;
+    s.seerr.clear();
+}
 
 /// A poisoned lock here means some earlier caller panicked mid-lookup. The
 /// cache is still coherent — worst case a field is unset and gets refilled —
@@ -374,6 +391,8 @@ fn redact_accounts(cfg: &mut Value) {
         for a in list {
             if let Some(obj) = a.as_object_mut() {
                 obj.remove("token");
+                // A Seerr session filed here for want of a keyring.
+                obj.remove("seerr");
             }
         }
     }
@@ -523,4 +542,368 @@ pub fn clear_account(key: &str) {
         }
     }
     let _ = crate::config::set_account_field(key, "token", Value::Null);
+}
+
+// ---------- Seerr sessions ----------
+//
+// One per Jellyfin account, beside that account's token and under the same
+// rules: the keyring first, the account's config entry when there is no
+// keyring, one D-Bus conversation at a time, and never across the IPC
+// boundary (`redact_accounts` strips the file copy; nothing returns the
+// keyring one to the webview). What is filed is one JSON blob, written and
+// read by `seerr.rs`.
+
+fn seerr_slot(key: &str) -> String {
+    format!("{SEERR_ACCOUNT}:{key}")
+}
+
+fn remember_seerr(st: &mut State, key: &str, value: Option<String>) {
+    st.seerr.retain(|(k, _)| k != key);
+    st.seerr.push((key.to_owned(), value));
+}
+
+fn seerr_in_file(key: &str) -> Option<String> {
+    crate::config::accounts()
+        .into_iter()
+        .find(|a| a.get("key").and_then(|v| v.as_str()) == Some(key))
+        .and_then(|a| a.get("seerr").and_then(|v| v.as_str()).map(str::to_owned))
+        .filter(|s| !s.is_empty())
+}
+
+/// File an account's Seerr session. With no usable keyring it goes into that
+/// account's entry in config.json, the degraded mode `store_account` has; an
+/// account with no entry has nowhere to put it, and that is an error.
+pub fn store_seerr(key: &str, blob: &str) -> Result<(), String> {
+    let mut st = state();
+    let stored = match write(&seerr_slot(key), blob) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            crate::debug_log_line(&format!(
+                "secret: keyring write for a Seerr session failed ({}) — falling back to config.json",
+                e
+            ));
+            let listed = crate::config::accounts()
+                .iter()
+                .any(|a| a.get("key").and_then(|v| v.as_str()) == Some(key));
+            if listed {
+                crate::config::set_account_field(key, "seerr", json!(blob))
+            } else {
+                Err("no saved account to file the Seerr session under".to_string())
+            }
+        }
+    };
+    if stored.is_ok() {
+        remember_seerr(&mut st, key, Some(blob.to_owned()));
+    }
+    stored
+}
+
+/// An account's Seerr session, from memory after the first lookup (a miss
+/// and a failed lookup are remembered too, for the reason `cached_token`
+/// gives), from its keyring slot or, failing that, its config entry.
+pub fn seerr_session(key: &str) -> Option<String> {
+    let mut st = state();
+    if let Some((_, known)) = st.seerr.iter().find(|(k, _)| k == key) {
+        return known.clone();
+    }
+    let found = match read(&seerr_slot(key)) {
+        Ok(Some(v)) => Some(v),
+        Ok(None) => seerr_in_file(key),
+        Err(e) => {
+            crate::debug_log_line(&format!("secret: Seerr session lookup failed: {}", e));
+            seerr_in_file(key)
+        }
+    };
+    remember_seerr(&mut st, key, found.clone());
+    found
+}
+
+pub fn clear_seerr(key: &str) {
+    let mut st = state();
+    if let Err(e) = wipe(&seerr_slot(key)) {
+        crate::debug_log_line(&format!("secret: Seerr session removal from the keyring failed: {}", e));
+    }
+    let _ = crate::config::set_account_field(key, "seerr", Value::Null);
+    remember_seerr(&mut st, key, None);
+}
+
+/// Built only by the Linux crate (D-Bus). The test sandbox points the session
+/// and system buses at a socket that doesn't exist, so everything here except
+/// the `#[ignore]`d tests exercises the no-keyring fallback. The ignored ones
+/// need a real Secret Service and only touch items of their own:
+///   AQUARIUM_TEST_REAL_DBUS=1 cargo test --lib secret -- --ignored
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{config_on_disk, debug_log, sandbox};
+
+    // ---------- What an item is filed under ----------
+
+    #[test]
+    fn items_keep_the_attributes_the_keyring_crate_wrote() {
+        // Changing any of these orphans the token already in a user's keyring.
+        assert_eq!(
+            attrs("acct"),
+            HashMap::from([
+                ("service", "dev.aquarium.app"),
+                ("username", "acct"),
+                ("target", "default"),
+                ("application", "rust-keyring"),
+            ])
+        );
+        // Searches are narrower, so items from before `target` still match.
+        assert_eq!(
+            search_attrs("acct"),
+            HashMap::from([("service", "dev.aquarium.app"), ("username", "acct")])
+        );
+        assert_eq!(label("acct"), "acct@dev.aquarium.app:default");
+        assert_eq!(ACCOUNT, "jellyfin-access-token");
+        assert_eq!(PENDING_ACCOUNT, "jellyfin-pending-revocation");
+        assert_eq!(slot("k1"), "jellyfin-access-token:k1");
+        assert_eq!(seerr_slot("k1"), "seerr-session:k1");
+    }
+
+    #[test]
+    fn the_legacy_fellyjin_service_is_still_searched() {
+        // Invariant (Linux/CLAUDE.md): LEGACY_SERVICE/adopt_legacy keep
+        // FellyJin installs signed in.
+        assert_eq!(LEGACY_SERVICE, "dev.fellyjin.app");
+        assert_eq!(
+            search_attrs_in(LEGACY_SERVICE, ACCOUNT),
+            HashMap::from([("service", "dev.fellyjin.app"), ("username", "jellyfin-access-token")])
+        );
+    }
+
+    // ---------- No keyring: the config.json fallback ----------
+
+    #[test]
+    fn without_a_keyring_a_new_token_goes_to_the_config_file() {
+        let _s = sandbox();
+        store("tok-1").unwrap();
+        assert_eq!(config_on_disk()["token"], json!("tok-1"));
+        assert_eq!(backend_name(), "file");
+        assert_eq!(token().as_deref(), Some("tok-1"));
+        assert!(debug_log().contains("falling back to config.json"), "{}", debug_log());
+    }
+
+    #[test]
+    fn a_failed_keyring_lookup_is_remembered() {
+        // Regression: the token cache. Without it every request was its own
+        // Secret Service lookup, and against a locked keyring its own prompt.
+        let _s = sandbox();
+        assert_eq!(token(), None);
+        assert_eq!(token(), None);
+        assert_eq!(backend_name(), "file");
+        let log = debug_log();
+        assert_eq!(log.matches("keyring read failed").count(), 1, "{log}");
+    }
+
+    #[test]
+    fn backend_name_settles_with_one_lookup() {
+        let _s = sandbox();
+        assert_eq!(backend_name(), "file");
+        assert_eq!(backend_name(), "file");
+        assert_eq!(debug_log().matches("keyring read failed").count(), 1);
+    }
+
+    #[test]
+    fn a_plaintext_token_stays_put_when_there_is_no_keyring() {
+        let _s = sandbox();
+        crate::config::save(&json!({
+            "device_id": "d",
+            "server": "http://jf",
+            "token": "plain",
+            "accounts": [{ "key": "a", "token": "acct-tok", "user_name": "Ann" }],
+        }))
+        .unwrap();
+        let cfg = hydrate(crate::config::load());
+        // The webview never sees a token.
+        assert!(cfg.get("token").is_none());
+        assert!(cfg["accounts"][0].get("token").is_none());
+        assert_eq!(cfg["accounts"][0]["user_name"], json!("Ann"));
+        assert_eq!(cfg["has_token"], json!(true));
+        assert_eq!(cfg["token_storage"], json!("file"));
+        // ...and the only copy is not dropped from disk.
+        assert_eq!(config_on_disk()["token"], json!("plain"));
+        assert!(debug_log().contains("token stays in config.json"));
+        assert_eq!(token().as_deref(), Some("plain"));
+    }
+
+    #[test]
+    fn hydrate_says_whether_there_is_a_session() {
+        let _s = sandbox();
+        let cfg = hydrate(json!({ "server": "http://jf", "token": "" }));
+        assert_eq!(cfg["has_token"], json!(false));
+        assert_eq!(cfg["token_storage"], json!("file"));
+        assert!(cfg.get("token").is_none() || cfg["token"] == json!(""));
+        assert_eq!(cfg["server"], json!("http://jf"));
+    }
+
+    #[test]
+    fn dehydrate_drops_everything_the_backend_owns() {
+        let out = dehydrate(json!({
+            "token": "t", "token_storage": "file", "has_token": true,
+            "accounts": [], "known_servers": [], "hwdec": "auto",
+        }));
+        assert_eq!(out, json!({ "hwdec": "auto" }));
+        // A save without a token is not a sign-out.
+        assert_eq!(dehydrate(json!({ "hwdec": "off" })), json!({ "hwdec": "off" }));
+        assert_eq!(dehydrate(json!(null)), json!(null));
+    }
+
+    #[test]
+    fn clear_removes_the_file_copy_even_without_a_keyring() {
+        let _s = sandbox();
+        store("tok").unwrap();
+        clear();
+        assert!(config_on_disk().get("token").is_none());
+        assert_eq!(token(), None);
+        assert!(debug_log().contains("keyring clear failed"));
+    }
+
+    #[test]
+    fn a_revocation_cannot_be_parked_without_a_keyring_and_the_miss_is_cached() {
+        // Regression: 6210523. app_info asks on every sidebar redraw; each ask
+        // used to be another keyring read.
+        let _s = sandbox();
+        assert!(park_pending_revocation("t", "http://jf", "d").is_err());
+        assert_eq!(pending_revocation(), None);
+        assert_eq!(pending_revocation(), None);
+        assert_eq!(debug_log().matches("pending-revocation read failed").count(), 1);
+        clear_pending_revocation();
+        assert_eq!(pending_revocation(), None);
+    }
+
+    #[test]
+    fn nothing_to_adopt_without_a_keyring() {
+        let _s = sandbox();
+        assert_eq!(adopt_legacy(ACCOUNT), None);
+        assert!(read_in(LEGACY_SERVICE, ACCOUNT).is_err());
+    }
+
+    #[test]
+    fn saved_account_tokens_fall_back_to_their_config_entry() {
+        let _s = sandbox();
+        crate::config::upsert_account(json!({ "key": "k", "user_name": "Ann" })).unwrap();
+        store_account("k", "acct-tok").unwrap();
+        let entry = crate::config::accounts().into_iter().find(|a| a["key"] == "k").unwrap();
+        assert_eq!(entry["token"], json!("acct-tok"));
+        assert_eq!(account_token("k").as_deref(), Some("acct-tok"));
+        assert!(debug_log().contains("keyring write for a saved account failed"));
+        clear_account("k");
+        assert_eq!(account_token("k"), None);
+        let entry = crate::config::accounts().into_iter().find(|a| a["key"] == "k").unwrap();
+        assert!(entry.get("token").is_none());
+        assert_eq!(entry["user_name"], json!("Ann"), "the account itself stays");
+        assert_eq!(account_token("nobody"), None);
+    }
+
+    #[test]
+    fn a_saved_account_token_needs_its_entry_first() {
+        // Regression: 13ea908. Without a keyring the token is written into
+        // the account's config entry, so filing it before the entry existed
+        // dropped it; server.rs now saves the entry first. This pins the
+        // reason that order matters.
+        let _s = sandbox();
+        store_account("k", "acct-tok").unwrap();
+        crate::config::upsert_account(json!({ "key": "k" })).unwrap();
+        assert_eq!(account_token("k"), None);
+    }
+
+    // ---------- Seerr sessions ----------
+
+    #[test]
+    fn a_seerr_session_falls_back_to_its_accounts_config_entry() {
+        let _s = sandbox();
+        crate::config::upsert_account(json!({ "key": "k", "user_name": "Ann" })).unwrap();
+        store_seerr("k", "{\"cookie\":\"s%3Aone\"}").unwrap();
+        let entry = crate::config::accounts().into_iter().find(|a| a["key"] == "k").unwrap();
+        assert_eq!(entry["seerr"], json!("{\"cookie\":\"s%3Aone\"}"));
+        assert_eq!(seerr_session("k").as_deref(), Some("{\"cookie\":\"s%3Aone\"}"));
+        assert!(debug_log().contains("keyring write for a Seerr session failed"));
+        // The webview's copy of the config never carries it.
+        let seen = hydrate(crate::config::load());
+        assert!(!seen.to_string().contains("s%3Aone"), "{seen}");
+        assert_eq!(seen["accounts"][0]["user_name"], json!("Ann"));
+        clear_seerr("k");
+        assert_eq!(seerr_session("k"), None);
+        let entry = crate::config::accounts().into_iter().find(|a| a["key"] == "k").unwrap();
+        assert!(entry.get("seerr").is_none());
+        assert_eq!(entry["user_name"], json!("Ann"), "the account itself stays");
+    }
+
+    #[test]
+    fn a_seerr_session_with_nowhere_to_go_is_an_error() {
+        let _s = sandbox();
+        assert!(store_seerr("nobody", "{}").is_err());
+        assert_eq!(seerr_session("nobody"), None);
+    }
+
+    #[test]
+    fn a_seerr_lookup_is_made_once_per_account() {
+        let _s = sandbox();
+        assert_eq!(seerr_session("k"), None);
+        assert_eq!(seerr_session("k"), None);
+        assert_eq!(debug_log().matches("Seerr session lookup failed").count(), 1);
+        // Another account is its own lookup.
+        assert_eq!(seerr_session("other"), None);
+        assert_eq!(debug_log().matches("Seerr session lookup failed").count(), 2);
+    }
+
+    // ---------- A real Secret Service (opt-in) ----------
+
+    fn real_bus() -> bool {
+        if !crate::test_support::real_dbus() {
+            eprintln!("skipped: needs AQUARIUM_TEST_REAL_DBUS=1 and a session keyring");
+            return false;
+        }
+        true
+    }
+
+    /// An account name no real item uses, so these never touch the user's token.
+    fn scratch_account() -> String {
+        format!("aquarium-test-{}", uuid::Uuid::new_v4())
+    }
+
+    #[test]
+    #[ignore = "needs a real Secret Service: AQUARIUM_TEST_REAL_DBUS=1 cargo test --lib secret -- --ignored"]
+    fn a_fellyjin_item_is_adopted_and_the_old_one_removed() {
+        if !real_bus() {
+            return;
+        }
+        let acct = scratch_account();
+        with_collection(|c| {
+            c.create_item("aquarium test (legacy)", search_attrs_in(LEGACY_SERVICE, &acct), b"legacy-tok", true, "text/plain")
+                .map(|_| ())
+        })
+        .expect("could not file a legacy item");
+        let adopted = adopt_legacy(&acct);
+        let now = read_in(SERVICE, &acct);
+        let old = read_in(LEGACY_SERVICE, &acct);
+        let _ = wipe_in(SERVICE, &acct);
+        let _ = wipe_in(LEGACY_SERVICE, &acct);
+        assert_eq!(adopted.as_deref(), Some("legacy-tok"));
+        assert_eq!(now, Ok(Some("legacy-tok".to_string())), "not filed under the new service");
+        assert_eq!(old, Ok(None), "the FellyJin copy was left behind");
+    }
+
+    #[test]
+    #[ignore = "needs a real Secret Service: AQUARIUM_TEST_REAL_DBUS=1 cargo test --lib secret -- --ignored"]
+    fn writing_twice_overwrites_in_place() {
+        if !real_bus() {
+            return;
+        }
+        let acct = scratch_account();
+        write(&acct, "one").expect("write");
+        write(&acct, "two").expect("overwrite");
+        let count = with_collection(|c| Ok(c.search_items(search_attrs(&acct))?.len()));
+        let value = read(&acct);
+        wipe(&acct).expect("wipe");
+        let after = read(&acct);
+        assert_eq!(count.ok(), Some(1), "a second, competing item was filed");
+        assert_eq!(value, Ok(Some("two".to_string())));
+        assert_eq!(after, Ok(None));
+        // Wiping nothing is success.
+        assert_eq!(wipe(&acct), Ok(()));
+    }
 }

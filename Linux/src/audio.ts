@@ -43,9 +43,13 @@ interface Queue {
   source: QueueSource | null;
   /** Audiobooks: skip by seconds, report chapters, keep a speed. */
   book: boolean;
+  /** The queue is a mix built from downloads because the server was away.
+   *  It stays that way when the server comes back, until another mix or
+   *  another queue replaces it. */
+  offlineMix: boolean;
 }
 
-const q: Queue = { items: [], original: null, index: -1, title: "", repeat: "off", source: null, book: false };
+const q: Queue = { items: [], original: null, index: -1, title: "", repeat: "off", source: null, book: false, offlineMix: false };
 let status: AudioStatus = {
   active: false, paused: false, position: 0, duration: 0, item_id: "",
   volume: 100, mute: false, speed: 1, buffering: false,
@@ -53,6 +57,9 @@ let status: AudioStatus = {
 /** Which item mpv has queued behind the current one, so the same answer
  *  isn't handed down twice (each hand-down clears mpv's prefetch). */
 let queuedNext: string | null | undefined = undefined;
+/** The song `audio_play` was just asked to start: the backend answers it with
+ *  an `audio-track` of its own, which is not mpv moving on. */
+let playEcho: string | null = null;
 let extending = false;
 const listeners = new Set<() => void>();
 
@@ -210,6 +217,7 @@ async function startAt(index: number, startSeconds?: number): Promise<void> {
   status = { ...status, active: true, paused: false, position: startSeconds ?? 0, item_id: item.Id, duration: secondsOf(item.RunTimeTicks) };
   changed();
   publishQueue();
+  playEcho = item.Id;
   try {
     await invoke("audio_play", {
       req: {
@@ -226,6 +234,7 @@ async function startAt(index: number, startSeconds?: number): Promise<void> {
       },
     });
   } catch (e: any) {
+    playEcho = null;
     status = { ...status, active: false };
     changed();
     throw new Error(String(e?.message ?? e));
@@ -288,6 +297,8 @@ export interface PlayOptions {
   source?: QueueSource | null;
   book?: boolean;
   startSeconds?: number;
+  /** Built from downloads while offline (see `Queue.offlineMix`). */
+  offlineMix?: boolean;
 }
 
 /** Play `items` from `start`, replacing the queue. */
@@ -298,6 +309,7 @@ export async function play(items: any[], start = 0, opts: PlayOptions = {}): Pro
   q.title = opts.title ?? "";
   q.source = opts.source ?? null;
   q.book = opts.book ?? list[0].Type === "AudioBook";
+  q.offlineMix = !!opts.offlineMix;
   if (opts.shuffle) {
     const first = list[Math.max(0, Math.min(start, list.length - 1))];
     const rest = shuffled(list.filter((i) => i !== first));
@@ -311,6 +323,23 @@ export async function play(items: any[], start = 0, opts: PlayOptions = {}): Pro
     q.items = list;
     await startAt(Math.max(0, Math.min(start, list.length - 1)), opts.startSeconds);
   }
+}
+
+/** Keep the current item playing and replace everything after it with
+ *  `items` — an Instant Mix from the song that's on. */
+export async function replaceUpNext(items: any[], opts: { title?: string; source?: QueueSource | null; offlineMix?: boolean } = {}): Promise<void> {
+  if (!isActive()) return play(items, 0, opts);
+  const list = items.filter((i) => i && i.Id && i.Id !== q.items[q.index]?.Id);
+  await attachLocal(list);
+  q.items.splice(q.index + 1, Infinity, ...list);
+  q.original = null;
+  q.title = opts.title ?? q.title;
+  q.source = opts.source ?? null;
+  q.offlineMix = !!opts.offlineMix;
+  publishQueue();
+  changed();
+  await handDownNext();
+  void topUp();
 }
 
 /** Put items straight after the current one. */
@@ -365,6 +394,7 @@ export async function stop(): Promise<void> {
   q.items = [];
   q.original = null;
   q.source = null;
+  q.offlineMix = false;
   status = { ...status, active: false };
   cancelSleep();
   publishQueue();
@@ -400,6 +430,7 @@ export async function clearUpNext(): Promise<void> {
   q.items.splice(q.index + 1);
   q.original = null;
   q.source = null;
+  q.offlineMix = false;
   publishQueue();
   changed();
   await handDownNext();
@@ -556,6 +587,7 @@ export async function wireAudio(onError: (msg: string) => void): Promise<void> {
         q.items = [];
         q.original = null;
         q.source = null;
+        q.offlineMix = false;
         if (sleepMode === "track") cancelSleep();
       } else {
         q.index = -1;
@@ -570,9 +602,16 @@ export async function wireAudio(onError: (msg: string) => void): Promise<void> {
   await listen<any>("audio-track", (ev) => {
     const id = ev.payload?.item_id;
     if (!id) return;
-    if (q.items[q.index]?.Id === id) return;
+    const echo = playEcho === id;
+    if (echo) playEcho = null;
     const nextIdx = followingIndex();
-    if (nextIdx != null && q.items[nextIdx]?.Id === id) q.index = nextIdx;
+    if (q.items[q.index]?.Id === id) {
+      // The same song again is a move only when it is not the echo of `play`
+      // and the next song is another copy of it: Repeat All on one song, or a
+      // song queued twice running.
+      if (echo || nextIdx == null || q.items[nextIdx]?.Id !== id) return;
+      q.index = nextIdx;
+    } else if (nextIdx != null && q.items[nextIdx]?.Id === id) q.index = nextIdx;
     else {
       const at = q.items.findIndex((i, n) => n > q.index && i.Id === id);
       if (at >= 0) q.index = at;

@@ -441,6 +441,16 @@ final class MPVEngine: @unchecked Sendable {
         shutdown()
     }
 
+    #if DEBUG
+    /// An option or property as mpv holds it now, for the unit tests (the TLS
+    /// settings, say). Nil once shut down or for a name mpv doesn't know.
+    func debugValue(_ name: String) -> String? {
+        guard let h = handle, let raw = mpv_get_property_string(h, name) else { return nil }
+        defer { mpv_free(raw) }
+        return String(cString: raw)
+    }
+    #endif
+
     /// Stop reading events and destroy the handle. Safe to call twice.
     func shutdown() {
         guard let h = handle else { return }
@@ -501,7 +511,7 @@ final class MPVEngine: @unchecked Sendable {
         \(qualityProfile.map { "\($0.0)=\($0.1)" }.joined(separator: "\n"))
 
         """
-        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        guard let caches = Optional(AppDirectory.url(.cachesDirectory)) else { return nil }
         let folder = caches.appendingPathComponent("mpv", isDirectory: true)
         let file = folder.appendingPathComponent("aquarium-profiles.conf")
         do {

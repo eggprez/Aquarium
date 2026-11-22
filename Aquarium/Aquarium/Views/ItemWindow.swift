@@ -62,17 +62,10 @@ final class ItemWindowNavigator {
     }
 }
 
-private struct RouteWindowNavigatorKey: EnvironmentKey {
-    static let defaultValue: ItemWindowNavigator? = nil
-}
-
 extension EnvironmentValues {
     /// The pages of the title or library window a view is in; nil in the main
     /// window. See `AppModel.isWorkingWindow`.
-    var routeWindowNavigator: ItemWindowNavigator? {
-        get { self[RouteWindowNavigatorKey.self] }
-        set { self[RouteWindowNavigatorKey.self] = newValue }
-    }
+    @Entry var routeWindowNavigator: ItemWindowNavigator? = nil
 }
 
 extension AppModel {
@@ -122,6 +115,7 @@ struct RouteWindow: View {
                 }
             } else {
                 EmptyState(symbol: "film", title: "Nothing to Show", message: "This window's page isn't available.")
+                    .testAnchor(TestID.Detail.windowEmpty)
             }
         }
         .frame(minWidth: 720, minHeight: 520)
@@ -170,6 +164,7 @@ struct RouteWindow: View {
         // Outermost, so the toasts' overlay and every page know which window
         // they are in.
         .environment(\.routeWindowNavigator, navigator)
+        .testAnchor(TestID.Detail.window)
     }
 
     private func release() {

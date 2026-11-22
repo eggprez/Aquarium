@@ -147,13 +147,11 @@ interface Profile {
   year: number | null;
   albumId: string | null;
   songId: string | null;
-  open: boolean;
-  surprise: boolean;
   artistStation: boolean;
 }
 
-function emptyProfile(open: boolean, surprise = false): Profile {
-  return { artists: new Set(), genres: new Map(), words: new Map(), year: null, albumId: null, songId: null, open, surprise, artistStation: false };
+function emptyProfile(): Profile {
+  return { artists: new Set(), genres: new Map(), words: new Map(), year: null, albumId: null, songId: null, artistStation: false };
 }
 
 function addGenres(p: Profile, keys: string[]): void {
@@ -164,7 +162,7 @@ function addGenres(p: Profile, keys: string[]): void {
 }
 
 function profileOf(seed: any, members: any[] = []): Profile {
-  const p = emptyProfile(false);
+  const p = emptyProfile();
   let mem = members;
   if (seed.Type === "MusicGenre" || seed.Type === "Genre") {
     addGenres(p, [genreKey(seed.Name ?? "")]);
@@ -213,7 +211,6 @@ function genreAffinity(p: Profile, candidate: string[]): number {
 
 /** How like the seed a song is. Null: nothing in common at all. */
 function likeness(p: Profile, song: any, pts: MixPoints): number | null {
-  if (p.open) return 1;
   const keys = artistKeys(song);
   const sameArtist = [...keys].some((k) => p.artists.has(k));
   const genre = genreAffinity(p, genresOf(song));
@@ -260,16 +257,15 @@ function actGrouper(): (song: any) => string {
 }
 
 function score(pool: any[], p: Profile, pts: MixPoints, luck: Map<string, number>, exclude: Set<string>): Scored[] {
-  const jitter = p.surprise ? Math.max(weight(pts, "surprise"), 5) : weight(pts, "surprise");
-  const familiar = p.surprise ? 0.3 : 1;
+  const jitter = weight(pts, "surprise");
   const out: Scored[] = [];
   for (const song of pool) {
     if (exclude.has(song.Id) || song.Id === p.songId) continue;
     const like = likeness(p, song, pts);
     let s = like ?? -4;
     const plays = song.UserData?.PlayCount ?? 0;
-    if (song.UserData?.IsFavorite) s += familiar * weight(pts, "favorites");
-    s += familiar * weight(pts, "mostPlayed") * Math.min(1, Math.log2(1 + plays) / 4);
+    if (song.UserData?.IsFavorite) s += weight(pts, "favorites");
+    s += weight(pts, "mostPlayed") * Math.min(1, Math.log2(1 + plays) / 4);
     if (plays === 0) s += weight(pts, "discovery");
     if (jitter > 0) {
       if (!luck.has(song.Id)) luck.set(song.Id, Math.random());
@@ -399,27 +395,6 @@ async function gather(seed: any): Promise<{ pool: any[]; profile: Profile }> {
   return { pool, profile };
 }
 
-async function surprisePool(): Promise<any[]> {
-  const none = { Items: [] as any[], TotalRecordCount: 0 };
-  const [starred, top, recent, anywhere] = await Promise.all([
-    safe(m.music({ types: "Audio", sort: "random", favorites: true, limit: 150 }), none),
-    safe(m.mostPlayedSongs(100), []),
-    safe(m.recentlyPlayedSongs(60), []),
-    safe(m.music({ types: "Audio", sort: "random", limit: 50 }), none),
-  ]);
-  const known = [...starred.Items, ...top, ...recent];
-  const artistIds: string[] = [];
-  for (const s of [...known].sort(() => Math.random() - 0.5)) {
-    if (artistIds.length >= 25) break;
-    const id = (s.AlbumArtists?.[0] ?? s.ArtistItems?.[0])?.Id;
-    if (id && !artistIds.includes(id)) artistIds.push(id);
-  }
-  const byArtists = artistIds.length
-    ? (await safe(m.music({ types: "Audio", sort: "random", artistIds, limit: 250 }), none)).Items
-    : [];
-  return [...known, ...byArtists, ...anywhere.Items];
-}
-
 function dedupe(songs: any[]): any[] {
   const seen = new Set<string>();
   return songs.filter((s) => s?.Id && s.Type === "Audio" && !seen.has(s.Id) && (seen.add(s.Id), true));
@@ -454,12 +429,35 @@ export async function buildStation(seed: any): Promise<{ source: QueueSource; fi
   return { source: station, first };
 }
 
-/** Surprise Me: a shuffle of what this account plays, with some from anywhere. */
-export async function buildSurprise(): Promise<{ source: QueueSource; first: any[] }> {
-  const pool = dedupe(await surprisePool());
-  const station = new Station("Surprise Mix", pool, emptyProfile(true, true));
-  const first = station.first(null, 25);
-  if (!first.length) throw new Error("There's nothing in your music library to shuffle yet");
+// ---------- Which mix ----------
+
+/** Who builds a mix: the app's own stations, or the server's Instant Mix
+ *  (which AudioMuse-AI answers with its own similarity when installed). */
+export type MixSource = "aquarium" | "jellyfin";
+
+export function getMixSource(): MixSource {
+  return api.getConfig()?.music_mix_source === "jellyfin" ? "jellyfin" : "aquarium";
+}
+
+/** Jellyfin's Instant Mix of `seed`, as the server ordered it. */
+export async function buildInstantMix(seed: any): Promise<any[]> {
+  const songs = dedupe(await m.instantMix(seed.Id, 200));
+  if (!songs.length) throw new Error("The server had no Instant Mix for that");
+  return songs;
+}
+
+/** A station over downloaded songs only: what plays with no server. The
+ *  ranker needs nothing but the pool, so it keeps going offline. */
+export function buildOfflineMix(seed: any, downloaded: any[]): { source: QueueSource; first: any[] } {
+  const songs = dedupe(downloaded);
+  if (!songs.length) throw new Error("No downloaded songs to mix from");
+  const members =
+    seed.Type === "MusicAlbum" ? songs.filter((s) => s.AlbumId === seed.Id)
+    : seed.Type === "MusicArtist" ? songs.filter((s) => artistKeys(s).has(`id:${seed.Id}`))
+    : [];
+  const station = new Station(`${seed.Name ?? "Downloads"} Mix`, songs, profileOf(seed, members));
+  const first = station.first(seed, 25);
+  if (!first.length) throw new Error("No downloaded songs to mix from");
   return { source: station, first };
 }
 

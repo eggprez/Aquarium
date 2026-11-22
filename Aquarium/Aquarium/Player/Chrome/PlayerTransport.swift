@@ -102,6 +102,11 @@ struct PlayerTransport: View {
                     skipButton(forward: false)
                     skipButton(forward: true)
                 }
+            } else if player.canStepChannel {
+                HStack(spacing: 18) {
+                    channelButton(next: false)
+                    channelButton(next: true)
+                }
             }
         }
     }
@@ -128,6 +133,7 @@ struct PlayerTransport: View {
                 HStack(spacing: 10) {
                     Image(systemName: "chevron.down")
                     Text(remoteHint)
+                        .accessibilityIdentifier(TestID.Player.remoteHint)
                 }
                 .font(.caption)
                 .foregroundStyle(Theme.textDim)
@@ -144,6 +150,7 @@ struct PlayerTransport: View {
         }
         .frame(maxHeight: .infinity, alignment: .bottom)
         .ignoresSafeArea()
+        .testAnchor(TestID.Player.controls)
     }
 
     /// Above the band's timeline: the show, the title, and that it is paused.
@@ -151,7 +158,9 @@ struct PlayerTransport: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 14) {
                 if player.isLive { liveBadge }
-                if let kicker, !kicker.isEmpty {
+                if let episode = player.playingEpisode {
+                    EpisodeLine.text(for: episode, episode: false, font: .callout, tone: .picture)
+                } else if let kicker, !kicker.isEmpty {
                     Text(kicker)
                         .font(.callout.weight(.semibold))
                         .foregroundStyle(Theme.link)
@@ -162,12 +171,15 @@ struct PlayerTransport: View {
                         .foregroundStyle(Theme.textBody)
                 }
             }
+            // An episode's own name is the regular one of the three; a film's
+            // title, a programme's, keep the heading's weight.
             Text(mainTitle)
-                .font(.title2.weight(.bold))
+                .font(player.playingEpisode != nil ? Font.title2.titleRole(.episode) : .title2.weight(.bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
         }
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.Player.title)
     }
 
     /// What the remote does from here, in a line. The remote's alone.
@@ -217,6 +229,7 @@ struct PlayerTransport: View {
             chrome.pointerOnControls = on
         }
         .onDisappear { chrome.pointerOnControls = false }
+        .testAnchor(TestID.Player.controls)
     }
 
     /// What a row keeps clear beyond the edge inset it already has: the
@@ -256,16 +269,23 @@ struct PlayerTransport: View {
             if showsBackButton {
                 PlayerGlyphButton(symbol: "chevron.backward", label: "Back", size: 20, action: onDismiss)
                     .accessibilityHint("Closes the player")
+                    .accessibilityIdentifier(TestID.Player.back)
             }
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
                     if player.isLive { liveBadge }
                     Text(mainTitle)
-                        .font(compact ? .headline : .title3.weight(.semibold))
+                        .font(titleFont)
                         .lineLimit(1)
                 }
-                if let kicker, !kicker.isEmpty {
+                if let episode = player.playingEpisode {
+                    EpisodeLine.text(for: episode, episode: false, font: .subheadline, tone: .picture)
+                        .lineLimit(1)
+                        // A phone held upright has room for the show and
+                        // most of the label; a little smaller, all of it.
+                        .minimumScaleFactor(0.85)
+                } else if let kicker, !kicker.isEmpty {
                     Text(kicker)
                         .font(.subheadline)
                         .foregroundStyle(Theme.textDim)
@@ -275,6 +295,7 @@ struct PlayerTransport: View {
             .foregroundStyle(.white)
             .padding(.leading, 4)
             .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(TestID.Player.title)
 
             Spacer(minLength: 8)
 
@@ -285,6 +306,7 @@ struct PlayerTransport: View {
                 PlayerAirPlayButton()
                     .frame(width: 40, height: 40)
                     .accessibilityLabel("AirPlay")
+                    .accessibilityIdentifier(TestID.Player.airPlay)
             }
 
             if let pip = pictureInPicture, pip.isPossible || pip.isActive || player.canHandOverForPictureInPicture {
@@ -300,6 +322,17 @@ struct PlayerTransport: View {
                         pip.toggle()
                     }
                 }
+                .accessibilityIdentifier(TestID.Player.pictureInPicture)
+            }
+
+            // A running sleep timer, where it can be seen without opening
+            // the card that set it.
+            if let left = player.sleepMinutesRemaining {
+                Label("\(left)m", systemImage: "moon.zzz.fill")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.white)
+                    .fixedSize()
+                    .accessibilityLabel("Sleep timer: stopping in \(left) minutes")
             }
 
             moreButton
@@ -372,16 +405,15 @@ struct PlayerTransport: View {
             .accessibilityLabel("Live")
     }
 
-    /// The line under the title: the show and the episode, or the channel.
+    /// The line under the title: the channel, or a film's year. An episode's
+    /// line — its show and which episode it is — is `EpisodeLine`'s, so the
+    /// two are set apart the way they are on a card.
     private var kicker: String? {
         if player.isLive {
             if let channel = player.currentChannel {
                 return [channel.ChannelNumber, channel.title].compactMap { $0 }.joined(separator: " · ")
             }
             return player.subtitle
-        }
-        if let item = player.item, item.isEpisode {
-            return [item.SeriesName, item.episodeLabel].compactMap { $0 }.joined(separator: " · ")
         }
         return player.item?.ProductionYear.map(String.init)
     }
@@ -391,12 +423,21 @@ struct PlayerTransport: View {
         return player.item?.title ?? player.title
     }
 
+    /// The title over the picture on a phone, an iPad and a Mac. An episode's
+    /// name is the regular one of its three; anything else keeps the
+    /// heading's weight.
+    private var titleFont: Font {
+        let size: Font = compact ? .headline : .title3
+        return player.playingEpisode != nil ? size.titleRole(.episode) : size.weight(.semibold)
+    }
+
     /// The "…" button: the More card — speed, the sleep timer, what happens
     /// after this episode, the channels, Watch Together. See `PlayerMenus`.
     private var moreButton: some View {
         PlayerGlyphButton(symbol: "ellipsis", label: "More", size: 18, isOn: chrome.menu == .more) {
             toggleMenu(.more)
         }
+        .accessibilityIdentifier(TestID.Player.more)
         .chromeMenuAnchor(.more)
     }
 
@@ -406,13 +447,34 @@ struct PlayerTransport: View {
         HStack(spacing: PlayerMetrics.clusterSpacing(compact: compact)) {
             if !player.isLive {
                 skipButton(forward: false)
+            } else if player.canStepChannel {
+                channelButton(next: false)
             }
             playPauseButton
             if !player.isLive {
                 skipButton(forward: true)
+            } else if player.canStepChannel {
+                channelButton(next: true)
             }
         }
         .shadow(color: .black.opacity(0.35), radius: 10, y: 2)
+    }
+
+    /// The channel before or after this one in the line-up, where a film has
+    /// its two skips: a channel has nothing to skip through, and the next
+    /// one is what a thumb reaches for instead. The television does this
+    /// with a click on the top or bottom of the remote — see
+    /// `PlayerRemoteDriver` — and wraps round at either end, as this does.
+    private func channelButton(next: Bool) -> some View {
+        PlayerGlyphButton(
+            symbol: next ? "forward.end.fill" : "backward.end.fill",
+            label: next ? "Next channel" : "Previous channel",
+            size: PlayerMetrics.skipGlyph(compact: compact) - 8, weight: .medium, padding: 16
+        ) {
+            onInteract()
+            player.switchChannel(by: next ? 1 : -1)
+        }
+        .accessibilityIdentifier(next ? TestID.Player.channelNext : TestID.Player.channelPrevious)
     }
 
     private func skipButton(forward: Bool) -> some View {
@@ -427,6 +489,7 @@ struct PlayerTransport: View {
             chrome.countSkip(forward ? skip : -skip)
         }
         .disabled(player.isOpening)
+        .accessibilityIdentifier(forward ? TestID.Player.skipForward : TestID.Player.skipBack)
     }
 
     private var playPauseButton: some View {
@@ -452,6 +515,7 @@ struct PlayerTransport: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(player.isBuffering ? "Loading" : player.isPaused ? "Play" : "Pause")
+        .accessibilityIdentifier(TestID.Player.playPause)
     }
 
     // MARK: - Bottom
@@ -479,6 +543,7 @@ struct PlayerTransport: View {
         return HStack {
             Text(PlayerTime.format(shown))
                 .accessibilityLabel("Elapsed \(PlayerTime.spoken(shown))")
+                .accessibilityIdentifier(TestID.Player.elapsed)
             Spacer()
             Button {
                 onInteract()
@@ -493,6 +558,7 @@ struct PlayerTransport: View {
                 ? "Total length \(PlayerTime.spoken(player.duration))"
                 : "Remaining \(PlayerTime.spoken(remaining))")
             .accessibilityHint("Switches between time remaining and total length")
+            .accessibilityIdentifier(TestID.Player.remaining)
         }
         .font(PlayerMetrics.television ? .callout.monospacedDigit() : .caption.monospacedDigit())
         .foregroundStyle(.white.opacity(0.9))
@@ -501,8 +567,8 @@ struct PlayerTransport: View {
 
     // MARK: - Pills
 
-    /// Info opens the panel; Audio, Subtitles, Quality and Up Next drop
-    /// their cards; Fill is a switch.
+    /// Info opens the panel, and on a channel so does Channels; Audio,
+    /// Subtitles, Quality and Up Next drop their cards; Fill is a switch.
     ///
     /// A phone held upright, the smallest of them especially, has no room
     /// for six pills with their words: the row used to scroll, with Fill
@@ -521,6 +587,7 @@ struct PlayerTransport: View {
                 .scrollClipDisabled()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .testAnchor(TestID.Player.pillRow)
     }
 
     /// Which pills keep their words.
@@ -533,18 +600,30 @@ struct PlayerTransport: View {
             pill(symbol: PlayerTab.info.symbol, title: plain ? "Info" : nil,
                  label: player.isLive ? "Channel info" : "Episode info",
                  tab: .info, anchor: .info)
+            // The line-up, one tap from the picture: the television has it as
+            // the tab beside Info in its panel, and under "…" it was two. It
+            // keeps its word as long as Quality would have: a channel has no
+            // Quality pill, and a screen on its own does not say "channels".
+            if player.panelTabs.contains(.channels) {
+                pill(symbol: PlayerTab.channels.symbol, title: state ? "Channels" : nil,
+                     label: "Channels", tab: .channels, anchor: .channels)
+            }
             menuPill(.audio, symbol: "speaker.wave.2", title: plain ? "Audio" : nil, label: "Audio tracks")
+                .accessibilityIdentifier(TestID.Player.pillAudio)
             menuPill(.subtitles, symbol: "captions.bubble", title: plain ? "Subtitles" : nil, label: "Subtitles")
+                .accessibilityIdentifier(TestID.Player.pillSubtitles)
             if player.offersQualityChoice {
                 menuPill(.quality, symbol: "slider.horizontal.3",
                          title: state ? qualityTitle : nil,
                          label: player.isCheckingSpeed ? "Quality, checking the connection speed" : "Quality, \(qualitySpoken)",
                          busy: player.isCheckingSpeed)
+                    .accessibilityIdentifier(TestID.Player.pillQuality)
             }
             if !player.isLive, player.upNextCount > 0 {
                 menuPill(.upNext, symbol: "text.line.first.and.arrowtriangle.forward",
                          title: !state ? nil : player.queue.isEmpty ? "Up Next" : "Up Next · \(player.queue.count)",
                          label: "Up next, \(player.upNextCount) waiting")
+                    .accessibilityIdentifier(TestID.Player.pillUpNext)
             }
             Button {
                 onInteract()
@@ -560,6 +639,7 @@ struct PlayerTransport: View {
             .buttonStyle(PlayerPillStyle())
             .accessibilityLabel("Fill the screen")
             .accessibilityValue(prefs.fillScreen ? "On" : "Off")
+            .accessibilityIdentifier(TestID.Player.pillFill)
         }
         .padding(.horizontal, 2)
         .padding(.vertical, 2)
@@ -582,7 +662,9 @@ struct PlayerTransport: View {
     private var qualitySpoken: String {
         if player.isLocal { return "Downloaded copy" }
         return switch player.qualitySelection {
-        case .auto: "Auto, playing \(Quality.label(for: player.currentBitrate))"
+        case .auto: player.currentBitrate == nil && player.isTranscoding
+            ? "Auto, playing the original, converted by the server"
+            : "Auto, playing \(Quality.label(for: player.currentBitrate))"
         case .downloaded: "Downloaded copy"
         case .stream(let bitrate): Quality.label(for: bitrate)
         }
@@ -601,6 +683,7 @@ struct PlayerTransport: View {
         .buttonStyle(PlayerPillStyle())
         .accessibilityLabel(label)
         .accessibilityHint("Opens the \(tab.title) panel")
+        .accessibilityIdentifier(TestID.Player.pill(tab.rawValue))
         .panelPopover(isPresented: popover(for: anchor), arrowEdge: .bottom) { panelPopover }
     }
 

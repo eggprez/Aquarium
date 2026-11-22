@@ -76,6 +76,7 @@ struct RootView: View {
             LibraryHome()
                 .navigationDestination(for: WatchRoute.self) { $0.page }
         }
+        .testAnchor(TestID.Watch.appRoot)
         .onChange(of: player.playRequests) { _, _ in nav.showPlayer() }
     }
 }
@@ -99,6 +100,7 @@ struct LibraryHome: View {
         List {
             // Watch or iPhone: which source the rest of the page is about.
             SourceSwitch()
+                .testAnchor(TestID.Watch.rootSourceSwitch)
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 4, trailing: 0))
 
@@ -108,6 +110,7 @@ struct LibraryHome: View {
 
             if player.isActive, let item = player.current {
                 Button { nav.showPlayer() } label: { NowPlayingRow(item: item) }
+                    .accessibilityIdentifier(TestID.Watch.rootNowPlaying)
                     .listRowBackground(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .fill(WatchTheme.accent.opacity(0.28))
@@ -116,6 +119,7 @@ struct LibraryHome: View {
 
             if !downloads.inFlight.isEmpty {
                 NavigationLink(value: WatchRoute.downloadQueue) { DownloadingRow() }
+                    .accessibilityIdentifier(TestID.Watch.rootDownloading)
             }
 
             if mode.source == .watch {
@@ -124,10 +128,14 @@ struct LibraryHome: View {
 
             Section {
                 NavigationLink(value: WatchRoute.settings) { Door("Settings", symbol: "gearshape.fill", tint: .gray) }
+                    .accessibilityIdentifier(TestID.Watch.rootDoor("settings"))
             }
         }
         .navigationTitle("Aquarium")
         .task(id: serverAvailable) { await load() }
+        .testAnchor(TestID.Watch.root)
+        .testAnchor(TestID.Watch.rootState(!client.isSignedIn ? "signedOut" : (client.isOffline ? "offline" : "signedIn")))
+        .testAnchor(TestID.Watch.rootMode(mode.source.rawValue))
     }
 
     /// iPhone mode: the phone's player and nothing of the library. What
@@ -136,12 +144,14 @@ struct LibraryHome: View {
     private var phoneRows: some View {
         if let state = link.phonePlayback {
             Button { nav.path.append(WatchRoute.phonePlayer) } label: { PhoneNowPlayingRow(state: state) }
+                .accessibilityIdentifier(TestID.Watch.rootPhoneNowPlaying)
                 .listRowBackground(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(WatchTheme.accent.opacity(0.28))
                 )
         } else {
             PhoneIdleRow()
+                .testAnchor(TestID.Watch.rootPhoneIdle)
                 .listRowBackground(Color.clear)
         }
     }
@@ -153,6 +163,7 @@ struct LibraryHome: View {
             signInNote
         } else if client.isOffline {
             Label("Server out of reach — showing what's on the watch", systemImage: "wifi.slash")
+                .accessibilityIdentifier(TestID.Watch.rootOffline)
                 .font(.footnote)
                 .foregroundStyle(WatchTheme.dim)
                 .listRowBackground(Color.clear)
@@ -164,19 +175,25 @@ struct LibraryHome: View {
                     Button { player.play([book], title: book.title) } label: {
                         BookRow(item: book)
                     }
+                    .accessibilityIdentifier(TestID.Watch.rootContinue(book.Id))
                 }
             }
         }
 
         Section {
             NavigationLink(value: WatchRoute.books) { Door("Audiobooks", symbol: "book.fill", tint: Color(hex: 0xF59E0B)) }
+                .accessibilityIdentifier(TestID.Watch.rootDoor("books"))
             NavigationLink(value: WatchRoute.music) { Door("Music", symbol: "music.note", tint: Color(hex: 0xEC4899)) }
+                .accessibilityIdentifier(TestID.Watch.rootDoor("music"))
             NavigationLink(value: WatchRoute.playlists) { Door("Playlists", symbol: "music.note.list", tint: Color(hex: 0x22C55E)) }
+                .accessibilityIdentifier(TestID.Watch.rootDoor("playlists"))
             NavigationLink(value: WatchRoute.onWatch) {
                 Door("On Watch", symbol: "applewatch", tint: WatchTheme.accent, detail: onWatchDetail)
             }
+            .accessibilityIdentifier(TestID.Watch.rootDoor("onWatch"))
             if serverAvailable {
                 NavigationLink(value: WatchRoute.search) { Door("Search", symbol: "magnifyingglass", tint: Color(hex: 0x38BDF8)) }
+                    .accessibilityIdentifier(TestID.Watch.rootDoor("search"))
             }
         }
     }
@@ -204,6 +221,7 @@ struct LibraryHome: View {
                 .font(.footnote)
                 .foregroundStyle(WatchTheme.dim)
         }
+        .testAnchor(TestID.Watch.rootSignedOut)
         .listRowBackground(Color.clear)
     }
 
@@ -228,7 +246,8 @@ struct NowPlayingRow: View {
                 Text(player.isPlaying ? "Now Playing" : "Paused")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(WatchTheme.link)
-                Text(item.title).font(.footnote).lineLimit(1)
+                    .accessibilityIdentifier(TestID.Watch.rootNowPlayingStatus)
+                Text(item.title).font(.footnote).lineLimit(1).accessibilityIdentifier(TestID.Watch.rootNowPlayingTitle)
             }
             Spacer(minLength: 0)
             Image(systemName: player.isPlaying ? "waveform" : "pause.fill")
@@ -251,7 +270,7 @@ struct DownloadingRow: View {
                 Label("Downloading", systemImage: "arrow.down.circle")
                     .font(.footnote.weight(.medium))
                 Spacer()
-                Text("\(arriving) left").font(.caption2).foregroundStyle(WatchTheme.dim)
+                Text("\(arriving) left").font(.caption2).foregroundStyle(WatchTheme.dim).accessibilityIdentifier(TestID.Watch.downloadingLeft)
             }
             ProgressBar(fraction: p.fraction)
         }
@@ -429,6 +448,7 @@ struct DownloadButton: View {
                 .frame(width: 30, height: 30)
                 .contentShape(Rectangle())
                 .accessibilityLabel(label)
+                .accessibilityIdentifier(TestID.Watch.itemDownload(item.Id))
         }
     }
 
@@ -513,6 +533,21 @@ struct DownloadControl: View {
         return "song"
     }
 
+    /// About what the button would fetch: every watch download is 128 kbps
+    /// AAC, so it comes from running time — of the songs not here yet where
+    /// the page knows them, else of the album, playlist or book as a whole.
+    private var sizeText: String? {
+        let bytes: Int64
+        if let members, !members.isEmpty {
+            bytes = members.filter { downloads.record(for: $0.Id)?.status != .complete }
+                .reduce(0) { $0 + JellyfinClient.estimatedBytes(for: $1) }
+        } else {
+            bytes = JellyfinClient.estimatedBytes(for: item)
+        }
+        guard bytes > 0 else { return nil }
+        return "About " + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
     private var memberIds: [String] {
         if let members { return members.map(\.Id) }
         if item.isAudiobook || item.isSong { return [item.Id] }
@@ -534,36 +569,45 @@ struct DownloadControl: View {
                     Text("\(p.percent)%")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(WatchTheme.dim)
+                        .accessibilityIdentifier(TestID.Watch.detailDownloadPercent)
                 }
                 ProgressBar(fraction: p.fraction)
                 if p.total > 1 {
                     Text("\(p.done) of \(p.total) on watch")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(WatchTheme.dim)
+                        .accessibilityIdentifier(TestID.Watch.detailDownloadCount)
                 }
             }
+            .testAnchor(TestID.Watch.detailDownloadProgress)
             Button(role: .destructive) { cancel(ids) } label: {
                 Label("Cancel Download", systemImage: "xmark.circle")
             }
+            .accessibilityIdentifier(TestID.Watch.detailDownloadCancel)
         } else if p.all {
             Label(p.total > 1 ? "\(p.total) songs on watch" : "On watch", systemImage: "checkmark.circle.fill")
                 .font(.footnote)
                 .foregroundStyle(.green)
+                .accessibilityIdentifier(TestID.Watch.detailDownloadComplete)
             Button(role: .destructive) { remove() } label: {
                 Label("Remove", systemImage: "trash")
             }
+            .accessibilityIdentifier(TestID.Watch.detailDownloadRemove)
         } else {
             if p.failed > 0 {
                 Label("\(p.failed) didn't arrive", systemImage: "exclamationmark.circle")
                     .font(.footnote)
                     .foregroundStyle(.orange)
+                    .accessibilityIdentifier(TestID.Watch.detailDownloadFailed)
                 Button { for id in ids { downloads.retry(id) } } label: {
                     Label("Try Again", systemImage: "arrow.clockwise")
                 }
+                .accessibilityIdentifier(TestID.Watch.detailDownloadRetry)
             } else if p.done > 0 {
                 Label("\(p.done) of \(p.total) on watch", systemImage: "checkmark.circle")
                     .font(.footnote)
                     .foregroundStyle(WatchTheme.dim)
+                    .accessibilityIdentifier(TestID.Watch.detailDownloadPartial)
             }
             if canFetch {
                 Button {
@@ -578,14 +622,27 @@ struct DownloadControl: View {
                     if working {
                         HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
                     } else {
-                        Label(p.done > 0 ? "Download the Rest" : "Download to Watch", systemImage: "arrow.down.circle")
+                        Label {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(p.done > 0 ? "Download the Rest" : "Download to Watch")
+                                if let size = sizeText {
+                                    Text(size)
+                                        .font(.caption2)
+                                        .foregroundStyle(WatchTheme.dim)
+                                }
+                            }
+                        } icon: {
+                            Image(systemName: "arrow.down.circle")
+                        }
                     }
                 }
                 .tint(WatchTheme.accent)
+                .accessibilityIdentifier(TestID.Watch.detailDownloadStart)
             } else if p.done > 0 {
                 Button(role: .destructive) { remove() } label: {
                     Label("Remove", systemImage: "trash")
                 }
+                .accessibilityIdentifier(TestID.Watch.detailDownloadRemove)
             }
         }
     }
@@ -619,8 +676,10 @@ struct PlayShuffleBar: View {
         HStack(spacing: 8) {
             Button(action: play) { Label("Play", systemImage: "play.fill") }
                 .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier(TestID.Watch.detailPlay)
             Button(action: shuffle) { Label("Shuffle", systemImage: "shuffle") }
                 .buttonStyle(.bordered)
+                .accessibilityIdentifier(TestID.Watch.detailShuffle)
         }
         .font(.footnote.weight(.semibold))
         .labelStyle(.titleAndIcon)
@@ -637,14 +696,15 @@ struct StatusRow: View {
 
     var body: some View {
         if loading {
-            HStack { Spacer(); ProgressView(); Spacer() }.listRowBackground(Color.clear)
+            HStack { Spacer(); ProgressView(); Spacer() }.testAnchor(TestID.Watch.statusLoading).listRowBackground(Color.clear)
         } else if let error {
             Label(error, systemImage: "exclamationmark.triangle")
                 .font(.footnote)
                 .foregroundStyle(.orange)
+                .accessibilityIdentifier(TestID.Watch.statusError)
                 .listRowBackground(Color.clear)
         } else if let empty {
-            Text(empty).font(.footnote).foregroundStyle(WatchTheme.dim).listRowBackground(Color.clear)
+            Text(empty).font(.footnote).foregroundStyle(WatchTheme.dim).accessibilityIdentifier(TestID.Watch.statusEmpty).listRowBackground(Color.clear)
         }
     }
 }

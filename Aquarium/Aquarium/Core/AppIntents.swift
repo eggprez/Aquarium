@@ -205,7 +205,7 @@ struct MediaItemQuery: EntityStringQuery {
             return Self.searchDownloads(term)
         }
         #endif
-        let response = try await client.search(term, limit: 12)
+        let response = try await client.search(term, limit: 12, types: "Movie,Series,Episode")
         return (response.Items ?? []).filter { Self.kinds.contains($0.kind) }.map(MediaItemEntity.init)
     }
 

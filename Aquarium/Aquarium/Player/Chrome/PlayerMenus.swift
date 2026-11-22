@@ -10,8 +10,9 @@
 //
 //  A control reports where it is through `chromeMenuAnchor`, and
 //  `ChromeMenuLayer`, laid over the whole transport, puts the open card
-//  above a pill or under the "…" button — clamped to the picture, and no
-//  taller than the room there is, scrolling inside when it needs more.
+//  above a pill or under the "…" button — clamped to the picture, kept
+//  between the title row and the pills, and no taller than the room there
+//  is, scrolling inside when it needs more.
 
 import SwiftUI
 
@@ -51,32 +52,44 @@ struct ChromeMenuLayer: View {
 
     private static let gap: CGFloat = 8
     private static let margin: CGFloat = 8
+    /// The cards that open above a pill, whose row "…"'s card stops short of.
+    private static let pillMenus: [PlayerChromeState.ChromeMenu] = [.audio, .subtitles, .quality, .upNext]
 
     var body: some View {
         GeometryReader { geo in
             if let menu = chrome.menu, let anchor = anchors[menu] {
                 let rect = geo[anchor]
                 let width = min(compact ? 300 : 340, geo.size.width - Self.margin * 2)
+                // The card keeps to the band between the title row and the
+                // pills. Given the whole picture, a tall card — Quality, Up
+                // Next, "…" — ran over the title and the "…" button, or over
+                // the pills, on a phone held sideways.
+                let barBottom = anchors[.more].map { geo[$0].maxY + Self.gap } ?? Self.margin
+                let pillsTop = Self.pillMenus.compactMap { anchors[$0].map { geo[$0].minY - Self.gap } }.min()
                 if menu == .more {
                     let x = max(Self.margin, min(rect.maxX - width, geo.size.width - width - Self.margin))
-                    let room = geo.size.height - rect.maxY - Self.gap - Self.margin
+                    let top = rect.maxY + Self.gap
+                    let floor = pillsTop.flatMap { $0 > top ? $0 : nil } ?? geo.size.height - Self.margin
+                    let room = floor - top
                     VStack(spacing: 0) {
                         card(menu, maxHeight: room)
                         Spacer(minLength: 0)
                     }
                     .frame(width: width, height: max(0, room), alignment: .top)
-                    .offset(x: x, y: rect.maxY + Self.gap)
+                    .offset(x: x, y: top)
                     .transition(transition(anchor: .topTrailing))
                     .id(menu)
                 } else {
                     let x = max(Self.margin, min(rect.minX, geo.size.width - width - Self.margin))
-                    let room = rect.minY - Self.gap - Self.margin
+                    let bottom = rect.minY - Self.gap
+                    let top = barBottom < bottom ? barBottom : Self.margin
+                    let room = bottom - top
                     VStack(spacing: 0) {
                         Spacer(minLength: 0)
                         card(menu, maxHeight: room)
                     }
                     .frame(width: width, height: max(0, room), alignment: .bottom)
-                    .offset(x: x, y: Self.margin)
+                    .offset(x: x, y: top)
                     .transition(transition(anchor: .bottomLeading))
                     .id(menu)
                 }
@@ -98,23 +111,28 @@ struct ChromeMenuLayer: View {
             PlayerMenuCard(title: "Audio", symbol: "speaker.wave.2", maxHeight: maxHeight, close: close) {
                 AudioMenu(onInteract: onInteract, close: close)
             }
+            .testAnchor(TestID.Player.cardAudio)
         case .subtitles:
             PlayerMenuCard(title: "Subtitles", symbol: "captions.bubble", maxHeight: maxHeight, close: close) {
                 SubtitlesMenu(onInteract: onInteract, close: close)
             }
+            .testAnchor(TestID.Player.cardSubtitles)
         case .quality:
             PlayerMenuCard(title: "Quality", symbol: "slider.horizontal.3", maxHeight: maxHeight, close: close) {
                 QualityMenu(onInteract: onInteract, close: close)
             }
+            .testAnchor(TestID.Player.cardQuality)
         case .upNext:
             PlayerMenuCard(title: "Up Next", symbol: "text.line.first.and.arrowtriangle.forward",
                            maxHeight: maxHeight, close: close) {
                 UpNextMenu(onInteract: onInteract, close: close)
             }
+            .testAnchor(TestID.Player.cardUpNext)
         case .more:
             PlayerMenuCard(title: "More", symbol: "ellipsis.circle", maxHeight: maxHeight, close: close) {
                 MoreMenu(onInteract: onInteract, close: close, openPanel: openPanel)
             }
+            .testAnchor(TestID.Player.cardMore)
         }
     }
 }
@@ -155,6 +173,7 @@ struct PlayerMenuCard<Content: View>: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Close")
+                .accessibilityIdentifier(TestID.Player.cardClose)
             }
             .padding(.leading, 16)
             .padding(.trailing, 8)
@@ -220,15 +239,17 @@ private struct AudioMenu: View {
         let selected = player.selectedAudioOption
         if options.isEmpty {
             PanelNote(text: player.isOpening ? "The stream is still opening." : "This stream lists no audio tracks.")
+                .accessibilityIdentifier(TestID.Player.audioEmpty)
         } else {
             ForEach(options) { option in
                 PanelRow(title: option.label,
-                         detail: option.needsNewStream ? "Reopens the stream with this track" : nil,
+                         detail: player.audioDetail(for: option),
                          isSelected: option.id == selected) {
                     onInteract()
                     player.selectAudio(option)
                     close()
                 }
+                .accessibilityIdentifier(TestID.Player.audioOption(TestID.Player.trackKey(option.id)))
             }
         }
     }
@@ -247,20 +268,25 @@ private struct SubtitlesMenu: View {
             player.selectSubtitles(nil)
             close()
         }
+        .accessibilityIdentifier(TestID.Player.subtitlesOff)
         ForEach(options) { option in
             PanelRow(title: option.label,
                      // Many forced tracks are named so already.
                      detail: [option.isForced && !option.label.localizedCaseInsensitiveContains("forced") ? "Forced" : nil,
-                              option.needsNewStream ? "Drawn by the server · reopens the stream" : nil]
+                              // A download's own subtitle files are drawn
+                              // here, with no server and no reopen.
+                              option.needsNewStream && !player.isLocal ? "Drawn by the server · reopens the stream" : nil]
                         .compactMap { $0 }.joined(separator: " · "),
                      isSelected: option.id == selected) {
                 onInteract()
                 player.selectSubtitles(option)
                 close()
             }
+            .accessibilityIdentifier(TestID.Player.subtitleOption(TestID.Player.trackKey(option.id)))
         }
         if options.isEmpty {
             PanelNote(text: "This stream has no subtitle tracks.")
+                .accessibilityIdentifier(TestID.Player.subtitlesEmpty)
         }
     }
 }
@@ -275,13 +301,16 @@ private struct QualityMenu: View {
     let close: () -> Void
 
     var body: some View {
-        // A download plays as it was saved, and the card says only that:
-        // no Auto, no rungs — see `PlayerModel.chooseQuality`.
-        if player.isLocal {
+        // Offline, a download plays as it was saved, and the card says only
+        // that. With a server in reach it lists everything a stream would,
+        // and picking a rung asks before leaving the download — see
+        // `PlayerModel.chooseQuality`.
+        if player.isLocal, JellyfinClient.shared.isOffline {
             PanelRow(title: player.downloadedTitle, detail: "Playing from this device", isSelected: true) {
                 onInteract()
                 close()
             }
+            .accessibilityIdentifier(TestID.Player.qualityDownloaded)
         } else {
             rungs
         }
@@ -290,41 +319,57 @@ private struct QualityMenu: View {
     @ViewBuilder private var rungs: some View {
         let selection = player.qualitySelection
         let auto = selection == .auto
-        let streamable = player.offersQuality
+        // A download's card: every row plain, the question on picking one
+        // doing the explaining.
+        let local = player.isLocal
+        let streamable = player.offersQuality || local
 
         if let reason = player.qualityUnavailableReason {
             PanelNote(text: reason)
+                .accessibilityIdentifier(TestID.Player.qualityUnavailable)
         }
         // Auto first, then the rows in the order Auto tries them: the
         // download, Direct, and the transcodes from the largest down.
         PanelRow(title: "Auto",
-                 detail: auto ? "Playing now · \(playingNow)" : "Downloaded, then Direct, then smaller streams",
+                 detail: local ? nil : auto ? "Playing now · \(playingNow)" : "Downloaded, then Direct, then smaller streams",
                  isSelected: auto) {
             pick(.auto)
         }
+        .accessibilityIdentifier(TestID.Player.qualityAuto)
         #if !os(tvOS)
         if player.downloadedCopy != nil {
-            PanelRow(title: player.downloadedTitle, detail: "From this device") {
+            PanelRow(title: player.downloadedTitle, detail: local ? nil : "From this device", isSelected: local) {
                 pick(.downloaded)
             }
+            .accessibilityIdentifier(TestID.Player.qualityDownloaded)
         }
         #endif
         ForEach(Quality.choices) { choice in
-            let playing = player.currentBitrate == choice.maxBitrate
+            let playing = !local && player.currentBitrate == choice.maxBitrate
             PanelRow(title: choice.maxBitrate == nil ? "Direct (original)" : choice.label,
-                     detail: playing ? (player.isTranscoding ? "Playing now · transcoding" : "Playing now")
+                     detail: local ? nil : playing ? (player.isTranscoding
+                                        ? (choice.maxBitrate == nil ? "Playing now · converted by the server" : "Playing now · transcoding")
+                                        : "Playing now")
                         : choice.maxBitrate == nil ? "The file as it is, no transcode" : nil,
                      isSelected: !auto && playing,
                      disabledReason: streamable ? nil : "Not for this stream") {
                 pick(.stream(choice.maxBitrate))
             }
+            .accessibilityIdentifier(TestID.Player.qualityOption(TestID.Player.qualityKey(choice.maxBitrate)))
         }
+        if !local {
         PanelNote(text: "Auto plays the downloaded copy if there is one, then Direct — the original file, no transcode — and steps down through the streams below it when the connection struggles, climbing back once it is steady. Picking a quality keeps it there.")
+            .accessibilityIdentifier(TestID.Player.qualityNote)
+        }
     }
 
     /// What Auto has landed on, in the pill's words.
     private var playingNow: String {
-        player.currentBitrate == nil ? "Direct" : Quality.shortLabel(for: player.currentBitrate)
+        // "Direct" only when it is: an original the server has to repackage
+        // or re-encode for this device is still the original, not direct.
+        player.currentBitrate == nil
+            ? (player.isTranscoding ? "Original, converted by the server" : "Direct")
+            : Quality.shortLabel(for: player.currentBitrate)
     }
 
     private func pick(_ selection: PlayerModel.QualitySelection) {
@@ -347,29 +392,33 @@ private struct UpNextMenu: View {
     var body: some View {
         if !player.queue.isEmpty {
             ForEach(player.queue, id: \.Id) { entry in
-                PanelRow(title: PlayerModel.displayTitle(entry)) {
+                PanelRow(title: PlayerModel.displayTitle(entry), styledTitle: EpisodeLine.row(entry)) {
                     onInteract()
                     close()
                     Task { await player.playQueued(entry.Id) }
                 } leading: {
                     still(entry)
                 }
+                .accessibilityIdentifier(TestID.Player.upNextItem(entry.Id))
             }
             PanelRow(title: "Clear up next", detail: "Forget what was queued by hand") {
                 onInteract()
                 player.clearQueue()
                 close()
             }
+            .accessibilityIdentifier(TestID.Player.upNextClear)
         } else {
             ForEach(player.upNextList, id: \.Id) { entry in
                 PanelRow(title: PlayerModel.upNextRowTitle(entry),
-                         detail: entry.title == PlayerModel.upNextRowTitle(entry) ? nil : entry.SeriesName) {
+                         detail: entry.title == PlayerModel.upNextRowTitle(entry) ? nil : entry.SeriesName,
+                         styledTitle: EpisodeLine.row(entry, show: false)) {
                     onInteract()
                     close()
                     Task { await player.playUpcoming(entry) }
                 } leading: {
                     still(entry)
                 }
+                .accessibilityIdentifier(TestID.Player.upNextItem(entry.Id))
             }
             #if !os(tvOS)
             ForEach(player.upNextLocal, id: \.itemId) { record in
@@ -378,6 +427,7 @@ private struct UpNextMenu: View {
                     close()
                     player.playLocal(record, keepShuffle: true)
                 }
+                .accessibilityIdentifier(TestID.Player.upNextItem(record.itemId))
             }
             #endif
         }
@@ -404,10 +454,22 @@ private struct MoreMenu: View {
     let close: () -> Void
     let openPanel: (PlayerTab) -> Void
 
-    private let chipColumns = [GridItem(.adaptive(minimum: 58), spacing: 6)]
+    /// Wide enough for "Normal" at the card's wider size: at 58 the iPad's
+    /// card fitted five to a row and cut it to "Nor…".
+    private let chipColumns = [GridItem(.adaptive(minimum: 64), spacing: 6)]
 
     var body: some View {
-        if !player.isLive {
+        // First: under the speed, the sleep timer and "After this" it was
+        // below the fold of a card on a phone held sideways, and on an
+        // episode — which has the most above it — looked not to be there.
+        if player.offersWatchTogether {
+            PanelHeading(text: "Watch Together")
+            WatchTogetherRows(onInteract: onInteract, close: close)
+        }
+
+        // The group's speed is normal: SyncPlay has no other, and one
+        // device on 1.5× would walk away from the rest.
+        if !player.isLive, !player.isInGroup {
             PanelHeading(text: "Speed")
             LazyVGrid(columns: chipColumns, spacing: 6) {
                 ForEach(PlayerModel.speeds, id: \.self) { rate in
@@ -416,6 +478,7 @@ private struct MoreMenu: View {
                         player.speed = rate
                     }
                     .accessibilityLabel("Speed \(PlayerModel.speedName(rate))")
+                    .accessibilityIdentifier(TestID.Player.speedOption(TestID.Player.speedKey(rate)))
                 }
             }
         }
@@ -426,6 +489,7 @@ private struct MoreMenu: View {
                 onInteract()
                 player.cancelSleepTimer()
             }
+            .accessibilityIdentifier(TestID.Player.sleepCancel)
         } else {
             HStack(spacing: 6) {
                 ForEach([15, 30, 60, 90], id: \.self) { minutes in
@@ -435,19 +499,23 @@ private struct MoreMenu: View {
                         close()
                     }
                     .accessibilityLabel("Stop in \(minutes) minutes")
+                    .accessibilityIdentifier(TestID.Player.sleepOption(minutes))
                 }
             }
         }
 
-        if !player.isLive {
+        // Only with something to stop before: a film on its own, or a
+        // show's last episode, has nothing after it.
+        if !player.isLive, player.hasUpNext {
             PanelHeading(text: "After this")
-            PanelRow(title: "Stop after this episode",
+            PanelRow(title: player.stopAfterTitle,
                      detail: player.autoplayCancelled ? "Nothing plays after this one"
                         : player.upNextTitle.map { "Otherwise next: \($0)" },
                      isSelected: player.autoplayCancelled) {
                 onInteract()
                 if player.autoplayCancelled { player.resumeAutoplay() } else { player.cancelAutoplay() }
             }
+            .accessibilityIdentifier(TestID.Player.stopAfterThis)
         }
 
         if player.isLive, player.channelLineup.count > 1 {
@@ -457,33 +525,7 @@ private struct MoreMenu: View {
                 close()
                 openPanel(.channels)
             }
+            .accessibilityIdentifier(TestID.Player.moreChannels)
         }
-
-        #if !os(tvOS)
-        if let item = player.item, !player.isLocal, !player.isLive,
-           player.engine?.capabilities.contains(.sharePlay) == true || player.canSwitchEngine(to: .apple) {
-            let shareplay = SharePlayCoordinator.shared
-            PanelHeading(text: "Watch Together")
-            if shareplay.isActive {
-                PanelRow(title: "Leave SharePlay", isSelected: true) {
-                    onInteract()
-                    shareplay.leave()
-                    close()
-                }
-            } else {
-                // On mpv the stream is handed to AVPlayer first, whose player
-                // the session coordinates.
-                PanelRow(title: "Watch Together with SharePlay",
-                         detail: "The same picture on everyone's screen, over FaceTime") {
-                    onInteract()
-                    close()
-                    Task {
-                        await player.prepareForSharePlay()
-                        await shareplay.share(item)
-                    }
-                }
-            }
-        }
-        #endif
     }
 }

@@ -137,6 +137,9 @@ extension PlayerModel {
         switch kind {
         case .mpv:
             if !Self.mpvAvailable { return "The mpv engine is not in this build." }
+            if isLocal, let id = localRecordId, DownloadManager.shared.record(for: id)?.hlsPath != nil {
+                return "A download saved as a stream plays through Apple's engine alone."
+            }
             if SharePlayCoordinator.shared.isActive { return "Watch Together plays through Apple's engine for the length of the session." }
             if prefs.playbackEngine == .apple { return "Settings → Video → Playback engine is set to Apple." }
         case .apple:
@@ -240,10 +243,41 @@ extension PlayerModel {
         Task { await switchEngine(to: .apple, reason: "AirPlay") }
     }
 
-    /// Watch Together is AVPlayer's; the stream goes there first.
+    /// Watch Together is AVPlayer's; the stream goes there first — even with
+    /// Settings set to mpv, which is otherwise what `switchEngine` refuses
+    /// on (setting the override first is what it asks for).
     func prepareForSharePlay() async {
+        // The Apple TV stays on mpv: its session asks instead (Core/SharePlay.swift).
+        #if !os(tvOS)
         guard engine?.kind == .mpv else { return }
+        engineOverride = .apple
         await switchEngine(to: .apple, reason: "Watch Together")
+        #endif
+    }
+
+    /// Whether "Watch Together" is offered for what is playing: a server
+    /// title (not a download, not live) that is on AVPlayer or can be handed
+    /// to it. The mpv setting doesn't take it away (`prepareForSharePlay`).
+    /// On the Apple TV the session follows mpv, so any server title will do.
+    var canWatchTogether: Bool {
+        guard canSyncPlay else { return false }
+        #if os(tvOS)
+        return true
+        #else
+        // A download is left for the server's stream first (`streamForGroup`).
+        if isLocal { return true }
+        if engine?.capabilities.contains(.sharePlay) == true { return true }
+        return engine?.kind == .mpv && fileContainerWithNothingToRemux == nil
+        #endif
+    }
+
+    /// Whether what is playing can be put on for a SyncPlay group: a title
+    /// everyone can open from the server, on either engine.
+    var canSyncPlay: Bool {
+        guard item != nil || isLocal, !isLive, !isExternal, errorMessage == nil else { return false }
+        // A download can be left for the server's stream (`streamForGroup`),
+        // while there is a server to leave it for.
+        return !isLocal || !JellyfinClient.shared.isOffline
     }
 
     /// Picture in Picture ended on a stream that was handed over for it: back

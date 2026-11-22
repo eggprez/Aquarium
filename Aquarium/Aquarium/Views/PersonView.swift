@@ -30,14 +30,17 @@ struct PersonView: View {
                 header
                 if isLoading, films.isEmpty, shows.isEmpty {
                     SkeletonGrid(count: 6)
+                        .testAnchor(TestID.Person.loading)
                 } else if let error, films.isEmpty, shows.isEmpty {
                     ErrorState(error: error) { Task { await load() } }
+                        .testAnchor(TestID.Person.error)
                 } else if films.isEmpty, shows.isEmpty {
                     EmptyState(
                         symbol: "person.crop.rectangle.stack",
                         title: "Nothing else of theirs here",
                         message: "No other film or show in your libraries credits \(displayName)."
                     )
+                    .testAnchor(TestID.Person.empty)
                 } else {
                     #if os(macOS)
                     // A grid under each heading: a filmography is a list to
@@ -45,22 +48,32 @@ struct PersonView: View {
                     // to show it whole rather than a row at a time. The grid
                     // brings the Mac's own selection, arrows and menu with it.
                     filmographyGrid(title: films.count == 1 ? "Film" : "Films", items: films)
+                        .testAnchor(TestID.Person.films)
                     filmographyGrid(title: shows.count == 1 ? "Show" : "Shows", items: shows)
+                        .testAnchor(TestID.Person.shows)
                     #else
                     // Shelves, not one grid: "was in these films" and "was in
                     // these shows" are two answers, and a television can walk
                     // a shelf without a page of tiles between it and the top.
                     MediaShelf(title: films.count == 1 ? "Film" : "Films", items: films) { app.push(.item($0.Id)) }
+                        .testAnchor(TestID.Person.films)
                     MediaShelf(title: shows.count == 1 ? "Show" : "Shows", items: shows) { app.push(.item($0.Id)) }
+                        .testAnchor(TestID.Person.shows)
                     #endif
                 }
+                // The rest of what they made, where a Seerr server is
+                // connected to ask it of.
+                SeerrPersonHook(person: person)
             }
             .padding(.top, 12)
             .padding(.bottom, 32)
         }
+        .focusOnArrival()
         .screenTitle(displayName)
         .paletteBar()
         .task(id: personId) { await load() }
+        .testAnchor(TestID.Person.root)
+        .testAnchor(TestID.Person.page(personId))
         #if os(macOS)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -69,6 +82,7 @@ struct PersonView: View {
                     // shown: the credits arrive before the biography does.
                     ProgressView()
                         .controlSize(.small)
+                        .accessibilityIdentifier(TestID.Person.toolbarLoading)
                 }
                 Button {
                     openWindow(id: RouteWindow.id, value: Route.person(id: personId, name: displayName))
@@ -76,6 +90,7 @@ struct PersonView: View {
                     Label("Open in New Window", systemImage: "macwindow.badge.plus")
                 }
                 .help("Open in New Window")
+                .accessibilityIdentifier(TestID.Person.openInNewWindow)
             }
         }
         #endif
@@ -130,6 +145,7 @@ struct PersonView: View {
                 Text(displayName)
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(Theme.text)
+                    .accessibilityIdentifier(TestID.Person.name)
                 #endif
                 if let facts, !facts.isEmpty {
                     Text(facts)
@@ -137,6 +153,7 @@ struct PersonView: View {
                         .foregroundStyle(Theme.textDim)
                         .fixedSize(horizontal: false, vertical: true)
                         .macSelectable()
+                        .accessibilityIdentifier(TestID.Person.facts)
                 }
                 if let bio = person?.Overview, !bio.isEmpty {
                     Text(bio)
@@ -145,6 +162,7 @@ struct PersonView: View {
                         .lineLimit(showsWholeBio ? nil : bioLines)
                         .fixedSize(horizontal: false, vertical: true)
                         .macSelectable()
+                        .accessibilityIdentifier(TestID.Person.bio)
                     // A button rather than a tap on the text: a television can
                     // only scroll to what can take focus, and a biography that
                     // runs off the screen would otherwise be out of reach.
@@ -153,6 +171,7 @@ struct PersonView: View {
                             withAnimation(.easeOut(duration: 0.2)) { showsWholeBio.toggle() }
                         }
                         .font(.subheadline.weight(.medium))
+                        .accessibilityIdentifier(TestID.Person.bioToggle)
                         #if os(tvOS)
                         .appButtonStyle()
                         #elseif os(macOS)
@@ -171,6 +190,7 @@ struct PersonView: View {
         }
         .padding(.horizontal, Metrics.gutter)
         .focusRegion()
+        .testAnchor(TestID.Person.header)
     }
 
     private static let clear = LinearGradient(colors: [.clear], startPoint: .top, endPoint: .bottom)
@@ -241,7 +261,10 @@ struct PersonView: View {
             guard !Task.isCancelled else { return }
             self.error = error.localizedDescription
         }
-        if let found = await who, !Task.isCancelled { person = found }
+        if let found = await who, !Task.isCancelled {
+            person = found
+            SeerrClient.shared.warm(for: found)
+        }
     }
 }
 
@@ -249,9 +272,18 @@ struct PersonView: View {
 
 /// Which trailer a title has, and how one that lives on the web gets opened.
 enum Trailers {
+    @MainActor
     static func has(_ item: BaseItem) -> Bool {
         guard item.kind == "Movie" || item.kind == "Series" else { return false }
-        return (item.LocalTrailerCount ?? 0) > 0 || remote(item) != nil
+        if (item.LocalTrailerCount ?? 0) > 0 { return true }
+        #if os(tvOS)
+        // A television has no browser: a remote trailer opens only in the
+        // YouTube app (`open`), so offer one only when that app answers.
+        guard let url = remote(item), youTubeID(url) != nil, let app = URL(string: "youtube://") else { return false }
+        return UIApplication.shared.canOpenURL(app)
+        #else
+        return remote(item) != nil
+        #endif
     }
 
     /// The first remote trailer with an address that can actually be opened.

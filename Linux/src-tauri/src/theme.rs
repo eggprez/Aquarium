@@ -79,3 +79,34 @@ pub fn watch(app: AppHandle) {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn portal_values_map_to_css_names() {
+        assert_eq!(label(0), "no-preference");
+        assert_eq!(label(1), "dark");
+        assert_eq!(label(2), "light");
+        assert_eq!(label(7), "no-preference");
+    }
+
+    /// No session bus (as in the test sandbox) is "unknown", which tells the
+    /// frontend to fall back to matchMedia.
+    #[test]
+    fn no_portal_is_unknown() {
+        if crate::test_support::real_dbus() {
+            return;
+        }
+        let _s = crate::test_support::sandbox();
+        assert_eq!(system_color_scheme(), "unknown");
+        assert!(crate::test_support::debug_log().contains("theme: no session bus"));
+    }
+
+    #[test]
+    fn the_portal_setting_is_the_appearance_color_scheme() {
+        assert_eq!((BUS, PATH, IFACE), ("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", "org.freedesktop.portal.Settings"));
+        assert_eq!((NAMESPACE, KEY), ("org.freedesktop.appearance", "color-scheme"));
+    }
+}

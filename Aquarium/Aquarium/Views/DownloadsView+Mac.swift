@@ -67,6 +67,7 @@ struct MacDownloadsView: View {
                     title: "No Downloads",
                     message: "Anything you download from a title's page is kept on this Mac and plays without a server — including when you're offline."
                 )
+                .testAnchor(TestID.Downloads.empty)
             } else {
                 list
             }
@@ -96,6 +97,7 @@ struct MacDownloadsView: View {
         // View ▸ Refresh: send what is waiting and ask the server what it
         // knows — while this is the page in front. See `onMacRefresh`.
         .onMacRefresh { Task { await sync() } }
+        .testAnchor(TestID.Downloads.root)
     }
 
     /// "42 items · 120 GB · 310 GB free", where the phone has a card.
@@ -148,13 +150,13 @@ struct MacDownloadsView: View {
             }
 
             if !shows.isEmpty {
-                gridSection(films.isEmpty ? "On This Device" : "Shows", kind: .shows) {
+                gridSection(films.isEmpty ? "On This Device" : DownloadGroups.showsHeading, kind: .shows) {
                     ForEach(shows) { show in seriesTile(show) }
                 }
             }
 
             if !films.isEmpty {
-                gridSection(shows.isEmpty ? "On This Device" : "Films", kind: .films) {
+                gridSection(shows.isEmpty ? "On This Device" : DownloadGroups.moviesHeading, kind: .films) {
                     ForEach(films) { film in filmTile(film) }
                 }
             }
@@ -175,6 +177,7 @@ struct MacDownloadsView: View {
         .onChange(of: rowSelection) { _, rows in
             if !rows.isEmpty { tileSelection = [] }
         }
+        .testAnchor(TestID.Downloads.list)
     }
 
     /// A grid of posters as one row of the list: no stripe, no separator,
@@ -189,6 +192,7 @@ struct MacDownloadsView: View {
                 content()
             }
             .padding(.vertical, 6)
+            .testAnchor(kind == .shows ? TestID.Downloads.showsSection : TestID.Downloads.filmsSection)
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
             .selectionDisabled()
@@ -219,6 +223,7 @@ struct MacDownloadsView: View {
         .contextMenu { seriesMenu(show) }
         .help(show.title)
         .accessibilityAddTraits(tileSelection.contains(show.id) ? .isSelected : [])
+        .testAnchor(TestID.Downloads.showCard(show.id))
     }
 
     private func filmTile(_ film: DownloadRecord) -> some View {
@@ -237,6 +242,7 @@ struct MacDownloadsView: View {
         .contextMenu { filmMenu(film) }
         .help(film.title)
         .accessibilityAddTraits(tileSelection.contains(film.itemId) ? .isSelected : [])
+        .testAnchor(TestID.Downloads.filmCard(film.itemId))
     }
 
     @ViewBuilder
@@ -245,15 +251,18 @@ struct MacDownloadsView: View {
         Button { app.push(.downloadedSeries(show.id)) } label: {
             Label("Open", systemImage: "chevron.right")
         }
+        .accessibilityIdentifier(TestID.Downloads.showCardOpen(show.id))
         if let start = show.resumePoint {
             Button { player.playLocal(start) } label: {
                 Label(show.unwatched > 0 ? "Play Next" : "Play", systemImage: "play.fill")
             }
+            .accessibilityIdentifier(TestID.Downloads.showCardPlay(show.id))
         }
         if show.records.count > 1 {
             Button { player.startShuffle(show.records) } label: {
                 Label("Shuffle", systemImage: "shuffle")
             }
+            .accessibilityIdentifier(TestID.Downloads.showCardShuffle(show.id))
         }
         Divider()
         Button {
@@ -261,13 +270,16 @@ struct MacDownloadsView: View {
         } label: {
             Label("Open in New Window", systemImage: "macwindow.badge.plus")
         }
+        .accessibilityIdentifier(TestID.Downloads.showCardOpenInNewWindow(show.id))
         Button { downloads.reveal(itemIds: records(inTiles: targets).map(\.itemId)) } label: {
             Label("Show in Finder", systemImage: "folder")
         }
+        .accessibilityIdentifier(TestID.Downloads.showCardShowInFinder(show.id))
         Divider()
         Button(role: .destructive) { deleteTiles(targets) } label: {
             Label(targets.count > 1 ? "Delete \(targets.count) Items…" : "Delete Show…", systemImage: "trash")
         }
+        .accessibilityIdentifier(TestID.Downloads.showCardDelete(show.id))
     }
 
     @ViewBuilder
@@ -276,6 +288,7 @@ struct MacDownloadsView: View {
         Button { player.playLocal(film) } label: {
             Label("Play", systemImage: "play.fill")
         }
+        .accessibilityIdentifier(TestID.Downloads.filmCardPlay(film.itemId))
         Button {
             downloads.setPlayed(film.itemId, played: !film.played)
         } label: {
@@ -284,19 +297,23 @@ struct MacDownloadsView: View {
                 systemImage: film.played ? "arrow.uturn.backward.circle" : "checkmark.circle"
             )
         }
+        .accessibilityIdentifier(TestID.Downloads.filmCardToggleWatched(film.itemId))
         Divider()
         Button {
             openWindow(id: ItemWindow.id, value: film.itemId)
         } label: {
             Label("Open in New Window", systemImage: "macwindow.badge.plus")
         }
+        .accessibilityIdentifier(TestID.Downloads.filmCardOpenInNewWindow(film.itemId))
         Button { downloads.reveal(itemIds: records(inTiles: targets).map(\.itemId)) } label: {
             Label("Show in Finder", systemImage: "folder")
         }
+        .accessibilityIdentifier(TestID.Downloads.filmCardShowInFinder(film.itemId))
         Divider()
         Button(role: .destructive) { deleteTiles(targets) } label: {
             Label(targets.count > 1 ? "Delete \(targets.count) Items…" : "Delete…", systemImage: "trash")
         }
+        .accessibilityIdentifier(TestID.Downloads.filmCardDelete(film.itemId))
     }
 
     /// The click, read with whatever keys were down: ⌘ toggles the tile, a
@@ -390,6 +407,7 @@ struct MacDownloadsView: View {
             } label: {
                 Label(active.count > 1 ? "Stop Downloads" : "Stop Download", systemImage: "xmark.circle")
             }
+            .accessibilityIdentifier(TestID.Downloads.selectionStop)
         }
         if !waiting.isEmpty {
             Button {
@@ -397,6 +415,7 @@ struct MacDownloadsView: View {
             } label: {
                 Label("Remove from Queue", systemImage: "xmark.circle")
             }
+            .accessibilityIdentifier(TestID.Downloads.selectionRemoveFromQueue)
         }
         if !broken.isEmpty {
             Button {
@@ -404,11 +423,13 @@ struct MacDownloadsView: View {
             } label: {
                 Label("Retry", systemImage: "arrow.clockwise")
             }
+            .accessibilityIdentifier(TestID.Downloads.selectionRetry)
             Button(role: .destructive) {
                 downloads.delete(broken.map(\.itemId))
             } label: {
                 Label("Delete", systemImage: "trash")
             }
+            .accessibilityIdentifier(TestID.Downloads.selectionDelete)
         }
         if ids.count == 1, let id = ids.first {
             Divider()
@@ -418,12 +439,14 @@ struct MacDownloadsView: View {
                 Button { downloads.reveal(itemIds: [id]) } label: {
                     Label("Show in Finder", systemImage: "folder")
                 }
+                .accessibilityIdentifier(TestID.Downloads.selectionShowInFinder)
             }
             Button {
                 openWindow(id: ItemWindow.id, value: id)
             } label: {
                 Label("Open in New Window", systemImage: "macwindow.badge.plus")
             }
+            .accessibilityIdentifier(TestID.Downloads.selectionOpenInNewWindow)
         }
     }
 
@@ -453,6 +476,7 @@ struct MacDownloadsView: View {
             }
             .help(downloads.isPaused ? "Resume Downloads" : "Pause Downloads")
             .disabled(!downloads.isPaused && running.isEmpty && downloads.queue.isEmpty)
+            .accessibilityIdentifier(TestID.Downloads.pause)
 
             Button {
                 Task { await sync() }
@@ -465,6 +489,7 @@ struct MacDownloadsView: View {
             }
             .help(syncHelp)
             .disabled(isSyncing || client.isOffline)
+            .accessibilityIdentifier(TestID.Downloads.sync)
 
             Button {
                 DownloadManager.revealInFinder()
@@ -472,6 +497,7 @@ struct MacDownloadsView: View {
                 Label("Show in Finder", systemImage: "folder")
             }
             .help("Show Downloads in Finder")
+            .accessibilityIdentifier(TestID.Downloads.showInFinder)
 
             manageMenu
         }
@@ -492,8 +518,10 @@ struct MacDownloadsView: View {
         return Menu {
             Button("Retry All Failed") { downloads.retryAllFailed() }
                 .disabled(failed.isEmpty)
+                .accessibilityIdentifier(TestID.Downloads.manageRetryAllFailed)
             Button("Clear Queue…") { confirmingClearQueue = true }
                 .disabled(downloads.queue.isEmpty)
+                .accessibilityIdentifier(TestID.Downloads.manageClearQueue)
             Divider()
             Button("Delete Watched Downloads…") {
                 pendingDeletion = DownloadDeletion(
@@ -504,6 +532,7 @@ struct MacDownloadsView: View {
                 )
             }
             .disabled(watched.isEmpty)
+            .accessibilityIdentifier(TestID.Downloads.manageDeleteWatched)
             Button("Delete All Downloads…", role: .destructive) {
                 let all = downloads.records
                 pendingDeletion = DownloadDeletion(
@@ -515,10 +544,12 @@ struct MacDownloadsView: View {
                 )
             }
             .disabled(downloads.records.isEmpty)
+            .accessibilityIdentifier(TestID.Downloads.manageDeleteAll)
         } label: {
             Label("Manage", systemImage: "ellipsis.circle")
         }
         .help("Manage Downloads")
+        .accessibilityIdentifier(TestID.Downloads.manageMenu)
     }
 
     /// Send what is waiting, then ask the server what it knows. Success shows
@@ -535,6 +566,10 @@ struct MacDownloadsView: View {
                 title: "Couldn't Sync",
                 message: "The watched progress of \(result.failed) item\(result.failed == 1 ? "" : "s") couldn't be sent to Jellyfin. Check the connection and try again."
             )
+        } else if result.gone > 0 {
+            // Not a failure, but worth a word: the count went to nothing
+            // without anything reaching the server.
+            app.toast(DownloadsView.syncMessage(result), tone: .ok)
         }
     }
 
@@ -575,14 +610,16 @@ struct MacTransferRow: View {
                 }
                 .progressViewStyle(.linear)
                 .controlSize(.small)
+                .accessibilityIdentifier(TestID.Downloads.transferProgress(record.itemId))
                 HStack {
                     Text(record.quality)
                     Spacer()
-                    Text(progressText)
+                    Text(record.progressText)
                         .monospacedDigit()
                         // Digits roll rather than snap as the bytes climb.
                         .contentTransition(.numericText())
-                        .animation(.default, value: progressText)
+                        .animation(.default, value: record.progressText)
+                        .accessibilityIdentifier(TestID.Downloads.transferStatus(record.itemId))
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -594,6 +631,7 @@ struct MacTransferRow: View {
                     Label("The first copy arrived incomplete — fetching it again", systemImage: "arrow.clockwise")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                        .accessibilityIdentifier(TestID.Downloads.transferNote(record.itemId))
                 }
             }
             Button(action: onStop) {
@@ -603,19 +641,11 @@ struct MacTransferRow: View {
             .foregroundStyle(.secondary)
             .help("Stop Download")
             .accessibilityLabel("Stop downloading \(record.title)")
+            .accessibilityIdentifier(TestID.Downloads.transferCancel(record.itemId))
         }
         .padding(.vertical, 3)
         .macHover(cornerRadius: 6, inset: 4)
-    }
-
-    private var progressText: String {
-        let received = Format.bytes(record.receivedBytes)
-        guard let total = record.progressTotal else { return received }
-        // The tilde is the whole disclosure: past that point the bar is full
-        // and the bytes are still climbing, and this is what says why.
-        let denominator = (total.estimated ? "~" : "") + Format.bytes(total.bytes)
-        guard let fraction = record.fraction else { return "\(received) / \(denominator)" }
-        return "\(Int(fraction * 100))% · \(received) / \(denominator)"
+        .testAnchor(TestID.Downloads.transfer(record.itemId))
     }
 }
 
@@ -652,9 +682,11 @@ struct MacQueueRow: View {
             .foregroundStyle(.secondary)
             .help("Remove from Queue")
             .accessibilityLabel("Remove \(entry.title) from the queue")
+            .accessibilityIdentifier(TestID.Downloads.queuedRemove(entry.itemId))
         }
         .padding(.vertical, 2)
         .macHover(cornerRadius: 6, inset: 4)
+        .testAnchor(TestID.Downloads.queued(entry.itemId))
     }
 }
 
@@ -676,6 +708,7 @@ struct MacFailedRow: View {
                     .foregroundStyle(.red)
                     .lineLimit(2)
                     .help(record.errorMessage ?? "Transfer stopped")
+                    .accessibilityIdentifier(TestID.Downloads.failedMessage(record.itemId))
             }
             Spacer(minLength: 8)
             Button(action: onRetry) {
@@ -684,6 +717,7 @@ struct MacFailedRow: View {
             .buttonStyle(.borderless)
             .help("Retry")
             .accessibilityLabel("Retry \(record.title)")
+            .accessibilityIdentifier(TestID.Downloads.failedRetry(record.itemId))
             Button(action: onDelete) {
                 Image(systemName: "xmark.circle.fill")
             }
@@ -691,9 +725,11 @@ struct MacFailedRow: View {
             .foregroundStyle(.secondary)
             .help("Delete")
             .accessibilityLabel("Delete \(record.title)")
+            .accessibilityIdentifier(TestID.Downloads.failedDelete(record.itemId))
         }
         .padding(.vertical, 2)
         .macHover(cornerRadius: 6, inset: 4)
+        .testAnchor(TestID.Downloads.failed(record.itemId))
     }
 }
 
@@ -729,6 +765,7 @@ struct MacDownloadedSeriesView: View {
                     title: "Nothing Left Here",
                     message: "Every episode of this show has been deleted from this Mac."
                 )
+                .testAnchor(TestID.Downloads.seriesEmpty)
             }
         }
         .navigationTitle(show?.title ?? "Downloads")
@@ -743,6 +780,7 @@ struct MacDownloadedSeriesView: View {
             // an empty screen the back button is the only way out of.
             if show == nil { dismiss() }
         }
+        .testAnchor(TestID.Downloads.seriesRoot)
     }
 
     /// "2 seasons · 14 episodes · 9.8 GB · 3 unwatched".
@@ -773,6 +811,7 @@ struct MacDownloadedSeriesView: View {
                         Text("\(season.records.count) episode\(season.records.count == 1 ? "" : "s") · \(Format.bytes(season.bytes))")
                             .foregroundStyle(.secondary)
                     }
+                    .testAnchor(TestID.Downloads.season(season.id))
                 }
             }
         }
@@ -787,6 +826,7 @@ struct MacDownloadedSeriesView: View {
             }
         }
         .onDeleteCommand { confirmDelete(selection, in: show) }
+        .testAnchor(TestID.Downloads.seriesList)
     }
 
     @ViewBuilder
@@ -796,6 +836,7 @@ struct MacDownloadedSeriesView: View {
             Button { player.playLocal(record) } label: {
                 Label("Play", systemImage: "play.fill")
             }
+            .accessibilityIdentifier(TestID.Downloads.seriesSelectionPlay)
         }
         if !records.isEmpty {
             // One verb for the lot: watched if any is not, unwatched once all are.
@@ -808,19 +849,23 @@ struct MacDownloadedSeriesView: View {
                     systemImage: allPlayed ? "arrow.uturn.backward.circle" : "checkmark.circle"
                 )
             }
+            .accessibilityIdentifier(TestID.Downloads.seriesSelectionToggleWatched)
             Divider()
             if records.count == 1, let record = records.first {
                 Button { openWindow(id: ItemWindow.id, value: record.itemId) } label: {
                     Label("Open in New Window", systemImage: "macwindow.badge.plus")
                 }
+                .accessibilityIdentifier(TestID.Downloads.seriesSelectionOpenInNewWindow)
             }
             Button { downloads.reveal(itemIds: records.map(\.itemId)) } label: {
                 Label("Show in Finder", systemImage: "folder")
             }
+            .accessibilityIdentifier(TestID.Downloads.seriesSelectionShowInFinder)
             Divider()
             Button(role: .destructive) { confirmDelete(ids, in: show) } label: {
                 Label(records.count > 1 ? "Delete \(records.count) Episodes…" : "Delete Episode…", systemImage: "trash")
             }
+            .accessibilityIdentifier(TestID.Downloads.seriesSelectionDelete)
         }
     }
 
@@ -832,22 +877,26 @@ struct MacDownloadedSeriesView: View {
                     Label(show.unwatched > 0 ? "Play Next" : "Play", systemImage: "play.fill")
                 }
                 .help(show.unwatched > 0 ? "Play the Next Unwatched Episode" : "Play from the Start")
+                .accessibilityIdentifier(TestID.Downloads.seriesPlay)
             }
             if show.records.count > 1 {
                 Button { player.startShuffle(show.records) } label: {
                     Label("Shuffle", systemImage: "shuffle")
                 }
                 .help("Shuffle Every Episode")
+                .accessibilityIdentifier(TestID.Downloads.seriesShuffle)
             }
             Button { downloads.reveal(itemIds: show.records.map(\.itemId)) } label: {
                 Label("Show in Finder", systemImage: "folder")
             }
             .help("Show the Episodes in Finder")
+            .accessibilityIdentifier(TestID.Downloads.seriesShowInFinder)
             Menu {
                 ForEach(show.seasons) { season in
                     Button("Delete \(season.title)…") {
                         pendingDeletion = .season(season, show: show.title)
                     }
+                    .accessibilityIdentifier(TestID.Downloads.seriesDeleteSeason(season.id))
                 }
                 let watched = show.records.filter(\.played)
                 Button("Delete Watched Episodes…") {
@@ -859,14 +908,17 @@ struct MacDownloadedSeriesView: View {
                     )
                 }
                 .disabled(watched.isEmpty)
+                .accessibilityIdentifier(TestID.Downloads.seriesDeleteWatched)
                 Divider()
                 Button("Delete Show…", role: .destructive) {
                     pendingDeletion = .series(show)
                 }
+                .accessibilityIdentifier(TestID.Downloads.seriesDeleteAll)
             } label: {
                 Label("Delete", systemImage: "trash")
             }
             .help("Delete Episodes, a Season or the Show")
+            .accessibilityIdentifier(TestID.Downloads.seriesDeleteMenu)
         }
     }
 

@@ -39,6 +39,7 @@ struct TentIdleView: View {
                         MediaShelf(title: "Continue Watching", items: items, wide: true, menuOpensDetails: true) { item in
                             Task { await player.play(item: item) }
                         }
+                        .testShelfKey(TestID.Tent.rowContinue)
                     }
                 }
                 .padding(.vertical, 22)
@@ -48,15 +49,14 @@ struct TentIdleView: View {
         .task { await load() }
         // Opened from the music card: Now Playing, over this.
         .nowPlayingSheet()
+        .testAnchor(TestID.Tent.root)
     }
 
     // MARK: - Pieces
 
     private var topRow: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text("Aquarium")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(Theme.text)
+            Wordmark(font: .title2, color: Theme.text)
             Spacer()
             Button {
                 app.tentBrowsing = true
@@ -66,6 +66,7 @@ struct TentIdleView: View {
             }
             .buttonStyle(.bordered)
             .buttonBorderShape(.capsule)
+            .accessibilityIdentifier(TestID.Tent.browse)
         }
         .padding(.horizontal, Metrics.gutter)
     }
@@ -80,6 +81,7 @@ struct TentIdleView: View {
                     .font(.headline)
                     .foregroundStyle(Theme.text)
                     .lineLimit(1)
+                    .accessibilityIdentifier(TestID.Tent.nowPlayingTitle)
                 Text(song.artistLine)
                     .font(.subheadline)
                     .foregroundStyle(Theme.textDim)
@@ -92,11 +94,13 @@ struct TentIdleView: View {
                         .font(.system(size: 30, weight: .semibold))
                 }
                 .accessibilityLabel(music.isPlaying ? "Pause" : "Play")
+                .accessibilityIdentifier(TestID.Tent.nowPlayingPlayPause)
                 Button { music.skipNext() } label: {
                     Image(systemName: "forward.fill")
                         .font(.system(size: 26, weight: .semibold))
                 }
                 .accessibilityLabel("Next")
+                .accessibilityIdentifier(TestID.Tent.nowPlayingNext)
             }
             .buttonStyle(.plain)
             .foregroundStyle(Theme.text)
@@ -105,6 +109,7 @@ struct TentIdleView: View {
         .background(Theme.placeholderFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture { NowPlayingPresentation.shared.isPresented = true }
+        .testAnchor(TestID.Tent.nowPlaying)
         .padding(.horizontal, Metrics.gutter)
     }
 
@@ -116,14 +121,17 @@ struct TentIdleView: View {
             Text(loaded ? "Nothing to continue" : "Loading…")
                 .font(.subheadline)
                 .foregroundStyle(Theme.textDim)
+                .accessibilityIdentifier(TestID.Tent.emptyText)
             if loaded {
                 Button("Browse the library") { app.tentBrowsing = true }
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.accentStrong)
+                    .accessibilityIdentifier(TestID.Tent.emptyBrowse)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 30)
+        .testAnchor(TestID.Tent.empty)
     }
 
     // MARK: - Data

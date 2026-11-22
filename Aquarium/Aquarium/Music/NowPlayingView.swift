@@ -34,6 +34,7 @@ private struct MiniPlayerProgress: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 2)
                 .scaleEffect(x: min(1, max(0, music.position / music.duration)), y: 1, anchor: .leading)
+                .testAnchor(TestID.MiniPlayer.progress)
         }
     }
 }
@@ -49,15 +50,18 @@ struct MiniPlayerBar: View {
                     MusicArtwork(item: song, width: 200, radius: 6, placeholderSymbol: song.isAudiobook ? "book" : "music.note")
                         .frame(width: 44, height: 44)
                         .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+                        .testAnchor(TestID.MiniPlayer.artwork)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(song.title)
                             .font(.subheadline.weight(.medium))
                             .lineLimit(1)
                             .foregroundStyle(Theme.text)
+                            .accessibilityIdentifier(TestID.MiniPlayer.title)
                         Text(secondLine(song))
                             .font(.caption)
                             .lineLimit(1)
                             .foregroundStyle(Theme.textDim)
+                            .accessibilityIdentifier(TestID.MiniPlayer.subtitle)
                     }
                     Spacer(minLength: 8)
                     Button { music.togglePlayPause() } label: {
@@ -69,6 +73,7 @@ struct MiniPlayerBar: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.text)
+                    .accessibilityIdentifier(TestID.MiniPlayer.playPause)
                     Button {
                         if song.isAudiobook { music.seek(by: 30) } else { music.skipNext() }
                     } label: {
@@ -83,6 +88,7 @@ struct MiniPlayerBar: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.text)
                     .disabled(!song.isAudiobook && !music.hasNext)
+                    .accessibilityIdentifier(TestID.MiniPlayer.next)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -99,11 +105,13 @@ struct MiniPlayerBar: View {
                         if value.translation.height < -30 { presenter.isPresented = true }
                     }
                 )
+                .testAnchor(TestID.MiniPlayer.expand)
                 .padding(.horizontal, 8)
                 .padding(.bottom, 6)
             }
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .animation(.easeOut(duration: 0.2), value: music.isActive)
+            .testAnchor(TestID.MiniPlayer.root)
         }
     }
 
@@ -129,6 +137,7 @@ struct NowPlayingView: View {
     @State private var showQueue = false
     @State private var showLyrics = false
     @State private var showLeanings = false
+    @State private var isMixing = false
     @State private var scrubbing: Double?
 
     /// What sits where the cover normally is.
@@ -201,6 +210,7 @@ struct NowPlayingView: View {
                     .preferredColorScheme(.dark)
             }
         }
+        .testAnchor(TestID.NowPlaying.root)
     }
 
     /// The whole screen as one column: the cover above, the controls below.
@@ -300,6 +310,7 @@ struct NowPlayingView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close")
+            .accessibilityIdentifier(TestID.NowPlaying.close)
             VStack(spacing: 1) {
                 Text(song.isAudiobook ? "Listening to" : "Playing from")
                     .font(.caption2.weight(.bold))
@@ -310,6 +321,18 @@ struct NowPlayingView: View {
                     .font(.footnote.weight(.semibold))
                     .lineLimit(1)
                     .foregroundStyle(.white.opacity(0.9))
+                    .accessibilityIdentifier(TestID.NowPlaying.source)
+                // Said for as long as the offline mix is what's queued — back
+                // online included: it only changes when Instant Mix is
+                // pressed again.
+                if music.mixIsOfflineFallback {
+                    Label("Offline — mixed from your downloads", systemImage: "wifi.slash")
+                        .font(.caption2.weight(.semibold))
+                        .lineLimit(1)
+                        .foregroundStyle(Theme.link)
+                        .padding(.top, 1)
+                        .accessibilityIdentifier(TestID.NowPlaying.offlineMix)
+                }
             }
             .frame(maxWidth: .infinity)
             Menu {
@@ -321,6 +344,7 @@ struct NowPlayingView: View {
                     .frame(width: 36, height: 36)
                     .background(.white.opacity(0.12), in: Circle())
             }
+            .accessibilityIdentifier(TestID.NowPlaying.more)
         }
     }
 
@@ -337,6 +361,7 @@ struct NowPlayingView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .aspectRatio(1, contentMode: .fit)
+        .testAnchor(TestID.NowPlaying.artwork)
     }
 
     private func titleBlock(_ song: BaseItem) -> some View {
@@ -355,6 +380,7 @@ struct NowPlayingView: View {
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(.white)
+                    .accessibilityIdentifier(TestID.NowPlaying.title)
                 Button {
                     goToArtist(song)
                 } label: {
@@ -365,6 +391,7 @@ struct NowPlayingView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(song.isAudiobook)
+                .accessibilityIdentifier(TestID.NowPlaying.artist)
             }
             Spacer()
             Button {
@@ -377,6 +404,7 @@ struct NowPlayingView: View {
                     .background(.white.opacity(0.12), in: Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier(TestID.NowPlaying.favorite)
         }
     }
 
@@ -385,10 +413,12 @@ struct NowPlayingView: View {
         if music.sleepDeadline != nil {
             Section(sleepLabel) {
                 Button("Turn off", role: .destructive) { music.cancelSleepTimer() }
+                    .accessibilityIdentifier(TestID.NowPlaying.sleepOff)
             }
         }
         ForEach([15, 30, 45, 60, 90], id: \.self) { minutes in
             Button("\(minutes) minutes") { music.setSleepTimer(minutes: minutes) }
+                .accessibilityIdentifier(TestID.NowPlaying.sleepOption(minutes))
         }
     }
 
@@ -410,6 +440,7 @@ struct NowPlayingView: View {
                         Text(PlayerModel.speedName(rate))
                     }
                 }
+                .accessibilityIdentifier(TestID.NowPlaying.speedOption("\(rate)"))
             }
         } label: {
             Text(abs(music.speed - 1) < 0.001 ? "1×" : PlayerModel.speedName(music.speed))
@@ -420,6 +451,7 @@ struct NowPlayingView: View {
                 .contentShape(Rectangle())
         }
         .accessibilityLabel("Speed")
+        .accessibilityIdentifier(TestID.NowPlaying.speed)
     }
 
     private var scrubber: some View {
@@ -438,14 +470,18 @@ struct NowPlayingView: View {
                 }
             )
             .tint(.white.opacity(0.9))
+            .accessibilityIdentifier(TestID.NowPlaying.scrubber)
             HStack {
                 Text(Format.clock(scrubbing ?? music.position))
+                    .accessibilityIdentifier(TestID.NowPlaying.elapsed)
                 Spacer()
                 if let chapter = music.currentChapter?.Name, music.current?.isAudiobook == true {
                     Text(chapter).lineLimit(1)
+                        .accessibilityIdentifier(TestID.NowPlaying.chapter)
                     Spacer()
                 }
                 Text("-" + Format.clock(max(0, music.duration - (scrubbing ?? music.position))))
+                    .accessibilityIdentifier(TestID.NowPlaying.remaining)
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(.white.opacity(0.6))
@@ -459,6 +495,7 @@ struct NowPlayingView: View {
                 speedMenu
             } else {
                 toggle("shuffle", isOn: music.isShuffled, label: "Shuffle") { music.toggleShuffle() }
+                    .accessibilityIdentifier(TestID.NowPlaying.shuffle)
             }
             Spacer(minLength: 0)
             Button {
@@ -473,6 +510,7 @@ struct NowPlayingView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.white)
+            .accessibilityIdentifier(TestID.NowPlaying.previous)
             Spacer(minLength: 0)
             Button { music.togglePlayPause() } label: {
                 ZStack {
@@ -492,6 +530,7 @@ struct NowPlayingView: View {
             .buttonStyle(PosterButtonStyle())
             .foregroundStyle(.white)
             .accessibilityLabel(music.isPlaying ? "Pause" : "Play")
+            .accessibilityIdentifier(TestID.NowPlaying.playPause)
             Spacer(minLength: 0)
             Button {
                 if song.isAudiobook { music.seek(by: 30) } else { music.skipNext() }
@@ -506,11 +545,13 @@ struct NowPlayingView: View {
             .foregroundStyle(.white)
             .disabled(!song.isAudiobook && !music.hasNext)
             .opacity(!song.isAudiobook && !music.hasNext ? 0.4 : 1)
+            .accessibilityIdentifier(TestID.NowPlaying.next)
             Spacer(minLength: 0)
             toggle(
                 music.repeatMode == .one ? "repeat.1" : "repeat",
                 isOn: music.repeatMode != .off, label: "Repeat"
             ) { music.repeatMode = music.repeatMode.next }
+            .accessibilityIdentifier(TestID.NowPlaying.repeatMode)
         }
     }
 
@@ -537,6 +578,7 @@ struct NowPlayingView: View {
             Image(systemName: "speaker.wave.3.fill").font(.caption)
         }
         .foregroundStyle(.white.opacity(0.6))
+        .testAnchor(TestID.NowPlaying.volume)
     }
 
     private func bottomBar(_ song: BaseItem) -> some View {
@@ -546,12 +588,19 @@ struct NowPlayingView: View {
         return HStack {
             if stepsChapters {
                 toggle("backward.end", isOn: false, label: "Previous Chapter") { music.skipChapter(-1) }
+                    .accessibilityIdentifier(TestID.NowPlaying.previousChapter)
             } else {
                 toggle("text.quote", isOn: showLyrics, dimmed: song.HasLyrics == false, label: "Lyrics") {
                     withAnimation { showLyrics.toggle() }
                 }
                 .disabled(song.isAudiobook)
                 .opacity(song.isAudiobook ? 0.3 : 1)
+                .accessibilityIdentifier(TestID.NowPlaying.lyrics)
+            }
+            // A mix like this song, after it, in place of what was coming.
+            if song.isSong {
+                Spacer()
+                instantMixButton(song)
             }
             // A station only: what it has come to lean toward, by points —
             // the artists and genres what was played out and skipped has
@@ -561,10 +610,12 @@ struct NowPlayingView: View {
                 toggle("chart.bar.xaxis", isOn: showLeanings, label: "What's leading in the mix") {
                     showLeanings = true
                 }
+                .accessibilityIdentifier(TestID.NowPlaying.leanings)
             }
             Spacer()
             AirPlayButton()
                 .frame(width: 44, height: 40)
+                .testAnchor(TestID.NowPlaying.airPlay)
             Spacer()
             Menu {
                 sleepOptions
@@ -577,12 +628,58 @@ struct NowPlayingView: View {
                     .contentShape(Rectangle())
             }
             .accessibilityLabel(sleepLabel)
+            .accessibilityIdentifier(TestID.NowPlaying.sleepTimer)
             Spacer()
             if stepsChapters {
                 toggle("forward.end", isOn: false, label: "Next Chapter") { music.skipChapter(1) }
+                    .accessibilityIdentifier(TestID.NowPlaying.nextChapter)
             } else {
                 toggle("list.bullet", isOn: showQueue, label: "Queue") { setQueue(!showQueue) }
+                    .accessibilityIdentifier(TestID.NowPlaying.queue)
             }
+        }
+    }
+
+    private func instantMixButton(_ song: BaseItem) -> some View {
+        Button {
+            Task { await instantMix(from: song) }
+        } label: {
+            Group {
+                if isMixing {
+                    ProgressView().tint(.white)
+                } else {
+                    Image(systemName: "wand.and.stars")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+            }
+            .frame(width: 44, height: 40)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isMixing)
+        .accessibilityLabel("Instant Mix")
+        .accessibilityIdentifier(TestID.NowPlaying.instantMix)
+    }
+
+    /// Instant Mix: this song keeps playing, and a mix of it replaces Up
+    /// Next — the server's or Aquarium's, as Settings says. Offline it can
+    /// only be Aquarium's, from downloads, and that is said here and at the
+    /// top of the player.
+    private func instantMix(from song: BaseItem) async {
+        isMixing = true
+        defer { isMixing = false }
+        let result = await MusicMixes.instantMix(from: song)
+        guard result.started else {
+            return app.toast(
+                result.isLocal ? "Nothing on this device to mix with this song" : "Couldn't build a mix from this song",
+                tone: .error
+            )
+        }
+        if music.mixIsOfflineFallback {
+            app.toast("Offline — Instant Mix is Aquarium's, from your downloads", tone: .info)
+        } else {
+            app.toast("Instant Mix is up next", tone: .ok)
         }
     }
 
@@ -631,18 +728,11 @@ private struct StationLeaningsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                if station.profile.isSurprise, !MoodMemory.describe(session.prior).isEmpty, session.reactions < 9 {
-                    // The remembered mood, while it still has a say — see
-                    // `StationSession.priorLean`.
-                    Section {
-                        Text("Started with a lean toward \(MoodMemory.describe(session.prior).formatted(.list(type: .and))), from what you've played at this time of day. It fades as you skip and let songs play.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
                 if session.reactions == 0 {
                     Section {
                         Text("Nothing is ahead yet. Let a few songs play out and skip the ones that don't fit, and the mix starts to lean.")
                             .foregroundStyle(.secondary)
+                            .accessibilityIdentifier(TestID.Stations.leaningsEmpty)
                     }
                 } else {
                     standings("Genres", session.genreLeanings.map { Leaning(name: MusicNames.genreName($0.name), points: $0.points) })
@@ -656,6 +746,7 @@ private struct StationLeaningsSheet: View {
                     VStack(spacing: 1) {
                         Text("What's leading").font(.headline)
                         Text(station.title).font(.caption).foregroundStyle(.secondary)
+                            .accessibilityIdentifier(TestID.Stations.leaningsStation)
                     }
                 }
             }
@@ -666,8 +757,10 @@ private struct StationLeaningsSheet: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 10)
+                    .accessibilityIdentifier(TestID.Stations.leaningsFootnote)
             }
         }
+        .testAnchor(TestID.Stations.leanings)
     }
 
     private struct Leaning: Identifiable {
@@ -718,6 +811,7 @@ private struct StationLeaningsSheet: View {
         }
         .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(TestID.Stations.leaningRow(TestID.key(leaning.name)))
     }
 
     private static func points(_ value: Double) -> String {
@@ -749,6 +843,7 @@ private struct QueueCard: View {
                         .onTapGesture(perform: close)
                         .accessibilityLabel("Close Up Next")
                         .accessibilityAddTraits(.isButton)
+                        .accessibilityIdentifier(TestID.NowPlaying.queueClose)
                     QueueHeader()
                         .padding(.horizontal, 20)
                         .padding(.bottom, 8)
@@ -769,6 +864,7 @@ private struct QueueCard: View {
             }
             .offset(y: drag)
         }
+        .testAnchor(TestID.NowPlaying.queueRoot)
         .accessibilityAction(.escape, close)
     }
 
@@ -799,15 +895,18 @@ private struct QueueHeader: View {
                 Text("Up Next")
                     .font(.headline)
                     .foregroundStyle(.white)
+                    .accessibilityIdentifier(TestID.NowPlaying.queueTitle)
                 if let title = music.queueTitle {
                     Text("From \(title)")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.6))
+                        .accessibilityIdentifier(TestID.NowPlaying.queueSource)
                 }
                 if music.station != nil, !music.isShuffled {
                     Label("Changes with what you play, skip and rate", systemImage: "sparkles")
                         .font(.caption2)
                         .foregroundStyle(Theme.link)
+                        .accessibilityIdentifier(TestID.NowPlaying.queueStationNote)
                 }
             }
             Spacer()
@@ -816,6 +915,7 @@ private struct QueueHeader: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.8))
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier(TestID.NowPlaying.queueClear)
             }
         }
     }
@@ -835,6 +935,7 @@ private struct QueueList: View {
                     .foregroundStyle(.white.opacity(0.6))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .testAnchor(TestID.NowPlaying.queueEmpty)
         } else {
             List {
                 ForEach(music.upNext) { entry in
@@ -849,6 +950,7 @@ private struct QueueList: View {
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { music.skip(to: entry) }
+                    .testAnchor(TestID.NowPlaying.queueRow(entry.item.Id))
                     .listRowBackground(Color.clear)
                     .listRowSeparatorTint(.white.opacity(0.1))
                     // Room on the left for the delete control the list
@@ -869,6 +971,7 @@ private struct QueueList: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .environment(\.editMode, .constant(.active))
+            .testAnchor(TestID.NowPlaying.queueList)
         }
     }
 }

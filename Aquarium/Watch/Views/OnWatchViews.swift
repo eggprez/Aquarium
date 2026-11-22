@@ -153,6 +153,7 @@ struct OnWatchView: View {
             if !downloads.inFlight.isEmpty {
                 Section {
                     NavigationLink(value: WatchRoute.downloadQueue) { DownloadingRow() }
+                        .accessibilityIdentifier(TestID.Watch.onWatchDownloading)
                 }
             }
 
@@ -162,12 +163,15 @@ struct OnWatchView: View {
                         GroupLink(group: group) {
                             GroupRow(group: group, note: failedNote(group, p(group)), noteColor: .orange)
                         }
+                        .testAnchor(TestID.Watch.onWatchFailed(group.kind.rawValue, group.id))
                         .swipeActions {
-                            Button { downloads.retry(group) } label: { Label("Retry", systemImage: "arrow.clockwise") }.tint(WatchTheme.accent)
+                            Button { downloads.retry(group) } label: { Label("Retry", systemImage: "arrow.clockwise") }.tint(WatchTheme.accent).accessibilityIdentifier(TestID.Watch.onWatchSwipeRetry(group.kind.rawValue, group.id))
                             Button(role: .destructive) { downloads.remove(group) } label: { Label("Remove", systemImage: "trash") }
+                                .accessibilityIdentifier(TestID.Watch.onWatchSwipeRemove(group.kind.rawValue, group.id))
                         }
                     }
                     Button("Retry All") { downloads.retryAllFailed() }
+                        .accessibilityIdentifier(TestID.Watch.onWatchRetryAll)
                 }
             }
 
@@ -182,8 +186,10 @@ struct OnWatchView: View {
                             .swipeActions {
                                 if p(group).done == 0 {
                                     Button(role: .destructive) { downloads.cancel(group) } label: { Label("Cancel", systemImage: "xmark") }
+                                        .accessibilityIdentifier(TestID.Watch.onWatchSwipeCancel(group.kind.rawValue, group.id))
                                 } else {
                                     Button(role: .destructive) { downloads.remove(group) } label: { Label("Remove", systemImage: "trash") }
+                                        .accessibilityIdentifier(TestID.Watch.onWatchSwipeRemove(group.kind.rawValue, group.id))
                                 }
                             }
                         }
@@ -201,6 +207,7 @@ struct OnWatchView: View {
                     Button(role: .destructive) { confirmAll = true } label: {
                         Label("Remove Everything", systemImage: "trash")
                     }
+                    .accessibilityIdentifier(TestID.Watch.onWatchRemoveEverything)
                 }
             }
         }
@@ -210,7 +217,9 @@ struct OnWatchView: View {
                 player.stop()
                 downloads.deleteEverything()
             }
+            .accessibilityIdentifier(TestID.Watch.onWatchConfirmRemoveEverything)
         }
+        .testAnchor(TestID.Watch.onWatchRoot)
     }
 
     private func failedNote(_ group: WatchDownloads.Group, _ p: WatchDownloads.Progress) -> String {
@@ -243,8 +252,10 @@ private struct GroupLink<Label: View>: View {
     var body: some View {
         if let route = group.route {
             NavigationLink(value: route) { label() }
+                .accessibilityIdentifier(TestID.Watch.onWatchGroup(group.kind.rawValue, group.id))
         } else {
             label()
+                .testAnchor(TestID.Watch.onWatchGroup(group.kind.rawValue, group.id))
         }
     }
 }
@@ -269,7 +280,7 @@ private struct GroupRow: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(group.title).font(.footnote.weight(.medium)).lineLimit(2)
-                if let note { Text(note).font(.caption2).foregroundStyle(noteColor).lineLimit(1) }
+                if let note { Text(note).font(.caption2).foregroundStyle(noteColor).lineLimit(1).accessibilityIdentifier(TestID.Watch.onWatchGroupNote(group.kind.rawValue, group.id)) }
                 if group.kind == .book, let f = downloads.record(for: group.id)?.progressFraction {
                     ProgressBar(fraction: f)
                 }
@@ -314,7 +325,7 @@ struct DownloadQueueView: View {
                     }
                     if waiting.count > Self.shownWaiting {
                         Text("and \(waiting.count - Self.shownWaiting) more")
-                            .font(.caption2).foregroundStyle(WatchTheme.dim)
+                            .font(.caption2).foregroundStyle(WatchTheme.dim).accessibilityIdentifier(TestID.Watch.queueMore)
                     }
                 }
             }
@@ -323,19 +334,23 @@ struct DownloadQueueView: View {
                     Button(role: .destructive) { confirmCancel = true } label: {
                         Label("Cancel All", systemImage: "xmark.circle")
                     }
+                    .accessibilityIdentifier(TestID.Watch.queueCancelAll)
                 }
             }
         }
         .navigationTitle("Downloads")
         .confirmationDialog("Cancel every download?", isPresented: $confirmCancel, titleVisibility: .visible) {
             Button("Cancel \(moving.count + waiting.count)", role: .destructive) { downloads.cancelAll() }
+                .accessibilityIdentifier(TestID.Watch.queueConfirmCancelAll)
         } message: {
             Text("What is already on the watch stays.")
         }
+        .testAnchor(TestID.Watch.queueRoot)
     }
 
     private func cancelButton(_ record: WatchRecord) -> some View {
         Button(role: .destructive) { downloads.cancel(record.itemId) } label: { Label("Cancel", systemImage: "xmark") }
+            .accessibilityIdentifier(TestID.Watch.queueSwipeCancel(record.itemId))
     }
 
     /// Why a row isn't moving yet.
@@ -367,16 +382,17 @@ private struct QueueRow: View {
                     Spacer(minLength: 2)
                     if let fraction {
                         Text("\(Int((fraction * 100).rounded(.down)))%")
-                            .font(.caption2.monospacedDigit()).foregroundStyle(WatchTheme.dim)
+                            .font(.caption2.monospacedDigit()).foregroundStyle(WatchTheme.dim).accessibilityIdentifier(TestID.Watch.queuePercent(record.itemId))
                     }
                 }
                 if let fraction {
                     ProgressBar(fraction: fraction)
                 } else if let note {
-                    Text(note).font(.caption2).foregroundStyle(WatchTheme.dim).lineLimit(1)
+                    Text(note).font(.caption2).foregroundStyle(WatchTheme.dim).lineLimit(1).accessibilityIdentifier(TestID.Watch.queueNote(record.itemId))
                 }
             }
         }
+        .testAnchor(TestID.Watch.queueRow(record.itemId))
     }
 
     /// The playlist, the album or the book's author.
@@ -397,13 +413,13 @@ struct StorageLine: View {
             HStack {
                 Text("Aquarium").font(.caption2)
                 Spacer()
-                Text(Format.bytes(used)).font(.caption2.monospacedDigit())
+                Text(Format.bytes(used)).font(.caption2.monospacedDigit()).accessibilityIdentifier(TestID.Watch.storageUsed)
             }
             if let free {
                 HStack {
                     Text("Free on watch").font(.caption2).foregroundStyle(WatchTheme.dim)
                     Spacer()
-                    Text(Format.bytes(free)).font(.caption2.monospacedDigit()).foregroundStyle(WatchTheme.dim)
+                    Text(Format.bytes(free)).font(.caption2.monospacedDigit()).foregroundStyle(WatchTheme.dim).accessibilityIdentifier(TestID.Watch.storageFree)
                 }
                 // Drawn by hand: the system bar's track reads as a full bar
                 // on a watch's black, which at 0 B looked like a full watch.
@@ -418,6 +434,7 @@ struct StorageLine: View {
                 .frame(height: 6)
             }
         }
+        .testAnchor(TestID.Watch.storageRoot)
     }
 }
 
@@ -434,6 +451,14 @@ struct WatchSettingsView: View {
     @Environment(WatchSyncQueue.self) private var sync
     @State private var syncing = false
 
+    /// What the Server row says: out of reach, answering but refusing the
+    /// watch's sign-in, or connected.
+    static func serverStatus(_ client: JellyfinClient) -> String {
+        if client.isOffline { return "Out of reach" }
+        if client.signInRefused { return "Sign-in expired" }
+        return "Connected"
+    }
+
     var body: some View {
         List {
             Section {
@@ -441,18 +466,24 @@ struct WatchSettingsView: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(account.userName.isEmpty ? "Unnamed user" : account.userName)
                             .lineLimit(1)
+                            .accessibilityIdentifier(TestID.Watch.settingsUserName)
                         Text(account.server.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: ""))
                             .font(.caption2)
                             .foregroundStyle(WatchTheme.dim)
                             .lineLimit(1)
                             .truncationMode(.middle)
+                            .accessibilityIdentifier(TestID.Watch.settingsServer)
                     }
-                    LabeledContent("Server", value: client.isOffline ? "Out of reach" : "Connected")
+                    .testAnchor(TestID.Watch.settingsAccount)
+                    LabeledContent("Server", value: Self.serverStatus(client))
+                        .accessibilityIdentifier(TestID.Watch.settingsServerStatus)
                 } else {
                     Text("Not signed in. Open Aquarium on your iPhone.")
                         .foregroundStyle(WatchTheme.dim)
+                        .accessibilityIdentifier(TestID.Watch.settingsSignedOut)
                 }
                 LabeledContent("iPhone", value: link.isPhoneReachable ? "In reach" : "Away")
+                    .accessibilityIdentifier(TestID.Watch.settingsPhoneReach)
             } header: {
                 Text("Account")
             }
@@ -461,10 +492,12 @@ struct WatchSettingsView: View {
             Section {
                 StorageLine()
                 NavigationLink("Manage", value: WatchRoute.onWatch)
+                    .accessibilityIdentifier(TestID.Watch.settingsManage)
                 LabeledContent("From iPhone", value: keptSummary)
                     .font(.footnote)
+                    .accessibilityIdentifier(TestID.Watch.settingsFromPhone)
                 if let note = downloads.mirrorNote {
-                    Text(note).font(.caption2).foregroundStyle(WatchTheme.dim)
+                    Text(note).font(.caption2).foregroundStyle(WatchTheme.dim).accessibilityIdentifier(TestID.Watch.settingsMirrorNote)
                 }
             } header: {
                 Text("On This Watch")
@@ -474,10 +507,11 @@ struct WatchSettingsView: View {
             }
 
             Section {
-                LabeledContent("Waiting to send", value: "\(sync.pending.count)").font(.footnote)
+                LabeledContent("Waiting to send", value: "\(sync.pending.count)").font(.footnote).accessibilityIdentifier(TestID.Watch.settingsWaitingToSend)
                 if let at = sync.lastFlushedAt {
                     LabeledContent("Last sent", value: at.formatted(.relative(presentation: .named)) + (sync.lastRoute.map { " via \($0)" } ?? ""))
                         .font(.footnote)
+                        .accessibilityIdentifier(TestID.Watch.settingsLastSent)
                 }
                 Button {
                     syncing = true
@@ -493,6 +527,7 @@ struct WatchSettingsView: View {
                     if syncing { ProgressView() } else { Label("Sync Now", systemImage: "arrow.triangle.2.circlepath") }
                 }
                 .disabled(syncing)
+                .accessibilityIdentifier(TestID.Watch.settingsSyncNow)
             } header: {
                 Text("Sync")
             }
@@ -504,15 +539,18 @@ struct WatchSettingsView: View {
                     if link.logsSending { ProgressView() } else { Label("Send Log to iPhone", systemImage: "doc.text") }
                 }
                 .disabled(link.logsSending)
+                .accessibilityIdentifier(TestID.Watch.settingsSendLog)
             } header: {
                 Text("Diagnostics")
             } footer: {
                 Text(link.logsSentAt.map { "Sent \($0.formatted(.relative(presentation: .named))). Find it on the iPhone under Settings → Apple Watch." }
                      ?? "What the watch has been doing, for when something goes wrong.")
                     .font(.caption2)
+                    .accessibilityIdentifier(TestID.Watch.settingsLogNote)
             }
         }
         .navigationTitle("Settings")
+        .testAnchor(TestID.Watch.settingsRoot)
     }
 
     /// What the iPhone's settings keep on this watch: "2 books · 3 lists".

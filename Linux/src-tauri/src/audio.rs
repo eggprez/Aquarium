@@ -184,6 +184,13 @@ impl AudioPlayer {
         self.can_prev.load(Ordering::SeqCst)
     }
 
+    /// Test hook: the state a playing core would leave, without one.
+    #[cfg(test)]
+    pub(crate) fn set_for_tests(&self, status: AudioStatus, current: Option<AudioTrack>) {
+        *self.status.lock().unwrap() = status;
+        self.tracks.lock().unwrap().current = current;
+    }
+
     pub fn set_queue(&self, entries: Vec<AudioTrack>, index: usize, can_next: bool, can_prev: bool) {
         *self.queue.lock().unwrap() = QueueView { entries, index };
         self.can_next.store(can_next, Ordering::SeqCst);
@@ -628,7 +635,7 @@ fn status_payload(st: &AudioStatus) -> Value {
     serde_json::to_value(st).unwrap_or(Value::Null)
 }
 
-fn emit_status(app: &AppHandle, status: &Arc<StdMutex<AudioStatus>>) {
+fn emit_status<R: tauri::Runtime>(app: &AppHandle<R>, status: &Arc<StdMutex<AudioStatus>>) {
     let payload = status_payload(&status.lock().unwrap());
     let _ = app.emit("audio-status", payload);
     crate::mpris::notify();
@@ -726,5 +733,337 @@ mod tests {
         assert!(!apply_property(&json!({"event":"property-change","name":"pause","data":true}), &st));
         apply_property(&json!({"event":"property-change","name":"time-pos","data":12.5}), &st);
         assert_eq!(st.lock().unwrap().position, 12.5);
+    }
+
+    // ------------------------------------------------------------------
+    // Added with the test suite.
+
+    use crate::test_support::{sandbox, sign_in, FakeServer, Resp, TEST_TOKEN, TEST_USER};
+
+    fn track(id: &str, duration: f64) -> AudioTrack {
+        AudioTrack {
+            item_id: id.into(),
+            url: format!("http://srv/Audio/{id}/stream"),
+            title: format!("Song {id}"),
+            duration,
+            ..Default::default()
+        }
+    }
+
+    fn change(name: &str, data: Value) -> Value {
+        json!({ "event": "property-change", "name": name, "data": data })
+    }
+
+    fn reporting(server: &FakeServer) -> Reporting {
+        Reporting {
+            server_url: Some(server.url.clone()),
+            user_id: None,
+            device_id: Some("dev-a".into()),
+        }
+    }
+
+    #[test]
+    fn a_new_player_is_idle() {
+        let p = AudioPlayer::default();
+        assert!(!p.is_active());
+        assert!(p.current().is_none());
+        assert!(p.queue().entries.is_empty());
+        assert_eq!(p.queue().index, 0);
+        assert!(!p.can_next() && !p.can_prev());
+        let st = p.status();
+        assert!(!st.active && !st.paused && st.item_id.is_empty());
+    }
+
+    #[test]
+    fn set_queue_is_what_mpris_reads_back() {
+        let p = AudioPlayer::new();
+        p.set_queue(vec![track("a", 1.0), track("b", 2.0)], 1, true, false);
+        let q = p.queue();
+        assert_eq!(q.entries.iter().map(|t| t.item_id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(q.index, 1);
+        assert!(p.can_next());
+        assert!(!p.can_prev());
+        p.set_queue(Vec::new(), 0, false, true);
+        assert!(!p.can_next() && p.can_prev());
+    }
+
+    #[tokio::test]
+    async fn commands_with_nothing_playing_are_refused() {
+        let p = AudioPlayer::new();
+        assert_eq!(p.send(json!(["cycle", "pause"])).await, Err("nothing is playing".to_string()));
+    }
+
+    /// The queue can only ever hold network streams and downloaded files,
+    /// as video can (regression: f1e01de mpv targets contained).
+    #[tokio::test]
+    async fn set_next_refuses_what_mpv_must_not_open() {
+        let p = AudioPlayer::new();
+        let mut bad = track("x", 1.0);
+        bad.url = "av://lavfi:sine".into();
+        assert!(p.set_next(Some(bad)).await.is_err());
+        // Nothing playing: a good one, or none, is simply accepted.
+        assert_eq!(p.set_next(Some(track("y", 1.0))).await, Ok(()));
+        assert_eq!(p.set_next(None).await, Ok(()));
+    }
+
+    #[test]
+    fn unique_adds_a_query_or_extends_one() {
+        let p = AudioPlayer::new();
+        let a = p.unique("https://srv/Audio/1/stream");
+        let b = p.unique("https://srv/Audio/1/stream");
+        assert!(a.starts_with("https://srv/Audio/1/stream?aqEntry="), "{a}");
+        assert_ne!(a, b);
+        let n = |s: &str| s.rsplit('=').next().unwrap().parse::<u64>().unwrap();
+        assert_eq!(n(&b), n(&a) + 1);
+        assert_eq!(p.unique("file:///x.flac"), "file:///x.flac");
+    }
+
+    #[test]
+    fn every_observed_property_lands_in_the_status() {
+        let st = Arc::new(StdMutex::new(AudioStatus::default()));
+        for (name, data) in [
+            ("time-pos", json!(3.5)),
+            ("duration", json!(180.0)),
+            ("volume", json!(55.0)),
+            ("mute", json!(true)),
+            ("speed", json!(1.25)),
+            ("paused-for-cache", json!(true)),
+            ("something-else", json!(1)),
+        ] {
+            assert!(!apply_property(&change(name, data), &st), "{name} is not a pause change");
+        }
+        let s = st.lock().unwrap().clone();
+        assert_eq!(s.position, 3.5);
+        assert_eq!(s.duration, 180.0);
+        assert_eq!(s.volume, 55.0);
+        assert!(s.mute);
+        assert_eq!(s.speed, 1.25);
+        assert!(s.buffering);
+    }
+
+    /// mpv reports 0 or nothing for a stream whose length it doesn't know
+    /// yet; the server's length must not be wiped by that.
+    #[test]
+    fn an_unknown_duration_keeps_the_known_one() {
+        let st = Arc::new(StdMutex::new(AudioStatus { duration: 200.0, ..Default::default() }));
+        apply_property(&change("duration", json!(0.0)), &st);
+        apply_property(&change("duration", json!(null)), &st);
+        apply_property(&change("time-pos", json!(null)), &st);
+        assert_eq!(st.lock().unwrap().duration, 200.0);
+        // A flag property with no data reads as off.
+        st.lock().unwrap().mute = true;
+        apply_property(&change("mute", json!(null)), &st);
+        assert!(!st.lock().unwrap().mute);
+        // Unpausing is a pause change too.
+        st.lock().unwrap().paused = true;
+        assert!(apply_property(&change("pause", json!(false)), &st));
+    }
+
+    #[test]
+    fn the_status_payload_carries_every_field() {
+        let st = AudioStatus {
+            active: true,
+            paused: true,
+            position: 1.0,
+            duration: 2.0,
+            item_id: "i".into(),
+            volume: 80.0,
+            mute: true,
+            speed: 1.5,
+            buffering: true,
+        };
+        assert_eq!(
+            status_payload(&st),
+            json!({
+                "active": true, "paused": true, "position": 1.0, "duration": 2.0,
+                "item_id": "i", "volume": 80.0, "mute": true, "speed": 1.5, "buffering": true,
+            })
+        );
+    }
+
+    #[test]
+    fn report_bodies_clamp_negative_positions_and_name_the_source() {
+        let t = track("song", 10.0);
+        let body = report_body(&t, -3.0, true);
+        assert_eq!(body["PositionTicks"], json!(0));
+        assert_eq!(body["IsPaused"], json!(true));
+        assert_eq!(body["CanSeek"], json!(true));
+        assert_eq!(body["ItemId"], json!("song"));
+        assert_eq!(body["MediaSourceId"], json!("song"));
+    }
+
+    #[test]
+    fn requests_track_and_play_defaults() {
+        let req: PlayRequest = serde_json::from_value(json!({
+            "track": { "item_id": "a", "url": "http://srv/a" }
+        }))
+        .unwrap();
+        assert_eq!(req.track.item_id, "a");
+        assert_eq!(req.track.title, "");
+        assert_eq!(req.track.duration, 0.0);
+        assert!(!req.track.is_local && req.track.art_url.is_none() && req.track.track_number.is_none());
+        assert!(req.next.is_none() && req.start_seconds.is_none() && req.volume.is_none());
+        assert!(req.speed.is_none() && req.replaygain.is_none() && !req.loop_file);
+        assert!(req.server_url.is_none() && req.user_id.is_none() && req.device_id.is_none());
+    }
+
+    #[test]
+    fn credentials_need_a_server_and_a_token() {
+        let _s = sandbox();
+        let mut rep = Reporting { server_url: Some("http://jf".into()), user_id: None, device_id: None };
+        assert!(creds(&rep).is_none(), "no token yet");
+        crate::secret::store(TEST_TOKEN).unwrap();
+        assert_eq!(
+            creds(&rep),
+            Some(("http://jf".to_string(), TEST_TOKEN.to_string(), "aquarium".to_string()))
+        );
+        rep.device_id = Some("dev".into());
+        assert_eq!(creds(&rep).unwrap().2, "dev");
+        rep.server_url = None;
+        assert!(creds(&rep).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_start_is_reported_to_the_server() {
+        let _s = sandbox();
+        crate::secret::store(TEST_TOKEN).unwrap();
+        let server = FakeServer::start(|_| Resp::status(204));
+        let st = AudioStatus { position: 4.0, paused: true, ..Default::default() };
+        report_start(&reporting(&server), &track("s1", 100.0), &st).await;
+        let reqs = server.requests_to("/Sessions/Playing");
+        assert_eq!(reqs.len(), 1);
+        let body = reqs[0].json();
+        assert_eq!(body["ItemId"], json!("s1"));
+        assert_eq!(body["PositionTicks"], json!(40_000_000u64));
+        // A start is never reported paused.
+        assert_eq!(body["IsPaused"], json!(false));
+        assert_eq!(
+            reqs[0].header("authorization"),
+            Some(jellyfin::auth_header(TEST_TOKEN, "dev-a").as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn progress_carries_the_pause_state_and_event_name() {
+        let _s = sandbox();
+        crate::secret::store(TEST_TOKEN).unwrap();
+        let server = FakeServer::start(|_| Resp::status(204));
+        let st = AudioStatus { position: 2.0, paused: true, ..Default::default() };
+        report_progress(&reporting(&server), &track("s1", 100.0), &st).await;
+        let reqs = server.requests_to("/Sessions/Playing/Progress");
+        assert_eq!(reqs.len(), 1);
+        let body = reqs[0].json();
+        assert_eq!(body["EventName"], json!("timeupdate"));
+        assert_eq!(body["IsPaused"], json!(true));
+        assert_eq!(body["PositionTicks"], json!(20_000_000u64));
+    }
+
+    /// A natural end is reported at the full length, so the server counts the
+    /// play; a stop part way is reported where it stopped.
+    #[tokio::test]
+    async fn a_finished_track_is_reported_stopped_at_its_end() {
+        let _s = sandbox();
+        crate::secret::store(TEST_TOKEN).unwrap();
+        let server = FakeServer::start(|_| Resp::status(204));
+        let rep = reporting(&server);
+        report_stopped(&rep, &track("s1", 200.0), 150.0, true).await;
+        report_stopped(&rep, &track("s2", 200.0), 150.0, false).await;
+        let reqs = server.requests_to("/Sessions/Playing/Stopped");
+        assert_eq!(reqs.len(), 2);
+        let (a, b) = (reqs[0].json(), reqs[1].json());
+        assert_eq!(a["ItemId"], json!("s1"));
+        assert_eq!(a["PositionTicks"], json!(2_000_000_000u64));
+        assert_eq!(b["PositionTicks"], json!(1_500_000_000u64));
+        assert!(a.get("IsPaused").is_none() && b.get("IsPaused").is_none());
+    }
+
+    #[tokio::test]
+    async fn nothing_is_reported_without_credentials() {
+        let _s = sandbox();
+        let server = FakeServer::start(|_| Resp::status(204));
+        let rep = reporting(&server);
+        let st = AudioStatus::default();
+        report_start(&rep, &track("s1", 10.0), &st).await;
+        report_progress(&rep, &track("s1", 10.0), &st).await;
+        report_stopped(&rep, &track("s1", 10.0), 1.0, false).await;
+        assert!(server.requests().is_empty());
+    }
+
+    /// A downloaded song never calls the server to start or progress; its
+    /// position is queued locally for the next sync instead.
+    #[tokio::test]
+    async fn a_downloaded_track_is_queued_locally() {
+        let _s = sandbox();
+        let server = FakeServer::start(|_| Resp::status(204));
+        sign_in(&server.url);
+        let rep = Reporting { server_url: Some(server.url.clone()), user_id: None, device_id: None };
+        let mut t = track("local1", 100.0);
+        t.is_local = true;
+        report_start(&rep, &t, &AudioStatus::default()).await;
+        report_progress(&rep, &t, &AudioStatus { position: 50.0, ..Default::default() }).await;
+        assert!(server.requests().is_empty(), "a local track reached the server");
+        assert_eq!(crate::progress::pending_item_ids(), vec!["local1".to_string()]);
+        // Stopped past 92% counts as played; with no user id there is no sync.
+        report_stopped(&rep, &t, 95.0, false).await;
+        assert!(server.requests().is_empty());
+        assert_eq!(crate::progress::pending_count(), 1);
+    }
+
+    /// With a user id, a downloaded track's stop is followed by a sync of the
+    /// local queue to the server.
+    #[tokio::test]
+    async fn a_downloaded_track_stop_syncs_when_it_can() {
+        let _s = sandbox();
+        let server = FakeServer::start(|_| Resp::status(204));
+        sign_in(&server.url);
+        let rep = Reporting {
+            server_url: Some(server.url.clone()),
+            user_id: Some(TEST_USER.into()),
+            device_id: None,
+        };
+        let mut t = track("local2", 100.0);
+        t.is_local = true;
+        report_stopped(&rep, &t, 30.0, false).await;
+        assert!(!server.requests().is_empty(), "no sync was attempted");
+    }
+
+    /// Closing the app mid-chapter is the commonest way an audiobook stops,
+    /// so the synchronous stop waits for its report.
+    #[test]
+    fn stop_sync_reports_where_the_book_stopped() {
+        let _s = sandbox();
+        crate::secret::store(TEST_TOKEN).unwrap();
+        let server = FakeServer::start(|_| Resp::status(204));
+        let p = AudioPlayer::new();
+        *p.reporting.lock().unwrap() = reporting(&server);
+        p.set_for_tests(
+            AudioStatus { active: true, position: 61.0, ..Default::default() },
+            Some(track("book", 3600.0)),
+        );
+        p.stop_sync();
+        let reqs = server.requests_to("/Sessions/Playing/Stopped");
+        assert_eq!(reqs.len(), 1, "the report did not go out before stop_sync returned");
+        assert_eq!(reqs[0].json()["PositionTicks"], json!(610_000_000u64));
+        assert!(p.current().is_none());
+        // A second stop has nothing left to report.
+        p.stop_sync();
+        assert_eq!(server.requests_to("/Sessions/Playing/Stopped").len(), 1);
+    }
+
+    #[test]
+    fn emit_status_sends_the_payload_as_audio_status() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        let events = crate::test_support::capture_events(app.handle(), "audio-status");
+        let st = Arc::new(StdMutex::new(AudioStatus { active: true, item_id: "z".into(), ..Default::default() }));
+        emit_status(app.handle(), &st);
+        let started = std::time::Instant::now();
+        while events.all().is_empty() {
+            assert!(started.elapsed() < std::time::Duration::from_secs(10), "no audio-status event");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(events.last()["item_id"], json!("z"));
+        assert_eq!(events.last()["active"], json!(true));
     }
 }

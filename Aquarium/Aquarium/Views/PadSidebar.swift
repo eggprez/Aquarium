@@ -44,6 +44,7 @@ struct PadSidebar: View {
             footer
         }
         .background(Theme.sidebar.ignoresSafeArea())
+        .testAnchor(TestID.Sidebar.root)
     }
 
     // MARK: Header
@@ -77,6 +78,7 @@ struct PadSidebar: View {
                     .lineLimit(1)
             }
             .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(TestID.Sidebar.account)
 
             Spacer(minLength: 8)
 
@@ -89,6 +91,7 @@ struct PadSidebar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Hide sidebar")
+            .accessibilityIdentifier(TestID.Sidebar.collapse)
         }
     }
 
@@ -131,10 +134,15 @@ struct PadSidebar: View {
                     .font(.body.weight(.medium))
                     .frame(width: 24)
                     .foregroundStyle(selected ? Theme.accent : Theme.textBody)
+                // Two lines before an ellipsis: the column is sized for
+                // short words, and a library's own name ("Home Videos &
+                // Photos") needs a touch more than it has. The row grows
+                // to hold the second line rather than cutting the name.
                 Text(section.title)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(selected ? Theme.text : Theme.textBody)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
                 if section == .downloads, DownloadManager.shared.transfersToFinish > 0 {
                     Text("\(DownloadManager.shared.transfersToFinish)")
@@ -146,7 +154,8 @@ struct PadSidebar: View {
                 }
             }
             .padding(.horizontal, 12)
-            .frame(height: 40)
+            .padding(.vertical, 4)
+            .frame(minHeight: 40)
             .background {
                 if selected {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -158,6 +167,7 @@ struct PadSidebar: View {
         .buttonStyle(.plain)
         .accessibilityLabel(section.title)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier(TestID.Sidebar.row(section.id))
     }
 
     /// Search is not a section on iOS — it opens over whatever is showing,
@@ -181,6 +191,7 @@ struct PadSidebar: View {
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier(TestID.Sidebar.searchRow)
     }
 
     // MARK: Footer
@@ -219,7 +230,7 @@ struct PadSidebarGroup: Identifiable {
             switch section {
             case .home, .search: browse.append(section)
             case .liveTV: live.append(section)
-            case .favorites, .downloads: you.append(section)
+            case .favorites, .requests, .downloads: you.append(section)
             case .settings, .more: break
             default: libraries.append(section)
             }
@@ -252,6 +263,7 @@ private struct SidebarNowPlaying: View {
                     .font(.footnote.weight(.semibold))
                     .lineLimit(1)
                     .foregroundStyle(Theme.text)
+                    .accessibilityIdentifier(TestID.Sidebar.nowPlayingTitle)
                 Text(secondLine)
                     .font(.caption)
                     .lineLimit(1)
@@ -269,6 +281,7 @@ private struct SidebarNowPlaying: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(music.isPlaying ? "Pause" : "Play")
+            .accessibilityIdentifier(TestID.Sidebar.nowPlayingPlayPause)
         }
         .padding(10)
         .background(Theme.raised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -286,6 +299,7 @@ private struct SidebarNowPlaying: View {
         .onTapGesture { presenter.isPresented = true }
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Opens Now Playing")
+        .testAnchor(TestID.Sidebar.nowPlaying)
     }
 
     private var secondLine: String {

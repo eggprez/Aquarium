@@ -37,6 +37,7 @@ struct LibraryTable: View {
                         // tooltip has the whole of it, and the show an
                         // episode belongs to.
                         .help(item.SeriesName.map { "\(item.title) — \($0)" } ?? item.title)
+                        .accessibilityIdentifier(TestID.Library.tableRow(item.Id))
                     if item.userData.isFavorite {
                         Image(systemName: "star.fill")
                             .font(.caption2)
@@ -105,6 +106,7 @@ struct LibraryTable: View {
         } primaryAction: { ids in
             if let item = items.first(where: { ids.contains($0.Id) }) { onOpen(item) }
         }
+        .testAnchor(TestID.Library.table)
     }
 
     /// The table's idea of its sort, drawn from the page's and written back to

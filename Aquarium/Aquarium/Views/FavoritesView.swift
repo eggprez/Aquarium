@@ -62,6 +62,7 @@ struct FavoritesView: View {
         // fill this screen outright.
         .reloadWhenItemsChange { await load() }
         .task(id: loadKey) { await load() }
+        .testAnchor(TestID.Favorites.root)
     }
 
     /// Everything the request depends on, as one value for the task.
@@ -80,9 +81,11 @@ struct FavoritesView: View {
             if isLoading, items.isEmpty {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier(TestID.Favorites.loading)
             } else if let error, items.isEmpty {
                 ErrorState(error: error) { Task { await load() } }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .testAnchor(TestID.Favorites.error)
             } else if items.isEmpty {
                 emptyState
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -125,21 +128,26 @@ struct FavoritesView: View {
                             // `.plain` elsewhere; on a television it showed no
                             // sign of which pill the selector was on.
                             .chipButtonStyle()
+                            .accessibilityIdentifier(TestID.Favorites.kind(entry.value))
                         }
                     }
                     .padding(.horizontal, Metrics.gutter)
                 }
+                .testAnchor(TestID.Favorites.kinds)
                 #endif
 
                 if isLoading, items.isEmpty {
                     #if os(macOS)
                     ProgressView()
                         .frame(maxWidth: .infinity, minHeight: 240)
+                        .accessibilityIdentifier(TestID.Favorites.loading)
                     #else
                     SkeletonGrid(count: 9)
+                        .testAnchor(TestID.Favorites.loading)
                     #endif
                 } else if let error, items.isEmpty {
                     ErrorState(error: error) { Task { await load() } }
+                        .testAnchor(TestID.Favorites.error)
                 } else if items.isEmpty {
                     emptyState
                 } else {
@@ -150,6 +158,7 @@ struct FavoritesView: View {
                         selection: gridSelection
                     )
                     .padding(.bottom, 24)
+                    .testAnchor(TestID.Favorites.grid)
                 }
             }
             #if os(macOS)
@@ -166,6 +175,7 @@ struct FavoritesView: View {
             title: "Nothing Starred Yet",
             message: "Anything you mark as a favorite — in Aquarium or anywhere else signed in to this server — shows up here."
         )
+        .testAnchor(TestID.Favorites.empty)
     }
 
     /// The grid's selection is the page's on the Mac, so the toolbar can act
@@ -191,17 +201,19 @@ struct FavoritesView: View {
         ToolbarItem(placement: .principal) {
             Picker("Show", selection: $kind) {
                 ForEach(kinds, id: \.value) { entry in
-                    Text(entry.label).tag(entry.value)
+                    Text(entry.label).accessibilityIdentifier(TestID.Favorites.kind(entry.value)).tag(entry.value)
                 }
             }
             .pickerStyle(.segmented)
             .help("Which kind of favorites to show")
+            .accessibilityIdentifier(TestID.Favorites.kindPicker)
         }
         if isLoading || isLoadingPage, !items.isEmpty {
             ToolbarItem(placement: .status) {
                 ProgressView()
                     .controlSize(.small)
                     .help("Loading…")
+                    .accessibilityIdentifier(TestID.Favorites.paging)
             }
         }
         if !selection.isEmpty {
@@ -211,24 +223,32 @@ struct FavoritesView: View {
         }
         ToolbarItem(placement: .primaryAction) {
             Picker("View", selection: $layout) {
-                Label("Grid", systemImage: "square.grid.2x2").tag(LibraryView.LibraryLayout.grid)
-                Label("List", systemImage: "list.bullet").tag(LibraryView.LibraryLayout.list)
+                Label("Grid", systemImage: "square.grid.2x2")
+                    .accessibilityIdentifier(TestID.Favorites.layout(LibraryView.LibraryLayout.grid.rawValue))
+                    .tag(LibraryView.LibraryLayout.grid)
+                Label("List", systemImage: "list.bullet")
+                    .accessibilityIdentifier(TestID.Favorites.layout(LibraryView.LibraryLayout.list.rawValue))
+                    .tag(LibraryView.LibraryLayout.list)
             }
             .pickerStyle(.segmented)
             .help("Show as posters or as a list")
+            .accessibilityIdentifier(TestID.Favorites.layoutPicker)
         }
         ToolbarItem(placement: .primaryAction) {
             Menu {
                 Picker("Sort By", selection: $sort) {
-                    ForEach(sortOptions) { Text($0.label).tag($0) }
+                    ForEach(sortOptions) { Text($0.label).accessibilityIdentifier(TestID.Favorites.sortOption($0.rawValue)).tag($0) }
                 }
                 .pickerStyle(.inline)
+                .accessibilityIdentifier(TestID.Favorites.sortPicker)
                 Divider()
                 Toggle("Reverse Order", isOn: $reversed)
+                    .accessibilityIdentifier(TestID.Favorites.sortReverse)
             } label: {
                 Label("Sort: \(sort.label)", systemImage: "arrow.up.arrow.down")
             }
             .help("Sort by \(sort.label.lowercased())")
+            .accessibilityIdentifier(TestID.Favorites.sortMenu)
         }
     }
 

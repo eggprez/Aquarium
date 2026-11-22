@@ -73,6 +73,7 @@ struct SourceSwitch: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(mode.source == source ? .isSelected : [])
+                .accessibilityIdentifier(TestID.Watch.rootSource(source.rawValue))
             }
         }
         .padding(2)
@@ -95,7 +96,8 @@ struct PhoneNowPlayingRow: View {
                 Text(state.isPlaying ? "Playing on iPhone" : "Paused on iPhone")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(WatchTheme.link)
-                Text(state.title).font(.footnote).lineLimit(1)
+                    .accessibilityIdentifier(TestID.Watch.rootPhoneNowPlayingStatus)
+                Text(state.title).font(.footnote).lineLimit(1).accessibilityIdentifier(TestID.Watch.rootPhoneNowPlayingTitle)
             }
             Spacer(minLength: 0)
             Image(systemName: state.isPlaying ? "waveform" : "pause.fill")
@@ -142,13 +144,15 @@ struct PhoneIdleRow: View {
         VStack(alignment: .leading, spacing: 6) {
             Label(link.isPhoneReachable ? "Nothing playing on iPhone" : "iPhone out of reach", systemImage: link.isPhoneReachable ? "iphone" : "iphone.slash")
                 .font(.footnote.weight(.semibold))
+                .accessibilityIdentifier(TestID.Watch.phoneIdleStatus)
             Text(link.isPhoneReachable
                  ? "Start something in Aquarium on your iPhone and it shows here."
                  : "Bring the watch near your iPhone to control what it plays.")
                 .font(.caption2)
                 .foregroundStyle(WatchTheme.dim)
+                .accessibilityIdentifier(TestID.Watch.phoneIdleDetail)
             if let error = link.remoteError {
-                Text(error).font(.caption2).foregroundStyle(.orange)
+                Text(error).font(.caption2).foregroundStyle(.orange).accessibilityIdentifier(TestID.Watch.phoneIdleError)
             }
             Button {
                 link.requestPlayback()
@@ -162,6 +166,7 @@ struct PhoneIdleRow: View {
             .buttonStyle(.bordered)
             .controlSize(.mini)
             .disabled(link.remoteBusy)
+            .accessibilityIdentifier(TestID.Watch.phoneIdleCheckAgain)
         }
         .padding(.vertical, 2)
     }
@@ -198,6 +203,7 @@ struct PhonePlayerScreen: View {
                 link.requestPlayback()
             }
         }
+        .testAnchor(TestID.Watch.phoneRoot)
     }
 
     private var idle: some View {
@@ -210,6 +216,7 @@ struct PhonePlayerScreen: View {
             }
             .padding()
         }
+        .testAnchor(TestID.Watch.phoneIdle)
     }
 
     private func content(_ state: PhonePlaybackState) -> some View {
@@ -227,6 +234,7 @@ struct PhonePlayerScreen: View {
                     .accessibilityHidden(true)
                 PhoneVolumePopup(level: state.volume)
             }
+            .testAnchor(TestID.Watch.phoneVolume)
         }
     }
 
@@ -240,9 +248,10 @@ struct PhonePlayerScreen: View {
         return VStack(spacing: compact ? 4 : 6) {
             HStack(alignment: .top, spacing: 8) {
                 PhoneArtwork(itemId: state.itemId, isAudiobook: state.isAudiobook, isVideo: state.isVideo, size: compact ? 38 : 46, corner: 7)
+                    .testAnchor(TestID.Watch.phoneArtwork)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(state.title).font(.footnote.weight(.semibold)).lineLimit(lines)
-                    Text(subtitle(state)).font(.caption2).foregroundStyle(WatchTheme.dim).lineLimit(lines)
+                    Text(state.title).font(.footnote.weight(.semibold)).lineLimit(lines).accessibilityIdentifier(TestID.Watch.phoneTitle)
+                    Text(subtitle(state)).font(.caption2).foregroundStyle(WatchTheme.dim).lineLimit(lines).accessibilityIdentifier(TestID.Watch.phoneSubtitle)
                 }
                 Spacer(minLength: 0)
             }
@@ -252,10 +261,11 @@ struct PhonePlayerScreen: View {
                 VStack(spacing: 2) {
                     ProgressView(value: state.duration > 0 ? min(1, position / state.duration) : 0)
                         .tint(WatchTheme.accent)
+                        .accessibilityIdentifier(TestID.Watch.phoneProgress)
                     HStack {
-                        Text(Format.clock(position))
+                        Text(Format.clock(position)).accessibilityIdentifier(TestID.Watch.phoneElapsed)
                         Spacer()
-                        if state.duration > 0 { Text("-" + Format.clock(max(0, state.duration - position))) }
+                        if state.duration > 0 { Text("-" + Format.clock(max(0, state.duration - position))).accessibilityIdentifier(TestID.Watch.phoneRemaining) }
                     }
                     .font(.system(size: 10).monospacedDigit())
                     .foregroundStyle(WatchTheme.dim)
@@ -263,7 +273,7 @@ struct PhonePlayerScreen: View {
             }
 
             if let error = link.remoteError {
-                Text(error).font(.caption2).foregroundStyle(.orange).lineLimit(2)
+                Text(error).font(.caption2).foregroundStyle(.orange).lineLimit(2).accessibilityIdentifier(TestID.Watch.phoneError)
             }
 
             HStack(spacing: 4) {
@@ -277,6 +287,7 @@ struct PhonePlayerScreen: View {
                 .buttonStyle(.plain)
                 .font(.system(size: glyph, weight: .semibold))
                 .disabled(!skips && !state.hasPrevious)
+                .accessibilityIdentifier(skips ? TestID.Watch.phoneSkipBack : TestID.Watch.phonePrevious)
 
                 Button { link.remote(.togglePlayPause) } label: {
                     ZStack {
@@ -288,6 +299,7 @@ struct PhonePlayerScreen: View {
                     .frame(width: main, height: main)
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier(TestID.Watch.phonePlayPause)
 
                 Button {
                     link.remote(skips ? .seekBy(30) : .next)
@@ -299,21 +311,34 @@ struct PhonePlayerScreen: View {
                 .buttonStyle(.plain)
                 .font(.system(size: glyph, weight: .semibold))
                 .disabled(!skips && !state.hasNext)
+                .accessibilityIdentifier(skips ? TestID.Watch.phoneSkipForward : TestID.Watch.phoneNext)
             }
 
             if isBook {
                 HStack(spacing: 8) {
                     Button { link.remote(.setSpeed(Self.nextSpeed(after: state.speed))) } label: {
-                        Text(speedLabel(state.speed)).font(.caption2.weight(.semibold).monospacedDigit())
+                        Text(Self.speedLabel(state.speed)).font(.caption2.weight(.semibold).monospacedDigit())
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
                     .simultaneousGesture(LongPressGesture().onEnded { _ in link.remote(.setSpeed(1)) })
+                    .accessibilityIdentifier(TestID.Watch.phoneSpeed)
                 }
+            }
+
+            if !isBook, !state.isVideo {
+                Button { link.remote(.instantMix) } label: {
+                    Label("Instant Mix", systemImage: "wand.and.stars")
+                        .font(.caption2.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .accessibilityIdentifier(TestID.Watch.phoneInstantMix)
             }
 
             if !isBook {
                 let notes = [
+                    state.isOfflineMix ? "Offline mix" : nil,
                     state.upNextCount > 0 ? "\(state.upNextCount) up next" : nil,
                     "On iPhone",
                 ].compactMap { $0 }
@@ -321,20 +346,22 @@ struct PhonePlayerScreen: View {
                     .font(.caption2)
                     .foregroundStyle(WatchTheme.dim)
                     .lineLimit(1)
+                    .accessibilityIdentifier(TestID.Watch.phoneNotes)
             }
         }
         .padding(.horizontal, 4)
         .padding(.top, 4)
+        .testAnchor(TestID.Watch.phoneLayout(compact ? "compact" : "full"))
     }
 
-    private static func nextSpeed(after speed: Double) -> Double {
+    static func nextSpeed(after speed: Double) -> Double {
         let speeds = WatchPlayer.speeds
         guard let i = speeds.firstIndex(where: { abs($0 - speed) < 0.01 }) else { return 1 }
         return speeds[(i + 1) % speeds.count]
     }
 
-    private func speedLabel(_ s: Double) -> String {
-        s == s.rounded() ? "\(Int(s))×" : String(format: "%.2g×", s)
+    static func speedLabel(_ s: Double) -> String {
+        s == s.rounded() ? "\(Int(s))×" : String(format: "%g×", s)
     }
 
     private func subtitle(_ state: PhonePlaybackState) -> String {

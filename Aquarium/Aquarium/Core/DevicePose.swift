@@ -50,6 +50,10 @@ enum DevicePose: String, Equatable, Sendable {
     /// The big screen is the one on, so the layout is the iPad's.
     var usesInnerDisplay: Bool { self == .inside || self == .halfFolded }
 
+    /// The front screen is the one on: closed, or part-open and stood up
+    /// as a tent. Both have the camera and the clock column down one side.
+    var usesFrontDisplay: Bool { self == .front || self == .tent }
+
     /// Whether `LayoutOverride` counts on a device with no hinge: only in a
     /// debug build, for holding a pose on a plain simulator.
     static var overrideWithoutHinge: Bool {
@@ -74,6 +78,7 @@ enum DevicePose: String, Equatable, Sendable {
         horizontal: UserInterfaceSizeClass?,
         vertical: UserInterfaceSizeClass?,
         creaseIsVertical: Bool = false,
+        partSettled: Bool = true,
         override: LayoutOverride,
         isPhoneIdiom: Bool
     ) -> DevicePose {
@@ -93,7 +98,12 @@ enum DevicePose: String, Equatable, Sendable {
             // book gets the open-flat layout: a picture-above-controls split
             // has no top half to give it, and two pages side by side is a
             // layout this app does not have yet.
-            if horizontal == .regular { return creaseIsVertical ? .inside : .halfFolded }
+            //
+            // Every opening and closing of the phone passes through
+            // part-open, so the laptop waits until the hinge has stopped
+            // moving (`FoldState.partSettled`); until then the inside screen
+            // stays the open-flat layout it is on its way to or from.
+            if horizontal == .regular { return creaseIsVertical || !partSettled ? .inside : .halfFolded }
             return vertical == .compact ? .tent : .front
         case .closed:
             return .front
@@ -219,6 +229,10 @@ final class FoldState {
     private init() {}
 
     func safeAreaResolved(top: CGFloat, size: CGSize) {
+        #if os(iOS)
+        // The one report that follows the window to the other display.
+        OrientationLock.shared.screenResolved()
+        #endif
         let upright = size.height > size.width
         let strip: CGFloat? = usesInnerDisplay && upright && top > Self.phoneStatusHeight + 10 ? top : nil
         let sideways = usesInnerDisplay && !upright
@@ -250,8 +264,34 @@ final class FoldState {
         creaseIsVertical = vertical
     }
 
+    /// Whether a part-open hinge has stopped moving: held within
+    /// `settleSlack` degrees for `settleTime`. False while it is on its way
+    /// through part-open to open or closed, and whenever it is not part-open.
+    /// Only the laptop waits on it (see `DevicePose.resolve`); leaving the
+    /// laptop is at once.
+    private(set) var partSettled = false
+    @ObservationIgnored private var settleTask: Task<Void, Never>?
+    /// The angle the current wait started from.
+    @ObservationIgnored private var settleFrom: Double = 0
+    static let settleTime: Duration = .milliseconds(800)
+    static let settleSlack: Double = 4
+
     func update(hinge new: HingeStatus?, angle: Double) {
         self.angle = angle
+        if new == .partiallyOpen {
+            // Moving on: wait again from here. Still: let the wait run out.
+            if new != hinge || abs(angle - settleFrom) > Self.settleSlack {
+                if partSettled, new == hinge {
+                    // Already a laptop and being nudged: stays one.
+                } else {
+                    startSettling(at: angle)
+                }
+            }
+        } else {
+            settleTask?.cancel()
+            settleTask = nil
+            if partSettled { partSettled = false }
+        }
         guard new != hinge else { return }
         Self.log.debug("hinge \(String(describing: new)) at \(angle, format: .fixed(precision: 0))°")
         hinge = new
@@ -259,6 +299,17 @@ final class FoldState {
         FoldKeyboardGuard.shared.screenChanging()
         OrientationLock.shared.hingeChanged()
         #endif
+    }
+
+    private func startSettling(at angle: Double) {
+        settleFrom = angle
+        settleTask?.cancel()
+        settleTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.settleTime)
+            guard !Task.isCancelled, let self, self.hinge == .partiallyOpen else { return }
+            Self.log.debug("hinge settled at \(self.angle, format: .fixed(precision: 0))°")
+            self.partSettled = true
+        }
     }
 
     #if os(iOS)
@@ -333,17 +384,10 @@ final class FoldKeyboardGuard {
 
 // MARK: - Environment
 
-private struct DevicePoseKey: EnvironmentKey {
-    static let defaultValue: DevicePose = .standard
-}
-
 extension EnvironmentValues {
     /// The shape the app is in — see `DevicePose`. `.standard` everywhere the
     /// provider has not been applied, which is every platform but iOS.
-    var devicePose: DevicePose {
-        get { self[DevicePoseKey.self] }
-        set { self[DevicePoseKey.self] = newValue }
-    }
+    @Entry var devicePose: DevicePose = .standard
 }
 
 #if os(iOS)
@@ -362,6 +406,7 @@ private struct DevicePoseProvider: ViewModifier {
             horizontal: horizontal,
             vertical: vertical,
             creaseIsVertical: FoldState.shared.creaseIsVertical,
+            partSettled: FoldState.shared.partSettled,
             override: Preferences.shared.layoutOverride,
             isPhoneIdiom: UIDevice.current.userInterfaceIdiom == .phone
         )

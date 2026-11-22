@@ -90,6 +90,7 @@ struct MacTimeRuler: View {
                     .padding(.leading, 6)
                     .frame(width: markWidth, alignment: .leading)
                     .overlay(alignment: .leading) { Rectangle().fill(Theme.border).frame(width: 1) }
+                    .accessibilityIdentifier(TestID.Guide.timeMark(i))
             }
         }
         .frame(width: totalWidth, alignment: .leading)
@@ -136,20 +137,24 @@ struct GuideProgrammePopover: View {
                 Text(program?.title ?? "No Programme Information")
                     .font(.headline)
                     .lineLimit(3)
+                    .accessibilityIdentifier(TestID.Guide.infoTitle)
                 if let episode = program?.EpisodeTitle, !episode.isEmpty {
                     Text(episode)
                         .font(.subheadline)
                         .lineLimit(2)
+                        .accessibilityIdentifier(TestID.Guide.infoEpisode)
                 }
                 if let program, let window = Format.programWindow(start: program.programStart, end: program.programEnd) {
                     Text(window)
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier(TestID.Guide.infoTime)
                 }
                 Text(channelLabel)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .accessibilityIdentifier(TestID.Guide.infoChannel)
             }
 
             if let overview = program?.Overview, !overview.isEmpty {
@@ -158,6 +163,7 @@ struct GuideProgrammePopover: View {
                     .foregroundStyle(.primary)
                     .lineLimit(8)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier(TestID.Guide.infoOverview)
             }
 
             if let genres = program?.Genres, !genres.isEmpty {
@@ -172,11 +178,13 @@ struct GuideProgrammePopover: View {
                 Button("Play Channel", action: onPlay)
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier(TestID.Guide.infoPlay)
             }
             .padding(.top, 4)
         }
         .padding(16)
         .frame(width: 320, alignment: .leading)
+        .testAnchor(TestID.Guide.info)
     }
 
     private var channelLabel: String {
@@ -199,9 +207,12 @@ struct GuideCellMenu: View {
 
     var body: some View {
         Button("Play Channel", action: onPlay)
+            .accessibilityIdentifier(TestID.Guide.menuPlay)
         Button("Show Info", action: onInfo)
+            .accessibilityIdentifier(TestID.Guide.menuInfo)
         Divider()
         Button("Copy Title") { GuidePasteboard.copy(title) }
+            .accessibilityIdentifier(TestID.Guide.menuCopyTitle)
     }
 }
 

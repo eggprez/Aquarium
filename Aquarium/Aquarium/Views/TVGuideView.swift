@@ -243,6 +243,7 @@ struct TVGuideView: View {
     // the top while the channels scroll is what a pinned header is for.
     var body: some View {
         core
+        .testAnchor(TestID.Guide.root)
         // Keyed on both ends of the window: the start moves when a Mac's
         // arrows shift it, the length grows when the guide is scrolled to its
         // end, and either one means a different set of programmes.
@@ -391,6 +392,7 @@ struct TVGuideView: View {
 
                         if let guideError {
                             GuideErrorBanner(message: guideError) { Task { await loadPrograms() } }
+                                .testAnchor(TestID.Guide.errorBanner)
                         }
 
                         Rectangle().fill(Theme.border).frame(height: 0.5)
@@ -427,6 +429,7 @@ struct TVGuideView: View {
             Spacer(minLength: 0)
             if isLoadingPrograms {
                 ProgressView().controlSize(.small)
+                    .accessibilityIdentifier(TestID.Guide.loading)
             }
         }
         .padding(.horizontal, Metrics.gutter)
@@ -473,13 +476,16 @@ struct TVGuideView: View {
                     Label("Earlier", systemImage: "chevron.left")
                 }
                 .help("Earlier — three hours back (⌘←)")
+                .accessibilityIdentifier(TestID.Guide.earlier)
                 Button("Now") { resetToNow() }
                     .disabled(followsNow)
                     .help("Back to what's on now (⌘T)")
+                    .accessibilityIdentifier(TestID.Guide.now)
                 Button { shiftWindow(by: shiftSeconds) } label: {
                     Label("Later", systemImage: "chevron.right")
                 }
                 .help("Later — three hours on (⌘→)")
+                .accessibilityIdentifier(TestID.Guide.later)
             }
             DatePicker(
                 "Jump to",
@@ -489,12 +495,14 @@ struct TVGuideView: View {
             .datePickerStyle(.compact)
             .labelsHidden()
             .help("Jump to a day and time")
+            .accessibilityIdentifier(TestID.Guide.datePicker)
         }
         ToolbarItemGroup(placement: .primaryAction) {
             if isLoadingPrograms {
                 ProgressView()
                     .controlSize(.small)
                     .help("Loading the guide")
+                    .accessibilityIdentifier(TestID.Guide.loading)
             }
         }
     }
@@ -564,6 +572,7 @@ struct TVGuideView: View {
                     .help(windowHours >= Self.maxWindowHours
                           ? "The guide holds a day at most"
                           : "Load the next six hours of the schedule")
+                    .accessibilityIdentifier(TestID.Guide.moreHours)
                     .padding(.horizontal, 6)
                     .frame(height: rulerHeight)
                     .background(.bar)
@@ -574,6 +583,7 @@ struct TVGuideView: View {
             if let guideError, !programsByChannel.isEmpty {
                 Divider()
                 GuideErrorBanner(message: guideError) { Task { await loadPrograms() } }
+                    .testAnchor(TestID.Guide.errorBanner)
             }
 
             Divider()
@@ -612,6 +622,7 @@ struct TVGuideView: View {
             #if os(macOS)
             ContentUnavailableView.search(text: noMatches)
                 .padding(.vertical, 40)
+                .testAnchor(TestID.Guide.noMatches)
             #else
             Text("Nothing in the channel list matches \u{201C}\(noMatches)\u{201D}.")
                 .font(.callout)
@@ -619,6 +630,7 @@ struct TVGuideView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, Metrics.gutter)
                 .padding(.vertical, 28)
+                .testAnchor(TestID.Guide.noMatches)
             #endif
         } else {
             #if os(macOS)
@@ -630,8 +642,10 @@ struct TVGuideView: View {
                 } actions: {
                     Button("Retry") { Task { await loadPrograms() } }
                         .buttonStyle(.link)
+                        .accessibilityIdentifier(TestID.Guide.unavailableRetry)
                 }
                 .padding(.vertical, 40)
+                .testAnchor(TestID.Guide.unavailable)
             } else {
                 gridBody
             }
@@ -1170,7 +1184,8 @@ struct TVGuideView: View {
                 guard let channelId = item.ChannelId else { continue }
                 map[channelId, default: []].append((item.programStart ?? .distantPast, item))
             }
-            return map.mapValues { $0.sorted { $0.start < $1.start }.map(\.item) }
+            // In order, then made to lie end to end: see `GuideSchedule`.
+            return map.mapValues { GuideSchedule.resolved($0.sorted { $0.start < $1.start }.map(\.item)) }
         }.value
     }
 
@@ -1362,6 +1377,7 @@ private struct TimeRuler: View {
                     .overlay(alignment: .leading) {
                         Rectangle().fill(Theme.border).frame(width: 0.5)
                     }
+                    .accessibilityIdentifier(TestID.Guide.timeMark(i))
                     .onAppear { if i == marks - 1 { onReachEnd() } }
             }
         }
@@ -1438,12 +1454,14 @@ private struct ChannelGuideCell: View {
             .help(channelHelp)
             .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+            .testAnchor(TestID.Guide.channel(channel.id))
         #else
         Button(action: onPlay) {
             content
                 .contentShape(Rectangle())
         }
         .buttonStyle(GuideCellButtonStyle())
+        .accessibilityIdentifier(TestID.Guide.channel(channel.id))
         .itemContextMenu(channel)
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 0.5) }
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 0.5) }
@@ -1606,6 +1624,8 @@ private struct GuideRow: View {
                             index: index,
                             program: program,
                             title: program.title,
+                            episode: program.programmeEpisodeLine,
+                            episodeRole: program.programmeEpisodeRole,
                             timeLabel: Format.programWindow(start: program.programStart, end: program.programEnd),
                             isLive: program.isAiringNow,
                             width: width
@@ -1623,7 +1643,8 @@ private struct GuideRow: View {
     }
 
     @ViewBuilder
-    private func cell(index: Int, program: BaseItem?, title: String, timeLabel: String?, isLive: Bool, width: CGFloat) -> some View {
+    private func cell(index: Int, program: BaseItem?, title: String, episode: String? = nil, episodeRole: TitleRole = .episode, timeLabel: String?, isLive: Bool, width: CGFloat) -> some View {
+        let testID = program.map { TestID.Guide.programme($0.Id) } ?? TestID.Guide.noProgramme(channelId)
         #if os(macOS)
         let key = GuideSelection(row: rowIndex, column: index)
         GuideCell(
@@ -1636,7 +1657,8 @@ private struct GuideRow: View {
             isSelected: selectedColumn == index,
             gridFocused: gridFocused,
             onSelect: { onSelect(index) },
-            onInfo: { onInfo(index) }
+            onInfo: { onInfo(index) },
+            testID: testID
         )
         .id(key)
         .popover(
@@ -1651,14 +1673,30 @@ private struct GuideRow: View {
                 onPlay()
             }
         }
-        #else
+        #elseif os(tvOS)
         GuideCell(
             title: title,
+            episode: episode,
+            episodeRole: episodeRole,
             timeLabel: timeLabel,
             isLive: isLive,
             width: width,
             height: rowHeight,
-            onPlay: onPlay
+            onPlay: onPlay,
+            isFocused: focus == .program(channel: channelId, index: index),
+            testID: testID
+        )
+        #else
+        GuideCell(
+            title: title,
+            episode: episode,
+            episodeRole: episodeRole,
+            timeLabel: timeLabel,
+            isLive: isLive,
+            width: width,
+            height: rowHeight,
+            onPlay: onPlay,
+            testID: testID
         )
         #endif
     }
@@ -1689,6 +1727,13 @@ extension GuideRow: Equatable {
 
 private struct GuideCell: View {
     let title: String
+    /// The episode's own name, for a programme that is one of a series. A
+    /// television's row has a line for it; a phone's and a Mac's do not,
+    /// and there it is in the programme's popover or not at all.
+    var episode: String? = nil
+    /// Whether that line is the episode's name or its number standing in
+    /// for one: the two are set differently (see EpisodeTypography).
+    var episodeRole: TitleRole = .episode
     let timeLabel: String?
     let isLive: Bool
     let width: CGFloat
@@ -1700,7 +1745,15 @@ private struct GuideCell: View {
     var onSelect: () -> Void = {}
     var onInfo: () -> Void = {}
     @State private var isHovered = false
+    #elseif os(tvOS)
+    /// Whether the selector is on this cell, from the row's focus state:
+    /// the text is drawn over the button rather than inside it (see
+    /// `body`), so it has to be told when to lift with the cell.
+    var isFocused = false
     #endif
+    /// What a UI test finds the cell by: `TestID.Guide.programme` or
+    /// `noProgramme`.
+    var testID = ""
 
     var body: some View {
         #if os(macOS)
@@ -1720,6 +1773,31 @@ private struct GuideCell: View {
             // The whole title and its times on hover, for the cells the window
             // has cut short at either end.
             .help([title, timeLabel].compactMap { $0 }.joined(separator: "\n"))
+            .testAnchor(testID)
+        #elseif os(tvOS)
+        // The button is the cell's tint alone; the words sit over it. With
+        // the text inside the button's label, an Apple TV (not the
+        // simulator, which draws it as written) paints an opaque dark
+        // platter behind the label's content, which on an on-now cell showed
+        // as a dark box hugging the title and times inside the lighter fill
+        // — "the reverse highlighting", in the photo from 2026-11-07. Text
+        // that is not a button's label gets no such treatment.
+        Button(action: onPlay) {
+            (isLive ? Theme.accentSoft : Color.clear)
+                .frame(width: width, height: height)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(GuideCellButtonStyle())
+        .accessibilityIdentifier(testID)
+        .overlay(alignment: .topLeading) {
+            label
+                .allowsHitTesting(false)
+                // The same lift the style gives the cell, so the words move
+                // with it.
+                .scaleEffect(isFocused ? 1.02 : 1)
+                .animation(.easeOut(duration: 0.15), value: isFocused)
+        }
+        .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 0.5) }
         #else
         Button(action: onPlay) {
             label
@@ -1727,6 +1805,7 @@ private struct GuideCell: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(GuideCellButtonStyle())
+        .accessibilityIdentifier(testID)
         .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 0.5) }
         #endif
     }
@@ -1734,14 +1813,26 @@ private struct GuideCell: View {
     private var label: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.caption.weight(.medium))
+                .font(Font.caption.titleRole(.show))
                 #if os(macOS)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                #elseif os(tvOS)
+                .foregroundStyle(Theme.text)
+                // One line when the episode takes the next; two for a film
+                // or a one-off, which has only its own name to show.
+                .lineLimit(width < 100 || showsEpisode ? 1 : 2)
                 #else
                 .foregroundStyle(Theme.text)
                 .lineLimit(width < 100 ? 1 : 2)
                 #endif
+            #if os(tvOS)
+            if showsEpisode, let episode {
+                Text(episode)
+                    .titleRole(episodeRole, font: .caption)
+                    .lineLimit(1)
+            }
+            #endif
             if let timeLabel, width > 64 {
                 Text(timeLabel)
                     .font(.caption2)
@@ -1757,6 +1848,16 @@ private struct GuideCell: View {
         .padding(.vertical, 6)
         .frame(width: width, height: height, alignment: .topLeading)
     }
+
+    #if os(tvOS)
+    /// Whether the cell has an episode name and the width to say it: the
+    /// same cut-off the times use, since a cell too narrow for "8:00 PM –
+    /// 9:00 PM" is too narrow for a title.
+    private var showsEpisode: Bool {
+        guard let episode, !episode.isEmpty else { return false }
+        return width > 64
+    }
+    #endif
 
     #if os(macOS)
     /// Selected, then hovered, then on now, then nothing — the strongest
@@ -1825,6 +1926,7 @@ private struct GuideErrorBanner: View {
                 .font(.caption)
                 .foregroundStyle(Theme.textDim)
                 .lineLimit(1)
+                .accessibilityIdentifier(TestID.Guide.errorMessage)
                 #if os(macOS)
                 .help(message)
                 #endif
@@ -1833,11 +1935,13 @@ private struct GuideErrorBanner: View {
             Button("Retry", action: retry)
                 .buttonStyle(.link)
                 .controlSize(.small)
+                .accessibilityIdentifier(TestID.Guide.errorRetry)
             #else
             Button("Retry", action: retry)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.accent)
                 .chipButtonStyle()
+                .accessibilityIdentifier(TestID.Guide.errorRetry)
             #endif
         }
         .padding(.horizontal, Metrics.gutter)

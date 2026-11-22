@@ -4,7 +4,7 @@ import * as audio from "../audio";
 import * as iptv from "../iptv";
 import { cachedLineup, loadLineup, refreshNow as refreshLineup } from "../lineup";
 import { getMixPoints, presetName } from "../stations";
-import { el, clear, toast, openDialog } from "../ui";
+import { el, clear, toast, openDialog, wordmark } from "../ui";
 import {
   isAdaptiveEnabled,
   setAdaptiveEnabled,
@@ -20,6 +20,7 @@ import {
 } from "../playback";
 import { getThemePref, setThemePref, type ThemePref } from "../theme";
 import { openMixDialog } from "./music";
+import { seerrSettingsBlock } from "./seerrSettings";
 
 // ---------- Panes ----------
 
@@ -550,7 +551,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void, pa
           el("img", { src: "/aquarium-logo.svg", alt: "", width: "48", height: "48" }),
           el("div", {}, [
             el("div", { class: "about-name" }, [
-              el("span", { class: "wordmark" }, [el("span", {}, ["Aqua"]), el("b", {}, ["rium"])]),
+              wordmark(),
               el("span", { class: "about-version" }, [info.version ? `v${info.version}` : ""]),
             ]),
             el("div", { class: "sub" }, ["A lightweight Jellyfin client. Playback engine: mpv."]),
@@ -730,6 +731,10 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void, pa
   };
   await drawAccounts();
   if (!document.contains(title)) return;
+
+  // Requests: a Seerr server beside this Jellyfin server, signed in to with
+  // the account in use (views/seerrSettings.ts).
+  if (s) into("account", seerrSettingsBlock());
 
   // Quick Connect, the approving side: a device signing in to this server
   // shows a code, and entering it here signs that device in as this user.
@@ -1058,6 +1063,17 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void, pa
       ),
     ]),
     block("Stations", [
+      row(
+        "Mixes",
+        "Who builds a mix when you press Instant Mix or start a station. Aquarium's own stations score songs by artist, genre and era (tuned with Station Mix); Jellyfin Instant Mix plays what the server sends, in the server's order.",
+        choice(cfg, "music_mix_source", [
+          ["aquarium", "Aquarium"],
+          ["jellyfin", "Jellyfin Instant Mix"],
+        ]),
+        note(
+          "A Jellyfin server running the AudioMuse-AI plugin answers Instant Mix with AudioMuse's similarity automatically. Without a server connection, Aquarium always uses its own mix from your downloads."
+        )
+      ),
       row(
         "Station mix",
         "Twenty points to spend on what stations favour — what you star and play most, or what you have never played. Every station uses them.",

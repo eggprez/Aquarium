@@ -27,6 +27,20 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+/**
+ * The app's name as it is drawn wherever the app names itself: "aquarium" in
+ * lowercase, heavy and rounded, with a dotless i whose dot is one of the
+ * icon's bubbles (`.wordmark .wm-i::after` in styles.css). The Apple app draws
+ * the same thing (Aquarium/Shared/Wordmark.swift). Read aloud as one word.
+ */
+export function wordmark(): HTMLSpanElement {
+  return el("span", { class: "wordmark", role: "img", "aria-label": "Aquarium" }, [
+    "aquar",
+    el("span", { class: "wm-i", "aria-hidden": "true" }, ["\u0131"]),
+    "um",
+  ]);
+}
+
 export function clear(node: HTMLElement): void {
   node.textContent = "";
 }
@@ -1206,6 +1220,10 @@ export function itemCard(
       : null,
   ]);
 
+  // A collection opens as a grid of what is in it, the way a library does:
+  // its own detail page would be little more than that list.
+  const openHash = item.Type === "BoxSet" ? `#/lib/${item.Id}` : `#/item/${target}`;
+
   // A card behaves like a button, so it has to say so and be reachable by Tab.
   // It can't *be* a <button>: it contains one (the play overlay), which nesting
   // rules forbid.
@@ -1220,7 +1238,7 @@ export function itemCard(
       // focus or the pointer, before Enter or a click ever asks for it.
       "data-item-id": target,
       onClick: () => {
-        location.hash = `#/item/${target}`;
+        location.hash = openHash;
       },
       onKeydown: (ev: KeyboardEvent) => {
         // Space scrolls the page by default; a card that looks like a button
@@ -1228,7 +1246,7 @@ export function itemCard(
         if (ev.key !== "Enter" && ev.key !== " ") return;
         if (ev.target !== ev.currentTarget) return; // the overlay button's own key
         ev.preventDefault();
-        location.hash = `#/item/${target}`;
+        location.hash = openHash;
       },
     },
     [

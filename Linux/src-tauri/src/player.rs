@@ -109,6 +109,10 @@ pub struct PlayRequest {
     /// HTTP User-Agent for the stream (custom playlist channels only).
     #[serde(default)]
     pub user_agent: Option<String>,
+    /// Subtitle files the server sends beside a stream (`StreamSubtitle` in
+    /// api.ts), added once it has loaded. See `download_extras::stream_subtitles`.
+    #[serde(default)]
+    pub subtitles: Vec<Value>,
 }
 
 struct SessionHandle {
@@ -276,6 +280,12 @@ impl Player {
 
     pub fn status(&self) -> Status {
         self.status.lock().unwrap().clone()
+    }
+
+    /// Test hook: the status a running session would leave, without one.
+    #[cfg(test)]
+    pub(crate) fn set_status_for_tests(&self, st: Status) {
+        *self.status.lock().unwrap() = st;
     }
 
     /// Several properties at once, as display strings, for the stream info
@@ -512,7 +522,13 @@ impl Player {
         // refused before then, and it is the only way to give each track its
         // language and name (`sub-files` leaves both to the file name).
         let local = req.ctx.as_ref().is_some_and(|c| c.is_local);
-        let mut local_subs = if local { crate::download_extras::subtitles_for(&req.url) } else { Vec::new() };
+        // A stream brings the server's own subtitle files the same way, but
+        // only from the signed-in server: mpv sends them its Authorization header.
+        let mut local_subs = if local {
+            crate::download_extras::subtitles_for(&req.url)
+        } else {
+            crate::download_extras::stream_subtitles(&req.subtitles, crate::server::is_session_origin)
+        };
         if let Err(e) = session.command(json!(["loadfile", &req.url])) {
             let _ = session.command(json!(["quit"]));
             surface_arc.detach();
@@ -819,10 +835,10 @@ fn track_position(msg: &Value, st: &mut Status, lock_duration: bool) {
 
 /// Apply one mpv IPC message to shared status. Returns true when the pause
 /// state flipped (which warrants an immediate progress report).
-fn apply_event(
+fn apply_event<R: tauri::Runtime>(
     msg: &Value,
     status: &Arc<StdMutex<Status>>,
-    app: &AppHandle,
+    app: &AppHandle<R>,
     lock_duration: bool,
 ) -> bool {
     match msg.get("event").and_then(|v| v.as_str()) {
@@ -977,7 +993,7 @@ fn apply_event(
     pause_changed
 }
 
-fn emit_status(app: &AppHandle, status: &Arc<StdMutex<Status>>) -> Value {
+fn emit_status<R: tauri::Runtime>(app: &AppHandle<R>, status: &Arc<StdMutex<Status>>) -> Value {
     let payload = status_payload(&status.lock().unwrap());
     let _ = app.emit("player-status", payload.clone());
     // The shell's media controls are the same status, told to a different
@@ -1167,5 +1183,455 @@ mod play_target_tests {
         assert!(!allowed(&root.join("item")));
         assert!(!allowed(&root.join("item/missing.mkv")));
         std::fs::remove_dir_all(&base).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{capture_events, sandbox, sign_in, Events, FakeServer, Resp, TEST_TOKEN, TEST_USER};
+
+    fn mock() -> tauri::App<tauri::test::MockRuntime> {
+        tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app")
+    }
+
+    fn change(name: &str, data: Value) -> Value {
+        json!({ "event": "property-change", "name": name, "data": data })
+    }
+
+    /// Events reach `listen_any` handlers from Tauri's dispatch; wait for
+    /// `n` of them rather than assume they are already there.
+    fn wait_for(events: &Events, n: usize) {
+        let started = std::time::Instant::now();
+        while events.all().len() < n {
+            assert!(started.elapsed() < std::time::Duration::from_secs(10), "expected {n} events, got {:?}", events.all());
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    fn ctx(server: &str) -> PlayContext {
+        PlayContext {
+            item_id: "item1".into(),
+            media_source_id: None,
+            play_session_id: None,
+            play_method: None,
+            server_url: Some(server.into()),
+            user_id: None,
+            device_id: Some("dev-v".into()),
+            is_local: false,
+            live: false,
+        }
+    }
+
+    #[test]
+    fn a_new_player_has_nothing_playing() {
+        let p = Player::new();
+        assert!(!p.is_active());
+        assert!(!p.next_available());
+        assert!(!p.viewport_full.load(Ordering::SeqCst));
+        assert!(!p.bar_reveal.load(Ordering::SeqCst));
+        let st = p.status();
+        assert!(!st.active && st.item_id.is_empty() && st.chapters.is_empty());
+    }
+
+    #[test]
+    fn next_available_is_what_the_frontend_last_said() {
+        let p = Player::new();
+        p.set_next_available(true);
+        assert!(p.next_available());
+        p.set_next_available(false);
+        assert!(!p.next_available());
+    }
+
+    #[tokio::test]
+    async fn with_no_session_commands_fail_and_properties_are_empty() {
+        let p = Player::new();
+        assert_eq!(p.send(json!(["cycle", "pause"])).await, Err("no active playback".to_string()));
+        assert_eq!(p.properties(&["video-codec".to_string()]).await, json!({}));
+    }
+
+    /// Whatever followed the old item says nothing about the new one.
+    #[tokio::test]
+    async fn stopping_forgets_what_came_next() {
+        let p = Player::new();
+        p.set_next_available(true);
+        p.stop().await;
+        assert!(!p.next_available());
+        p.stop_sync();
+    }
+
+    /// play() and stop() queue behind one lock (regression: 6212677 serialize
+    /// player starts and stops): overlapping stops each finish.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn overlapping_stops_each_complete() {
+        let p = std::sync::Arc::new(Player::new());
+        let a = { let p = p.clone(); tokio::spawn(async move { p.stop().await }) };
+        let b = { let p = p.clone(); tokio::spawn(async move { p.stop().await }) };
+        a.await.unwrap();
+        b.await.unwrap();
+        assert!(!p.is_active());
+    }
+
+    /// The inhibitor is held only while something plays unpaused; a paused
+    /// film must let the laptop sleep.
+    #[test]
+    fn the_idle_inhibitor_follows_play_and_pause() {
+        let _s = sandbox();
+        let p = Player::new();
+        let status = Arc::new(StdMutex::new(Status::default()));
+        p.sync_idle_inhibit(&status);
+        assert!(p.idle.lock().unwrap().is_none(), "nothing playing");
+        status.lock().unwrap().active = true;
+        status.lock().unwrap().paused = true;
+        p.sync_idle_inhibit(&status);
+        assert!(p.idle.lock().unwrap().is_none(), "paused");
+        // Playing: the inhibitor is asked for. The test bus is dead, so the
+        // request fails, which is logged and survives.
+        status.lock().unwrap().paused = false;
+        p.sync_idle_inhibit(&status);
+        if p.idle.lock().unwrap().is_none() {
+            assert!(crate::test_support::debug_log().contains("player: idle-inhibit failed"));
+        }
+        status.lock().unwrap().active = false;
+        p.sync_idle_inhibit(&status);
+        assert!(p.idle.lock().unwrap().is_none(), "stopped");
+    }
+
+    #[test]
+    fn a_superseded_session_keeps_only_its_own_position() {
+        let mut st = Status { duration: 100.0, ..Default::default() };
+        track_position(&change("time-pos", json!(42.0)), &mut st, false);
+        assert_eq!(st.position, 42.0);
+        track_position(&change("duration", json!(120.0)), &mut st, false);
+        assert_eq!(st.duration, 120.0);
+        // The server's runtime wins over mpv's estimate when it is known.
+        track_position(&change("duration", json!(150.0)), &mut st, true);
+        assert_eq!(st.duration, 120.0);
+        track_position(&change("pause", json!(true)), &mut st, false);
+        assert!(!st.paused, "only position and duration are tracked");
+        track_position(&json!({ "event": "end-file", "name": "time-pos", "data": 1.0 }), &mut st, false);
+        assert_eq!(st.position, 42.0);
+        track_position(&change("time-pos", json!(null)), &mut st, false);
+        assert_eq!(st.position, 42.0);
+    }
+
+    #[test]
+    fn property_changes_update_the_shared_status() {
+        let app = mock();
+        let status = Arc::new(StdMutex::new(Status::default()));
+        for (name, data) in [
+            ("time-pos", json!(10.0)),
+            ("duration", json!(600.0)),
+            ("volume", json!(70.0)),
+            ("mute", json!(true)),
+            ("speed", json!(1.5)),
+            ("sub-delay", json!(-0.5)),
+            ("audio-delay", json!(0.2)),
+            ("decoder-frame-drop-count", json!(3)),
+            ("frame-drop-count", json!(4)),
+            ("hwdec-current", json!("vaapi")),
+            ("vo-configured", json!(true)),
+            ("vo-delayed-frame-count", json!(1)),
+            ("unknown", json!(1)),
+        ] {
+            assert!(!apply_event(&change(name, data), &status, app.handle(), false), "{name}");
+        }
+        let st = status.lock().unwrap().clone();
+        assert_eq!(st.position, 10.0);
+        assert_eq!(st.duration, 600.0);
+        assert_eq!(st.volume, 70.0);
+        assert!(st.mute);
+        assert_eq!(st.speed, 1.5);
+        assert_eq!(st.sub_delay, -0.5);
+        assert_eq!(st.audio_delay, 0.2);
+        assert_eq!((st.drops_decoder, st.drops_vo), (3, 4));
+        assert_eq!(st.hwdec, "vaapi");
+    }
+
+    /// Transcoded downloads have no duration in the container; the server's
+    /// runtime is locked in and mpv's growing estimate is ignored.
+    #[test]
+    fn a_known_duration_is_not_overwritten() {
+        let app = mock();
+        let status = Arc::new(StdMutex::new(Status { duration: 2400.0, ..Default::default() }));
+        apply_event(&change("duration", json!(37.0)), &status, app.handle(), true);
+        assert_eq!(status.lock().unwrap().duration, 2400.0);
+    }
+
+    #[test]
+    fn only_a_pause_flip_asks_for_a_report() {
+        let app = mock();
+        let status = Arc::new(StdMutex::new(Status::default()));
+        assert!(apply_event(&change("pause", json!(true)), &status, app.handle(), false));
+        assert!(!apply_event(&change("pause", json!(true)), &status, app.handle(), false));
+        assert!(apply_event(&change("pause", json!(false)), &status, app.handle(), false));
+        assert!(!apply_event(&change("pause", json!(null)), &status, app.handle(), false));
+        assert!(!apply_event(&json!({ "event": "start-file" }), &status, app.handle(), false));
+        assert!(!apply_event(&json!({}), &status, app.handle(), false));
+    }
+
+    /// mpv reports the cache end as a duration on some demuxers and as a
+    /// timestamp on others; the further reading wins.
+    #[test]
+    fn the_buffered_mark_is_never_behind_the_playhead() {
+        let app = mock();
+        let status = Arc::new(StdMutex::new(Status { position: 300.0, ..Default::default() }));
+        apply_event(&change("demuxer-cache-time", json!(20.0)), &status, app.handle(), false);
+        assert_eq!(status.lock().unwrap().buffered, 300.0);
+        apply_event(&change("demuxer-cache-time", json!(330.0)), &status, app.handle(), false);
+        assert_eq!(status.lock().unwrap().buffered, 330.0);
+    }
+
+    /// A mark at 0:00 is the start of the file, not a division in it.
+    #[test]
+    fn chapters_skip_the_opening_mark_and_untimed_entries() {
+        let app = mock();
+        let status = Arc::new(StdMutex::new(Status::default()));
+        apply_event(
+            &change(
+                "chapter-list",
+                json!([
+                    { "time": 0.0, "title": "Opening" },
+                    { "time": 61.5, "title": "Part 2" },
+                    { "title": "No time" },
+                    { "time": 120.0 },
+                ]),
+            ),
+            &status,
+            app.handle(),
+            false,
+        );
+        let ch = status.lock().unwrap().chapters.clone();
+        assert_eq!(ch.len(), 2);
+        assert_eq!((ch[0].time, ch[0].title.as_str()), (61.5, "Part 2"));
+        assert_eq!((ch[1].time, ch[1].title.as_str()), (120.0, ""));
+    }
+
+    /// The stall is sent the moment it starts, once, with where it happened:
+    /// the adaptive policy times it from this event.
+    #[test]
+    fn a_cache_stall_is_announced_once_when_it_starts() {
+        let app = mock();
+        let stalls = capture_events(app.handle(), "player-stall");
+        let status = Arc::new(StdMutex::new(Status { position: 12.0, ..Default::default() }));
+        apply_event(&change("paused-for-cache", json!(true)), &status, app.handle(), false);
+        apply_event(&change("paused-for-cache", json!(true)), &status, app.handle(), false);
+        assert!(status.lock().unwrap().buffering);
+        apply_event(&change("paused-for-cache", json!(false)), &status, app.handle(), false);
+        assert!(!status.lock().unwrap().buffering);
+        apply_event(&change("paused-for-cache", json!(true)), &status, app.handle(), false);
+        wait_for(&stalls, 2);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert_eq!(stalls.all(), vec![json!({ "position": 12.0 }), json!({ "position": 12.0 })]);
+    }
+
+    #[test]
+    fn script_messages_and_track_lists_go_to_the_frontend() {
+        let app = mock();
+        let messages = capture_events(app.handle(), "player-message");
+        let tracks = capture_events(app.handle(), "player-tracks");
+        let status = Arc::new(StdMutex::new(Status::default()));
+        let msg = json!({ "event": "client-message", "args": ["aquarium-gesture", "tap"] });
+        assert!(!apply_event(&msg, &status, app.handle(), false));
+        let list = json!([{ "id": 1, "type": "video" }, { "id": 1, "type": "audio", "lang": "en" }]);
+        apply_event(&change("track-list", list.clone()), &status, app.handle(), false);
+        wait_for(&messages, 1);
+        wait_for(&tracks, 1);
+        assert_eq!(messages.last(), json!(["aquarium-gesture", "tap"]));
+        assert_eq!(tracks.last(), list);
+    }
+
+    /// The scrubber's buffer band and chapter marks read these; they were
+    /// once tracked but never sent.
+    #[test]
+    fn the_status_payload_carries_buffer_chapters_and_drop_total() {
+        let st = Status {
+            active: true,
+            buffered: 90.0,
+            chapters: vec![Chapter { time: 30.0, title: "B".into() }],
+            drops_decoder: 2,
+            drops_vo: 5,
+            hwdec: "vaapi".into(),
+            title: "T".into(),
+            ..Default::default()
+        };
+        let p = status_payload(&st);
+        assert_eq!(p["buffered"], json!(90.0));
+        assert_eq!(p["chapters"], json!([{ "time": 30.0, "title": "B" }]));
+        assert_eq!(p["dropped_frames"], json!(7));
+        assert_eq!(p["hwdec"], json!("vaapi"));
+        for key in [
+            "active", "position", "duration", "paused", "title", "item_id", "embedded", "volume", "mute",
+            "speed", "sub_delay", "audio_delay", "buffering",
+        ] {
+            assert!(p.get(key).is_some(), "{key} missing");
+        }
+    }
+
+    #[test]
+    fn emit_status_sends_and_returns_the_same_payload() {
+        let app = mock();
+        let events = capture_events(app.handle(), "player-status");
+        let status = Arc::new(StdMutex::new(Status { active: true, item_id: "e1".into(), ..Default::default() }));
+        let sent = emit_status(app.handle(), &status);
+        wait_for(&events, 1);
+        assert_eq!(events.last(), sent);
+        assert_eq!(sent["item_id"], json!("e1"));
+    }
+
+    #[test]
+    fn report_bodies_follow_the_context() {
+        let mut c = ctx("http://jf");
+        let st = Status { position: 1.5, paused: true, ..Default::default() };
+        let b = report_body(&c, &st, None);
+        assert_eq!(b["PlayMethod"], json!("DirectStream"));
+        assert_eq!(b["CanSeek"], json!(true));
+        assert_eq!(b["PositionTicks"], json!(15_000_000u64));
+        assert!(b.get("MediaSourceId").is_none() && b.get("PlaySessionId").is_none() && b.get("EventName").is_none());
+        c.live = true;
+        c.play_method = Some("Transcode".into());
+        c.media_source_id = Some("ms".into());
+        c.play_session_id = Some("ps".into());
+        let b = report_body(&c, &Status { position: -4.0, ..Default::default() }, Some("timeupdate"));
+        assert_eq!(b["CanSeek"], json!(false), "a live channel cannot seek");
+        assert_eq!(b["PlayMethod"], json!("Transcode"));
+        assert_eq!(b["MediaSourceId"], json!("ms"));
+        assert_eq!(b["PlaySessionId"], json!("ps"));
+        assert_eq!(b["EventName"], json!("timeupdate"));
+        assert_eq!(b["PositionTicks"], json!(0));
+    }
+
+    /// The token only goes to the signed-in server's own origin (regression:
+    /// f1e01de the token only goes to the signed-in server's exact origin).
+    #[test]
+    fn credentials_are_only_for_the_signed_in_origin() {
+        let _s = sandbox();
+        sign_in("http://127.0.0.1:9");
+        assert_eq!(
+            server_creds(&ctx("http://127.0.0.1:9")),
+            Some(("http://127.0.0.1:9".to_string(), TEST_TOKEN.to_string(), "dev-v".to_string()))
+        );
+        assert!(server_creds(&ctx("http://127.0.0.1:10")).is_none(), "another port");
+        assert!(server_creds(&ctx("https://127.0.0.1:9")).is_none(), "another scheme");
+        let mut c = ctx("http://127.0.0.1:9");
+        c.device_id = None;
+        assert_eq!(server_creds(&c).unwrap().2, "aquarium");
+        c.server_url = None;
+        assert!(server_creds(&c).is_none());
+    }
+
+    /// A custom Live TV playlist streams from the provider's hosts; the
+    /// Jellyfin token must never be sent there.
+    #[test]
+    fn the_stream_header_is_only_for_the_signed_in_server() {
+        let _s = sandbox();
+        sign_in("http://127.0.0.1:9");
+        let req = |url: &str, with_ctx: bool| PlayRequest {
+            url: url.into(),
+            title: None,
+            start_seconds: None,
+            known_duration_seconds: None,
+            volume: None,
+            ctx: with_ctx.then(|| ctx("http://127.0.0.1:9")),
+            user_agent: None,
+            subtitles: Vec::new(),
+        };
+        assert_eq!(
+            http_auth_header(&req("http://127.0.0.1:9/Videos/1/stream", true)),
+            Some(jellyfin::auth_header(TEST_TOKEN, "dev-v"))
+        );
+        assert_eq!(http_auth_header(&req("http://provider.example/live.m3u8", true)), None);
+        assert_eq!(http_auth_header(&req("http://127.0.0.1:9/Videos/1/stream", false)), None);
+        crate::secret::clear();
+        assert_eq!(http_auth_header(&req("http://127.0.0.1:9/Videos/1/stream", true)), None);
+    }
+
+    #[test]
+    fn a_downloaded_file_may_play_but_nothing_else_on_disk() {
+        let _s = sandbox();
+        let dir = crate::config::downloads_dir().join("item9");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("film.mkv");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(check_play_target(&file.to_string_lossy()), Ok(()));
+        assert!(check_play_target(&crate::config::data_dir().join("debug.log").to_string_lossy()).is_err());
+        assert!(check_play_target("http://example.com/x.mkv").is_ok());
+        assert!(check_play_target("av://lavfi:testsrc").is_err());
+    }
+
+    #[test]
+    fn requests_deserialize_with_their_defaults() {
+        let r: PlayRequest = serde_json::from_value(json!({ "url": "http://x" })).unwrap();
+        assert!(r.title.is_none() && r.start_seconds.is_none() && r.known_duration_seconds.is_none());
+        assert!(r.volume.is_none() && r.ctx.is_none() && r.user_agent.is_none());
+        let c: PlayContext = serde_json::from_value(json!({ "item_id": "i" })).unwrap();
+        assert!(!c.is_local && !c.live && c.server_url.is_none() && c.play_method.is_none());
+    }
+
+    #[tokio::test]
+    async fn start_progress_and_stop_are_reported_to_the_server() {
+        let _s = sandbox();
+        let server = FakeServer::start(|_| Resp::status(204));
+        sign_in(&server.url);
+        let c = Some(ctx(&server.url));
+        let status = Arc::new(StdMutex::new(Status { position: 5.0, paused: true, ..Default::default() }));
+        report_start(&c, &status).await;
+        report_progress(&c, &status).await;
+        report_stopped(&c, &status.lock().unwrap().clone()).await;
+        let start = server.requests_to("/Sessions/Playing");
+        let progress = server.requests_to("/Sessions/Playing/Progress");
+        let stopped = server.requests_to("/Sessions/Playing/Stopped");
+        assert_eq!((start.len(), progress.len(), stopped.len()), (1, 1, 1));
+        assert!(start[0].json().get("EventName").is_none());
+        assert_eq!(progress[0].json()["EventName"], json!("timeupdate"));
+        assert_eq!(progress[0].json()["IsPaused"], json!(true));
+        let s = stopped[0].json();
+        assert!(s.get("IsPaused").is_none() && s.get("EventName").is_none());
+        assert_eq!(s["PositionTicks"], json!(50_000_000u64));
+        assert_eq!(
+            stopped[0].header("authorization"),
+            Some(jellyfin::auth_header(TEST_TOKEN, "dev-v").as_str())
+        );
+        // No context: nothing to report.
+        report_start(&None, &status).await;
+        report_progress(&None, &status).await;
+        report_stopped(&None, &Status::default()).await;
+        assert_eq!(server.requests().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn reports_for_another_origin_are_not_sent() {
+        let _s = sandbox();
+        let server = FakeServer::start(|_| Resp::status(204));
+        sign_in(&FakeServer::dead_url());
+        let c = Some(ctx(&server.url));
+        let status = Arc::new(StdMutex::new(Status::default()));
+        report_start(&c, &status).await;
+        report_progress(&c, &status).await;
+        report_stopped(&c, &Status::default()).await;
+        assert!(server.requests().is_empty());
+    }
+
+    /// A downloaded file's progress goes to the local queue, played past 92%.
+    #[tokio::test]
+    async fn a_local_file_is_queued_not_reported() {
+        let _s = sandbox();
+        let server = FakeServer::start(|_| Resp::status(204));
+        sign_in(&server.url);
+        let mut local = ctx(&server.url);
+        local.is_local = true;
+        let c = Some(local);
+        let status = Arc::new(StdMutex::new(Status { position: 95.0, duration: 100.0, ..Default::default() }));
+        report_start(&c, &status).await;
+        report_progress(&c, &status).await;
+        assert!(server.requests().is_empty(), "a local file reached the server");
+        assert_eq!(crate::progress::pending_item_ids(), vec!["item1".to_string()]);
+        // Stopped with a user id: the queue is synced opportunistically.
+        let mut with_user = c.clone().unwrap();
+        with_user.user_id = Some(TEST_USER.into());
+        report_stopped(&Some(with_user), &status.lock().unwrap().clone()).await;
+        assert!(!server.requests().is_empty(), "no opportunistic sync");
     }
 }

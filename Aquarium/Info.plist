@@ -15,7 +15,11 @@
 		</dict>
 	</array>
 	<key>FJCarPlayVideo</key>
-	<false/>
+	<true/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>youtube</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

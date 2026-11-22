@@ -67,6 +67,14 @@ struct PlayerScreen: View {
             if player.pictureIsStale {
                 Color.black.ignoresSafeArea()
             }
+            #if !os(tvOS)
+            // A download's subtitle file, where the engine can't take one.
+            if !player.pictureIsStale {
+                SubtitleFileOverlay()
+                    .ignoresSafeArea()
+                    .testAnchor(TestID.Player.subtitleOverlay)
+            }
+            #endif
             #if os(tvOS)
             // The code the iPhone app reads during a sync clip: which rate
             // this is and the delay in force. See `SyncCodeOverlay`.
@@ -127,9 +135,10 @@ struct PlayerScreen: View {
                 // buttons were centred in that strip, which is why they
                 // rarely worked. So the chrome keeps at least the strip
                 // clear on the front screen.
-                let top = pose == .front ? max(insets.top, Self.frontStatusStrip) : insets.top
+                let top = pose.usesFrontDisplay ? max(insets.top, Self.frontStatusStrip) : insets.top
                 // The front screen's side column (camera, then clock) comes
-                // back as a whole side of safe area, which held the progress
+                // back as a whole side of safe area — closed or stood up as
+                // a tent, which is the same screen part-open, which held the progress
                 // bar and the title row's buttons 84 points short of that
                 // edge. Apple's guidance for an immersive screen that does
                 // not scroll is the full width, clear of the camera and the
@@ -141,7 +150,7 @@ struct PlayerScreen: View {
                 // it while the title row and the pills keep the column.
                 // The camera's clearance is read live: the lens is where it
                 // is whether or not the bar shows. Only the insets are held.
-                let clearance: PlayerSideClearance? = pose == .front
+                let clearance: PlayerSideClearance? = pose.usesFrontDisplay
                     ? PlayerSideClearance(geo, column: insets, titleRowFoot: top + PlayerSideClearance.titleRowDepth,
                                           pillRowHead: insets.top + geo.size.height - PlayerSideClearance.pillRowDepth)
                     : FoldState.shared.innerSideways ? PlayerSideClearance(keeping: insets) : nil
@@ -202,6 +211,11 @@ struct PlayerScreen: View {
         // and on a Mac the popovers take the window's appearance.
         .preferredColorScheme(.dark)
         .modifier(PlayerScreenLifecycle())
+        #if !os(tvOS)
+        .modifier(StreamSwitchPrompt())
+        #endif
+        .modifier(SharePlayProgressPrompt())
+        .modifier(SyncPlayPrompt(whilePlaying: true))
         #if os(iOS)
         // The status bar comes and goes with the controls, as in Apple's
         // player; the home indicator dims on its own over a full-screen video.
@@ -219,6 +233,7 @@ struct PlayerScreen: View {
         // Playback menu has, in the place a Mac user asks for them.
         .contextMenu { PlayerContextMenu(player: player) }
         #endif
+        .testAnchor(TestID.Player.root)
     }
 }
 
@@ -384,5 +399,109 @@ private struct PlayerScreenLifecycle: ViewModifier {
                     player.stop(reason: "player screen disappeared", ifStill: generation)
                 }
             }
+    }
+}
+
+// MARK: - Leaving a download for a stream
+
+#if !os(tvOS)
+/// The question a download asks when something it can't give is picked — a
+/// soundtrack or a subtitle it doesn't carry, one of the server's qualities:
+/// having it means streaming the title instead of playing the copy on this
+/// device. The rows themselves say nothing of it; this does.
+private struct StreamSwitchPrompt: ViewModifier {
+    @Environment(PlayerModel.self) private var player
+
+    func body(content: Content) -> some View {
+        let asking = Binding(
+            get: { player.streamSwitchRequest != nil },
+            set: { if !$0 { player.streamSwitchRequest = nil } })
+        let offline = JellyfinClient.shared.isOffline
+        content.alert(
+            offline ? "That isn’t in the download" : "Switch to streaming?",
+            isPresented: asking, presenting: player.streamSwitchRequest
+        ) { request in
+            if offline {
+                Button("OK", role: .cancel) {}
+                    .accessibilityIdentifier(TestID.Player.streamSwitchOK)
+            } else {
+                Button("Stream") { Task { await player.confirmStreamSwitch(request) } }
+                    .accessibilityIdentifier(TestID.Player.streamSwitchConfirm)
+                Button("Keep Download", role: .cancel) {}
+                    .accessibilityIdentifier(TestID.Player.streamSwitchKeepDownload)
+            }
+        } message: { request in
+            if offline {
+                Text("\(Self.subject(request)) wasn’t downloaded. To have it you’ll need to go online and stream this instead.")
+            } else {
+                Text("You’re watching the downloaded copy. \(Self.subject(request)) isn’t part of it, so picking this switches to streaming from the server.")
+            }
+        }
+    }
+
+    private static func subject(_ request: StreamSwitch) -> String {
+        switch request {
+        case .audio(let option): "“\(option.label)”"
+        case .subtitle(let option): "“\(option.label)”"
+        case .quality: "That quality"
+        }
+    }
+}
+#endif
+
+// MARK: - SharePlay: whose progress
+
+/// "Start from whose progress?" — asked of the person who put a title on in
+/// SharePlay, once the others' saved spots are in (see `SharePlayCoordinator`).
+/// Each row is a person and their spot, then the beginning; the pick is a
+/// seek, and on a coordinated player a seek moves everyone.
+private struct SharePlayProgressPrompt: ViewModifier {
+    func body(content: Content) -> some View {
+        let shareplay = SharePlayCoordinator.shared
+        let asking = Binding(
+            get: { shareplay.progressQuestion != nil },
+            set: { if !$0 { shareplay.progressQuestion = nil } })
+        #if os(macOS)
+        // A Mac alert shows three buttons at most and drops the rest, so with
+        // you, a friend and the beginning "Keep Watching Here" was gone and
+        // there was no visible way to decline (2026-11-19). A sheet holds
+        // every row.
+        content.sheet(isPresented: asking) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Start from whose progress?").font(.headline)
+                Text("Everyone in SharePlay jumps to the spot you pick.")
+                    .font(.callout).foregroundStyle(.secondary)
+                ForEach(shareplay.progressQuestion ?? []) { choice in
+                    Button { shareplay.choose(choice) } label: {
+                        Text(choice.title).frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.large)
+                    .accessibilityIdentifier(TestID.Player.sharePlayProgressChoice(choice.id))
+                }
+                Button { shareplay.progressQuestion = nil } label: {
+                    Text("Keep Watching Here").frame(maxWidth: .infinity)
+                }
+                .controlSize(.large)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityIdentifier(TestID.Player.sharePlayProgressKeep)
+            }
+            .padding(20)
+            .frame(width: 300)
+        }
+        #else
+        content.alert(
+            "Start from whose progress?",
+            isPresented: asking, presenting: shareplay.progressQuestion
+        ) { choices in
+            ForEach(choices) { choice in
+                Button(choice.title) { shareplay.choose(choice) }
+                    .accessibilityIdentifier(TestID.Player.sharePlayProgressChoice(choice.id))
+            }
+            Button("Keep Watching Here", role: .cancel) {}
+                .accessibilityIdentifier(TestID.Player.sharePlayProgressKeep)
+        } message: { _ in
+            Text("Everyone in SharePlay jumps to the spot you pick.")
+        }
+        #endif
     }
 }

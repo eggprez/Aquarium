@@ -32,11 +32,13 @@ struct FoldSplit<Upper: View, Lower: View>: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .frame(height: fold?.minY)
                     .clipped()
+                    .testAnchor(TestID.Tent.foldUpper)
                 if let fold {
                     crease.frame(height: fold.height)
                     lower()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipped()
+                        .testAnchor(TestID.Tent.foldLower)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)

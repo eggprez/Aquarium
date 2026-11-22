@@ -33,6 +33,30 @@ enum Route: Hashable, Sendable, Codable {
     /// A page inside the Music tab — an artist, an album, a genre, one of the
     /// library's lists. See `MusicRoute`.
     case music(MusicRoute)
+    /// A page a Settings page opens — the app icon, the sidebar's order.
+    /// See `SettingsRoute`.
+    case settings(SettingsRoute)
+    /// A film or a show that isn't in the library, by its TMDB id: the page
+    /// that asks Seerr for it. See `RequestTitleView`.
+    case request(kind: SeerrMediaKind, tmdbId: Int)
+}
+
+/// The pages Settings pushes on a phone or an iPad.
+///
+/// Routes on the section's path rather than `NavigationLink`s with a view
+/// inside, because a view-pushed page is not on the path and the model can't
+/// clear it. On an iPad the split view's detail column kept such a page when
+/// the sidebar went to Home: Home's row lit and the App Icon page stayed on
+/// screen. Pages pushed by value are the section's own and leave with it.
+///
+/// The first page's rows are values too (`page`), wherever the list is one
+/// column. A value link pressed on a page that was pushed by a view-
+/// destination link goes nowhere — the path gains the value and the page on
+/// top is not the path's — so with the rows as view links, the Sidebar and
+/// App Icon rows on Appearance lit and opened nothing.
+enum SettingsRoute: Hashable, Sendable, Codable {
+    case page(SettingsPage)
+    case appIcon, tabBar, syncMeasure, stationMix, customPlaylist
 }
 
 /// Where the Music tab can go. Its own enum rather than more cases on
@@ -91,6 +115,13 @@ enum AppSection: Hashable, Identifiable, Sendable, Codable {
     case libraries
     case library(id: String, name: String, collectionType: String?)
     case favorites
+    /// The server's Collections view: Jellyfin's box sets, each a grid of the
+    /// films and shows put in it. Only where the server has the view, which
+    /// it makes once anything has been put in a collection.
+    case collections
+    /// What has been asked of Seerr, and things worth asking for. Only while
+    /// a Seerr server is connected (`SeerrClient`).
+    case requests
     case liveTV
     case downloads
     case search
@@ -108,6 +139,8 @@ enum AppSection: Hashable, Identifiable, Sendable, Codable {
         case .libraries: "libraries"
         case .library(let id, _, _): "lib-\(id)"
         case .favorites: "favorites"
+        case .collections: "collections"
+        case .requests: "requests"
         case .liveTV: "livetv"
         case .downloads: "downloads"
         case .search: "search"
@@ -124,6 +157,8 @@ enum AppSection: Hashable, Identifiable, Sendable, Codable {
         case .libraries: "Library"
         case .library(_, let name, _): name
         case .favorites: "Favorites"
+        case .collections: "Collections"
+        case .requests: RequestsView.title
         case .liveTV: "Live TV"
         case .downloads: "Downloads"
         case .search: "Search"
@@ -164,6 +199,8 @@ enum AppSection: Hashable, Identifiable, Sendable, Codable {
             default: "folder"
             }
         case .favorites: "star"
+        case .collections: "square.stack"
+        case .requests: "plus.rectangle.on.rectangle"
         case .liveTV:
             #if os(macOS)
             "play.tv"
@@ -218,6 +255,26 @@ final class AppModel {
     /// video ones: they are browsed by the Music tab, not by Library.
     private(set) var musicLibraries: [BaseItem] = []
     private(set) var audiobookLibraries: [BaseItem] = []
+    /// The server's Collections view (`boxsets`), if it has one. Kept apart
+    /// from `libraries`: it is not a library of titles but a list of lists,
+    /// and has a section of its own — see `AppSection.collections`.
+    private(set) var collectionsView: BaseItem?
+
+    /// Whether there is a Collections section. Until the server has been
+    /// asked, what it said last time, so the section doesn't come and go
+    /// with every launch.
+    var hasCollections: Bool {
+        collectionsView != nil || (librariesUnknown && UserDefaults.standard.string(forKey: Self.collectionsViewKey) != nil)
+    }
+
+    /// The id of the Collections view the server last had.
+    private static let collectionsViewKey = "collections_view_id"
+
+    /// The Collections view's id: the one the server gave, or the one it gave
+    /// last time while it hasn't been asked yet.
+    var collectionsViewId: String? {
+        collectionsView?.Id ?? UserDefaults.standard.string(forKey: Self.collectionsViewKey)
+    }
 
     /// Whether there is anything for a Music tab to show. iPhone and iPad
     /// only for now — the Mac and the television get theirs in a later pass.
@@ -585,6 +642,10 @@ final class AppModel {
     var sections: [AppSection] {
         #if os(tvOS)
         var out: [AppSection] = [.home, .libraries, .search]
+        // A sixth entry, and only for a household that set Seerr up: asking
+        // for something is a destination on a television, where Search is
+        // the only other way to it.
+        if SeerrClient.shared.isConnected { out.append(.requests) }
         if hasLiveTV { out.append(.liveTV) }
         out.append(.settings)
         return out
@@ -743,6 +804,13 @@ final class AppModel {
         #endif
         out.append(.libraries)
         out.append(.favorites)
+        // After Favorites and never in the default bar: on a phone it starts
+        // in More, and anyone who wants it in the bar can move it there in
+        // Settings → Tab Bar.
+        if hasCollections { out.append(.collections) }
+        // Like Collections, never in the default bar: on a phone it starts
+        // in More.
+        if SeerrClient.shared.isConnected { out.append(.requests) }
         if hasLiveTV { out.append(.liveTV) }
         out.append(.downloads)
         return out
@@ -1206,7 +1274,7 @@ final class AppModel {
     /// Start something by id — from a link, a Siri request, a Handoff. A
     /// show plays its first unwatched episode, the way Home's hero does; an
     /// id the server no longer has lands on the title page's own error.
-    func play(itemId id: String, at seconds: Double? = nil) async {
+    func play(itemId id: String, at seconds: Double? = nil, resume: Bool = true) async {
         guard client.isSignedIn else { return }
         // These arrive as the app comes to the front, and coming to the front
         // is what resets the URL session — a request in flight at that moment
@@ -1223,6 +1291,7 @@ final class AppModel {
             item = first
         }
         var options = StreamOptions()
+        options.resume = resume
         if let seconds, seconds > 1 { options.startSeconds = seconds }
         await PlayerModel.shared.play(item: item, options: options)
     }
@@ -1350,6 +1419,9 @@ final class AppModel {
         let books = views.filter { $0.CollectionType == "books" || $0.CollectionType == "audiobooks" }
         if musicLibraries != music { musicLibraries = music }
         if audiobookLibraries != books { audiobookLibraries = books }
+        let collections = views.first { $0.CollectionType == "boxsets" }
+        if collectionsView != collections { collectionsView = collections }
+        UserDefaults.standard.set(collections?.Id, forKey: Self.collectionsViewKey)
         LibraryIndex.shared.keepLibraries(video: video, music: music, books: books, liveTV: liveTV)
         UserDefaults.standard.set(!musicLibraries.isEmpty, forKey: "had_music_library")
         UserDefaults.standard.set(!audiobookLibraries.isEmpty, forKey: "had_books_library")
@@ -1708,6 +1780,9 @@ final class AppModel {
 
     func signOut() async {
         stopSessionActivity()
+        // While the Jellyfin session still exists: Seerr is told its own
+        // session is over, rather than only forgetting it here.
+        await SeerrClient.shared.disconnect()
         let revoked = await client.logout()
         clearSessionState()
         if !revoked {

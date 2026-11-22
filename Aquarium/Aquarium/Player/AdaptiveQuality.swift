@@ -91,6 +91,14 @@ final class AdaptiveQuality {
     private var stallSince: Date?
     private var healthySince: Date?
     private var dropSample: (at: Date, frames: Int)?
+    /// A stream this policy stepped down to that still has no picture after
+    /// this long is itself too big for the connection: the step was one rung
+    /// and the line needed three. Waiting it out was two minutes of black.
+    private let slowOpening: TimeInterval = 25
+    /// Said so once for this stream, and the step it asks for skips the
+    /// cooldown the policy's own switch started.
+    private var slowOpeningNoted = false
+    private var urgentDown = false
     /// Said "this is as low as it goes" once for this stream.
     private var floorNoted = false
     private var pendingDecision: Decision?
@@ -197,6 +205,8 @@ final class AdaptiveQuality {
         lastSampleAt = nil
         lastSeekAt = .distantPast
         floorNoted = false
+        slowOpeningNoted = false
+        urgentDown = false
         pendingDecision = nil
     }
 
@@ -251,6 +261,19 @@ final class AdaptiveQuality {
         guard seconds >= longStall, !settling else { return false }
         stallSince = nil
         stallTimes = []
+        queueStepDown(reason: .stall)
+        return true
+    }
+
+    /// The stream the policy last stepped down to has been opening for
+    /// `seconds` with no picture yet. Returns whether a further step down is
+    /// now queued for `decide` — once per stream, and without waiting out
+    /// the cooldown, which exists to let a new stream settle and has nothing
+    /// to say about one that can't even start.
+    func noteSlowOpening(for seconds: TimeInterval) -> Bool {
+        guard seconds >= slowOpening, !slowOpeningNoted else { return false }
+        slowOpeningNoted = true
+        urgentDown = true
         queueStepDown(reason: .stall)
         return true
     }
@@ -372,7 +395,9 @@ final class AdaptiveQuality {
 
         if wantDown {
             wantDown = false
-            guard !settling else { return nil }
+            let urgent = urgentDown
+            urgentDown = false
+            guard urgent || !settling else { return nil }
             guard index < lowest else {
                 // Nothing left to give. Say so once — a picture that keeps
                 // stopping with no explanation reads as a broken app rather

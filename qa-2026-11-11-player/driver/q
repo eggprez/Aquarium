@@ -1,0 +1,20 @@
+#!/bin/zsh
+# q <p|t> <cmd> [args]
+S=${QA_SCRATCH:-${0:A:h}}
+case $1 in p) U=8CF4435C-9D5E-497E-99B1-CDCA682F7E93;; t) U=FDF307D5-0243-41C1-A92F-2766662C9273;; esac
+D=$1; shift; C=$1; shift
+case $C in
+ play) xcrun simctl spawn $U defaults write scottai.FellyJin debug_url "aquarium://play/$1"; xcrun simctl spawn $U notifyutil -p aquarium.debug.openurl;;
+ url) xcrun simctl spawn $U defaults write scottai.FellyJin debug_url "$1"; xcrun simctl spawn $U notifyutil -p aquarium.debug.openurl;;
+ n) xcrun simctl spawn $U notifyutil -p aquarium.debug.$1;;
+ stop) xcrun simctl spawn $U notifyutil -p aquarium.debug.stop;;
+ shot) xcrun simctl io $U screenshot $S/shots/$D-$1.png >/dev/null 2>&1; sips -Z ${2:-1000} $S/shots/$D-$1.png >/dev/null; echo $S/shots/$D-$1.png;;
+ log) tail -n ${1:-25} $S/log-$D.txt | cut -c1-${2:-260};;
+ mark) echo "===== $*" >> $S/log-$D.txt;;
+ launch) xcrun simctl terminate $U scottai.FellyJin 2>/dev/null; xcrun simctl launch $U scottai.FellyJin "$@";;
+ u) echo $U;;
+ lg) xcrun simctl spawn $U log show --last ${1:-1m} --style compact --info --predicate 'subsystem == "scottai.FellyJin" AND (category == "player" OR category == "avengine" OR category == "mpv")' 2>/dev/null | grep -vE '^(Timestamp|getpw|Filtering)' | sed -E 's/^[0-9-]+ ([0-9:]+)\.[0-9]+ +[A-Za-z]+ +Aquarium\[[0-9:]+\] \[scottai.FellyJin:/\1 [/' | cut -c1-${2:-230};;
+ st) $0 $D x "labels" | grep -E '^(btn \[(Play|Pause|Loading)\]|oth \[Timeline|btn \[Quality|btn \[Fill|btn \[Skip|btn \[Play now|txt \[Up next|btn \[Up next|txt \[.*S0|btn \[Picture|btn \[Leave|txt \[This didn)' | cut -c1-110;;
+ open) $0 $D x "show" "tap $1" "wait 0.9" "${@:2}";;
+ x) IO=$S/io/$U; rm -f $IO/out.txt; printf '%s\n' "$@" > $IO/cmd.tmp; mv $IO/cmd.tmp $IO/cmd.txt; n=0; while [[ ! -f $IO/out.txt && $n -lt 600 ]]; do sleep 0.1; n=$((n+1)); done; cat $IO/out.txt 2>/dev/null || echo TIMEOUT;;
+esac

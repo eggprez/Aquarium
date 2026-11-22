@@ -73,6 +73,7 @@ struct MacCommands: Commands {
         CommandGroup(before: .windowList) {
             Button("Aquarium") { MacMainWindow.show() }
                 .keyboardShortcut("1", modifiers: [.command, .option])
+                .accessibilityIdentifier(TestID.MacMenu.mainWindow)
             Divider()
         }
 
@@ -81,6 +82,7 @@ struct MacCommands: Commands {
         // window of our own, because that is where a Mac user looks for it.
         CommandGroup(replacing: .appInfo) {
             Button("About Aquarium") { showAboutPanel() }
+                .accessibilityIdentifier(TestID.MacMenu.about)
         }
 
         // One main window. The navigation, the player and the app model are
@@ -97,12 +99,15 @@ struct MacCommands: Commands {
             Button("Bigger") { MacViewOptions.shared.bigger() }
                 .keyboardShortcut("=", modifiers: .command)
                 .disabled(!MacViewOptions.shared.canGrow)
+                .accessibilityIdentifier(TestID.MacMenu.bigger)
             Button("Smaller") { MacViewOptions.shared.smaller() }
                 .keyboardShortcut("-", modifiers: .command)
                 .disabled(!MacViewOptions.shared.canShrink)
+                .accessibilityIdentifier(TestID.MacMenu.smaller)
             Button("Actual Size") { MacViewOptions.shared.actualSize() }
                 .keyboardShortcut("0", modifiers: .command)
                 .disabled(MacViewOptions.shared.isActualSize)
+                .accessibilityIdentifier(TestID.MacMenu.actualSize)
             Divider()
             // Numbered down the sidebar as it is drawn — regrouped under its
             // headings — not in `app.sections` order, which an iPhone's tab
@@ -112,10 +117,12 @@ struct MacCommands: Commands {
             ForEach(Array(sidebarOrder.prefix(9).enumerated()), id: \.element.id) { index, section in
                 Button(section.title) { show(section) }
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
+                    .accessibilityIdentifier(TestID.MacMenu.section(section.id))
             }
             Divider()
             Button("Refresh") { MacCommandRequests.shared.refresh += 1 }
                 .keyboardShortcut("r", modifiers: .command)
+                .accessibilityIdentifier(TestID.MacMenu.refresh)
             Divider()
         }
 
@@ -123,58 +130,82 @@ struct MacCommands: Commands {
             Button("Back") { goBack() }
                 .keyboardShortcut("[", modifiers: .command)
                 .disabled(!canGoBack)
+                .accessibilityIdentifier(TestID.MacMenu.goBack)
             Divider()
             Button("Home") { show(.home) }
                 .keyboardShortcut("h", modifiers: [.command, .shift])
+                .accessibilityIdentifier(TestID.MacMenu.goHome)
             Button("Search") { focusSearch() }
                 .keyboardShortcut("f", modifiers: .command)
+                .accessibilityIdentifier(TestID.MacMenu.goSearch)
             if app.sections.contains(.liveTV) {
                 Button("Live TV") { show(.liveTV) }
                     .keyboardShortcut("l", modifiers: [.command, .shift])
+                    .accessibilityIdentifier(TestID.MacMenu.goLiveTV)
             }
             Button("Downloads") { show(.downloads) }
                 .keyboardShortcut("j", modifiers: [.command, .option])
+                .accessibilityIdentifier(TestID.MacMenu.goDownloads)
             Button("Show Downloads in Finder") { showDownloadsInFinder() }
                 .keyboardShortcut("r", modifiers: [.command, .option])
+                .accessibilityIdentifier(TestID.MacMenu.goShowDownloadsInFinder)
             // The guide's own navigation, live only while it is in front:
             // a page back or forward in time, and back to now.
             Divider()
+            // ⌘← and ⌘→ only while the guide is showing, not merely greyed
+            // out: AppKit stops at the first menu item with a key, enabled or
+            // not, and Go comes before Playback, so a disabled Earlier and
+            // Later swallowed the player's skip keys.
             Button("Earlier") { MacCommandRequests.shared.guideEarlier += 1 }
-                .keyboardShortcut(.leftArrow, modifiers: .command)
+                .keyboardShortcut(isGuideShowing ? KeyboardShortcut(.leftArrow, modifiers: .command) : nil)
                 .disabled(!isGuideShowing)
+                .accessibilityIdentifier(TestID.MacMenu.goEarlier)
             Button("Later") { MacCommandRequests.shared.guideLater += 1 }
-                .keyboardShortcut(.rightArrow, modifiers: .command)
+                .keyboardShortcut(isGuideShowing ? KeyboardShortcut(.rightArrow, modifiers: .command) : nil)
                 .disabled(!isGuideShowing)
+                .accessibilityIdentifier(TestID.MacMenu.goLater)
             Button("Now") { MacCommandRequests.shared.guideNow += 1 }
                 .keyboardShortcut("t", modifiers: .command)
                 .disabled(!isGuideShowing)
+                .accessibilityIdentifier(TestID.MacMenu.goNow)
         }
 
         CommandMenu("Item") {
             Button(item?.playLabel ?? "Play") { item?.play() }
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(item?.canPlay != true)
+                .accessibilityIdentifier(TestID.MacMenu.itemPlay)
             Divider()
             Button(item?.isFavorite == true ? "Remove from Favorites" : "Add to Favorites") {
                 item?.toggleFavorite()
             }
             .keyboardShortcut("d", modifiers: .command)
             .disabled(item == nil)
+            .accessibilityIdentifier(TestID.MacMenu.itemFavorite)
             Button(item?.isWatched == true ? "Mark as Unwatched" : "Mark as Watched") {
                 item?.toggleWatched()
             }
             .keyboardShortcut("u", modifiers: [.command, .shift])
             .disabled(item?.isWatched == nil)
+            .accessibilityIdentifier(TestID.MacMenu.itemWatched)
             Divider()
             Button("Open in New Window") { item?.openInNewWindow() }
                 .keyboardShortcut("o", modifiers: [.command, .option])
                 .disabled(item == nil)
+                .accessibilityIdentifier(TestID.MacMenu.itemOpenInNewWindow)
         }
     }
 
     /// The sections in the order the sidebar's rows show them.
     private var sidebarOrder: [AppSection] {
-        MacSidebarGroup.grouped(app.sections).flatMap(\.sections).filter { $0 != .search }
+        Self.sidebarOrder(app.sections)
+    }
+
+    /// The order ⌘1…⌘9 number: the sidebar's rows as drawn. Static for the
+    /// unit tests.
+    @MainActor
+    static func sidebarOrder(_ sections: [AppSection]) -> [AppSection] {
+        MacSidebarGroup.grouped(sections).flatMap(\.sections).filter { $0 != .search }
     }
 
     /// Straight to a section, at its top. Selecting it alone left whatever
@@ -199,6 +230,12 @@ struct MacCommands: Commands {
     /// film (see `PlaybackCommands`), and the guide behind it is not what
     /// they're for.
     private var isGuideShowing: Bool {
+        Self.isGuideShowing(app, inPlayer: inPlayer)
+    }
+
+    /// `isGuideShowing`, as a static for the unit tests.
+    @MainActor
+    static func isGuideShowing(_ app: AppModel, inPlayer: Bool?) -> Bool {
         inPlayer != true
             && app.keyNavigator == nil
             && app.shownSelection == .liveTV
@@ -258,12 +295,19 @@ struct MacCommands: Commands {
     }
 
     /// A title window in front goes back through its own pages.
-    private var canGoBack: Bool {
+    private var canGoBack: Bool { Self.canGoBack(app) }
+
+    private func goBack() { Self.goBack(app) }
+
+    /// `canGoBack` and `goBack`, as statics for the unit tests.
+    @MainActor
+    static func canGoBack(_ app: AppModel) -> Bool {
         if let window = app.keyNavigator { return !window.path.isEmpty }
         return !app.path(for: app.shownSelection).wrappedValue.isEmpty
     }
 
-    private func goBack() {
+    @MainActor
+    static func goBack(_ app: AppModel) {
         if let window = app.keyNavigator {
             window.goBack()
             return

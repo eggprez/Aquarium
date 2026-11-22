@@ -20,7 +20,13 @@ enum CloudSync {
     /// those becomes true later in the life of the process, and every read and
     /// write below is a no-op when it is false, so a build without the
     /// entitlement behaves exactly as this app did before.
-    static let isAvailable: Bool = NSUbiquitousKeyValueStore.default.synchronize()
+    static let isAvailable: Bool = {
+        #if DEBUG
+        // UI test mode never touches the developer's iCloud.
+        if TestRuntime.isUITest { return false }
+        #endif
+        return NSUbiquitousKeyValueStore.default.synchronize()
+    }()
 
     private static var store: NSUbiquitousKeyValueStore { .default }
 

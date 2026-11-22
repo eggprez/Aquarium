@@ -1,6 +1,6 @@
 [package]
 name = "aquarium"
-version = "1.1.0"
+version = "1.2.0"
 description = "Lightweight Jellyfin client"
 edition = "2021"
 
@@ -49,6 +49,11 @@ dbus = "0.9"
 # controls). The low-level `dbus` API can do it, but every property and method
 # would be hand-dispatched from a match on the message name.
 dbus-crossroads = "0.5"
+
+[dev-dependencies]
+# `tauri::test`'s mock runtime, for the back-end tests that need an AppHandle
+# (src/test_support.rs). Test builds only.
+tauri = { version = "2", features = ["protocol-asset", "test"] }
 
 [profile.release]
 lto = true
