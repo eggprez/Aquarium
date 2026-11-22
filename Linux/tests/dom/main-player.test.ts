@@ -49,16 +49,19 @@ function pick(label: string): void {
 }
 
 describe("bar lifecycle", () => {
-  it("comes up on the first active status with the series and episode on two lines, and goes on stop", async () => {
+  it("comes up on the first active status with the show and its number above the episode's name, and goes on stop", async () => {
     const shell = await playing();
     const bar = $("player-bar");
     expect(bar.classList.contains("hidden")).toBe(false);
     expect($("content").classList.contains("has-player")).toBe(true);
-    expect(text("pb-title")).toBe("Archer");
-    expect(text("pb-subtitle")).toBe("Season 1, Episode 2");
+    // The episode's own name is the bold line; the show and where this falls
+    // in it are the kicker, drawn above it (`kicker-first` reorders the two).
+    expect(text("pb-title")).toBe("The Second One");
+    expect(text("pb-subtitle")).toBe("Archer · S1 E2");
+    expect($("pb-title").parentElement!.classList.contains("kicker-first")).toBe(true);
     // The whole one-line title lives in the tooltip.
     expect($("pb-title").title).toBe("Archer Season 1, Episode 2 · The Second One");
-    expect($("pb-subtitle").title).toBe("Season 1, Episode 2");
+    expect($("pb-subtitle").title).toBe("Archer · S1 E2");
     expect(document.body.classList.contains("video-covered")).toBe(true);
     shell.stop();
     await settle();
@@ -67,23 +70,34 @@ describe("bar lifecycle", () => {
     expect(document.body.classList.contains("video-covered")).toBe(false);
   });
 
-  it("names a film by itself, and an episode without numbers by its name", async () => {
+  it("names a film by itself, an episode without numbers under its show alone, and one without a name by its show", async () => {
     const shell = await playing({}, {}, MOVIE);
     expect(text("pb-title")).toBe("Heat");
     expect(text("pb-subtitle")).toBe("");
+    expect($("pb-title").parentElement!.classList.contains("kicker-first")).toBe(false);
     shell.stop();
     await shell.play({ ...EPISODE, ParentIndexNumber: undefined });
-    expect(text("pb-subtitle")).toBe("The Second One");
+    expect(text("pb-title")).toBe("The Second One");
+    expect(text("pb-subtitle")).toBe("Archer");
+    expect($("pb-title").parentElement!.classList.contains("kicker-first")).toBe(true);
+    shell.stop();
+    // Nothing to put under a kicker: the show is the title, its number below.
+    await shell.play({ ...EPISODE, Name: undefined });
+    expect(text("pb-title")).toBe("Archer");
+    expect(text("pb-subtitle")).toBe("S1 E2");
+    expect($("pb-title").parentElement!.classList.contains("kicker-first")).toBe(false);
   });
 
   it("spells a downloaded episode's lower-case record the same way (regression: the bold line showed mpv's one-line title)", async () => {
     const shell = await boot();
     await shell.playLocal({ item_id: "dl-1", path: "/v/a.mkv", series: "Archer", season: 9, episode: 7, name: "Fugue", title: "Archer S09E07 · Fugue" });
-    expect(text("pb-title")).toBe("Archer");
-    expect(text("pb-subtitle")).toBe("Season 9, Episode 7");
+    expect(text("pb-title")).toBe("Fugue");
+    expect(text("pb-subtitle")).toBe("Archer · S9 E7");
+    expect($("pb-title").parentElement!.classList.contains("kicker-first")).toBe(true);
     shell.stop();
     await shell.playLocal({ item_id: "dl-2", path: "/v/b.mkv", series: "Archer", name: "Special", title: "x" });
-    expect(text("pb-subtitle")).toBe("Special");
+    expect(text("pb-title")).toBe("Special");
+    expect(text("pb-subtitle")).toBe("Archer");
     shell.stop();
     await shell.playLocal({ item_id: "dl-3", path: "/v/c.mkv", type: "Movie", series: "Saga", name: "Heat", title: "Heat (1995)" });
     expect(text("pb-title")).toBe("Heat");
@@ -126,7 +140,7 @@ describe("bar lifecycle", () => {
     await playing();
     $("pb-title").textContent = "stale";
     document.dispatchEvent(new CustomEvent("aquarium-bar-refresh"));
-    expect(text("pb-title")).toBe("Archer");
+    expect(text("pb-title")).toBe("The Second One");
   });
 
   it("ignores aquarium-bar-refresh with nothing playing", async () => {
@@ -313,18 +327,26 @@ describe("chapters and the scrubber readout", () => {
     scrub.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: frac * width }));
   }
 
-  it("marks the chapters on the scrubber, and redraws only when the list changes", async () => {
+  it("marks the chapters on the scrubber, redraws only when the list changes, and offers their list under More only when there are any", async () => {
     const shell = await playing({}, { duration: 1500, chapters: CHAPTERS });
     const marks = [...$("pb-chapters").querySelectorAll<HTMLElement>("i")];
     expect(marks.map((m) => m.style.left)).toEqual(["0%", "20%", "60%"]);
     expect(marks.map((m) => m.title)).toEqual(["Cold open", "5:00", "Finale"]);
-    expect($("pb-chapters-btn").style.display).toBe("");
+    // The chapter list has no pill of its own: it is a row of the More card.
+    const moreRows = (): string[] => {
+      click($("pb-more"));
+      const rows = [...document.querySelectorAll("#player-cards .pb-card-row")].map((r) => r.textContent ?? "");
+      click($("pb-more"));
+      return rows;
+    };
+    // The four mpv reported, and the stretch before the first.
+    expect(moreRows()).toContain("Chapters5 in this file");
     marks[0]!.remove();
     shell.status({ position: 1 });
     expect($("pb-chapters").querySelectorAll("i")).toHaveLength(2);
     shell.status({ chapters: [] });
     expect($("pb-chapters").querySelectorAll("i")).toHaveLength(0);
-    expect($("pb-chapters-btn").style.display).toBe("none");
+    expect(moreRows().some((r) => r.startsWith("Chapters"))).toBe(false);
   });
 
   it("names the chapter and the time under the pointer, clamped to the bar", async () => {

@@ -127,7 +127,7 @@ describe("Listen Now", () => {
     await boot();
     await books.renderBooks(content, "");
     expect(texts(page(), ".mu-shelf h2")).toEqual(["Continue Listening", "Recently Added", "Authors"]);
-    expect(byText(page(), ".mu-shelf", "Continue Listening")!.querySelector(".mu-card-sub")!.textContent).toBe("1 hr 30 min left");
+    expect(byText(page(), ".mu-shelf", "Continue Listening")!.querySelector(".mu-card-sub")!.textContent).toBe("25% · 1h 30m left");
     expect(byText(page(), ".mu-shelf", "Recently Added")!.querySelector(".mu-card-sub")!.textContent).toBe("Ann Author");
     expect(texts(page(), ".mu-author")).toEqual(["Ann Author", "Bea", "Unknown author", "Zoe"]);
     expect(page().querySelector(".mu-author")!.getAttribute("href")).toBe("#/books/author/Ann%20Author");
@@ -188,7 +188,7 @@ describe("a book's menu", () => {
     await menuFor(halfway("b1"));
     expect(menuTitle()).toBe("Book b1");
     expect(menuLabels()).toEqual([
-      "Resume (1 hr 30 min left)", "Play from Start", "Play Next", "Play Later", "Mark as Finished", "Download", "Go to Author",
+      "Resume (25% · 1h 30m left)", "Play from Start", "Play Next", "Play Later", "Mark as Finished", "Download", "Go to Author",
     ]);
     await pickMenu("Play from Start");
     await settle();
@@ -465,7 +465,7 @@ describe("a book's page", () => {
     await p;
     expect(page().querySelector(".mu-eyebrow")!.textContent).toBe("Audiobook");
     const lines = texts(page(), ".mu-head-line");
-    expect(lines.slice(0, 2)).toEqual(["Ann Author", "2010 · 30 min · 18 min left"]);
+    expect(lines.slice(0, 2)).toEqual(["Ann Author", "2010 · 30 min · 40% · 18m left"]);
     expect(page().querySelector(".mu-head-line a")!.getAttribute("href")).toBe("#/books/author/Ann%20Author");
     expect(page().querySelector<HTMLElement>(".mu-book-progress div")!.style.width).toBe("40%");
     expect(page().querySelector(".mu-about")!.textContent).toBe("A long story.");

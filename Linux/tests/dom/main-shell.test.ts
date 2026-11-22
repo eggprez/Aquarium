@@ -1,5 +1,5 @@
-// src/main.ts: the shell around the pages — the sidebar and its footer,
-// going offline and probing for the server's return, accounts, an expired
+// src/main.ts: the shell around the pages — the sidebar, the account control
+// at its foot and the menu behind it, going offline and probing for the server's return, accounts, an expired
 // session, a server whose identity changed, search, the shortcut sheet and
 // arrow-key navigation between tiles.
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -28,6 +28,31 @@ function navEntries(): string[] {
   );
 }
 
+/** The account control at the foot of the sidebar. */
+function account(): { name: string; server: string; initial: string } {
+  const btn = $("account-btn");
+  return {
+    name: btn.querySelector(".account-name")!.textContent ?? "",
+    server: btn.querySelector(".account-server")!.textContent ?? "",
+    initial: btn.querySelector(".avatar")!.textContent ?? "",
+  };
+}
+
+/** Open the account menu and return its entries' labels. */
+async function accountMenu(): Promise<string[]> {
+  click($("account-btn"));
+  await settle();
+  return [...document.querySelectorAll(".account-menu > *")].map((n) =>
+    n.classList.contains("menu-rule") ? "—" : n.classList.contains("menu-label") ? `[${n.textContent}]` : n.textContent ?? ""
+  );
+}
+
+function menuItem(label: string): HTMLElement {
+  const hit = [...document.querySelectorAll<HTMLElement>('.account-menu [role="menuitem"]')].find((b) => b.textContent === label);
+  if (!hit) throw new Error(`no menu item "${label}"`);
+  return hit;
+}
+
 function footer(): { version: string; line: string; cls: string } {
   const line = $("sidebar-footer").querySelector(".foot-line")!;
   return {
@@ -38,7 +63,7 @@ function footer(): { version: string; line: string; cls: string } {
 }
 
 describe("sidebar", () => {
-  it("lists the video libraries, then music, books, the app's own pages and Live TV where there is one", async () => {
+  it("groups Home, the libraries with collections, music and books among them, Live, then what is yours", async () => {
     await bootShell({
       libraries: [
         { Id: "m", Name: "Films", CollectionType: "movies" },
@@ -59,24 +84,72 @@ describe("sidebar", () => {
       "Shows #/lib/t",
       "Home videos #/lib/h",
       "Mixed #/lib/f",
-      "— Music",
+      // regression: 56a1825 — Jellyfin's box sets get an entry of their own.
+      "Collections #/lib/bs",
       "Listen Now #/music/discover",
       "Library #/music/library",
       "Audiobooks #/books",
-      "— Aquarium",
-      "Favorites #/favorites",
-      // regression: 56a1825 — Jellyfin's box sets get an entry of their own.
-      "Collections #/lib/bs",
+      "— Live",
       "Live TV #/livetv",
+      "— You",
+      "Favorites #/favorites",
       "Downloads #/downloads",
-      "Settings #/settings",
+    ]);
+    // Settings is reached from the account control, not from a row.
+    expect($("nav").querySelector('[data-route="#/settings"]')).toBeNull();
+  });
+
+  it("puts audiobooks among the libraries without music, and gives Live TV to a custom playlist", async () => {
+    await bootShell({ libraries: [{ Id: "b", Name: "Books", CollectionType: "books" }], config: { livetv_source: "custom" } });
+    expect(navEntries()).toEqual([
+      "Home #/home",
+      "— Libraries",
+      "Audiobooks #/books",
+      "— Live",
+      "Live TV #/livetv",
+      "— You",
+      "Favorites #/favorites",
+      "Downloads #/downloads",
     ]);
   });
 
-  it("gives books a heading of their own without music, and Live TV to a custom playlist", async () => {
-    await bootShell({ libraries: [{ Id: "b", Name: "Books", CollectionType: "books" }], config: { livetv_source: "custom" } });
-    expect(navEntries()).toContain("— Listening");
-    expect(navEntries()).toContain("Live TV #/livetv");
+  it("names each row in a tooltip, with its Ctrl+number for the first nine", async () => {
+    await bootShell({
+      libraries: ["a", "b", "c", "d", "e", "f", "g"].map((id) => ({ Id: id, Name: `Lib ${id}`, CollectionType: "movies" })),
+    });
+    const tips = [...$("nav").querySelectorAll(".nav-item")].map((n) => n.getAttribute("title"));
+    expect(tips).toEqual([
+      "Home (Ctrl+1)",
+      "Lib a (Ctrl+2)",
+      "Lib b (Ctrl+3)",
+      "Lib c (Ctrl+4)",
+      "Lib d (Ctrl+5)",
+      "Lib e (Ctrl+6)",
+      "Lib f (Ctrl+7)",
+      "Lib g (Ctrl+8)",
+      "Favorites (Ctrl+9)",
+      "Downloads",
+    ]);
+  });
+
+  it("adds the Seerr page under You only while a Seerr server is connected", async () => {
+    await bootShell({ invokes: { seerr_status: { connected: true, host: "seerr.test", user_name: "tester" } } });
+    await settle();
+    expect(navEntries()).toEqual([
+      "Home #/home",
+      "— Libraries",
+      "Films #/lib/lib-movies",
+      "Shows #/lib/lib-shows",
+      "— You",
+      "Favorites #/favorites",
+      "Seerr #/requests",
+      "Downloads #/downloads",
+    ]);
+    teardownShell();
+    // A connection whose session has run out shows nothing until it is renewed.
+    await bootShell({ invokes: { seerr_status: { connected: true, needs_reconnect: true } } });
+    await settle();
+    expect(navEntries()).not.toContain("Seerr #/requests");
   });
 
   it("draws only what needs no server when the library list cannot be had", async () => {
@@ -85,12 +158,28 @@ describe("sidebar", () => {
         throw new Error("500");
       },
     });
+    expect(navEntries()).toEqual(["Home #/home", "— You", "Favorites #/favorites", "Downloads #/downloads"]);
+  });
+
+  it("keeps Favorites and Downloads when Seerr connects with no library list (regression: the sidebar fell back to Home alone)", async () => {
+    await bootShell({
+      libraries: () => {
+        throw new Error("500");
+      },
+    });
+    await settle();
+    expect(navEntries()).toEqual(["Home #/home", "— You", "Favorites #/favorites", "Downloads #/downloads"]);
+    // The Seerr answer arrives after the sidebar was drawn from no list.
+    const seerr = await import("../../src/seerr");
+    onInvoke("seerr_status", { connected: true, host: "seerr.test", user_name: "tester" });
+    await seerr.loadStatus();
+    await settle();
     expect(navEntries()).toEqual([
       "Home #/home",
-      "— Aquarium",
+      "— You",
       "Favorites #/favorites",
+      "Seerr #/requests",
       "Downloads #/downloads",
-      "Settings #/settings",
     ]);
   });
 
@@ -142,9 +231,19 @@ describe("sidebar", () => {
     expect(films.classList.contains("active")).toBe(true);
     expect(home.hasAttribute("aria-current")).toBe(false);
     // A page under a route keeps its entry lit.
-    await shell.go("#/music/library/albums");
+    await shell.go("#/lib/lib-movies/genre/x");
+    expect(films.classList.contains("active")).toBe(true);
+    expect(films.getAttribute("aria-current")).toBe("page");
+    // Settings has no row: the account control takes the selected fill instead.
+    expect($("account-btn").classList.contains("active")).toBe(false);
     await shell.go("#/settings");
-    expect($("nav").querySelector('[data-route="#/settings"]')!.classList.contains("active")).toBe(true);
+    expect($("nav").querySelector(".nav-item.active")).toBeNull();
+    expect($("nav").querySelector("[aria-current]")).toBeNull();
+    expect($("account-btn").classList.contains("active")).toBe(true);
+    await shell.go("#/settings/video");
+    expect($("account-btn").classList.contains("active")).toBe(true);
+    await shell.go("#/home");
+    expect($("account-btn").classList.contains("active")).toBe(false);
   });
 
   it("rebuilds when asked (the Live TV source changed in Settings)", async () => {
@@ -154,6 +253,69 @@ describe("sidebar", () => {
     document.dispatchEvent(new CustomEvent("aquarium-nav-refresh"));
     await settle();
     expect(navEntries()).toContain("Live TV #/livetv");
+  });
+});
+
+describe("account control", () => {
+  it("names who is signed in and to which server, with their initial", async () => {
+    await bootShell({ config: { user_name: "scott" } });
+    expect(account()).toEqual({ name: "scott", server: "jf.test:8096", initial: "S" });
+    expect($("account-btn").getAttribute("aria-haspopup")).toBe("menu");
+  });
+
+  it("opens a menu of Add Account, Settings and Sign Out, and a second click closes it", async () => {
+    await bootShell();
+    expect(await accountMenu()).toEqual(["Add Account…", "—", "Settings…", "—", "Sign Out…"]);
+    expect(menuItem("Sign Out…").classList.contains("danger")).toBe(true);
+    // The menu's own outside-click handler closes it on the way down; the
+    // click that follows must not open it again.
+    $("account-btn").dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    document.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    click($("account-btn"));
+    await settle();
+    expect(document.querySelector(".account-menu")).toBeNull();
+  });
+
+  it("Settings… opens Settings, and Sign Out… its Account pane, where signing out is confirmed", async () => {
+    const shell = await bootShell();
+    await accountMenu();
+    click(menuItem("Settings…"));
+    await settle();
+    expect(document.querySelector(".account-menu")).toBeNull();
+    expect(location.hash).toBe("#/settings");
+    expect(page()).toBe("settings");
+    await accountMenu();
+    click(menuItem("Sign Out…"));
+    await settle();
+    expect(location.hash).toBe("#/settings/account");
+    expect(shell.views.settings).toHaveBeenCalledTimes(2);
+    // Nothing is signed out from the menu itself.
+    expect(invokeCalls("jf_logout")).toHaveLength(0);
+  });
+
+  it("lists the other saved accounts to switch to, and Add Account opens the sign-in screen", async () => {
+    const shell = await bootShell({
+      invokes: {
+        accounts_list: [
+          { key: "k1", server: "http://jf.test:8096", user_name: "tester", current: true },
+          { key: "k2", server: "https://other.test", user_name: "second", current: false },
+        ],
+        account_switch: () => {
+          shell.cfg.user_name = "second";
+          return null;
+        },
+      },
+    });
+    expect(await accountMenu()).toEqual(["[Switch Account]", "second — other.test", "Add Account…", "—", "Settings…", "—", "Sign Out…"]);
+    click(menuItem("second — other.test"));
+    await settle();
+    expect(invokeCalls("account_switch")[0]!.args).toEqual({ key: "k2" });
+    expect(account().name).toBe("second");
+    await accountMenu();
+    click(menuItem("Add Account…"));
+    await settle();
+    expect(shown("login-root")).toBe(true);
+    expect(shown("shell")).toBe(false);
   });
 });
 
@@ -220,12 +382,50 @@ describe("going offline and coming back", () => {
     return { shell, setUp: (v) => (up = v) };
   }
 
-  it("says so, shows the pill, and redraws the page as the offline screen", async () => {
+  it("says so, shows the strip above the page, and redraws the page as the offline screen", async () => {
     const { shell } = await onlineThenOff();
     expect(toasts()).toContain("Server unreachable — offline mode. Downloads still work.");
-    expect($("offline-pill").hasAttribute("hidden")).toBe(false);
+    expect($("offline-strip").hasAttribute("hidden")).toBe(false);
+    expect($("offline-status").textContent).toBe("Your server can't be reached");
+    expect(($("offline-retry") as HTMLButtonElement).disabled).toBe(false);
+    expect($("offline-retry").textContent).toBe("Retry");
     expect($("content").querySelector(".offline-screen")).not.toBeNull();
     void shell;
+  });
+
+  it("reduces the sidebar to what works with no server, and puts the rest back on return", async () => {
+    let up = true;
+    const shell = await bootShell({
+      ping: () => up,
+      libraries: [
+        { Id: "m", Name: "Films", CollectionType: "movies" },
+        { Id: "mu", Name: "Music", CollectionType: "music" },
+        { Id: "b", Name: "Books", CollectionType: "audiobooks" },
+        { Id: "l", Name: "Live", CollectionType: "livetv" },
+      ],
+    });
+    const whole = navEntries();
+    expect(whole).toContain("Films #/lib/m");
+    up = false;
+    await shell.api.checkOnline();
+    await settle();
+    // Downloads, and the two sections whose pages show downloaded content.
+    expect(navEntries()).toEqual([
+      "Downloads #/downloads",
+      "— Libraries",
+      "Listen Now #/music/discover",
+      "Library #/music/library",
+      "Audiobooks #/books",
+    ]);
+    up = true;
+    await shell.api.checkOnline();
+    await settle();
+    expect(navEntries()).toEqual(whole);
+  });
+
+  it("draws only Downloads for a launch with no server and no remembered libraries", async () => {
+    await bootShell({ ping: false });
+    expect(navEntries()).toEqual(["Downloads #/downloads"]);
   });
 
   it("probes again at 15 s, backing off by doubling to five minutes", async () => {
@@ -257,7 +457,7 @@ describe("going offline and coming back", () => {
     await vi.advanceTimersByTimeAsync(15_000);
     await flush();
     expect(toasts()).toContain("Back online");
-    expect($("offline-pill").hasAttribute("hidden")).toBe(true);
+    expect($("offline-strip").hasAttribute("hidden")).toBe(true);
     expect(page()).toBe("home");
     expect(invokeCalls("progress_sync").length).toBeGreaterThan(0);
     const pings = invokeCalls("jf_ping").length;
@@ -316,12 +516,19 @@ describe("going offline and coming back", () => {
     expect(invokeCalls("jf_ping").length).toBe(n);
   });
 
-  it("the pill's Retry says when the server is still away, and starts the backoff over", async () => {
+  it("the strip's Retry says it is looking, then that the server is still away, and starts the backoff over", async () => {
     const { setUp } = await onlineThenOff();
     await vi.advanceTimersByTimeAsync(15_000 + 30_000);
     const before = invokeCalls("jf_ping").length;
-    click($("offline-retry"));
+    const retry = $("offline-retry") as HTMLButtonElement;
+    click(retry);
+    expect(retry.disabled).toBe(true);
+    expect(retry.textContent).toBe("Checking…");
+    expect($("offline-status").textContent).toBe("Looking for your server…");
     await flush();
+    expect(retry.disabled).toBe(false);
+    expect(retry.textContent).toBe("Retry");
+    expect($("offline-status").textContent).toBe("Your server can't be reached");
     expect(invokeCalls("jf_ping").length).toBe(before + 1);
     expect(toasts().filter((t) => t === "Still offline — server unreachable")).toHaveLength(1);
     // The next automatic probe is 15 s out again, not 60.
@@ -364,7 +571,7 @@ describe("accounts", () => {
     expect(invokeCalls("account_switch")[0]!.args).toEqual({ key: "k2" });
     expect(toasts()).toContain("Signed in as second");
     expect(location.hash).toBe("#/home");
-    expect($("topbar-user").textContent).toContain("second");
+    expect(account().name).toBe("second");
   });
 
   it("says why a switch failed, and stays where it was", async () => {
@@ -572,7 +779,13 @@ describe("the shortcut sheet", () => {
     expect(key("?").defaultPrevented).toBe(true);
     const dialog = document.querySelector(".dialog")!;
     expect(dialog.querySelector("h2")!.textContent).toBe("Keyboard shortcuts");
-    expect([...dialog.querySelectorAll("h4")].map((h) => h.textContent)).toEqual(["Anywhere", "Playback", "On the picture", "Browsing"]);
+    expect([...dialog.querySelectorAll("h4")].map((h) => h.textContent)).toEqual([
+      "Anywhere",
+      "Go to",
+      "Playback",
+      "On the picture",
+      "Browsing",
+    ]);
     expect(dialog.querySelector(".shortcut-row kbd")!.textContent).toBe("/");
     key("?");
     expect(document.querySelector(".dialog")).toBeNull();
@@ -678,7 +891,7 @@ describe("signing in from the shell's sign-in screen", () => {
     });
     await signInThrough($("login-root"));
     expect(shown("shell")).toBe(true);
-    expect($("topbar-user").textContent).toContain("ada");
+    expect(account()).toEqual({ name: "ada", server: "jf.test", initial: "A" });
     expect(page()).toBe("home");
   });
 

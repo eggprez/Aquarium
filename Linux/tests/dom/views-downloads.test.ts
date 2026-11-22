@@ -224,6 +224,34 @@ describe("first paint and the header", () => {
     expect(tab("Movies").classList.contains("active")).toBe(true);
   });
 
+  it("says under the title how much is here, what it takes and what is free, and Show in Files opens the downloads folder", async () => {
+    list = [
+      ep("e1", "Alpha", 1, 1),
+      movie("m1", "Arrival"),
+      { item_id: "x1", status: "error", title: "Broken", error: "boom" },
+    ];
+    await boot();
+    // With no answer about free space, the line leaves it out.
+    await open();
+    expect(root.querySelector(".dl-storage")?.textContent).toBe("2 items · 3.00 GiB");
+    onInvoke("disk_free", () => 10 * GiB);
+    await open({ keepTab: true });
+    expect(root.querySelector(".dl-title h1.page-title")?.textContent).toBe("Downloads");
+    expect(root.querySelector(".dl-storage")?.textContent).toBe("2 items · 3.00 GiB · 10.00 GiB free");
+    click(button(root.querySelector(".head-tools")!, "Show in Files"));
+    await flush();
+    expect(invokeCalls("downloads_reveal").at(-1)!.args).toEqual({ itemIds: [] });
+    onInvoke("downloads_reveal", () => {
+      throw new Error("no file manager");
+    });
+    click(button(root.querySelector(".head-tools")!, "Show in Files"));
+    await flush();
+    expect(lastToast()).toBe("Couldn't show the downloads folder: Error: no file manager");
+    list = [];
+    await open({ keepTab: true });
+    expect(root.querySelector(".dl-storage")?.textContent).toBe("0 items · 10.00 GiB free");
+  });
+
   it("counts each tab, and leaves the count off an empty one", async () => {
     list = [
       ep("e1", "Alpha", 1, 1),
@@ -347,9 +375,9 @@ describe("TV tab", () => {
     await boot();
     await open();
     expect(texts(root, ".card-title")).toEqual(["Alpha", "Zeta"]);
-    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("3 episodes · 1 watched");
-    expect(card("Zeta").querySelector(".card-sub")?.textContent).toBe("1 episode");
-    expect(card("Alpha").getAttribute("aria-label")).toBe("Alpha — 3 episodes · 1 watched");
+    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("3 episodes · 3.00 GiB · 1 watched");
+    expect(card("Zeta").querySelector(".card-sub")?.textContent).toBe("1 episode · 1.00 GiB");
+    expect(card("Alpha").getAttribute("aria-label")).toBe("Alpha — 3 episodes · 3.00 GiB · 1 watched");
   });
 
   it("treats an untyped download with a series as an episode, and a Movie with one as a film", async () => {
@@ -360,7 +388,7 @@ describe("TV tab", () => {
     await boot();
     await open();
     expect(texts(root, ".card-title")).toEqual(["Alpha"]);
-    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("1 episode");
+    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("1 episode · 1.00 GiB");
     click(tab("Movies"));
     expect(texts(root, ".card-title")).toEqual(["Spin-off Film"]);
   });
@@ -411,7 +439,7 @@ describe("TV tab", () => {
     click(card("Alpha"));
     expect(texts(root, ".card-title")).toEqual(["Episodes", "Season 1", "Season 2"]);
     expect(root.querySelector(".lib-crumb")?.textContent).toContain("All shows");
-    expect(card("Season 1").querySelector(".card-sub")?.textContent).toBe("2 episodes");
+    expect(card("Season 1").querySelector(".card-sub")?.textContent).toBe("2 episodes · 2.00 GiB");
 
     click(card("Season 1"));
     expect(texts(root, ".dl-row h4")).toEqual(["1. Part 1", "2. Part 2"]);
@@ -502,13 +530,23 @@ describe("TV tab", () => {
     expect(byText(row("Part 1"), "button", "Delete")).not.toBeNull();
   });
 
-  it("deleting an episode removes it and stays in the season being looked at", async () => {
+  it("deleting an episode asks first, naming it and what it frees, then removes it and stays in the season being looked at", async () => {
     list = [ep("a1", "Alpha", 1, 1), ep("a2", "Alpha", 1, 2)];
     await boot();
     await open();
     click(card("Alpha"));
     click(card("Season 1"));
-    click(button(row("Part 1"), "Delete"));
+    expect(button(row("Part 1"), "Delete").textContent).toBe("Delete…");
+    click(button(row("Part 1"), "Delete…"));
+    expect(dialogTitle()).toBe("Delete “Part 1”?");
+    expect(dialogEl()!.querySelector("p")?.textContent).toBe("720p · 4.5 Mbps · 1.00 GiB · The file is removed from this computer.");
+    expect(dialogButtons()).toEqual(["Cancel", "Delete"]);
+    await pickDialog("Cancel");
+    await settle();
+    expect(deleted()).toEqual([]);
+    expect(texts(root, ".dl-row h4")).toEqual(["1. Part 1", "2. Part 2"]);
+    click(button(row("Part 1"), "Delete…"));
+    await pickDialog("Delete");
     await settle();
     expect(deleted()).toEqual(["a1"]);
     expect(toasts()).toContain("Download deleted");
@@ -521,7 +559,8 @@ describe("TV tab", () => {
     await open();
     click(card("Alpha"));
     click(card("Season 1"));
-    click(button(row("Part 1"), "Delete"));
+    click(button(row("Part 1"), "Delete…"));
+    await pickDialog("Delete");
     await settle();
     // Season 1 is empty now: back at Alpha's seasons.
     expect(texts(root, ".card-title")).toEqual(["Season 2"]);
@@ -602,7 +641,7 @@ describe("Play Next", () => {
     expect(byText(crumb, "button", "Play Next")).toBeNull();
     expect(byText(crumb, "button", /^Play$/)).toBeNull();
     rightClick(card("Season 1"));
-    expect(menuLabels()).toEqual(["Mark season watched", "Delete season"]);
+    expect(menuLabels()).toEqual(["Mark season watched", "Delete season…"]);
   });
 
   it("the menu entry names the episode it will play", async () => {
@@ -684,40 +723,45 @@ describe("series and season actions", () => {
     expect(lastToast()).toBe("Couldn't show that in Files: Error: no file manager");
   });
 
-  it("Delete series asks first on the button itself, forgets after four seconds, and deletes on the second click", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  it("Delete series… asks in a dialog with the seasons, episodes and size; Cancel keeps them, confirming deletes them all", async () => {
     click(card("Alpha"));
+    expect(root.querySelector(".dl-summary")?.textContent).toBe("2 seasons · 3 episodes · 3.00 GiB · 2 unwatched");
     const btn = button(root.querySelector(".lib-crumb")!, "Delete series");
+    expect(btn.textContent).toBe("Delete series…");
     click(btn);
-    expect(btn.textContent).toBe("Delete 3 episodes?");
+    expect(dialogTitle()).toBe("Delete all 3 episodes of “Alpha” (3.00 GiB)?");
+    expect(dialogEl()!.querySelector("p")?.textContent).toBe("2 seasons · 3 episodes will be removed from this computer.");
+    expect(dialogButtons()).toEqual(["Cancel", "Delete 3 Episodes"]);
+    // Focus lands on Cancel, so Enter never destroys anything.
+    expect(document.activeElement?.textContent).toBe("Cancel");
     expect(deleted()).toEqual([]);
-    vi.advanceTimersByTime(3999);
-    expect(btn.textContent).toBe("Delete 3 episodes?");
-    vi.advanceTimersByTime(1);
-    expect(btn.textContent).toBe("Delete series");
-    // Armed again, then confirmed.
+    await pickDialog("Cancel");
+    await settle();
+    expect(deleted()).toEqual([]);
+    // The button itself never changes: the question is the dialog's.
+    expect(btn.textContent).toBe("Delete series…");
+    expect(btn.disabled).toBe(false);
     click(btn);
-    click(btn);
-    expect(btn.textContent).toBe("Working…");
-    expect(btn.disabled).toBe(true);
-    await flush(60);
+    await pickDialog("Delete 3 Episodes");
+    await settle();
     expect(deleted()).toEqual(["e1", "e2", "e3"]);
     expect(toasts()).toContain("Deleted 3 downloads");
-    // The timer that would have disarmed it was cancelled.
-    vi.advanceTimersByTime(5000);
-    expect(btn.textContent).toBe("Working…");
   });
 
-  it("Delete season counts one episode in the singular", async () => {
+  it("Delete season… names the season and counts one episode in the singular", async () => {
     click(card("Alpha"));
     click(card("Season 2"));
+    expect(root.querySelector(".dl-summary")?.textContent).toBe("Season 2 — 1 episode · 1.00 GiB");
     const btn = button(root.querySelector(".lib-crumb")!, "Delete season");
+    expect(btn.textContent).toBe("Delete season…");
     click(btn);
-    expect(btn.textContent).toBe("Delete 1 episode?");
-    click(btn);
+    expect(dialogTitle()).toBe("Delete 1 episode of Season 2 (1.00 GiB)?");
+    expect(dialogEl()!.querySelector("p")?.textContent).toBe("Season 2 of “Alpha” will be removed from this computer.");
+    expect(dialogButtons()).toEqual(["Cancel", "Delete 1 Episode"]);
+    await pickDialog("Delete 1 Episode");
     await settle();
     expect(deleted()).toEqual(["e3"]);
-    expect(toasts()).toContain("Deleted 1 download");
+    expect(toasts()).toContain("Download deleted");
   });
 
   it("a series card's menu: play next, shuffle, files, mark, delete watched, delete", async () => {
@@ -729,7 +773,7 @@ describe("series and season actions", () => {
       "Show in Files",
       "Mark series watched",
       "Delete watched episodes (1)",
-      "Delete series",
+      "Delete series…",
     ]);
   });
 
@@ -743,7 +787,7 @@ describe("series and season actions", () => {
       "Show in Files",
       "Mark season watched",
       "Delete watched episodes (1)",
-      "Delete season",
+      "Delete season…",
     ]);
     await pickMenu("Shuffle this season");
     expect(["/dl/e1.mkv", "/dl/e2.mkv"]).toContain(played()[0].url);
@@ -767,7 +811,7 @@ describe("series and season actions", () => {
     ]);
     expect(queueEvents).toBe(1);
     expect(toasts()).toContain("Marked 3 episodes watched");
-    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("3 episodes · 3 watched");
+    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("3 episodes · 3.00 GiB · 3 watched");
     // Everything watched: the toggle flips, and "delete watched" would be the
     // same as deleting the series, so it's gone.
     rightClick(card("Alpha"));
@@ -776,13 +820,13 @@ describe("series and season actions", () => {
       "Shuffle",
       "Show in Files",
       "Mark series unwatched",
-      "Delete series",
+      "Delete series…",
     ]);
     await pickMenu("Mark series unwatched");
     await settle();
     expect(invokeCalls("progress_store_local").at(-1)!.args).toEqual({ itemId: "e3", positionTicks: 0, played: false });
     expect(toasts()).toContain("Marked 3 episodes unwatched");
-    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("3 episodes");
+    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("3 episodes · 3.00 GiB");
   });
 
   it("Delete watched episodes asks with the count and size, and Cancel keeps them", async () => {
@@ -798,7 +842,7 @@ describe("series and season actions", () => {
     await pickDialog("Delete 1 Download");
     await settle();
     expect(deleted()).toEqual(["e1"]);
-    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("2 episodes");
+    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("2 episodes · 2.00 GiB");
   });
 
   it("says so when the watched episodes were unmarked while the menu was open", async () => {
@@ -809,18 +853,21 @@ describe("series and season actions", () => {
     expect(lastToast()).toBe("Nothing watched to delete");
   });
 
-  it("Delete series from the menu deletes at once, skipping an episode the backend refuses", async () => {
+  it("Delete series… from the menu asks first, then deletes, skipping an episode the backend refuses", async () => {
     onInvoke("download_delete", ({ itemId }: any) => {
       if (itemId === "e2") throw new Error("busy");
       list = list.filter((d) => d.item_id !== itemId);
       return null;
     });
     rightClick(card("Alpha"));
-    await pickMenu("Delete series");
+    await pickMenu("Delete series…");
+    expect(dialogTitle()).toBe("Delete all 3 episodes of “Alpha” (3.00 GiB)?");
+    expect(deleted()).toEqual([]);
+    await pickDialog("Delete 3 Episodes");
     await settle();
     expect(deleted()).toEqual(["e1", "e2", "e3"]);
     expect(toasts()).toContain("Deleted 3 downloads");
-    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("1 episode");
+    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("1 episode · 1.00 GiB");
   });
 });
 
@@ -839,7 +886,7 @@ describe("one download's menu", () => {
       "Mark watched",
       "Show details",
       "Show in Files",
-      "Delete download",
+      "Delete download…",
     ]);
     await pickMenu("Resume");
     expect(played()[0].start_seconds).toBe(720);
@@ -915,7 +962,10 @@ describe("one download's menu", () => {
     await pickMenu("Show in Files");
     expect(invokeCalls("downloads_reveal")[0]!.args).toEqual({ itemIds: ["e1"] });
     rightClick(row("Part 1"));
-    await pickMenu("Delete download");
+    await pickMenu("Delete download…");
+    expect(dialogTitle()).toBe("Delete “Part 1”?");
+    expect(deleted()).toEqual([]);
+    await pickDialog("Delete");
     await settle();
     expect(deleted()).toEqual(["e1"]);
     expect(texts(root, ".dl-row h4")).toEqual(["2. Part 2"]);
@@ -927,7 +977,7 @@ describe("one download's menu", () => {
     await open();
     click(tab("Movies"));
     rightClick(card("Arrival"));
-    expect(menuLabels()).toEqual(["Mark watched", "Delete download"]);
+    expect(menuLabels()).toEqual(["Mark watched", "Delete download…"]);
     // And nothing was asked of a server that isn't there.
     expect(jfPaths()).toEqual([]);
   });
@@ -976,12 +1026,17 @@ describe("Movies tab", () => {
     expect(played()[0]).toMatchObject({ url: "/dl/m1.mkv", title: "Arrival", start_seconds: 1500, known_duration_seconds: 6000 });
   });
 
-  it("the delete badge removes the film without also playing it", async () => {
+  it("the delete badge asks, then removes the film, without also playing it", async () => {
     list = [movie("m1", "Arrival"), movie("m2", "Brazil")];
     await boot();
     await open();
     click(tab("Movies"));
     click(card("Arrival").querySelector(".dl-del-badge"));
+    expect(dialogTitle()).toBe("Delete “Arrival”?");
+    expect(dialogEl()!.querySelector("p")?.textContent).toBe("Original quality · 2.00 GiB · The file is removed from this computer.");
+    expect(dialogButtons()).toEqual(["Cancel", "Delete"]);
+    expect(deleted()).toEqual([]);
+    await pickDialog("Delete");
     await settle();
     expect(played()).toHaveLength(0);
     expect(deleted()).toEqual(["m1"]);
@@ -996,7 +1051,7 @@ describe("Movies tab", () => {
     click(tab("Movies"));
     rightClick(card("Arrival"));
     expect(menuTitle()).toBe("Arrival");
-    expect(menuLabels()).toEqual(["Play", "Mark watched", "Show details", "Show in Files", "Delete download"]);
+    expect(menuLabels()).toEqual(["Play", "Mark watched", "Show details", "Show in Files", "Delete download…"]);
   });
 
   it("deleting a download also drops a retry of it still waiting, so it can't come back", async () => {
@@ -1010,6 +1065,7 @@ describe("Movies tab", () => {
     await open();
     click(tab("Movies"));
     click(card("Arrival").querySelector(".dl-del-badge"));
+    await pickDialog("Delete");
     await settle();
     expect(playback.getQueuedDownloads()).toEqual([]);
     expect(deleted()).toEqual(["m1"]);
@@ -1025,16 +1081,16 @@ describe("the Delete key (f0902f2)", () => {
     await open();
   });
 
-  it("asks before deleting the focused series, naming it and how many files go", async () => {
+  it("asks before deleting the focused series, naming it, how many episodes go and what they free", async () => {
     card("Alpha").focus();
     const ev = key(document.activeElement, "Delete");
     expect(ev.defaultPrevented).toBe(true);
-    expect(dialogTitle()).toBe("Delete all 2 episodes of “Alpha”?");
-    expect(dialogEl()!.querySelector("p")?.textContent).toBe("2 downloads are removed from this computer.");
-    expect(dialogButtons()).toEqual(["Cancel", "Delete 2"]);
+    expect(dialogTitle()).toBe("Delete all 2 episodes of “Alpha” (2.00 GiB)?");
+    expect(dialogEl()!.querySelector("p")?.textContent).toBe("1 season · 2 episodes will be removed from this computer.");
+    expect(dialogButtons()).toEqual(["Cancel", "Delete 2 Episodes"]);
     // Focus lands on Cancel, so Enter never destroys anything.
     expect(document.activeElement?.textContent).toBe("Cancel");
-    await pickDialog("Delete 2");
+    await pickDialog("Delete 2 Episodes");
     await settle();
     expect(deleted()).toEqual(["e1", "e2"]);
     expect(texts(root, ".card-title")).toEqual(["Beta"]);
@@ -1043,21 +1099,25 @@ describe("the Delete key (f0902f2)", () => {
   it("words a single episode, a season, an episode row and a film each their own way", async () => {
     card("Beta").focus();
     key(document.activeElement, "Delete");
-    expect(dialogTitle()).toBe("Delete the episode of “Beta”?");
-    expect(dialogEl()!.querySelector("p")?.textContent).toBe("The file is removed from this computer.");
-    expect(dialogButtons()).toEqual(["Cancel", "Delete"]);
+    expect(dialogTitle()).toBe("Delete the episode of “Beta” (1.00 GiB)?");
+    expect(dialogEl()!.querySelector("p")?.textContent).toBe("1 season · 1 episode will be removed from this computer.");
+    expect(dialogButtons()).toEqual(["Cancel", "Delete 1 Episode"]);
     await pickDialog("Cancel");
 
     click(card("Alpha"));
     card("Season 1").focus();
     key(document.activeElement, "Delete");
-    expect(dialogTitle()).toBe("Delete Season 1 of “Alpha”?");
+    expect(dialogTitle()).toBe("Delete 2 episodes of Season 1 (2.00 GiB)?");
+    expect(dialogEl()!.querySelector("p")?.textContent).toBe("Season 1 of “Alpha” will be removed from this computer.");
+    expect(dialogButtons()).toEqual(["Cancel", "Delete 2 Episodes"]);
     await pickDialog("Cancel");
 
     click(card("Season 1"));
     row("Part 2").focus();
     key(document.activeElement, "Delete");
     expect(dialogTitle()).toBe("Delete “Part 2”?");
+    expect(dialogEl()!.querySelector("p")?.textContent).toBe("720p · 4.5 Mbps · 1.00 GiB · The file is removed from this computer.");
+    expect(dialogButtons()).toEqual(["Cancel", "Delete"]);
     await pickDialog("Delete");
     await settle();
     expect(deleted()).toEqual(["e2"]);
@@ -1066,6 +1126,7 @@ describe("the Delete key (f0902f2)", () => {
     card("Arrival").focus();
     key(document.activeElement, "Delete");
     expect(dialogTitle()).toBe("Delete “Arrival”?");
+    expect(dialogEl()!.querySelector("p")?.textContent).toBe("Original quality · 2.00 GiB · The file is removed from this computer.");
     await pickDialog("Cancel");
     expect(deleted()).toEqual(["e2"]);
   });
@@ -1074,14 +1135,20 @@ describe("the Delete key (f0902f2)", () => {
     const badge = card("Alpha").querySelector<HTMLElement>(".dl-shuffle-badge")!;
     badge.focus();
     key(badge, "Delete");
-    expect(dialogTitle()).toBe("Delete all 2 episodes of “Alpha”?");
+    expect(dialogTitle()).toBe("Delete all 2 episodes of “Alpha” (2.00 GiB)?");
   });
 
   it("episode rows can take focus so they can be selected", async () => {
     click(card("Alpha"));
     click(card("Season 1"));
     expect(row("Part 1").tabIndex).toBe(0);
-    expect(row("Part 1").dataset.dlIds).toBe("e1");
+    // The marker the stylesheet and the key handler look for; what the key
+    // does is held with the row, not in the attribute.
+    expect(row("Part 1").hasAttribute("data-dl-ids")).toBe(true);
+    row("Part 1").focus();
+    const ev = key(document.activeElement, "Delete");
+    expect(ev.defaultPrevented).toBe(true);
+    expect(dialogTitle()).toBe("Delete “Part 1”?");
   });
 
   it("does nothing when focus is not on a download", async () => {
@@ -1130,7 +1197,7 @@ describe("the Delete key (f0902f2)", () => {
     card("Alpha").focus();
     key(card("Alpha"), "Delete");
     expect(document.querySelectorAll(".dialog-scrim").length).toBe(1);
-    await pickDialog("Delete 2");
+    await pickDialog("Delete 2 Episodes");
     await settle();
     expect(deleted()).toEqual(["e1", "e2"]);
   });
@@ -1691,7 +1758,7 @@ describe("watch state from the server", () => {
       { itemId: "e1", positionTicks: 0, played: true },
       { itemId: "e2", positionTicks: 20 * MIN, played: false },
     ]);
-    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("2 episodes · 1 watched");
+    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("2 episodes · 2.00 GiB · 1 watched");
     expect(jfPaths()[0]).toContain("/Items?userId=user-1&Ids=e1,e2");
   });
 
@@ -1723,7 +1790,7 @@ describe("watch state from the server", () => {
     await boot();
     await open();
     expect(invokeCalls("download_set_watch_state")).toEqual([]);
-    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("2 episodes · 1 watched");
+    expect(card("Alpha").querySelector(".card-sub")?.textContent).toBe("2 episodes · 2.00 GiB · 1 watched");
   });
 
   it("is skipped offline", async () => {

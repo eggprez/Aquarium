@@ -1110,7 +1110,7 @@ describe("itemActions", () => {
     expect(acts[0]!.label).toBe("Resume");
   });
 
-  it("offers Play for an unstarted item, and no playback at all for a series or season", async () => {
+  it("offers Play for an unstarted item, and Play Next Episode for a series or season", async () => {
     const movie = { Id: "m1", Type: "Movie" };
     const acts = ui.itemActions(movie);
     expect(acts[0]!.label).toBe("Play");
@@ -1118,12 +1118,79 @@ describe("itemActions", () => {
     expect(pb.playItem).toHaveBeenCalledWith(movie, { resume: false });
     expect(labels(acts)).toEqual(["Play", "Play Next", "Play Later", "Download", "Mark watched", "Add to favorites"]);
     expect(labels(ui.itemActions({ Id: "s", Type: "Series" }))).toEqual([
+      "Play Next Episode",
       "Download series",
       "Mark watched",
       "Add to favorites",
       "Add to Next Up…",
     ]);
-    expect(labels(ui.itemActions({ Id: "se", Type: "Season", SeriesId: "s" }))[0]).toBe("Play Season Next");
+    expect(labels(ui.itemActions({ Id: "se", Type: "Season", SeriesId: "s" })).slice(0, 2)).toEqual([
+      "Play Next Episode",
+      "Play Season Next",
+    ]);
+  });
+
+  describe("Play Next Episode", () => {
+    const next = (item: any) => ui.itemActions(item).find((a) => a.label === "Play Next Episode")!;
+    let nextUp: ReturnType<typeof vi.spyOn>;
+    let episodes: ReturnType<typeof vi.spyOn>;
+    let seasons: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      nextUp = vi.spyOn(api, "getSeriesNextUp").mockResolvedValue(null as any);
+      episodes = vi.spyOn(api, "getEpisodes").mockResolvedValue([]);
+      seasons = vi.spyOn(api, "getSeasons").mockResolvedValue([]);
+    });
+    afterEach(() => {
+      nextUp.mockRestore();
+      episodes.mockRestore();
+      seasons.mockRestore();
+    });
+
+    it("resumes a show at the episode the server says is next", async () => {
+      const ep = { Id: "e7", Type: "Episode" };
+      nextUp.mockResolvedValue(ep as any);
+      await next({ Id: "s", Type: "Series" }).run!();
+      expect(nextUp).toHaveBeenCalledWith("s");
+      expect(pb.playItem).toHaveBeenCalledWith(ep, { resume: true });
+      expect(seasons).not.toHaveBeenCalled();
+    });
+
+    it("starts a show nothing is next in from its first episode, past the specials", async () => {
+      seasons.mockResolvedValue([{ Id: "sp", IndexNumber: 0 }, { Id: "se1", IndexNumber: 1 }]);
+      const first = { Id: "e1", Type: "Episode" };
+      episodes.mockResolvedValue([first, { Id: "e2", Type: "Episode" }]);
+      await next({ Id: "s", Type: "Series" }).run!();
+      expect(episodes).toHaveBeenCalledWith("s", "se1");
+      expect(pb.playItem).toHaveBeenCalledWith(first, { resume: true });
+    });
+
+    it("plays a season's first unwatched episode, or its first when all are watched", async () => {
+      const eps = [
+        { Id: "e1", UserData: { Played: true } },
+        { Id: "e2", UserData: { Played: false } },
+        { Id: "e3" },
+      ];
+      episodes.mockResolvedValue(eps);
+      await next({ Id: "se", Type: "Season", SeriesId: "s" }).run!();
+      expect(episodes).toHaveBeenCalledWith("s", "se");
+      expect(nextUp).not.toHaveBeenCalled();
+      expect(pb.playItem).toHaveBeenLastCalledWith(eps[1], { resume: true });
+
+      const seen = [{ Id: "e1", UserData: { Played: true } }, { Id: "e2", UserData: { Played: true } }];
+      episodes.mockResolvedValue(seen);
+      await next({ Id: "se", Type: "Season", SeriesId: "s" }).run!();
+      expect(pb.playItem).toHaveBeenLastCalledWith(seen[0], { resume: true });
+    });
+
+    it("says so when there is nothing to play, and reports a failure", async () => {
+      await next({ Id: "s", Type: "Series" }).run!();
+      expect(pb.playItem).not.toHaveBeenCalled();
+      expect(toasts().at(-1)).toBe("Nothing to play in it yet");
+      nextUp.mockRejectedValue(new Error("server away"));
+      await next({ Id: "s", Type: "Series" }).run!();
+      expect(toasts().at(-1)).toBe("server away");
+    });
   });
 
   it("marks watched and unwatched, updating the item and telling the caller", async () => {
@@ -1291,10 +1358,26 @@ describe("itemCard", () => {
     expect(withSeries.querySelector(".card-title")!.textContent).toBe("Special");
   });
 
-  it("counts a series' unplayed episodes", () => {
-    const card = ui.itemCard({ Id: "s1", Type: "Series", Name: "Archer", UserData: { UnplayedItemCount: 4 } });
-    expect(card.querySelector(".card-sub")!.textContent).toBe("4 unplayed");
+  it("counts a series' unplayed episodes in a badge on the poster, under its year and score", () => {
+    const card = ui.itemCard({
+      Id: "s1",
+      Type: "Series",
+      Name: "Archer",
+      ProductionYear: 2009,
+      CommunityRating: 8.64,
+      RunTimeTicks: 13_200_000_000,
+      UserData: { UnplayedItemCount: 4 },
+    });
+    const badge = card.querySelector(".card-poster .badge.unplayed")!;
+    expect(badge.textContent).toBe("4");
+    expect(badge.getAttribute("title")).toBe("4 to watch");
+    // A show's line is its year and score; only a film has a length.
+    expect(card.querySelector(".card-sub")!.textContent).toBe("2009 · ★ 8.6");
     expect(card.querySelector(".play-overlay")).toBeNull();
+
+    // No badge for a show with nothing left, nor for anything that is not a show.
+    expect(ui.itemCard({ Id: "s2", Type: "Series", Name: "Done", UserData: { UnplayedItemCount: 0 } }).querySelector(".badge.unplayed")).toBeNull();
+    expect(ui.itemCard({ Id: "b1", Type: "BoxSet", Name: "Set", UserData: { UnplayedItemCount: 3 } }).querySelector(".badge.unplayed")).toBeNull();
   });
 
   it("draws a Next Up card with the season poster, two spelled-out lines, opening the show", () => {

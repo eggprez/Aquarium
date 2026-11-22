@@ -84,8 +84,28 @@ describe("renderMusic", () => {
     await music.renderMusic(content, "");
     expect(content.children).toHaveLength(1);
     expect(content.classList.contains("mu-page")).toBe(false);
-    expect(page().querySelector("h1")!.textContent).toBe("Listen Now");
+    expect(page().querySelector("h1")!.textContent).toMatch(/^Good (Morning|Afternoon|Evening)$/);
     expect(paths(/IncludeItemTypes=Playlist/)).toHaveLength(1);
+  });
+
+  it.each([
+    [4, "Good Evening"],
+    [5, "Good Morning"],
+    [11, "Good Morning"],
+    [12, "Good Afternoon"],
+    [16, "Good Afternoon"],
+    [17, "Good Evening"],
+  ])("titles Listen Now by the time of day: at %i:00, %s", async (hour, title) => {
+    await boot();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(2026, 0, 15, hour, 0, 0));
+      await music.renderMusic(content, "");
+      expect(page().querySelector("h1")!.textContent).toBe(title);
+      expect(page().querySelector(".mu-tab.active")!.textContent).toBe("Listen Now");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("routes library, songs, search and downloaded", async () => {
@@ -100,7 +120,7 @@ describe("renderMusic", () => {
     expect(page().querySelector("h1")!.textContent).toBe("Downloaded Music & Books");
     expect(page().querySelector(".mu-tab.active")!.textContent).toBe("Downloaded");
     expect(page().querySelector(".mu-tab.active")!.getAttribute("aria-current")).toBe("page");
-    expect(texts(page(), ".mu-tab")).toEqual(["Listen Now", "Playlists", "Artists", "Albums", "Songs", "Genres", "Search", "Downloaded"]);
+    expect(texts(page(), ".mu-tab")).toEqual(["Listen Now", "Playlists", "Artists", "Albums", "Songs", "Genres", "Favorites", "Search", "Downloaded"]);
   });
 });
 
@@ -940,7 +960,7 @@ describe("playlist page", () => {
   it("renames from More, and reports a rename that failed", async () => {
     await open();
     click(page().querySelector(".mu-head-buttons button[title=More]"));
-    expect(menuLabels()).toEqual(["Rename…", "Start Station", "Delete Playlist"]);
+    expect(menuLabels()).toEqual(["Rename…", "Start Station", "Download", "Delete Playlist"]);
     await pickMenu("Rename…");
     expect(dialogTitle()).toBe("Rename Playlist");
     dialogEl()!.querySelector<HTMLInputElement>("input")!.value = "Coast";

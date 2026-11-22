@@ -30,13 +30,17 @@ describe("boot", () => {
     // The player bar is built, and stays out of sight until something plays.
     expect($("player-bar").classList.contains("hidden")).toBe(true);
     expect(document.getElementById("pb-playpause")).not.toBeNull();
-    expect($("offline-pill").hasAttribute("hidden")).toBe(true);
+    expect($("offline-strip").hasAttribute("hidden")).toBe(true);
   });
 
-  it("writes the signed-in user's name and initial in the top bar", async () => {
+  it("writes the signed-in user's name, initial and server in the account control at the sidebar's foot", async () => {
     await bootShell({ config: { user_name: "scott" } });
-    expect($("topbar-user").querySelector("span")!.textContent).toBe("scott");
-    expect($("topbar-user").querySelector(".avatar")!.textContent).toBe("S");
+    const account = $("sidebar-footer").querySelector("#account-btn")!;
+    expect(account.querySelector(".account-name")!.textContent).toBe("scott");
+    expect(account.querySelector(".avatar")!.textContent).toBe("S");
+    expect(account.querySelector(".account-server")!.textContent).toBe("jf.test:8096");
+    // The top bar holds Back and search only now.
+    expect(document.getElementById("topbar-user")).toBeNull();
   });
 
   it("starts the music player, the offline-progress sync and the download queue once the shell is up", async () => {
@@ -185,7 +189,7 @@ describe("route restore on launch", () => {
     await bootShell({ ping: false });
     expect(location.hash).toBe("#/downloads");
     expect(page()).toBe("downloads");
-    expect($("offline-pill").hasAttribute("hidden")).toBe(false);
+    expect($("offline-strip").hasAttribute("hidden")).toBe(false);
   });
 
   it("goes to Downloads from an explicit #/home too while offline", async () => {
@@ -296,13 +300,24 @@ describe("router", () => {
 describe("offline pages", () => {
   it("replaces every page that needs the server with the offline screen", async () => {
     const shell = await bootShell({ ping: false });
-    for (const hash of ["#/home", "#/lib/x", "#/item/y", "#/livetv", "#/search/q", "#/favorites", "#/music/library", "#/books"]) {
+    for (const hash of ["#/home", "#/lib/x", "#/item/y", "#/livetv", "#/search/q", "#/favorites", "#/requests", "#/request/movie-1"]) {
       await shell.go(hash);
       expect($("content").querySelector(".offline-screen"), hash).not.toBeNull();
     }
-    for (const v of ["home", "library", "item", "livetv", "search", "favorites", "music", "books"] as const) {
+    for (const v of ["home", "library", "item", "livetv", "search", "favorites", "requests", "request"] as const) {
       expect(shell.views[v], v).not.toHaveBeenCalled();
     }
+  });
+
+  it("leaves music and audiobooks to their own pages, which show what is downloaded", async () => {
+    const shell = await bootShell({ ping: false });
+    await shell.go("#/music/library");
+    expect(page()).toBe("music:library");
+    await shell.go("#/music/discover");
+    expect(page()).toBe("music:discover");
+    await shell.go("#/books");
+    expect(page()).toBe("books");
+    expect($("content").querySelector(".offline-screen")).toBeNull();
   });
 
   it("still opens Downloads, Settings and downloaded music with no server", async () => {
@@ -324,17 +339,22 @@ describe("offline pages", () => {
     expect(page()).toBe("downloads");
   });
 
-  it("Retry connection says so when the server is still away, and draws the page when it is back", async () => {
+  it("Retry, in the strip above the page, says so when the server is still away, and draws the page when it is back", async () => {
     let up = false;
     const shell = await bootShell({ ping: () => up });
     await shell.go("#/favorites");
-    const retry = [...$("content").querySelectorAll("button")].find((b) => b.textContent === "Retry connection") as HTMLButtonElement;
+    // The offline screen only points at what still works; Retry is the strip's.
+    expect([...$("content").querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Go to Downloads"]);
+    const retry = $("offline-retry") as HTMLButtonElement;
+    expect($("offline-strip").hasAttribute("hidden")).toBe(false);
     click(retry);
     expect(retry.disabled).toBe(true);
     expect(retry.textContent).toBe("Checking…");
+    expect($("offline-status").textContent).toBe("Looking for your server…");
     await settle();
     expect(retry.disabled).toBe(false);
-    expect(retry.textContent).toBe("Retry connection");
+    expect(retry.textContent).toBe("Retry");
+    expect($("offline-status").textContent).toBe("Your server can't be reached");
     expect(toasts()).toContain("Still offline — server unreachable");
     expect(shell.views.favorites).not.toHaveBeenCalled();
 
@@ -343,6 +363,7 @@ describe("offline pages", () => {
     await settle();
     expect(page()).toBe("favorites");
     expect(toasts()).toContain("Back online");
+    expect($("offline-strip").hasAttribute("hidden")).toBe(true);
   });
 });
 

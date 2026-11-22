@@ -343,14 +343,18 @@ describe("playback keys", () => {
     expect(shell.api.getConfig().audio_delay).toBe(-0.05);
   });
 
-  it("i and Ctrl+I open the stream info", async () => {
+  it("i and Ctrl+I open the Info card", async () => {
     await startPlaying();
     key("i");
-    expect(document.querySelector(".pb-panel")!.getAttribute("data-panel")).toBe("info");
+    expect(document.querySelector("#player-cards .pb-card")!.getAttribute("data-card")).toBe("info");
+    expect($("pb-info").classList.contains("on")).toBe(true);
     key("I", { ctrlKey: true });
-    expect(document.querySelector(".pb-panel")).toBeNull();
+    // The pill goes dark at once; the card leaves once the picture is back over its band.
+    await flush();
+    expect(document.querySelector(".pb-card")).toBeNull();
+    expect($("pb-info").classList.contains("on")).toBe(false);
     key("i", { ctrlKey: true });
-    expect(document.querySelector(".pb-panel")).not.toBeNull();
+    expect(document.querySelector("#player-cards .pb-card[data-card=info]")).not.toBeNull();
   });
 
   it("c turns subtitles off, then back on with the same track", async () => {
@@ -456,7 +460,7 @@ describe("input relayed from the picture", () => {
     input("aquarium-key", "audio-reset");
     expect(propSets("audio-delay")).toEqual([0.05, 0, 0.05, 0]);
     input("aquarium-key", "info");
-    expect(document.querySelector(".pb-panel[data-panel=info]")).not.toBeNull();
+    expect(document.querySelector("#player-cards .pb-card[data-card=info]")).not.toBeNull();
     input("aquarium-key", "shortcuts");
     expect(document.querySelector(".dialog h2")!.textContent).toBe("Keyboard shortcuts");
     input("aquarium-key", "shortcuts");
@@ -504,7 +508,22 @@ describe("input relayed from the picture", () => {
     input("aquarium-ctl", "skip");
     expect(invokeCalls("player_seek").at(-1)!.args).toEqual({ seconds: 90, absolute: true });
     input("aquarium-ctl", "info");
-    expect(document.querySelector(".pb-panel[data-panel=info]")).not.toBeNull();
+    expect(document.querySelector("#player-cards .pb-card[data-card=info]")).not.toBeNull();
+    // The entries that open a card or a strip open the bar's own.
+    input("aquarium-ctl", "quality");
+    expect(document.querySelector("#player-cards .pb-card")!.getAttribute("data-card")).toBe("quality");
+    input("aquarium-ctl", "more");
+    expect(document.querySelector("#player-cards .pb-card")!.getAttribute("data-card")).toBe("more");
+    input("aquarium-ctl", "upnext");
+    expect(document.querySelector("#player-bar .pb-panel")!.getAttribute("data-panel")).toBe("episodes");
+    input("aquarium-ctl", "upnext");
+    input("aquarium-ctl", "stop-after");
+    expect(text("pb-state")).toBe("Stopping after this episode");
+    input("aquarium-ctl", "stop-after");
+    expect(text("pb-state")).toBe("Autoplay back on");
+    input("aquarium-ctl", "fill");
+    input("aquarium-ctl", "fill");
+    expect(propSets("panscan")).toEqual([1, 0]);
     input("aquarium-ctl", "fullscreen");
     await flush();
     expect(document.body.classList.contains("video-fs")).toBe(true);
@@ -549,7 +568,12 @@ describe("input relayed from the picture", () => {
       "Audio",
       "Speed",
       "Chapters",
-      "Stream info",
+      "Quality",
+      "Up Next",
+      "Sleep timer",
+      "Stop after this episode",
+      "Fill screen",
+      "Info",
       "Fullscreen",
       "Picture in picture",
       "Stop",
@@ -563,6 +587,14 @@ describe("input relayed from the picture", () => {
     expect(menu.items.find((i: any) => i.title === "Speed").hint).toBe("1.5×");
     expect(menu.items.find((i: any) => i.title === "Chapters").items.map((i: any) => i.title)).toEqual(["Chapter 1", "Chapter 2"]);
     expect(menu.items.find((i: any) => i.title === "Play next").hint).toBe("Archer · Season 1: Episode 3 · The Third One");
+    const entry = (title: string) => menu.items.find((i: any) => i.title === title);
+    // What the Quality pill says, and how many episodes follow this one.
+    expect([entry("Quality").hint, entry("Quality").value]).toEqual(["Auto", "script-message aquarium-ctl quality"]);
+    expect([entry("Up Next").hint, entry("Up Next").value]).toEqual(["2", "script-message aquarium-ctl upnext"]);
+    expect([entry("Sleep timer").hint, entry("Sleep timer").value]).toEqual(["", "script-message aquarium-ctl more"]);
+    expect([entry("Stop after this episode").active, entry("Stop after this episode").value]).toEqual([false, "script-message aquarium-ctl stop-after"]);
+    expect([entry("Fill screen").active, entry("Fill screen").value]).toEqual([false, "script-message aquarium-ctl fill"]);
+    expect([entry("Info").hint, entry("Info").value]).toEqual(["i", "script-message aquarium-ctl info"]);
 
     // Paused, one audio track, no chapters, no segment, in fullscreen.
     shell.status({ paused: true, position: 200, chapters: [], speed: 1 });

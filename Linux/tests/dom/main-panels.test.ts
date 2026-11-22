@@ -1,5 +1,7 @@
-// src/main.ts: the panels that open inside the player bar (the only surface
-// the embedded video leaves), each opened from its button.
+// src/main.ts: what the player bar's pills open. A card (Info, Audio,
+// Subtitles, Quality, More) is drawn in `#player-cards`, the band above the
+// bar that the backend clips the video off; a strip (Up Next, Channels,
+// Chapters, Picture, the delays) is drawn inside the bar itself.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emitEvent, flush, invokeCalls, onInvoke } from "../helpers/tauri";
 import {
@@ -24,6 +26,9 @@ import {
 afterEach(teardownShell);
 
 const $ = (id: string): HTMLElement => document.getElementById(id)!;
+const texts = (root: ParentNode | null, sel: string): string[] => [...(root?.querySelectorAll(sel) ?? [])].map((n) => n.textContent ?? "");
+
+// ---------- Strips, inside the bar ----------
 
 function open(btn: string): HTMLElement {
   click($(btn));
@@ -35,101 +40,303 @@ function pick(label: string): void {
 }
 
 function notes(): string[] {
-  return [...(panel()?.querySelectorAll(".pb-panel-note") ?? [])].map((n) => n.textContent ?? "");
+  return texts(panel(), ".pb-panel-note");
 }
 
 function primaries(): string[] {
-  return [...(panel()?.querySelectorAll("button.primary") ?? [])].map((b) => b.textContent ?? "");
+  return texts(panel(), "button.primary");
 }
 
-describe("panel frame", () => {
-  it("opens one panel at a time inside the bar, with its label and a Close", async () => {
+// ---------- Cards, in the band above the bar ----------
+
+function card(): HTMLElement | null {
+  return document.querySelector("#player-cards .pb-card");
+}
+
+function openCard(btn: string): HTMLElement {
+  click($(btn));
+  return card()!;
+}
+
+/** Every row as [title, detail]. */
+function rows(): Array<[string, string]> {
+  return [...(card()?.querySelectorAll(".pb-card-row") ?? [])].map((r) => [
+    r.querySelector(".pb-card-title")!.textContent ?? "",
+    r.querySelector(".pb-card-detail")?.textContent ?? "",
+  ]);
+}
+
+function rowTitles(): string[] {
+  return rows().map((r) => r[0]);
+}
+
+function row(title: string): HTMLButtonElement {
+  const hit = [...card()!.querySelectorAll<HTMLButtonElement>(".pb-card-row")].find((r) => r.querySelector(".pb-card-title")!.textContent === title);
+  if (!hit) throw new Error(`no row titled "${title}"`);
+  return hit;
+}
+
+function pickRow(title: string): void {
+  click(row(title));
+}
+
+/** The ticked rows' titles; each carries the tick as well as the class. */
+function ticked(): string[] {
+  const sel = [...(card()?.querySelectorAll(".pb-card-row.selected") ?? [])];
+  for (const r of sel) expect(r.querySelector(".pb-card-tick")).not.toBeNull();
+  expect(card()?.querySelectorAll(".pb-card-tick").length ?? 0).toBe(sel.length);
+  return sel.map((r) => r.querySelector(".pb-card-title")!.textContent ?? "");
+}
+
+function cardNotes(): string[] {
+  return texts(card(), ".pb-card-note");
+}
+
+function chips(): string[] {
+  return texts(card(), ".pb-chip");
+}
+
+function chipsOn(): string[] {
+  return texts(card(), ".pb-chip.on");
+}
+
+function pickChip(label: string): void {
+  click(buttonNamed(label, card()!));
+}
+
+/** A strip reached through a row of the More card. */
+function openFromMore(title: string): HTMLElement {
+  openCard("pb-more");
+  pickRow(title);
+  return panel()!;
+}
+
+/** The pills lit as open. */
+function litPills(): string[] {
+  return [...$("player-bar").querySelectorAll(".pb-pill.on")].map((p) => p.id).filter((id) => id !== "pb-fill");
+}
+
+describe("card and strip frames", () => {
+  it("opens one card at a time in the band above the bar, with its title and a Close, and cuts the picture off the band", async () => {
     await startPlaying();
-    const p = open("pb-subs");
+    // jsdom lays nothing out; give the band a height for the backend to cut.
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const height = this.id === "player-cards" ? 300.2 : 0;
+      return { left: 0, top: 0, right: 0, bottom: height, width: 0, height, x: 0, y: 0, toJSON() {} } as DOMRect;
+    });
+    try {
+      const band = () => invokeCalls("player_set_card_band").map((c) => c.args.px);
+      const c = openCard("pb-subs");
+      // Outside the bar, which clips its content.
+      expect(c.parentElement).toBe($("player-cards"));
+      expect($("player-cards").parentElement).toBe(document.body);
+      expect($("player-bar").contains(c)).toBe(false);
+      expect($("player-cards").classList.contains("hidden")).toBe(false);
+      expect(c.dataset.card).toBe("subs");
+      expect(c.getAttribute("role")).toBe("dialog");
+      expect(c.getAttribute("aria-label")).toBe("Subtitles");
+      expect(c.querySelector(".pb-card-head h4")!.textContent).toBe("Subtitles");
+      expect(litPills()).toEqual(["pb-subs"]);
+      expect(band()).toEqual([301]);
+      openCard("pb-audio");
+      expect(document.querySelectorAll(".pb-card")).toHaveLength(1);
+      expect(card()!.dataset.card).toBe("audio");
+      expect(litPills()).toEqual(["pb-audio"]);
+      // One card for another: the band stays cut.
+      expect(band()).toEqual([301]);
+      // The same pill again closes it: the picture comes back over the band
+      // first, and the card is taken away once it has.
+      click($("pb-audio"));
+      expect(litPills()).toEqual([]);
+      expect(band()).toEqual([301, 0]);
+      await flush();
+      expect(card()).toBeNull();
+      expect($("player-cards").classList.contains("hidden")).toBe(true);
+      openCard("pb-audio");
+      expect(band()).toEqual([301, 0, 301]);
+      click(card()!.querySelector(".pb-card-close")!);
+      await flush();
+      expect(card()).toBeNull();
+      expect(band()).toEqual([301, 0, 301, 0]);
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it("opens a strip inside the bar, with its label and a Close, and never a card and a strip together", async () => {
+    await startPlaying();
+    const p = open("pb-episodes");
     expect(p.parentElement).toBe($("player-bar"));
-    expect(p.dataset.panel).toBe("subs");
-    expect(p.querySelector(".pb-panel-label")!.textContent).toBe("Subtitles");
-    open("pb-audio");
-    expect(document.querySelectorAll(".pb-panel")).toHaveLength(1);
-    expect(panel()!.dataset.panel).toBe("audio");
-    // The same button again closes it.
-    click($("pb-audio"));
+    expect(p.dataset.panel).toBe("episodes");
+    expect(p.querySelector(".pb-panel-label")!.textContent).toBe("Up next");
+    expect(litPills()).toEqual(["pb-episodes"]);
+    // A card closes the strip.
+    openCard("pb-audio");
     expect(panel()).toBeNull();
-    open("pb-audio");
+    expect(litPills()).toEqual(["pb-audio"]);
+    // And a strip the card.
+    open("pb-episodes");
+    expect(litPills()).toEqual(["pb-episodes"]);
+    await flush();
+    expect(card()).toBeNull();
+    expect(document.querySelectorAll(".pb-panel")).toHaveLength(1);
+    // The same pill again closes it.
+    click($("pb-episodes"));
+    expect(panel()).toBeNull();
+    open("pb-episodes");
     click(panel()!.querySelector(".pb-panel-close")!);
     expect(panel()).toBeNull();
+    expect(litPills()).toEqual([]);
+  });
+
+  it("lights the More pill for the strips its card leads to", async () => {
+    await startPlaying();
+    openCard("pb-more");
+    expect(litPills()).toEqual(["pb-more"]);
+    pickRow("Picture and zoom");
+    expect(panel()!.dataset.panel).toBe("picture");
+    expect(litPills()).toEqual(["pb-more"]);
+    await flush();
+    expect(card()).toBeNull();
+    click(panel()!.querySelector(".pb-panel-close")!);
+    expect(litPills()).toEqual([]);
   });
 });
 
 describe("audio and subtitle tracks", () => {
-  it("lists each audio track by title, language or number, the playing one lit, and switches", async () => {
+  it("lists each audio track by title, language or number with what it is underneath, the playing one ticked, and switches", async () => {
     await startPlaying();
     sendTracks([
-      { id: 1, type: "audio", lang: "eng", selected: true },
-      { id: 2, type: "audio", lang: "jpn", title: "Commentary" },
-      { id: 3, type: "audio" },
-      { id: 4, type: "audio", lang: "xx" },
-      { id: 5, type: "audio", lang: "123" },
+      { id: 1, type: "audio", lang: "eng", selected: true, codec: "eac3", "demux-channel-count": 6, default: true },
+      { id: 2, type: "audio", lang: "jpn", title: "Commentary", codec: "aac", "demux-channel-count": 2 },
+      { id: 3, type: "audio", "demux-channel-count": 1, external: true },
+      { id: 4, type: "audio", lang: "xx", "audio-channels": 8 },
+      { id: 5, type: "audio", lang: "123", "demux-channel-count": 3, forced: true },
       { id: 6, type: "audio", lang: "und" },
     ]);
-    open("pb-audio");
-    const labels = [...panel()!.querySelectorAll("button:not(.pb-panel-close)")].map((b) => b.textContent);
+    openCard("pb-audio");
     // A tag Intl can't name (or "und", which names nothing) is shown as it
-    // came; a track with no tag at all gets its number.
-    expect(labels).toEqual(["English", "Commentary", "Track 3", "xx", "123", "und"]);
-    expect(primaries()).toEqual(["English"]);
-    pick("Commentary");
-    expect(panel()).toBeNull();
+    // came; a track with no tag at all gets its number. A named track says
+    // its language underneath; an unnamed one already has.
+    expect(rows()).toEqual([
+      ["English", "EAC3 · 5.1 · Default"],
+      ["Commentary", "Japanese · AAC · Stereo"],
+      ["Track 3", "Mono · External"],
+      ["xx", "7.1"],
+      ["123", "3 ch · Forced"],
+      ["und", ""],
+    ]);
+    expect(ticked()).toEqual(["English"]);
+    pickRow("Commentary");
     expect(invokeCalls("player_set_track").at(-1)!.args).toEqual({ kind: "audio", track: 2 });
+    await flush();
+    expect(card()).toBeNull();
   });
 
   it("says when no audio tracks have been reported", async () => {
     await startPlaying();
-    open("pb-audio");
-    expect(notes()).toEqual(["No audio tracks reported yet"]);
+    openCard("pb-audio");
+    expect(cardNotes()).toEqual(["No audio tracks reported yet."]);
+    expect(rows()).toEqual([]);
   });
 
   it("toasts a failed switch", async () => {
     await startPlaying();
     sendTracks([{ id: 1, type: "audio", lang: "eng" }, { id: 3, type: "sub", lang: "eng" }]);
     onInvoke("player_set_track", () => Promise.reject("no player"));
-    open("pb-audio");
-    pick("English");
-    open("pb-subs");
-    pick("English");
-    open("pb-subs");
-    pick("Off");
+    openCard("pb-audio");
+    pickRow("English");
+    openCard("pb-subs");
+    pickRow("English");
+    openCard("pb-subs");
+    pickRow("Off");
     await flush();
     expect(toasts()).toEqual(["no player", "no player", "no player"]);
   });
 
-  it("lists subtitles with Off first, lit when none is on", async () => {
+  it("lists subtitles with Off first, ticked when none is on", async () => {
     await startPlaying();
-    sendTracks([{ id: 3, type: "sub", lang: "fre" }, { id: 4, type: "sub", title: "Signs" }]);
-    open("pb-subs");
-    expect(primaries()).toEqual(["Off"]);
-    pick("Signs");
+    sendTracks([{ id: 3, type: "sub", lang: "fre", codec: "ass", forced: true }, { id: 4, type: "sub", title: "Signs" }]);
+    openCard("pb-subs");
+    expect(rows()).toEqual([["Off", ""], ["French", "ASS · Forced"], ["Signs", ""]]);
+    expect(ticked()).toEqual(["Off"]);
+    pickRow("Signs");
     expect(invokeCalls("player_set_track").at(-1)!.args).toEqual({ kind: "sub", track: 4 });
     sendTracks([{ id: 3, type: "sub", lang: "fre", selected: true }]);
-    open("pb-subs");
-    expect(primaries()).toEqual(["French"]);
-    pick("Off");
+    openCard("pb-subs");
+    expect(ticked()).toEqual(["French"]);
+    pickRow("Off");
     expect(invokeCalls("player_set_track").at(-1)!.args).toEqual({ kind: "sub", track: "no" });
   });
 
   it("says when the file has no subtitles, still offering Off", async () => {
     await startPlaying();
-    open("pb-subs");
-    expect(notes()).toEqual(["No subtitles for this file"]);
-    expect(primaries()).toEqual(["Off"]);
+    openCard("pb-subs");
+    expect(cardNotes()).toEqual(["No subtitles for this file."]);
+    expect(rowTitles()).toEqual(["Off"]);
+    expect(ticked()).toEqual(["Off"]);
+  });
+});
+
+describe("the More card", () => {
+  it("gathers speed, the sleep timer, stopping after this episode and the ways into the strips", async () => {
+    await startPlaying({}, { duration: 1500, chapters: [{ time: 300, title: "Middle" }] });
+    const c = openCard("pb-more");
+    expect(c.querySelector(".pb-card-head h4")!.textContent).toBe("More");
+    expect(texts(c, ".pb-card-section")).toEqual(["Speed", "Sleep timer", "This player"]);
+    expect(chips()).toEqual(["0.5×", "0.75×", "Normal", "1.25×", "1.5×", "1.75×", "2×", "15 min", "30 min", "60 min", "90 min"]);
+    expect(rows()).toEqual([
+      ["Stop after this episode", "Otherwise next: Archer · Season 1: Episode 3 · The Third One"],
+      ["Chapters", "2 in this file"],
+      ["Picture and zoom", "Brightness, contrast, saturation"],
+      ["Subtitle and audio delay", ""],
+    ]);
+  });
+
+  it("leaves Chapters out for a file with none, and says what stopping means with nothing next", async () => {
+    await startPlaying({}, {}, MOVIE);
+    openCard("pb-more");
+    expect(rows()).toEqual([
+      ["Stop after this episode", "Play this one to the end, then stop"],
+      ["Picture and zoom", "Brightness, contrast, saturation"],
+      ["Subtitle and audio delay", ""],
+    ]);
+  });
+
+  it("offers a channel the sleep timer, the line-up and the picture, and nothing that needs a timeline", async () => {
+    const shell = await bootPlayer();
+    await shell.playChannel(CHANNEL);
+    const c = openCard("pb-more");
+    expect(texts(c, ".pb-card-section")).toEqual(["Sleep timer", "This player"]);
+    expect(chips()).toEqual(["15 min", "30 min", "60 min", "90 min"]);
+    expect(rows()).toEqual([
+      ["Change channel", "Page Up and Page Down step through them"],
+      ["Picture and zoom", "Brightness, contrast, saturation"],
+    ]);
+    pickRow("Change channel");
+    expect(panel()!.dataset.panel).toBe("channels");
   });
 });
 
 describe("speed and delays", () => {
+  it("sets speed from the More card's chips, the one in force lit, in step with mpv", async () => {
+    const shell = await startPlaying();
+    shell.status({ speed: 1 });
+    openCard("pb-more");
+    expect(chipsOn()).toEqual(["Normal"]);
+    pickChip("1.5×");
+    expect(propSets("speed")).toEqual([1.5]);
+    // A chip leaves the card open, and follows what mpv says.
+    expect(card()!.dataset.card).toBe("more");
+    shell.status({ speed: 1.5 });
+    expect(chipsOn()).toEqual(["1.5×"]);
+  });
+
   it("sets speed, steps subtitle and audio delay, and keeps its readouts in step with mpv", async () => {
     const shell = await startPlaying();
     shell.status({ speed: 1, sub_delay: 0, audio_delay: 0 });
-    const p = open("pb-tune");
+    const p = openFromMore("Subtitle and audio delay");
+    expect(p.dataset.panel).toBe("tune");
     expect(p.classList.contains("pb-tune")).toBe(true);
     expect(primaries()).toEqual(["Normal"]);
     pick("1.5×");
@@ -172,7 +379,7 @@ describe("speed and delays", () => {
 describe("picture", () => {
   it("adjusts each control live from where Settings left it, and resets everything", async () => {
     await startPlaying({ config: { pic_brightness: 12, pic_gamma: "junk", video_zoom: 0.15 } });
-    const p = open("pb-picture");
+    const p = openFromMore("Picture and zoom");
     const slider = (label: string) => p.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
     const valueOf = (label: string) => (slider(label).nextElementSibling as HTMLElement).textContent;
     expect(slider("Brightness").value).toBe("12");
@@ -202,7 +409,7 @@ describe("picture", () => {
 
   it("starts from zero when the zoom in the config is not a number", async () => {
     await startPlaying({ config: { video_zoom: "x" } });
-    const p = open("pb-picture");
+    const p = openFromMore("Picture and zoom");
     expect(p.querySelector<HTMLInputElement>('input[aria-label="Zoom"]')!.value).toBe("0");
   });
 });
@@ -210,45 +417,56 @@ describe("picture", () => {
 describe("sleep", () => {
   it("stops at the end of this episode, and can be told not to", async () => {
     const shell = await startPlaying();
-    open("pb-sleep");
-    expect(primaries()).toEqual([]);
-    pick("End of episode");
+    openCard("pb-more");
+    expect(ticked()).toEqual([]);
+    pickRow("Stop after this episode");
     expect(shell.playback.isAutoplayCancelled()).toBe(true);
-    // The panel is rebuilt to show it.
-    expect(primaries()).toEqual(["End of episode"]);
-    pick("End of episode");
+    // The card stays, redrawn to show it.
+    expect(card()!.dataset.card).toBe("more");
+    expect(ticked()).toEqual(["Stop after this episode"]);
+    pickRow("Stop after this episode");
     expect(shell.playback.isAutoplayCancelled()).toBe(false);
-    expect(primaries()).toEqual([]);
+    expect(ticked()).toEqual([]);
+    await flush();
+    expect(card()!.dataset.card).toBe("more");
   });
 
   it("sets a timer, says how long is left, and cancels it", async () => {
     const shell = await startPlaying();
     fakeTimers();
-    open("pb-sleep");
-    pick("15m");
-    expect(toasts()).toContain("Playback will stop in 15 minutes");
-    expect(notes()).toEqual(["Stopping in 15 minutes"]);
+    openCard("pb-more");
+    pickChip("15 min");
+    expect(shell.playback.sleepDeadline()).not.toBeNull();
+    // Said in the bar: a toast would be on the page, under the picture.
+    expect($("pb-state").textContent).toBe("Stopping in 15 min");
+    expect(toasts()).toEqual([]);
+    // The card stays, the durations giving way to the timer that is running.
+    expect(rows()[0]).toEqual(["Stopping in 15 min", "Click to cancel"]);
+    expect(ticked()).toEqual(["Stopping in 15 min"]);
+    expect(chips()).not.toContain("15 min");
     vi.advanceTimersByTime(14.5 * 60_000);
-    click($("pb-sleep"));
-    open("pb-sleep");
-    expect(notes()).toEqual(["Stopping in under a minute"]);
-    pick("Cancel");
-    expect(toasts()).toContain("Sleep timer cancelled");
-    expect(notes()).toEqual([]);
+    click($("pb-more"));
+    openCard("pb-more");
+    expect(rows()[0]).toEqual(["Stopping in under a minute", "Click to cancel"]);
+    pickRow("Stopping in under a minute");
     expect(shell.playback.sleepDeadline()).toBeNull();
+    expect(card()!.dataset.card).toBe("more");
+    expect(ticked()).toEqual([]);
+    expect(chips().slice(-4)).toEqual(["15 min", "30 min", "60 min", "90 min"]);
   });
 });
 
 describe("chapters", () => {
-  it("says when the file has none", async () => {
+  it("is not offered for a file that has none", async () => {
     await startPlaying();
-    open("pb-chapters-btn");
-    expect(notes()).toEqual(["This file has no chapters"]);
+    openCard("pb-more");
+    expect(rowTitles()).not.toContain("Chapters");
   });
 
   it("lists the chapters from the start, lights the one playing, and jumps to one", async () => {
     const shell = await startPlaying({}, { position: 400, duration: 1500, chapters: [{ time: 300, title: "Middle" }, { time: 900, title: "" }] });
-    const p = open("pb-chapters-btn");
+    const p = openFromMore("Chapters");
+    expect(p.dataset.panel).toBe("chapters");
     const buttons = [...p.querySelectorAll<HTMLButtonElement>("button.pb-chapter")];
     expect(buttons.map((b) => b.textContent)).toEqual(["0:00Chapter 1", "5:00Middle", "15:00Chapter 3"]);
     expect(primaries()).toEqual(["5:00Middle"]);
@@ -281,22 +499,34 @@ describe("stream info", () => {
 
   function cells(): Record<string, string> {
     const out: Record<string, string> = {};
-    for (const c of panel()!.querySelectorAll(".pb-info-cell")) {
-      out[c.querySelector(".pb-info-label")!.textContent!] = c.querySelector(".pb-info-value")!.textContent!;
+    for (const label of card()!.querySelectorAll(".pb-info-grid .pb-info-label")) {
+      const value = label.nextElementSibling!;
+      expect(value.classList.contains("pb-info-value")).toBe(true);
+      out[label.textContent!] = value.textContent!;
     }
     return out;
   }
 
   async function infoFor(props: Record<string, any>, status: Record<string, any> = {}): Promise<Record<string, string>> {
     await startPlaying({ invokes: { player_get_properties: props } }, status);
-    open("pb-info");
+    openCard("pb-info");
     await settle();
     return cells();
   }
 
-  it("lists what the stream is and how it is going", async () => {
-    const c = await infoFor(PROPS, { dropped_frames: 3 });
+  it("lists how it is coming down, what is on the server and how it is playing", async () => {
+    const c = await infoFor(PROPS, { dropped_frames: 3, position: 100, duration: 1500, chapters: [{ time: 60, title: "Act one" }] });
+    expect(card()!.classList.contains("wide")).toBe(true);
+    expect(texts(card(), ".pb-card-section")).toEqual(["Coming down", "On the server", "Playing"]);
+    expect(Object.keys(c)).toEqual([
+      "Delivery", "Bitrate", "Buffer",
+      "Source", "Container",
+      "Video", "Audio", "Resolution", "Decoder", "Engine", "Stalls", "Dropped frames", "Position", "Chapter", "Sleep timer",
+    ]);
     expect(c).toMatchObject({
+      Position: "1:40 · 23:20 left",
+      Chapter: "Act one",
+      "Sleep timer": "Off",
       Container: "mkv",
       Video: "HEVC · 23.976 fps",
       Audio: "EAC3 · 6 ch · 48 kHz",
@@ -315,7 +545,7 @@ describe("stream info", () => {
     const shell = await startPlaying({ invokes: { player_get_properties: () => props } });
     emitEvent("player-stall", {});
     emitEvent("player-stall", {});
-    open("pb-info");
+    openCard("pb-info");
     await settle();
     expect(cells().Stalls).toBe("2");
     props = { ...PROPS, "hwdec-current": "no" };
@@ -342,15 +572,38 @@ describe("stream info", () => {
   it("says what mpv is when the backend cannot", async () => {
     const shell = await startPlaying({ invokes: { player_get_properties: () => Promise.reject(new Error("no player")), app_info: {} } });
     void shell;
-    open("pb-info");
+    openCard("pb-info");
     await settle();
     expect(cells().Engine).toBe("mpv");
+  });
+
+  it("leads with what is playing: the episode under its show, and its facts", async () => {
+    const item = { ...EPISODE, ProductionYear: 2009, OfficialRating: "TV-MA", CommunityRating: 8.64, Genres: ["Comedy", "Action", "Spy", "Animation"], Overview: "Archer goes rogue." };
+    await startPlaying({ invokes: { player_get_properties: {} } }, {}, item);
+    const c = openCard("pb-info");
+    expect(c.querySelector(".pb-info-top h3")!.textContent).toBe("The Second One");
+    expect(c.querySelector(".pb-info-kicker")!.textContent).toBe("Archer · S1 E2");
+    expect(c.querySelector(".pb-info-facts")!.textContent).toBe("2009 · 25 min · TV-MA · ★ 8.6 · Comedy, Action, Spy");
+    expect(c.querySelector(".pb-info-overview")!.textContent).toBe("Archer goes rogue.");
+  });
+
+  it("says what the sleep timer is doing", async () => {
+    const shell = await startPlaying({ invokes: { player_get_properties: {} } });
+    shell.playback.cancelAutoplay();
+    openCard("pb-info");
+    await settle();
+    expect(cells()["Sleep timer"]).toBe("Stopping after this episode");
+    shell.playback.setSleepTimer(30);
+    shell.status();
+    await settle();
+    expect(cells()["Sleep timer"]).toBe("Stopping in 30 min");
+    shell.playback.cancelSleepTimer();
   });
 
   it("names direct play and the source's own bitrate", async () => {
     const c = await infoFor({});
     expect(c.Delivery).toBe("Direct play");
-    expect(c["On the server"]).toBe("8.0 Mbps source");
+    expect(c.Source).toBe("8.0 Mbps");
     expect(c.Container).toBe("mkv");
   });
 
@@ -370,13 +623,13 @@ describe("stream info", () => {
     let reasons = "VideoCodecNotSupported,AudioCodecNotSupported";
     const shell = await bootPlayer({ routes: [[/\/PlaybackInfo/, () => tx(reasons)]] });
     await shell.play(EPISODE, {}, { maxBitrate: 5_000_000 });
-    open("pb-info");
+    openCard("pb-info");
     await settle();
     expect(cells().Delivery).toBe("Transcode · capped at 5.0 Mbps (VideoCodecNotSupported, AudioCodecNotSupported)");
     reasons = "ContainerNotSupported";
     await shell.play(EPISODE);
     click($("pb-info"));
-    open("pb-info");
+    openCard("pb-info");
     await settle();
     expect(cells().Delivery).toBe("Remux (ContainerNotSupported)");
   });
@@ -384,26 +637,30 @@ describe("stream info", () => {
   it("says a download plays from this device", async () => {
     const shell = await bootPlayer();
     await shell.playLocal({ item_id: "dl-1", path: "/v/a.mkv", title: "A" });
-    open("pb-info");
+    openCard("pb-info");
     await settle();
     expect(cells().Delivery).toBe("Playing from this device");
-    expect(cells()["On the server"]).toBe("Downloaded file");
+    expect(cells().Source).toBe("Downloaded file");
   });
 
-  it("has nothing to say about delivery between files", async () => {
+  it("has nothing to say about delivery between files: the card goes with the bar", async () => {
+    onInvoke("player_get_properties", {});
     const shell = await startPlaying();
+    openCard("pb-info");
+    await settle();
     // The status that ends one file and the bar's own next draw.
     emitEvent("player-status", { active: false, requested_stop: true });
     await settle();
     void shell;
     expect(document.querySelector(".pb-panel")).toBeNull();
+    expect(card()).toBeNull();
   });
 
   it("says a custom channel comes straight from the playlist", async () => {
     onInvoke("player_get_properties", {});
     const shell = await bootPlayer();
     await shell.playChannel(CHANNEL);
-    open("pb-info");
+    openCard("pb-info");
     await settle();
     expect(cells().Delivery).toBe("Live, straight from the playlist");
   });
@@ -413,19 +670,23 @@ describe("stream info", () => {
     const shell = await startPlaying();
     emitEvent("player-stall", {});
     await shell.play(MOVIE);
-    open("pb-info");
+    openCard("pb-info");
     await settle();
     expect(cells().Stalls).toBe("0");
   });
 
-  it("stops refreshing once the panel is closed", async () => {
+  it("stops refreshing once the card is closed", async () => {
     onInvoke("player_get_properties", {});
     const shell = await startPlaying();
-    const p = open("pb-info");
+    openCard("pb-info");
+    await settle();
+    // Open, it asks again with every status.
+    const first = invokeCalls("player_get_properties").length;
+    shell.status();
     await settle();
     const n = invokeCalls("player_get_properties").length;
+    expect(n).toBe(first + 1);
     click($("pb-info"));
-    (p as any).sync?.({});
     shell.status();
     await settle();
     expect(invokeCalls("player_get_properties").length).toBe(n);
@@ -433,44 +694,81 @@ describe("stream info", () => {
 });
 
 describe("quality", () => {
-  it("lists the rungs with the playing one lit, and switches to a capped stream", async () => {
+  const pill = (): string => $("pb-quality").querySelector(".pb-pill-label")!.textContent ?? "";
+
+  it("lists Auto, then Direct and the rungs, with what is playing said and ticked, and switches to a capped stream", async () => {
     const shell = await startPlaying();
-    open("pb-quality");
-    expect(primaries()).toEqual(["Direct Play (original)", "Auto"]);
+    openCard("pb-quality");
+    // Adapting is on to begin with: Auto holds the tick, and says what it
+    // is playing; the rung itself says so too, unticked.
+    expect(rows()).toEqual([
+      ["Auto", "Playing now · Direct Play (original)"],
+      ["Direct (original)", "Playing now"],
+      ["35 Mbps · 4K", ""],
+      ["18 Mbps · 1440p", ""],
+      ["10 Mbps · 1080p", ""],
+      ["5 Mbps · 720p", ""],
+      ["2.5 Mbps · 480p", ""],
+    ]);
+    expect(ticked()).toEqual(["Auto"]);
+    expect(cardNotes()).toHaveLength(1);
+    expect(cardNotes()[0]).toMatch(/^Auto drops to a smaller stream/);
+    expect(pill()).toBe("Auto");
     const before = invokeCalls("player_play").length;
-    pick("5 Mbps · 720p");
-    expect(panel()).toBeNull();
+    pickRow("5 Mbps · 720p");
     await settle();
+    expect(card()).toBeNull();
     expect(invokeCalls("player_play").length).toBe(before + 1);
     expect(shell.playback.getQualityState()!.current).toBe(5_000_000);
-    open("pb-quality");
-    expect(primaries()).toEqual(["5 Mbps · 720p", "Auto"]);
+    // A rung picked by hand is a choice to stay on it.
+    expect(shell.playback.isAdaptiveEnabled()).toBe(false);
+    shell.status();
+    expect(pill()).toBe("720p");
+    openCard("pb-quality");
+    expect(ticked()).toEqual(["5 Mbps · 720p"]);
+    expect(rows().filter((r) => r[1])).toEqual([
+      ["Auto", "Moves between the rungs as the connection allows"],
+      ["5 Mbps · 720p", "Playing now · transcoding"],
+    ]);
   });
 
-  it("toggles adapting to the connection", async () => {
+  it("turns adapting off for a rung picked by hand, and back on from Auto", async () => {
     const shell = await startPlaying();
-    open("pb-quality");
-    pick("Auto");
-    expect(shell.playback.isAdaptiveEnabled()).toBe(false);
-    expect(toasts()).toContain("Quality stays where you set it");
-    expect(primaries()).toEqual(["Direct Play (original)"]);
-    pick("Auto");
     expect(shell.playback.isAdaptiveEnabled()).toBe(true);
-    expect(toasts()).toContain("Quality will adapt to the connection");
+    openCard("pb-quality");
+    // The rung already playing: nothing restarts, it just stays there now.
+    const n = invokeCalls("player_play").length;
+    pickRow("Direct (original)");
+    await settle();
+    expect(shell.playback.isAdaptiveEnabled()).toBe(false);
+    expect(invokeCalls("player_play").length).toBe(n);
+    shell.status();
+    expect(pill()).toBe("Direct");
+    openCard("pb-quality");
+    expect(ticked()).toEqual(["Direct (original)"]);
+    pickRow("Auto");
+    expect(shell.playback.isAdaptiveEnabled()).toBe(true);
+    // Said in the bar: a toast would be on the page, under the picture.
+    expect($("pb-state").textContent).toBe("Quality: Auto");
+    expect(toasts()).toEqual([]);
+    expect(invokeCalls("player_play").length).toBe(n);
+    openCard("pb-quality");
+    expect(ticked()).toEqual(["Auto"]);
   });
 
   it("says a live channel's quality is the channel's", async () => {
     const shell = await bootPlayer();
     await shell.playChannel(CHANNEL);
-    open("pb-quality");
-    expect(notes()).toEqual(["Live TV — quality is set by the channel"]);
+    openCard("pb-quality");
+    expect(cardNotes()).toEqual(["Live TV — quality is set by the channel."]);
+    expect(rows()).toEqual([]);
   });
 
   it("toasts a stream that would not start", async () => {
     await startPlaying();
     onInvoke("player_play", () => Promise.reject(new Error("mpv gone")));
-    open("pb-quality");
-    pick("5 Mbps · 720p");
+    openCard("pb-quality");
+    pickRow("5 Mbps · 720p");
     await settle();
     expect(toasts().some((t) => t.startsWith("Couldn't start the stream: mpv gone"))).toBe(true);
   });
@@ -478,23 +776,31 @@ describe("quality", () => {
   describe("with a download of what is playing", () => {
     const DL = { item_id: "ep-2", status: "complete", path: "/v/ep2.mkv", quality: "720p · 4.5 Mbps", title: "Archer" };
 
-    it("offers the download as a rung of its own, and goes back to it", async () => {
+    it("offers the download as a row of its own under Auto, and goes back to it", async () => {
       const shell = await startPlaying({ downloads: [DL] });
       // A server item with a finished download plays from disk by default;
       // this one was started as a stream.
-      open("pb-quality");
-      const rung = buttonNamed("Downloaded · 720p · 4.5 Mbps", panel()!);
-      expect(rung.classList.contains("primary")).toBe(false);
-      click(rung);
+      openCard("pb-quality");
+      expect(rows().slice(0, 3)).toEqual([
+        ["Auto", "Playing now · Direct Play (original)"],
+        ["Downloaded", "720p · 4.5 Mbps"],
+        ["Direct (original)", "Playing now"],
+      ]);
+      expect(ticked()).toEqual(["Auto"]);
+      pickRow("Downloaded");
       await settle();
       expect(invokeCalls("player_play").at(-1)!.args.req.url).toBe("/v/ep2.mkv");
       expect(shell.playback.getQualityState()!.isLocal).toBe(true);
       shell.status();
-      open("pb-quality");
-      expect(primaries()[0]).toBe("Downloaded · 720p · 4.5 Mbps");
+      expect(pill()).toBe("Downloaded");
+      // A download plays as it was saved: its card holds the one row.
+      openCard("pb-quality");
+      expect(rows()).toEqual([["Downloaded", "720p · 4.5 Mbps"]]);
+      expect(ticked()).toEqual(["Downloaded"]);
+      expect(cardNotes()).toEqual([]);
       // Picking it while on it does nothing more.
       const n = invokeCalls("player_play").length;
-      pick("Downloaded · 720p · 4.5 Mbps");
+      pickRow("Downloaded");
       await settle();
       expect(invokeCalls("player_play").length).toBe(n);
     });
@@ -504,9 +810,9 @@ describe("quality", () => {
       const shell = await startPlaying({ invokes: { downloads_list: () => downloads } });
       void shell;
       downloads.length = 0;
-      open("pb-quality");
-      // The rung was offered from what was known at the start.
-      pick("Downloaded · 720p · 4.5 Mbps");
+      openCard("pb-quality");
+      // The row was offered from what was known at the start.
+      pickRow("Downloaded");
       await settle();
       expect(toasts()).toContain("The download isn't there anymore");
     });
@@ -524,20 +830,25 @@ describe("quality", () => {
       void calls;
       vi.spyOn(shell.playback, "switchToDownload");
       onInvoke("player_play", () => Promise.reject(new Error("bad file")));
-      open("pb-quality");
-      pick("Downloaded · 720p · 4.5 Mbps");
+      openCard("pb-quality");
+      pickRow("Downloaded");
       await settle();
       expect(toasts().some((t) => t.includes("bad file"))).toBe(true);
     });
 
-    it("offers no streams from a download while offline", async () => {
+    it("offers no streams from a download, online or off", async () => {
       let up = true;
       const shell = await bootPlayer({ ping: () => up, downloads: [DL] });
       await shell.playLocal(DL);
+      openCard("pb-quality");
+      expect(rows()).toEqual([["Downloaded", "720p · 4.5 Mbps"]]);
+      expect(ticked()).toEqual(["Downloaded"]);
+      click($("pb-quality"));
       up = false;
       await shell.api.checkOnline();
-      open("pb-quality");
-      expect(notes()).toEqual(["Offline — streaming unavailable"]);
+      openCard("pb-quality");
+      expect(rows()).toEqual([["Downloaded", "720p · 4.5 Mbps"]]);
+      expect(cardNotes()).toEqual([]);
     });
   });
 });

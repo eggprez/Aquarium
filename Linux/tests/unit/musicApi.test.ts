@@ -213,7 +213,7 @@ describe("single items and track lists", () => {
   it.each([
     ["topSongs", () => m.topSongs("ar"), { IncludeItemTypes: "Audio", SortBy: "PlayCount,SortName", ArtistIds: "ar", Limit: "10" }],
     ["allSongs", () => m.allSongs("ar"), { IncludeItemTypes: "Audio", SortBy: "AlbumArtist,SortName", ArtistIds: "ar", Limit: "2000" }],
-    ["albumsBy", () => m.albumsBy("ar"), { IncludeItemTypes: "MusicAlbum", SortBy: "ProductionYear,SortName", AlbumArtistIds: "ar", Limit: "200" }],
+    ["albumsBy", () => m.albumsBy("ar"), { IncludeItemTypes: "MusicAlbum", SortBy: "ProductionYear,SortName", AlbumArtistIds: "ar", Limit: "500" }],
     ["genreSongs", () => m.genreSongs("g"), { IncludeItemTypes: "Audio", SortBy: "Random", GenreIds: "g", Limit: "500" }],
     ["recentlyPlayedSongs", () => m.recentlyPlayedSongs(), { SortBy: "DatePlayed,SortName", Filters: "IsPlayed", Limit: "40" }],
     ["mostPlayedSongs", () => m.mostPlayedSongs(7), { SortBy: "PlayCount,SortName", Filters: "IsPlayed", Limit: "7" }],

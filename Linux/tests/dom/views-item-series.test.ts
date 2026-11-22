@@ -129,11 +129,12 @@ describe("series page: what plays next", () => {
     expect($(".detail-actions .btn.primary", m.root)!.textContent).toBe("Resume");
   });
 
-  it("has no caption and no play button when there is nothing to play, but still offers Add to Next Up", async () => {
+  it("has no caption and no play button when there is nothing to play, but still offers Add to Next Up and Favorite", async () => {
     const { root } = await open({ item: series(), seasons: [] });
     expect($(".detail-nextup", root)).toBeNull();
     const actions = $(".detail-actions", root)!;
-    expect($$("button", actions).map((b) => b.textContent)).toEqual(["Add to Next Up…"]);
+    expect($$("button", actions).map((b) => b.textContent)).toEqual(["Add to Next Up…", "Favorite"]);
+    expect($(".btn.primary", actions)).toBeNull();
   });
 
   it("does not get the film's quality, download and watched bar", async () => {

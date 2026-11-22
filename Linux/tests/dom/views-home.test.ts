@@ -149,7 +149,7 @@ describe("the spotlight", () => {
     const hero = root.querySelector(".home-hero")!;
     expect(hero.querySelector(".hero-eyebrow")!.textContent).toBe("Next up");
     expect(hero.querySelector(".hero-title .title-text")!.textContent).toBe("The Show");
-    expect(hero.querySelector(".hero-sub")!.textContent).toBe("S1:E2 · Ep e1");
+    expect(hero.querySelector(".hero-sub")!.textContent).toBe("Season 1: Episode 2 · Ep e1");
     expect(hero.querySelector<HTMLElement>(".hero-progress div")!.style.width).toBe("50%");
     const play = byText<HTMLButtonElement>(hero, ".hero-actions button", "Resume")!;
     expect(play.textContent).toMatch(/^Resume · .+ left$/);

@@ -3623,7 +3623,10 @@ async function boot(): Promise<void> {
     if (now === seerrShown) return;
     seerrShown = now;
     if ($("shell").classList.contains("hidden")) return;
-    paintNav(getCached<any[]>(VIEWS_CACHE_KEY) ?? null);
+    // The list on screen, not the cache: with nothing cached and the server
+    // away, the sidebar was drawn from an empty list, and `null` here would
+    // take Favorites and Downloads away again.
+    paintNav(navViews);
     const page = (location.hash || "#/home").match(/^#\/([^/]*)/)?.[1] ?? "home";
     if (page === "requests" || page === "request") void route();
     else if (["search", "item", "lib"].includes(page) && !playerActive) void route();
