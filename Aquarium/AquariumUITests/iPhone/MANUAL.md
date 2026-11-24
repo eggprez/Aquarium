@@ -267,36 +267,52 @@ eye can say the bubble sits right.
 
 ## The floating top bar (added 2026-11-20)
 
-`PhoneHeroBar` on Home and title pages. The UI tests check where the bar and
-the artwork sit and that the title arrives on scroll, and a unit test checks
-the blur filter is found; only an eye can judge the blur itself.
+`PhoneHeroBar` on Home and title pages (changed 2026-11-22: bare at the top
+of the page, glass discs once it moves, no blur). The UI tests check where
+the bar and the artwork sit and that it stays put and answers; a unit test
+checks when the wordmark fades and the discs arrive. Only an eye can judge
+how it looks.
 
 1. Home with a bright hero (a yellow or white poster), not scrolled: the
-   clock and battery are readable, the blur behind them takes the poster's
-   colours (no grey or white band), and the picture is sharp from the bottom
-   of the status bar down — a face under the wordmark is not blurred.
-2. Drag Home up slowly (changed 2026-11-21): the blur grows down under the
-   finger and covers the whole bar within about 32 points, well before the
-   hero has gone; let go and drag back, and it shrinks the same way. It is
-   one blur growing — no flash, no moment with no blur, no second band
-   fading in — and at every point its foot melts into the picture: no
-   line across the artwork where the blur stops (pick a detailed hero). Flick the page and tap the status bar to return: the same.
-   Further on, once posters pass under the bar, the wordmark and buttons
-   turn from white to the page's colour, and no line of text shows through
-   behind them at any point.
-3. A title page: the same over its artwork with only Back in the bar;
-   scrolled, the title appears beside Back on the blur.
-4. Both again in dark mode, and on a real iPhone (the blur is a system
-   filter; a simulator draws it, but check the real thing for banding).
+   picture is sharp to the top of the screen, with no blurred strip and no
+   band. The logo, wordmark, Search and Refresh are white with a soft shadow
+   and read on the poster; so do the clock and battery.
+2. Drag Home up slowly: the wordmark fades out under the finger and is gone
+   within about 96 points; early in that, Search and Refresh fade onto discs
+   of glass like the tab bar's. Drag back to the top: the discs go and the
+   wordmark returns. No blur comes in at any point, and rows pass under the
+   discs sharp. The clock sits on whatever is under it: judge whether that
+   is acceptable over posters.
+3. A title page: bare Back over the artwork; scrolled, Back is on a glass
+   disc and no title comes into the bar.
+4. Both again in dark mode, and on a real iPhone. In Settings › Appearance ›
+   Liquid Glass, Clear and Tinted: the discs follow the setting.
 5. The iPhone Duo (added 2026-11-21): the same bar floats on both screens.
    Closed, the wordmark and buttons sit below the 24-point dead strip with
    the hero behind them; open, they clear the status pill's column; open and
-   held upright, they sit on the status strip's line beside the pill.
-   In every pose the top of the hero is blurred before the page scrolls
-   (2026-11-21: closed, and open held sideways, there was no blur at all
-   until it did). Closed, the blur covers the dead strip and eases out
-   behind the wordmark; a face at the wordmark's height is still sharp.
-6. Search and Live TV (2026-11-21): the bar is the blur, not a band. On
+   held upright, they sit on the status strip's line beside the pill. The
+   discs arrive on scroll in every pose.
+6. Search and Live TV (2026-11-21; unchanged on 2026-11-22, these two still
+   have it): the bar is the blur, not a band. On
    Search, results scrolled under the bar show through it smeared, with no
    hairline; on Live TV the header has only the page under it.
 
+## Shell items with no automated driver (added 2026-11-22)
+
+The logic under each is unit-tested (`PhoneQuickActionsTests`,
+`PhoneAppIconChoiceTests`); the system's half is not reachable from XCUITest.
+
+1. Home Screen quick actions: with something part-way, press and hold the
+   app's icon. Expect the first entry to name it (an episode by its show,
+   with "Season 2: Episode 3 · Title" under it; a film by its title with
+   "Continue watching"), then Search. Choose the first: its title page opens
+   (not the player). Choose Search: Search opens. Signed out, the menu is
+   empty.
+2. Settings › Appearance › App Icon: pick another icon. iOS shows its own
+   "You have changed the icon" alert and the Home Screen icon changes; the
+   tile gets the tick and the Appearance row names it. Pick Aquarium again.
+3. Handoff: play a film on the phone, then on an iPad or Mac signed in to
+   the same iCloud account pick Aquarium from the dock or app switcher. The
+   same film opens there at about the same point.
+4. Spotlight: search the Home Screen for a film in the library and tap the
+   Aquarium result: its title page opens.

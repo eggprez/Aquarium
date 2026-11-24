@@ -135,6 +135,24 @@ screen shows what the extension draws.
 - [ ] Overscan: with the TV's overscan on, nothing important is cut (60 pt
       margins on Home, the panel, Settings).
 
+## 6. Long waits and failures the suite doesn't force
+
+The automated suite sets and cancels these, but doesn't wait them out or
+break the server for them (COVERAGE.md "untested" rows).
+
+- [ ] Sleep timer: on FX Long Direct Play, swipe down → Info → Sleep 15m. The
+      card reads "Sleep: 15 min left" and counts down; after 15 minutes the
+      player closes by itself, the resume point is kept, and nothing plays
+      next. On an episode, the next one doesn't start either.
+- [ ] Guide unavailable: with the guide open, stop the QA server's Live TV
+      guide (or the network) and wait for a refresh. The strip over the grid
+      says the guide is unavailable, Retry can be reached with the remote,
+      and after the server is back Retry fills the grid again.
+- [ ] Card menu → Remove from Next Up on a show, and Add to Next Up (both
+      answers) on another: Home's Next Up row changes to match, and the
+      server's Next Up agrees. Run on a spare account: it changes the
+      suite's baseline.
+
 ## Requests against a real Seerr server
 
 Every automated Requests test talks to a stand-in built from Seerr 3.5.0's

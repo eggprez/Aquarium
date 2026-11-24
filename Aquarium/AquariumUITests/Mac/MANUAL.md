@@ -124,7 +124,7 @@ no band of its own, only `HeroBarBlur` pinned beneath it.
 1. Home over a bright hero (Big Buck Bunny's sky): the window title and the
    toolbar buttons read, and the picture is sharp below the toolbar.
 2. Scroll Home slowly (changed 2026-11-21): the blur grows past the
-   toolbar's foot within about 32 points of scrolling and shrinks the same
+   toolbar's foot within about 96 points of scrolling (half a second at the least on a fast scroll, 2026-11-22) and shrinks the same
    way back at the top — one blur growing, no flash and no crossfade, and
    no line across the hero where it stops (its foot fades out; not yet
    seen on a Mac, 2026-11-21). Once

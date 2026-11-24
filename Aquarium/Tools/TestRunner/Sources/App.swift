@@ -160,7 +160,7 @@ struct MissingRepository: View {
         VStack(spacing: 14) {
             Image(systemName: "folder.badge.questionmark").font(.system(size: 44)).foregroundStyle(.secondary)
             Text("Where is the Aquarium project?").font(.title2.weight(.semibold))
-            Text(model.loadError ?? "Choose the FellyJin folder so the checks can be found.")
+            Text(model.loadError ?? "Choose the project folder (the one holding Aquarium and Linux) so the checks can be found.")
                 .foregroundStyle(.secondary)
             Button("Choose the Project Folder…") { picking = true }.controlSize(.large)
         }

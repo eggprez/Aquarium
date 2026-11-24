@@ -53,6 +53,11 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 | Shell follows the size class: section with no tab goes into More, comes back on widening (a98b494) | PadShellSelectionTests (9) | unit | pass |
 | Sidebar comes back after a phone-width window | PadWindowSizeTests.testSidebarComesBackAfterAPhoneWidthWindow | UI | skip (simulator shows apps full screen); open bug, MANUAL.md |
 | Stage Manager / Split View / external display | — | manual | manual |
+| Sidebar order: drag a row on Settings › Appearance › Sidebar, the sidebar follows live within its group; Reset | PadSidebarOrderTests.testDraggingARowReordersTheSidebarAndResetPutsItBack | UI | new, not yet run |
+| Sidebar order kept: Appearance row says Custom, same order after a relaunch | PadSidebarOrderTests.testAChangedOrderIsKept | UI | new, not yet run |
+| iPad turns every way; a screen asking for landscape changes nothing | PadOrientationTests (2) | unit | new, not yet run |
+| Grids: a range of column widths at regular width (156–234 posters), card fills its column; a compact window gets 3/2 fixed columns | PadGridTests (3) | unit | new, not yet run |
+| The phone's floating bar is never an iPad's | PadBarTests.testThePhonesFloatingBarIsNotAnIPads | unit | new, not yet run |
 
 ## Home
 
@@ -123,6 +128,11 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 | Header switches to the compact stack under 720 pt of column | — | manual | manual (needs a window narrower than the simulator allows) |
 | A person's page from the cast: header, name in the bar, Films shelf, a film opens; no facts or biography where the server has none | PadPersonTests.testPersonPageShowsTheirFilmsAndOpensOne | UI | pass |
 | Favorites: layout, sort and reverse pickers | — | — | the Mac's toolbar: an iPad has the kind chips only (PadFavoritesTests) |
+| Tagline and studios from the server | PadDetailMoreTests.testTaglineAndStudiosComeFromTheServer | UI | new, not yet run |
+| A show's "Carry on with" / "Up next" line names the episode Play points at; resume bar | PadDetailMoreTests.testAShowsPageSaysWhichEpisodePlayPointsAt | UI | new, not yet run |
+| Resume bar only on a film in progress | PadDetailMoreTests.testTheResumeBarIsOnlyOnAFilmInProgress | UI | new, not yet run |
+| Title joins the floating bar once the header scrolls away, leaves at the top | PadDetailMoreTests.testTheTitleJoinsTheBarOnceTheHeaderHasScrolledAway | UI | new, not yet run |
+| A show's Download menu: Whole Series, each season, a season's qualities | PadDetailMoreTests.testAShowsDownloadMenuOffersTheWholeSeriesAndEachSeason | UI | new, not yet run |
 
 ## Search and context menus
 
@@ -142,6 +152,11 @@ xcodebuild test -scheme Aquarium -testPlan Unit -destination 'id=<iPad sim>' \
 | Download submenu | PadContextMenuTests.testDownloadSubmenuListsQualities | UI | pass |
 | Grid card menu | PadContextMenuTests.testLibraryGridCardHasTheMenuToo; MANUAL.md | UI + manual | xfail (XCUITest only: a real long press gives the menu) |
 | Secondary click with a pointer | — | manual | manual |
+| Play Later with nothing playing starts the film (toast, player, server) | PadContextMenuMoreTests.testPlayLaterWithNothingPlayingStartsTheFilm | UI | new, not yet run |
+| Season chip: Play Next Episode plays the first unwatched (S01E02) | PadContextMenuMoreTests.testASeasonChipsPlayNextEpisodePlaysTheFirstUnwatched | UI | new, not yet run |
+| Season chip: Play Season Later plays S02E01, S02E02 waits in Up Next | PadContextMenuMoreTests.testPlaySeasonLaterPlaysTheSeasonInOrder | UI | new, not yet run |
+| Search: one match counted "1 result", no Films & TV heading without music | PadSearchMoreTests.testOneMatchIsCountedInTheSingular | UI | new, not yet run |
+| Search: an audiobook result opens on Audiobooks, its sidebar row lit | PadSearchMoreTests.testAnAudiobookFoundBySearchOpensUnderAudiobooks | UI | new, not yet run |
 
 ## Requests through Seerr (PadRequestsTests)
 
@@ -150,7 +165,7 @@ iPhone file (the same shared unit tests run here). Run 2026-11-16: 4 pass.
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Sidebar gains Requests (under You) only while connected; its page beside the sidebar | PadRequestsTests.testTheSidebarGainsRequestsOnlyWhenConnected, PadShellTests.testRequestsSitsWithWhatIsYours | UI, unit | pass |
+| Sidebar gains Requests (under You) only while connected; its page beside the sidebar | PadRequestsTests.testTheSidebarGainsRequestsOnlyWhenConnected, PadSidebarGroupTests.testRequestsSitsWithWhatIsYours | UI, unit | pass |
 | Search offers a title, its page requests it, Requests lists it by name | PadRequestsTests.testSearchOffersARequestAndThePageMakesIt | UI | pass |
 | A show partly in the library is not offered as missing | PadRequestsTests.testLibraryResultsStillLeadAndSeerrFollows | UI | pass |
 | A show's missing-seasons banner; a person's "Not in Your Library" row | PadRequestsTests.testAPersonsPageShowsTheRestOfTheirWork | UI | pass |
@@ -194,7 +209,13 @@ iPhone file (the same shared unit tests run here). Run 2026-11-16: 4 pass.
 | mpv, AirPlay, SharePlay, pinch, hold 2×, PiP placement | — | manual | manual |
 | SharePlay "Start from whose progress?" on the player: you, then others with a spot, then the beginning; the pick moves playback (made-up friends via AQUARIUM_TEST_SHAREPLAY_PROGRESS) | PadSharePlayTests.testWhoseProgressIsAskedAndThePickIsWherePlayGoes | UI | pass 2026-11-19 |
 | "Keep Watching Here" leaves playback where it was | PadSharePlayTests.testKeepWatchingHereStaysPut | UI | pass 2026-11-19 |
-| SyncPlay (shared with the iPhone: same card, same code) | PhoneSyncPlayTests on the iPhone; iPhone MANUAL for two devices | UI (iPhone) | not run on the iPad |
+| SyncPlay and SharePlay rows at the top of an episode's "…" card, tappable without scrolling | PadSyncPlayTests.testAnEpisodeOffersBothWaysToWatchTogetherInTheMoreCard | UI | new, not yet run |
+| SyncPlay: start a group from the player, pause/play are the group's, follow someone's jump and play, Leave; no SharePlay or speed chips in a group | PadSyncPlayTests.testSyncPlayStartsAGroupAndFollowsIt | UI | new, not yet run |
+| SyncPlay from Settings: row reads Off, joining a group opens its title at its spot | PadSyncPlayTests.testJoiningFromSettingsOpensWhatTheGroupIsWatching | UI | new, not yet run |
+| SyncPlay question cancelled from Settings joins nothing | PadSyncPlayTests.testCancellingTheQuestionFromSettingsJoinsNothing | UI | new, not yet run |
+| Timeline bar and thumb, scrub preview, moment overlay lift, skip badge inset (handheld values) | PadPlayerLogicMetricsTests (4) | unit | new, not yet run |
+| Popover anchors: Info off Info, line-up off Channels, the rest off … | PadPlayerPopoverAnchorTests (2) | unit | new, not yet run |
+| Engine on an iPad: platform is iPad, AVFoundation by default and for channels, PiP forces AVFoundation, mpv drawn cheaply unless Never, the keys with no row pinned and at their defaults | PadEngineTests (7) | unit | new, not yet run |
 
 ## Music, books
 
@@ -214,6 +235,23 @@ iPhone file (the same shared unit tests run here). Run 2026-11-16: 4 pass.
 | Discover: Shuffle all, stations | PadMusicPagesTests.testDiscoverHasStationsAndShuffle | UI | pass |
 | Audiobooks: Continue Listening | PadBooksTests.testAudiobooksSectionShowsContinueListening | UI | pass |
 | Book page, chapters, play a chapter → sidebar card names it | PadBooksTests.testBookPageListsChaptersAndPlaysFromOne | UI | pass |
+| Albums sort by Artist / Title; Recently Added has no sort | PadMusicMoreTests.testAlbumsSortByArtistMovesTheCompilationBehindFXBand, testRecentlyAddedHasNoSortMenu | UI | new, not yet run |
+| A genre's page and its Play | PadMusicMoreTests.testGenrePageListsItsAlbumsAndPlaysTheGenre | UI | new, not yet run |
+| Favorites door: the baseline's artist, album, song; Favorite Songs | PadMusicMoreTests.testFavoritesDoorShowsTheBaselinesArtistAlbumAndSong | UI | new, not yet run |
+| Album card menu: Add/Remove Favorites (server, toast, Favorites page); Play, Play Next, Play Later in Up Next's order | PadMusicMoreTests.testFavouriteFromAnAlbumsMenuReachesTheServerAndTheFavoritesPage, testAlbumMenuPlaysThenQueuesNextAndLater | UI | new, not yet run |
+| Artist page order (Top Songs, then every album) and Play; album header, footer "2 songs, 18 min", More by | PadMusicMoreTests.testArtistPageHasTopSongsThenEveryAlbumAndPlays, testAlbumPageHeaderFooterAndMoreByTheArtist | UI | new, not yet run |
+| Discover greeting and the baseline's shelves, See all; Shuffle All; the Songs door's Play | PadMusicMoreTests.testDiscoverGreetsAndShelvesTheBaselinesFavourites, testShuffleAllPlaysFromTheWholeLibrary, testSongsDoorPlayBarPlaysTheList | UI | new, not yet run |
+| Music search field: prompt, No matches, Clear, Cancel; a song found plays from "Search" | PadMusicMoreTests.testSearchPromptNoMatchesClearAndCancel, testASongFoundBySearchPlaysFromSearch | UI | new, not yet run |
+| Now Playing: Next and Previous through an album, Next off on the last song | PadNowPlayingTests.testNextAndPreviousStepThroughTheAlbum | UI | new, not yet run |
+| Now Playing: Repeat all lets Next wrap, one and off don't | PadNowPlayingTests.testRepeatAllLetsNextWrapOnTheLastSong | UI | new, not yet run |
+| Now Playing: Shuffle keeps the songs, off gives the album's order back | PadNowPlayingTests.testShuffleKeepsTheSongsAndOffGivesTheAlbumsOrderBack | UI | new, not yet run |
+| Now Playing: the star reaches the server | PadNowPlayingTests.testTheStarReachesTheServer | UI | new, not yet run |
+| Now Playing: sleep timer set and turned off | PadNowPlayingTests.testSleepTimerIsSetAndTurnedOff | UI | new, not yet run |
+| Now Playing: Up Next's Clear | PadNowPlayingTests.testClearEmptiesUpNext | UI | new, not yet run |
+| A book in Now Playing: chapter name, chapter buttons, no queue or shuffle | PadNowPlayingBookTests.testABooksFootStepsThroughChapters | UI | new, not yet run |
+| A book: forward 30 s, back 15 s | PadNowPlayingBookTests.testABooksSkipsAreThirtyForwardAndFifteenBack | UI | new, not yet run |
+| A book: speed 1.5× | PadNowPlayingBookTests.testABooksSpeedMenuSpeedsItUp | UI | new, not yet run |
+| Instant Mix, station leanings, AirPlay and volume in Now Playing | — | — | not covered: what the mix or a station holds depends on the server and the station engine (logic in AquariumTests/Shared); AirPlay and the system volume are hardware (MANUAL.md) |
 
 ### Playlists (PadPlaylistTests, added 2026-11-14)
 
@@ -271,7 +309,8 @@ A smart playlist is kept in the app's settings, which every launch starts empty.
 | Empty page | PadDownloadsTests.testEmptyDownloadsPage | UI | pass |
 | Download from a title, appears, plays from the copy, delete with confirmation | PadDownloadsTests.testDownloadPlayAndDeleteAFilm | UI | pass |
 | Manage menu | PadDownloadsTests.testDownloadSettingsOnThePage | UI | pass |
-| Series downloads, music/audiobook doors, offline shell | — | — | not covered: see the report (needs longer encodes or an offline server) |
+| A season downloaded from a show's menu arrives as one show, its page (title, "1 season · 6 episodes", Play), Delete the whole show (Cancel by tapping outside, then confirm) | PadDownloadsMoreTests.testASeasonDownloadsAsOneShowAndIsDeletedWhole | UI | new, not yet run |
+| Music/audiobook doors on Downloads, offline shell, failed and paused transfers | — | — | not covered: needs downloaded music, an offline server or a transfer cut part-way (the iPhone's switch proxy, which `run-tests.sh ipad` does not start) |
 
 ## Settings
 
@@ -300,7 +339,13 @@ A smart playlist is kept in the app's settings, which every launch starts empty.
 | Library copy: the switch, Status and Saved rows, Sync now, Delete with its confirmation and Cancel | PadSettingsMoreTests.testLibraryCopyStatusRowsSyncAndDelete | UI | pass |
 | About: the engine and the paragraph | PadSettingsMoreTests.testAboutSaysWhatTheAppIsAndItsEngine | UI | pass |
 | Apple Watch page | — | — | not offered on an iPad (the row is the iPhone's: SettingsView.swift:1020) |
-| Reordering the sidebar by drag | — | manual | manual (drag handles have no identifiers) |
+| Reordering the sidebar by drag | PadSidebarOrderTests (2) | UI | new, not yet run (the handle is found by its "Reorder" label inside the row's cell, as PadPlaylistTests does) |
+| Switches and choices on Appearance, Video, Audio, Subtitles, Music and Downloads kept across a relaunch | PadSettingsControlsTests.testSwitchesAndChoicesSurviveARelaunch | UI | new, not yet run |
+| Downloads at once: 1–6, − and + off at the ends, kept | PadSettingsControlsTests.testDownloadsAtOnceStaysInItsRangeAndIsKept | UI | new, not yet run |
+| Video › Resume off starts from the beginning (player and server) | PadSettingsControlsTests.testResumeOffStartsFromTheBeginning | UI | new, not yet run |
+| Video › a default quality rung turns the speed check off; Auto brings it back | PadSettingsControlsTests.testAQualityRungTurnsTheSpeedCheckOffAndAutoBringsItBack | UI | new, not yet run |
+| Appearance › Hide Continue Watching takes the row off Home and gives it back | PadSettingsControlsTests.testHidingContinueWatchingTakesTheRowOffHome | UI | new, not yet run |
+| The list's Watch Together (SyncPlay: Off) and iCloud rows (off and explained in test mode); no Apple Watch row | PadSettingsControlsTests.testWatchTogetherAndICloudRowsInTheList | UI | new, not yet run |
 
 ## Sign-in and keyboard
 
@@ -317,6 +362,8 @@ A smart playlist is kept in the app's settings, which every launch starts empty.
 | Tab from username to password | PadKeyboardTests.testTabMovesFromUsernameToPassword | UI | skip (Tab not delivered as a key by the simulator's on-screen keyboard; MANUAL.md) |
 | Escape closes the Info popover and a context menu (hardware key) | PadKeyboardTests.testEscapeDismissesTheInfoPopover, testEscapeDismissesAContextMenu | UI | skip (hardware key presses don't reach the app on this simulator; MANUAL.md) |
 | Pointer hover, Pencil, ⌘ overlay | — | manual | manual |
+| Plain-HTTP server marked HTTP with its warning | PadSignInMoreTests.testAPlainHTTPServerIsMarkedAndExplained | UI | new, not yet run |
+| "Use a different server" goes back to the address, form gone | PadSignInMoreTests.testADifferentServerGoesBackToTheAddress | UI | new, not yet run |
 
 ## Results
 
@@ -350,3 +397,13 @@ real long press gives it; MANUAL.md). Skips are the simulator's limits
 (hardware keys, Tab, full-screen windows), the hero under a pushed page, the
 smoke test of the iPhone's that the plan carries (it skips on an iPad), and the multitrack film
 whose encode the QA server can't open.
+
+## Added 2026-11-22 (not yet run)
+
+The rows marked "new, not yet run" above were written on 2026-11-22 from the
+source, compiled with `build-for-testing` (iPad and Unit plans) and not run.
+`PadMusicMoreTests` was left by an earlier pass and kept after a review of
+its identifiers, fixture names and the app's wording; `PadPlayerLogicTests`
+was cut to what an iPad host answers differently (its chrome-state and
+engine-rule duplicates of AquariumTests/Shared went).
+

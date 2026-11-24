@@ -25,7 +25,7 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | CarPlay: only the audio entitlement is held (never combined with video); the bundle carries `FJCarPlayVideo`; none on the Mac | PhoneCarPlayConfigTests | unit | pass |
 | App Store export is signed by hand, with a named profile for the app, Live Activities, watch app and watch widgets | PhoneCarPlayConfigTests.testAppStoreExportNamesAProfileForEveryBundle | unit | pass |
 | CarPlay Video tab on HomeView or a video car; the app appears on HomeView at all | — | manual | MANUAL.md (CarPlay, step 2) |
-| Floating bar's blur uses the untinted variable-blur filter (not the fallback); the bar floats on every phone, foldable included; its colour thresholds; the blur's mask leaves the bar's row clear over artwork; a blur with nothing above its clear part hides; the blur over artwork is never shorter than its least, so a foldable's front screen and an iPhone SE have one before the page scrolls; the blur is the thin one only at the top of the page and grows to the whole bar over the first 32 points of scrolling (one blur, its reach and strength blended); the bar's layout height follows the fold | PhoneHeroBarUnitTests | unit | pass |
+| The floating bar's wordmark fades and its buttons take glass discs as the page leaves its top (2026-11-22; no blur under it); the bar floats on every phone, foldable included; for the blur still under Search's and Live TV's bar: it uses the untinted variable-blur filter (not the fallback); the blur's mask leaves the bar's row clear over artwork; a blur with nothing above its clear part hides; the blur over artwork is never shorter than its least, so a foldable's front screen and an iPhone SE have one before the page scrolls; the blur is the thin one only at the top of the page and grows to the whole bar over the first 96 points of scrolling, eased, and never faster than half a second on a flick (one blur, its reach and strength blended); the system's glass lies over the blur and fades with it, so the bar follows the Liquid Glass setting (what it looks like at each setting: MANUAL); the bar's layout height follows the fold | PhoneHeroBarUnitTests | unit | pass |
 | `PlayerTime.format/spoken` | PhoneFormattingTests.testPlayerTime | unit | pass |
 | `Quality.choices/label/shortLabel/snapped/rungIndex/cap/smallerStream/untouchedRung` | PhoneFormattingTests (quality group) | unit | pass |
 | `DownloadQualities.named/menuLabel`, catalogue keys | PhoneFormattingTests | unit | pass |
@@ -83,7 +83,7 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | `DownloadManager` on real background sessions (`start`, `reconcile`, stall verdict, `judgeIdle`, `restartDemotedTransfers`) | — | manual | needs real background sessions and the clock (MANUAL.md) |
 | `OrientationLock` | — | manual | needs the hinge and real rotation (MANUAL.md) |
 | `ImageLoader`: widths, outcomes, coalescing, memory and disk filing | ImageLoaderTests (shared) | unit | pass; the ten-minute 404 memory has no clock seam |
-| `BlurHash` | — | none | drawing only; seen in every UI screenshot |
+| `BlurHash.image` (flat colours exact, size, a full hash, malformed hashes), `Artwork.hash` filed under the same tag | CoreBlurHashTests (shared) | unit | new, not yet run |
 | `LibraryIndex`: sync, paging, search ranking, grids, favourites, per-account, wipe | LibraryIndexMergeTests, LibraryIndexTests (shared) | unit | pass; reading back after a relaunch is manual |
 | `StreamResolver`, `StreamDiagnosis` | StreamResolverTests, TransportStreamTests, StreamDiagnosisTests (shared) | unit | pass |
 | `IPTVSource`, `LiveTVStore` | IPTVSourceTests, LiveTVStoreTests (shared) | unit | pass |
@@ -91,6 +91,15 @@ front screen). `AQUARIUM_PHONE_ALL_DEVICES=1` runs everything everywhere.
 | `FollowFeed`, Follow and Now Playing widget data, widget buttons | FollowSnapshotTests, FollowFeedTests, NowPlayingSnapshotTests, WidgetButtonTests (shared, iOS) | unit | pass; the drawing is manual |
 | App Intents: entities, queries, and every intent up to where a stream would start | MediaItemEntityTests, MediaItemQueryTests, LibraryIntentsTests, PlayerIntentsIdleTests, MusicIntentsTests (shared) | unit | pass |
 | Siri phrases, spoken replies, intents that start playback, Spotlight | — | manual | no headless driver for Siri/Shortcuts on the simulator |
+| Jellyfin models: permissive decoding, `ItemsResponse` totals, episode labels, a guide programme's episode line and airtime, progress fraction, kinds (audio, not-video, folder-like, opens as container), artist line, picture subtitles, a track's menu label, a source's tracks, chapters and segments, lyrics, people, a song's slot in a playlist, track order, albums from songs; `HomeSection` names, case and fallback | CoreModelsTests, CoreHomeSectionTests (shared) | unit | new, not yet run |
+| `PlayerChromeState`: when the controls hide (paused, loading, VoiceOver, an error, a card, the panel, a scrub, hold, toggle), one card or the panel at a time, a new stream starts clean, a run of skips, the double-tap ripple, an edge drag's level; `PlayerTab` names and symbols | PlayChromeStateTests (shared) | unit | new, not yet run |
+| Engine values and wording: `EngineTrack.label`, resolutions, `PictureAdjustment.isNeutral`, `AVEngine.isRecoverableStreamFailure` (wrapped errors too), `EnginePolicy.videoDecodesInHardware/fileContainer`, `AdaptiveQuality.powerRung`, Mbps, frame-rate, speed and audio-offset names, the player's and Up Next's titles, "forced only" subtitles, SyncPlay id and ticks | PlayEngineValuesTests (shared) | unit | new, not yet run |
+| Measure Apple TV sync, the sums: median and weighted median, pairing flashes with beeps (reach, nearest, once each), band averaging and the rolling-shutter slope, the advice and the Sync tab's number; `SyncBeepDetector` and `SyncFlashDetector` on made-up microphone and camera signals (onset, sample rates, two beats, silence, a click, warm-up, a partly-lit frame, a light left on, a faint flicker) | PlaySyncMeasurementTests, PlaySyncDetectorTests (shared) | unit | new, not yet run; the camera page itself is manual |
+| `TrickplayStore`: a thumbnail is its cell cut from its sheet, the next sheet asked for ahead, clamped to the last thumbnail, each sheet fetched once, no description or no spacing is no thumbnail, a new title forgets the old sheets | PlayTrickplayStoreTests (shared) | unit | new, not yet run |
+| `ChannelSchedule`: on now and what comes after, in airtime order, asked for this channel's window; no channel or a blank guide is nothing on | PlayChannelScheduleTests (shared) | unit | new, not yet run |
+| `QuickActions`: the Home Screen menu leads with Continue Watching's first title (an episode by its show, a film by its title), else Next Up, then Search; only Search with nothing to carry on; each entry's `aquarium://` link, ids escaped | PhoneQuickActionsTests | unit | new, not yet run; the press itself is manual |
+| `AppIconChoice`: ids unique, the original first, every alternate built into Info.plist, every tile's preview in the asset catalog, one icon per holiday, the In Season shelf first and only in season, soonest-ending first | PhoneAppIconChoiceTests | unit | new, not yet run |
+| `LetterIndex`: the strip # to Z, the sort key (a song by its title), where a name falls against a letter (accents, digits), the first name at or after a letter | PhoneLetterIndexTests | unit | new, not yet run |
 
 ## Requests through Seerr (PhoneRequestsTests, SeerrClientTests, SeerrModelsTests)
 
@@ -154,7 +163,7 @@ the other four on the standard phone).
 | Bar (Search, Refresh) and hero fit | testHomeBarAndHeroFitTheScreen | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Floating bar: the hero runs up under it, the wordmark and buttons sit below the clock (the dead touch strip on the Duo) and above the hero's Play | PhoneHeroBarTests.testHomeHeroRunsUpUnderTheBar | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Floating bar stays put and tappable while Home scrolls | PhoneHeroBarTests.testHomeBarStaysWhileThePageScrolls | UI | pass (17) |
-| The blur under the clock: untinted, takes the artwork's colours, deepens once scrolled; the same blur under Search's and Live TV's bars | — | manual | MANUAL.md (The floating top bar) |
+| How the floating bar looks: bare on the artwork, the wordmark's fade, the glass discs, the clock over the page; the blur under Search's and Live TV's bars | — | manual | MANUAL.md (The floating top bar) |
 | Hero Details, hero paging | testHeroDetailsOpensTheTitle, testHeroSwipesToTheNextPage | UI | pass (17) |
 | Refresh | testRefreshKeepsHome | UI | pass (17) |
 | Continue Watching card → title with progress | testContinueWatchingCardOpensTheTitle | UI | pass (17) |
@@ -164,7 +173,7 @@ the other four on the standard phone).
 | Hero Play | PhoneContextMenuTests / PhonePlayerTests (play paths) | UI | indirect |
 | Saved Home drawn offline at launch | — | manual | needs the server cut mid-run (MANUAL.md) |
 
-## Libraries, Favorites, Collections, Search, Photos (PhoneBrowseTests)
+## Libraries, Favorites, Collections, Search, Photos (PhoneLibraryTests, PhoneFavoritesAndCollectionsTests, PhoneSearchTests; file PhoneBrowseTests.swift)
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
@@ -190,7 +199,7 @@ the other four on the standard phone).
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Floating bar: the artwork runs up under it, Back clears the clock, the title arrives in the bar once scrolled, Back leaves | PhoneHeroBarTests.testTitleArtworkRunsUpUnderTheBarAndTheTitleArrivesOnScroll | UI, layout | pass (17, SE, Pro Max, Duo) |
+| Floating bar: the artwork runs up under it, Back clears the clock, no title comes into the bar once scrolled, Back leaves | PhoneHeroBarTests.testTitleArtworkRunsUpUnderTheBarAndBackStaysOnScroll | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Film page facts and actions fit | testFilmPageShowsItsFacts | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Action row one line | testActionRowIsOneLine | UI, layout | pass (17, SE, Pro Max, Duo) (R-2c20fe6-row) |
 | Favourite, Mark watched (server) | testFavouriteButtonReachesTheServer, testMarkWatchedFromTheMoreMenu | UI | pass (17) |
@@ -279,6 +288,7 @@ the other four on the standard phone).
 | Artist page order | testArtistPageShowsTopSongsThenAlbums | UI | pass (17) |
 | Playlists | testPlaylistsListTheAccountsOwn | UI | pass (17) |
 | Smart playlist editor, save, delete | testSmartPlaylistEditorSavesAndDeletes | UI | pass (17) |
+| A song's Add to Playlist reaches the server's playlist, its page lists it, Remove from Playlist takes it off (server and page) | PhoneMusicPlaylistTests.testASongIsAddedToAPlaylistAndRemovedFromIt | UI | new, not yet run |
 | Music search | testMusicSearchFindsArtistsAlbumsSongs | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Mini player clear of the list's end | testMiniPlayerDoesNotCoverTheEndOfAList | UI, layout | pass (17, SE, Pro Max, Duo) (R-f41df90) |
 | Audiobooks tab, Continue Listening | testAudiobooksTabShowsContinueListening | UI, layout | pass (17, SE, Pro Max, Duo) |
@@ -371,6 +381,12 @@ cuts the server; without it these three classes skip. Standard phone only.
 | Pages fit | testSettingsPagesFitTheScreen | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Measure Apple TV sync (camera) | — | manual | needs a camera and an Apple TV |
 | Tab bar drag to reorder | — | none | drag handles carry no identifiers (TESTING.md known gaps) |
+| Switches and choices on Appearance (Next Up rewatching, in progress, days), Video (Resume, Autoplay next), Audio (language), Subtitles (Never), Music (normalize, romanize, mix source) and Downloads (Wi-Fi only) are kept across a relaunch | PhoneSettingsControlsTests.testSwitchesAndChoicesSurviveARelaunch | UI | new, not yet run |
+| Downloads at once: never below 1 or above 6, kept across a relaunch | PhoneSettingsControlsTests.testDownloadsAtOnceStaysInItsRangeAndIsKept | UI | new, not yet run |
+| Video › Resume off: Play starts at the beginning despite a 5:00 resume point | PhoneSettingsControlsTests.testResumeOffStartsFromTheBeginning | UI | new, not yet run |
+| Live TV › Custom playlist: an M3U served from this Mac fills the guide with its channels; Settings says "2 channels" and names the host | PhoneSettingsControlsTests.testACustomPlaylistFillsTheGuide | UI | new, not yet run |
+| Next Up days / in progress / rewatching changing what Home's Next Up shows; Audio language and Subtitles Never changing what the player picks; Normalize volume and lossless on cellular changing what is heard | — | none | the rules are unit-tested (NextUpTargetTests, TrackPreferenceTests, MusicPlayerPlaybackTests); an end-to-end test needs server watch history set up per case, not written |
+| Home Screen quick actions, App Icon actually changing, Handoff, Spotlight results | — | manual | MANUAL.md (Shell items with no automated driver) |
 
 ## iPhone Duo and layout (DuoPoseTests, PhoneLayoutTests)
 

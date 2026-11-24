@@ -7,7 +7,8 @@ as `suite-tv`), **manual** (`MANUAL.md`, hardware only).
 
 Status: **pass**, **xfail** (kept with `XCTExpectFailure("bug: …")`, a real
 bug), **fail** (fails, not yet understood), **manual**, **untested** (with why).
-Status is from the run of 2026-11-13 (see the end of this file).
+Status is from the run of 2026-11-13 (see the end of this file), except rows
+marked 2026-11-22, which are from that day's run: 153 UI tests, 149 pass, 4 fail (three real Seerr bugs, fixed the same day; then 152 of 153, the one failure an mpv crash in the simulator's Metal driver while playing, which passed on two reruns); 555 unit tests on the Apple TV simulator, all pass.
 
 Regression tests are named after their bug and cite the source in a comment.
 
@@ -21,6 +22,7 @@ Regression tests are named after their bug and cite the source in a comment.
 | Library opens as its own screen; Menu goes back, not out (AppModel.push) | `TVShellFocusTests.testOpeningALibraryKeepsFocusAndMenuGoesBackNotOut`, `TVShellTests.testALibraryOpensTheSameWay_regressionBackQuitTheApp` | UI, unit | pass |
 | Title screen over everything (`detailRoot`), its own stack, Menu pops it | `TVShellTests.testATitleOpensAsItsOwnScreenNotUnderTheStrip`, `testMenuPoppingThePathTrimsTheRoutes`, `testCloseDetailEmptiesEverything`; `TVShellFocusTests.testMenuFromATitlePageReturnsToWhereItCameFrom` | unit, UI | pass |
 | Never an offline shell on a TV | `TVShellTests.testNeverAnOfflineShell` | unit | pass |
+| A library screen opens with something focused (seen opening with nothing focused) | `TVBrowseTests.testALibraryScreenOpensWithFocus` | UI | see the run |
 | Deep links `aquarium://item|play/<id>` (the Top Shelf's way in) | every `launchDetail` / `launchPlaying` test (through `AppModel.handle`) | UI | pass (exercised by 40+ UI tests) |
 
 ## Sign-in
@@ -28,13 +30,15 @@ Regression tests are named after their bug and cite the source in a comment.
 | Function | Test | Kind | Status |
 |---|---|---|---|
 | Server address, connect, password sign-in | `TVSignInTests.testPasswordSignInLandsOnHome` | UI | pass |
-| Sign-in shows the one-word wordmark, read as "Aquarium" | `TVSignInTests.testSignInShowsTheWordmark` | UI | new, not yet run |
+| Sign-in shows the one-word wordmark, read as "Aquarium" | `TVSignInTests.testSignInShowsTheWordmark` | UI | pass 2026-11-22 |
 | Wrong password message, stays on screen | `TVSignInTests.testAWrongPasswordSaysSoAndStaysPut` | UI | xfail |
 | Disabled account refused in plain words | `TVSignInTests.testADisabledAccountIsRefusedInPlainWords` | UI | xfail |
 | Public users offered; passwordless user signs straight in, sees only its library, no Live TV | `TVSignInTests.testTheServersPublicUsersAreOffered`, `testAPasswordlessUserSignsStraightInAndSeesOnlyTheirLibrary` | UI | pass |
 | Quick Connect: code shown, approved from another device, signs in | `TVSignInTests.testQuickConnectSignsInOnceApprovedElsewhere` | UI | pass |
 | "Who's watching?" household of the Apple TV's users (`Keychain.Household`) | `TVDeviceTests.testTheHouseholdOffersOnlyOtherUsersAccounts`, `testTestModeKeepsTheHouseholdOutOfTheSharedKeychain`; second tvOS user in `MANUAL.md` §5 | unit, manual | pass |
 | Device name sent to the server | `TVDeviceTests.testTheServerSeesAnAppleTV` | unit | pass |
+| A plain-http server is marked HTTP, with the warning and the server's version | `TVSignInServerTests.testAPlainHTTPServerIsMarkedAndWarnedAbout` | UI | pass 2026-11-22 |
+| "Use a different server" goes back to the address | `TVSignInServerTests.testUseADifferentServerGoesBackToTheAddress` | UI | pass 2026-11-22 |
 | Sign out (dialog, back to sign-in) | `TVSettingsTests.testSignOutReturnsToTheSignInScreen`, `testSignOutDialogNamesTheAccount` | UI | xfail (1), pass (1) |
 
 ## Home
@@ -49,6 +53,11 @@ Regression tests are named after their bug and cite the source in a comment.
 | Next Up card opens the season on its episode | `TVHomeTests.testNextUpCardOpensTheSeasonOnItsEpisode`, `TVShellTests.testNextUpOpensTheShowWithTheSeasonOnTopAndTheEpisodePicked` | UI, unit | pass |
 | Refresh | `TVHomeTests.testRefreshKeepsFocusAndRows` | UI | pass |
 | Hide Continue Watching | `TVSettingsTests.testHideContinueWatchingTakesTheRowOffHome` | UI | pass |
+| Card menu: Add to Favorites reaches the server | `TVCardMenuTests.testAddToFavoritesFromTheCardMenuReachesTheServer` | UI | pass 2026-11-22 |
+| Card menu: Play from Beginning ignores the resume point (offered only when started) | `TVCardMenuTests.testPlayFromBeginningIgnoresTheResumePoint` | UI | pass 2026-11-22 |
+| Card menu: Go to Show, Go to Season, Episode Details on a Next Up card | `TVCardMenuTests.testGoToShowFromAnEpisodeCardOpensTheShow`, `testGoToSeasonFromAnEpisodeCardOpensTheSeason`, `testANextUpCardOffersTheEpisodesOwnPage` | UI | pass 2026-11-22 |
+| Card menu: Add Show to Next Up asks first (Menu leaves the server alone); the Next Up row offers Remove, not Add | `TVCardMenuTests.testAddShowToNextUpAsksAndMenuLeavesItAlone`, `testTheNextUpRowsMenuOffersRemovalAndNotAdding` | UI | pass 2026-11-22 |
+| Card menu: Remove from Next Up and the two Add answers carried out | not automated: each changes the suite's Next Up baseline that `TVHomeTests` reads; the shared logic is in `NextUpRemovalTests`/`NextUpTargetTests` (unit); `MANUAL.md` §6 | manual |
 
 ## Libraries, collections, search
 
@@ -61,6 +70,7 @@ Regression tests are named after their bug and cite the source in a comment.
 | Photo folders (master-fix-list "Folder tiles open an empty page") | `TVBrowseTests.testFolderOfPhotosOpensItsContents` | UI | xfail |
 | Search: field, keyboard, results, Unicode, nothing found | `TVBrowseTests.testSearchFindsTheLongFixtures`, `testSearchFindsAUnicodeTitle`, `testSearchWithNoMatchSaysSo` | UI | pass |
 | Search offers no music on a TV | `TVBrowseTests.testSearchOffersNoMusicOnTheTV` | UI | pass |
+| Search for a person, by name | not written: no person fixture that Search is known to return on the TV (the cast path is `testCastLeadsToAPersonPage`, xfail) | untested |
 
 ## Requests through Seerr (TVRequestsTests)
 
@@ -73,7 +83,14 @@ Against the stand-in Seerr server (TESTING.md). Run 2026-11-16: 4 pass.
 | A film asked for with the remote from a browse row | TVRequestsTests.testAFilmIsAskedForWithTheRemote | UI | pass |
 | Search offers what the library lacks, reachable with the remote | TVRequestsTests.testSearchOffersWhatTheLibraryLacks | UI | pass |
 | The Seerr tab: each browse row a placeholder until it lands, the foot credits Seerr and TMDB, focus kept | TVRequestsTests.testRowsShowTheyAreLoadingAndThePageCreditsSeerrAndTMDB | UI | pass 2026-11-19 |
-| Connecting in Settings (the full-screen form and the on-screen keyboard) | — | manual | MANUAL.md |
+| Where each request stands on its row (Waiting for approval, On its way) | `TVRequestsMoreTests.testEachRequestsRowSaysWhereItStands` | UI | pass 2026-11-22 |
+| A pending request taken back with the remote, through "Cancel this request?" | `TVRequestsMoreTests.testARequestIsTakenBackWithTheRemote` | UI | pass 2026-11-22 |
+| A show's missing seasons offered on its page; the request page ticks them and asks for 3 and 4 | `TVRequestsMoreTests.testAShowsMissingSeasonsAreOfferedOnItsPageAndAskedFor` | UI | pass 2026-11-22, after the fix: the banner is a focus region, so Down from the seasons reaches Request… |
+| "Like This, Not in Your Library" under a film, reachable, opens a request page | `TVRequestsMoreTests.testAFilmsPageOffersLikeThisFromSeerr` | UI | pass 2026-11-22, after the fix: the request page's first button takes focus when it arrives |
+| Settings → Account: the Seerr rows while connected, Disconnect takes the tab away | `TVRequestsSettingsTests.testAConnectedSeerrShowsItsRowsAndDisconnectTakesTheTabAway` | UI | pass 2026-11-22, after the fix: Account is pushed by value and its Seerr row takes focus back after the strip rebuilds |
+| The Connect form opens; Menu leaves it unconnected | `TVRequestsSettingsTests.testTheConnectFormOpensAndMenuLeavesItUnconnected` | UI | pass 2026-11-22 |
+| Connecting in Settings with the on-screen keyboard, the plain-http warning, the tab appears | `TVRequestsSettingsTests.testConnectingFromSettingsWithTheKeyboardAddsTheSeerrTab` (stand-in server); a real Seerr in `MANUAL.md` | UI, manual | pass 2026-11-22, after the same fix |
+| Posters off notice, an expired session renewed, Reconnect | not written for the TV (covered on the iPhone: `PhoneRequestsTests`; same `SeerrClient`) | untested here |
 
 Seen, not fixed: after Request is pressed the button goes and focus moves up to
 the tab strip rather than to Cancel Request.
@@ -92,6 +109,8 @@ the tab strip rather than to Cancel Request.
 | Play on a show plays its next episode | `TVBrowseTests.testPlayOnAShowStartsItsNextEpisode` | UI | pass |
 | Episode page and breadcrumbs; double episode | `TVBrowseTests.testAnEpisodePage`, `testDoubleEpisodeAndAMissingNumberAreShownAsTheyAre` | UI | pass |
 | Person page from the cast | `TVBrowseTests.testCastLeadsToAPersonPage` | UI | xfail |
+| A show's Add to Next Up asks first; no Mark watched on a show | `TVDetailMoreTests.testAShowsAddToNextUpAsksAndMenuLeavesItAlone` | UI | pass 2026-11-22 |
+| More Like This reached with the remote, opens a title, Menu comes back | `TVDetailMoreTests.testMoreLikeThisIsReachedWithTheRemoteAndOpensATitle` | UI | pass 2026-11-22 |
 | Blocked title in plain words (fix-status "Blocked title raw error") | `TVBrowseTests.testABlockedTitleSaysSoInPlainWords` | UI | xfail |
 
 ## The player (mpv)
@@ -111,6 +130,10 @@ the tab strip rather than to Cancel Request.
 | Swipe-down panel: tabs for a film, focus along tabs and into cards, Menu from card to tab | `TVPlayerTests.testSwipeDownOpensInfoWithAFilmsTabs` | UI | pass |
 | Swipe up from the tabs closes the panel | `TVPlayerTests.testSwipeUpFromTheTabsPutsThePanelAway` | UI | pass |
 | Info tab: title, stream line (engine), chapter | `TVPlayerTests.testInfoNamesTheFileTheChapterAndHDRRange` | UI | pass |
+| Info tab: runtime line of facts | `TVPanelFactsTests` (2) | unit | see the run |
+| Info tab: sleep timer choices, set, Cancel | `TVPlayerInfoTabTests.testTheSleepTimerIsSetAndCancelledFromInfo` | UI | pass 2026-11-22 |
+| Info tab: Autoplay switch only on an episode with a next one; Off stops the next starting | `TVPlayerInfoTabTests.testAFilmHasNoAutoplaySwitch`, `testAutoplayOffInInfoStopsTheNextEpisodeStarting` | UI | pass 2026-11-22 |
+| The sleep timer running out closes the player | not automated: the shortest choice is 15 minutes; the elapse path is shared (`SiriIntentsTests` covers set/cancel through `PlayerActions`); `MANUAL.md` §6 | manual |
 | Audio tracks: every one listed, choosing one reaches the server (jellyfin-track-index-needs-source-id.md) | `TVPlayerTests.testEveryAudioTrackIsListedAndOneCanBeChosen` | UI | pass |
 | Every subtitle kind listed; none claims a server burn-in on direct play (master-fix-list) | `TVPlayerTests.testEverySubtitleKindIsListedAndNoneClaimsTheServerDrawsIt` | UI | pass |
 | PGS stays DirectPlay on mpv; ASS, WebVTT, VobSub each shown | `TVPlayerTests.testAPictureSubtitleStaysDirectPlayOnMPV`, `testAnASSAndAWebVTTAndAVobSubTrackCanEachBeShown` | UI | pass |
@@ -166,6 +189,9 @@ the tab strip rather than to Cancel Request.
 | Tune a channel; top edge changes channel; live timeline, no scrubber | `TVLiveTVTests.testTuningAChannelAndChangingItWithTheEdges` | UI | pass |
 | Channels tab; no Quality on a channel | `TVLiveTVTests.testTheChannelsTabListsTheLineUp` | UI | pass |
 | Menu back to the guide | `TVLiveTVTests.testMenuLeavesAChannelBackToTheGuide` | UI | pass |
+| Info over a channel: the programme, up to three coming up, no Autoplay | `TVLiveTVMoreTests.testInfoOverAChannelNamesTheProgrammeAndWhatComesNext` | UI | pass 2026-11-22 |
+| A custom playlist source with no playlist: "No channels" in place of a guide, focus not trapped | `TVLiveTVMoreTests.testACustomSourceWithNoPlaylistSaysThereAreNoChannels` | UI | pass 2026-11-22 |
+| Guide error banner and Retry | not automated: needs the guide request to fail while the channel list loads; no hook for it; `MANUAL.md` §6 | manual |
 | Live TV source choice in Settings | `TVSettingsTests.testLiveTVSourceChoices` | UI | pass |
 
 ## Settings
@@ -183,6 +209,17 @@ the tab strip rather than to Cancel Request.
 | Account page | `TVSettingsTests.testAccountPageSaysWhoAndWhere` | UI | pass |
 | About says mpv | `TVSettingsTests.testAboutSaysMPV` | UI | pass |
 | No Music, Downloads or Watch pages | `TVSettingsTests.testNoMusicPageOnTheTV` | UI | pass |
+| First page: General switches flip and are kept over a relaunch; Next Up window list; iCloud row a switch or Unavailable; each page's summary in grey | `TVSettingsRowsTests.testGeneralSwitchesFlipAndAreKeptOverARelaunch`, `testNextUpWindowListsItsChoicesAndKeepsOne`, `testTheICloudRowIsASwitchOrSaysUnavailable`, `testTheFirstPageSaysWhereEachPageStands` | UI | pass 2026-11-22 |
+| The summaries as the tvOS build words them (no Auto; the 60 fps delay and Stereo; Never; Custom playlist; the Next Up window in words) | `TVSettingsSummaryTests` (8) | unit | pass 2026-11-22 |
+| Account: connection facts; this account listed and clicking it asks nothing; Add Account opens sign-in and Cancel comes back; SyncPlay… asks which group, Menu leaves it Off | `TVSettingsRowsTests.testAccountPageGivesTheConnectionFacts`, `testTheAccountsListHasThisAccountAndClickingItAsksNothing`, `testAddAccountOpensSignInAndCancelComesBack`, `testSyncPlayInSettingsAsksWhichGroupAndMenuLeavesItOff` | UI | pass 2026-11-22 |
+| Two accounts: the other's row asks Switch / Sign Out of This Apple TV; Switch signs it in; Sign Out takes it off the list; signing out leaves it on "Who's watching?", a press signs it in | `TVSettingsAccountsTests` (4) | UI | pass 2026-11-22 |
+| Video: framing on its row and the first page; Resume and Autoplay switches; audio language list; zoom and aspect with Reset | `TVSettingsRowsTests.testFramingChoiceShowsOnItsRowAndOnTheFirstPage`, `testResumeAndAutoplaySwitchesFlip`, `testAudioLanguageListStartsWithTheFilesOwnAndKeepsAChoice`, `testZoomAndAspectAreListedAndResetPutsThemBack` | UI | pass 2026-11-22 |
+| Video's effect: the Settings quality is what a title opens at; Resume off starts from the top | `TVSettingsEffectTests.testTheQualityChosenInSettingsIsWhatATitleOpensAt`, `testWithResumeOffATitleStartsFromTheTop` | UI | pass 2026-11-22 |
+| Audio: downmix on the first page; every delay row In step on a clean launch; a delay set over the 24 fps clip shows on its row and no other | `TVSettingsRowsTests.testStereoDownmixShowsOnTheFirstPage`, `testEveryDelayRowReadsInStepOnACleanLaunch`; `TVSettingsEffectTests.testADelaySetOverTheClipIsShownOnItsRowAndNoOther` | UI | pass 2026-11-22 |
+| Subtitles: size, background, language and forced only; a choice list opens on the current choice | `TVSettingsRowsTests.testSubtitleSizeBackgroundLanguageAndForcedOnly`, `testAChoiceListOpensOnTheCurrentChoice` | UI | pass 2026-11-22 |
+| Live TV: a custom source brings the playlist rows and Jellyfin takes them away; a text row's alert, Menu saves nothing; artwork check with no playlist; Refresh now | `TVSettingsRowsTests.testACustomSourceBringsThePlaylistRowsAndTheServerTakesThemAway`, `testCheckingArtworkWithNoPlaylistSaysThereAreNoChannels`, `testRefreshNowSaysItIsRefreshing` | UI | pass 2026-11-22 |
+| Library copy: kept, synced, deleted, switched off | `TVSettingsRowsTests.testKeepingALibraryCopySyncsItAndDeleteEmptiesIt` | UI | pass 2026-11-22 |
+| A playlist address typed and saved; the guide from a real M3U/XMLTV playlist | not automated: the QA folder serves no playlist over http for the app to read; parsing is `TVGuideTests` (unit) | untested |
 
 ## Music, downloads
 
@@ -219,7 +256,7 @@ The Apple TV has no music UI and keeps no downloads (FEATURE-LIST.md;
 | SyncPlay against the QA server: a group from the panel, the remote's play/pause is the group's, someone else's jump and play move mpv, leave | TVSyncPlayTests.testSyncPlayStartsAGroupAndFollowsIt | new 2026-11-18 |
 | What mpv does with a group's order; SyncPlay's wire and clock | GroupOrderTests, SyncPlayWireTests, SyncPlayClockTests (unit) | new 2026-11-18 |
 | SharePlay session on the Apple TV (`AVDelegatingPlaybackCoordinator`) | MANUAL: needs a FaceTime call; never run | manual, untested |
-| Settings › Account › SyncPlay (join with nothing playing) | MANUAL | manual |
+| Settings › Account › SyncPlay (join with nothing playing) | the question and Menu: `TVSettingsRowsTests.testSyncPlayInSettingsAsksWhichGroupAndMenuLeavesItOff`; joining a group with nothing playing: MANUAL | UI, manual |
 | Focus styles and sizes in `Components.swift`, `HomeView`, `ItemDetailView` (layout) | screenshots attached by the UI tests; MANUAL §5 for the sofa | visual only |
 | Dropout taken as end of episode (master-fix-list "Top priority") | not automated: needs the QA proxy killed mid-stream; MANUAL §5 | untested |
 | Starved direct play notice | not automated: needs the 8098 throttle, which can hang below 2.6 Mbps (qa-rproxy-low-rate-hang.md) | untested |

@@ -828,6 +828,9 @@ struct RouteDestination: View {
         case .settings(let route):
             #if os(iOS)
             SettingsRouteView(route: route)
+            #elseif os(tvOS)
+            // Only Account is pushed by value on a TV — see `TVSettingsView`.
+            if case .page(.account) = route { ServerSettingsPage() } else { EmptyView() }
             #else
             EmptyView()
             #endif

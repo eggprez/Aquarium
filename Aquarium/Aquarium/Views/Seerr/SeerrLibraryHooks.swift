@@ -52,6 +52,11 @@ struct SeerrItemHooks: View {
         }
         .padding(.horizontal, Metrics.gutter)
         .padding(.vertical, 4)
+        // The button sits at the far trailing edge, out of line with the
+        // seasons above it, and on an Apple TV a press down from a season
+        // found nothing straight below and went nowhere. As a region the
+        // whole band is the target, so Down lands on the button.
+        .focusRegion()
         .testAnchor(TestID.Requests.detailSeasons)
     }
 

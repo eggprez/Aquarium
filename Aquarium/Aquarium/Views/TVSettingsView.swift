@@ -38,7 +38,14 @@ struct SettingsView: View {
             // controls are one press away, described one at a time in the
             // panel, and the first page never scrolls under the tab strip.
             SettingGroup(nil, page: .account) {
-                SettingLink(Self.row(.account), value: SettingsSummary.account(client), page: .account, isFirst: true) {
+                // Pushed by value, so the stack's path in `AppModel` holds it.
+                // Connecting or disconnecting Seerr on this page adds or
+                // removes the strip's Seerr tab, and the strip gives Settings
+                // a fresh page when its tabs change: a page pushed by a
+                // destination went with it, and you were thrown out of
+                // Account to the top of Settings.
+                SettingLink(Self.row(.account), value: SettingsSummary.account(client), page: .account, isFirst: true,
+                            route: .settings(.page(.account))) {
                     ServerSettingsPage()
                 }
                 .accessibilityIdentifier(TestID.Settings.pageLink(SettingsPage.account.rawValue))
@@ -135,7 +142,7 @@ struct SettingsView: View {
 
 // MARK: - The pages
 
-private struct ServerSettingsPage: View {
+struct ServerSettingsPage: View {
     @Environment(AppModel.self) private var app
     @Environment(JellyfinClient.self) private var client
 
@@ -143,6 +150,14 @@ private struct ServerSettingsPage: View {
     @State private var confirmSignOut = false
     @State private var chosenAccount: SavedSession?
     @State private var isConnectingSeerr = false
+    @FocusState private var seerrRowFocused: Bool
+
+    /// Set when Connect or Disconnect is pressed. Either one adds or removes
+    /// the strip's Seerr tab, the strip rebuilds Settings' page, and this
+    /// page comes back new (its place kept by the stack's path) with nothing
+    /// focused: Menu then left the app instead of going back. The new page
+    /// spends this to put focus back on the Seerr row.
+    @MainActor static var refocusSeerrRow = false
 
     var body: some View {
         SettingsColumns(title: "Account", intro: SettingsView.intro(.account)) {
@@ -212,13 +227,17 @@ private struct ServerSettingsPage: View {
                         }
                         SettingButton("Disconnect from Seerr", role: .destructive,
                                       notes: [SettingNote(name: "Disconnect", text: "Requests you have already made stay on the server. This Apple TV stops showing them until you connect again.")]) {
+                            Self.refocusSeerrRow = true
                             Task { await seerr.disconnect() }
                         }
+                        .focused($seerrRowFocused)
                         .accessibilityIdentifier(TestID.Requests.settingsDisconnect)
                     } else {
                         SettingButton("Connect to Seerr…", notes: [SettingNote(name: "Connect to Seerr", text: SeerrCopy.offer)]) {
+                            Self.refocusSeerrRow = true
                             isConnectingSeerr = true
                         }
+                        .focused($seerrRowFocused)
                         .accessibilityIdentifier(TestID.Requests.settingsConnect)
                     }
                 }
@@ -241,6 +260,16 @@ private struct ServerSettingsPage: View {
         }
         .testAnchor(TestID.Settings.pageRoot(SettingsPage.account.rawValue))
         .fullScreenCover(isPresented: $isConnectingSeerr) { SeerrConnectView() }
+        .onChange(of: isConnectingSeerr) { _, open in
+            // Left without connecting: nothing changed, nothing to put back.
+            if !open, !SeerrClient.shared.isConnected { Self.refocusSeerrRow = false }
+        }
+        .onAppear {
+            guard Self.refocusSeerrRow else { return }
+            Self.refocusSeerrRow = false
+            // After this pass, once the row is in the hierarchy.
+            Task { @MainActor in seerrRowFocused = true }
+        }
         .confirmationDialog(client.session?.signOutQuestion ?? "Sign out?",
                             isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign out", role: .destructive) {
@@ -1045,20 +1074,33 @@ private struct SettingLink<Destination: View>: View {
     let destination: () -> Destination
 
     init(_ note: SettingNote, value: String? = nil, page: SettingsPage? = nil, isFirst: Bool = false,
-         @ViewBuilder destination: @escaping () -> Destination) {
+         route: Route? = nil, @ViewBuilder destination: @escaping () -> Destination) {
         self.note = note
         self.value = value
         self.page = page
         self.isFirst = isFirst
+        self.route = route
         self.destination = destination
     }
 
+    /// Set for a page that must outlive its tab's page being rebuilt: the
+    /// stack's path in `AppModel` holds it, not the link. See the Account row.
+    var route: Route?
+
     var body: some View {
-        NavigationLink(destination: destination) {
-            SettingRowLabel(title: note.name ?? "", value: value, chevron: true)
-                .describes(note.name ?? "", [note], isFirst: isFirst, page: page)
+        Group {
+            if let route {
+                NavigationLink(value: route) { label }
+            } else {
+                NavigationLink(destination: destination) { label }
+            }
         }
         .buttonStyle(SettingRowStyle())
+    }
+
+    private var label: some View {
+        SettingRowLabel(title: note.name ?? "", value: value, chevron: true)
+            .describes(note.name ?? "", [note], isFirst: isFirst, page: page)
     }
 }
 

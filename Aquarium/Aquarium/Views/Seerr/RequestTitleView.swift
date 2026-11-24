@@ -164,6 +164,14 @@ struct RequestTitleView: View {
 
     @ViewBuilder
     private func actions(_ title: SeerrTitle) -> some View {
+        // The page opens before Seerr answers, so when the buttons arrive the
+        // focus engine has already placed focus and found nothing: opened
+        // from a shelf on a title page, an Apple TV sat with nothing focused
+        // and the remote did nothing. The first button drawn takes focus
+        // when it appears (`focusOnArrival` on the page).
+        let inLibrary = title.mediaInfo?.libraryItemId != nil
+            && [.available, .partiallyAvailable].contains(title.mediaInfo?.availability ?? .unknown)
+        let asks = canAsk(title) && rights.canRequest(kind)
         VStack(alignment: .leading, spacing: 12) {
             if let libraryId = title.mediaInfo?.libraryItemId,
                [.available, .partiallyAvailable].contains(title.mediaInfo?.availability ?? .unknown) {
@@ -174,6 +182,7 @@ struct RequestTitleView: View {
                 }
                 .appButtonStyle(prominent: !canAsk(title))
                 .accessibilityIdentifier(TestID.Requests.titleOpenInLibrary)
+                .arrivalFocusCard(isFirst: true)
             }
             if canAsk(title) {
                 if !rights.canRequest(kind) {
@@ -201,6 +210,7 @@ struct RequestTitleView: View {
                     .appButtonStyle(prominent: true)
                     .disabled(isSending || outOfQuota || (kind == .tv && chosenSeasons.isEmpty))
                     .accessibilityIdentifier(TestID.Requests.titleRequest)
+                    .arrivalFocusCard(isFirst: !inLibrary)
                     if let summary = quota?.allowance(for: kind)?.summary {
                         Text(summary)
                             .font(.footnote)
@@ -218,6 +228,7 @@ struct RequestTitleView: View {
                 .appButtonStyle()
                 .disabled(isSending)
                 .accessibilityIdentifier(TestID.Requests.titleCancel)
+                .arrivalFocusCard(isFirst: !inLibrary && !asks)
             }
         }
         .padding(.horizontal, Metrics.gutter)

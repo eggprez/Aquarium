@@ -179,11 +179,27 @@ tinted band with a hairline. Only an eye can judge it.
 1. Home over a bright hero, not scrolled: the clock reads, the strip behind
    it takes the poster's colours, and nothing below the status bar is blurred.
 2. Drag Home up slowly (changed 2026-11-21): the blur grows down under the
-   finger and reaches past the bar within about 32 points, and shrinks the
+   finger and reaches past the bar within about 96 points, and shrinks the
    same way on the way back — one blur growing, no flash and no crossfade,
-   and no line across the artwork where it stops.
+   and no line across the artwork where it stops. On a flick it takes about
+   half a second rather than snapping (2026-11-22). With Settings ›
+   Appearance › Liquid Glass at Tinted the bar's blur carries the system's
+   tint, as the phone's does (iPhone MANUAL, same section, step 3).
    Further on, when shelves pass under the bar, there is no grey band or
    hairline, and no line of text shows through behind the wordmark or the
    discs.
 3. A title page long enough to scroll: the same, with the title beside Back.
 4. Repeat in light mode.
+
+## Added 2026-11-22 (iPad audit)
+
+What the 2026-11-22 pass over the iPad source found that no automated test
+can reach. The automated side of the same pass is in COVERAGE.md ("new, not
+yet run").
+
+| Check | What should happen | Why not automated |
+|---|---|---|
+| Open a second Aquarium window (drag a card to the screen's edge, or the app's "+" in Stage Manager) | The new window closes at once and the first keeps its section and stack: the app runs one window (`SceneDelegate.scene(_:willConnectTo:)` destroys a second window scene). Record if a blank window flashes | The test simulator shows apps full screen and cannot make a second scene |
+| Settings › Appearance › Sidebar on an iPad | Look at the small words at each row's trailing end: they read "Tab bar" / "More", the iPhone's placements, though the footer says the order is the sidebar's. Record whether that reads wrongly (TabBarSettingsView draws them on every device) | Wording to judge, not a state; `PadSidebarOrderTests` covers the order itself |
+| Now Playing: Instant Mix, a station's "What's leading" sheet, the volume slider | A mix replaces Up Next ("From …" changes); the sheet lists artists and genres by points; the slider moves the system volume | What a mix or station holds depends on the server's library and the station engine (tested in AquariumTests/Shared); the slider is the system's |
+| Downloads with the network cut part-way (Wi-Fi off mid-transfer), and the offline shell | Failed section with Retry / Retry All / Delete; Paused section; offline, the sidebar is Downloads alone and the Music and Audiobooks doors open what is on the iPad | `run-tests.sh ipad` has no switch proxy (the iPhone's `PhoneProxyTestCase`), so a transfer cannot be cut on cue |
