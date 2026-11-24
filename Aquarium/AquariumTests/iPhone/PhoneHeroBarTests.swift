@@ -10,6 +10,8 @@ import UIKit
 
 @MainActor
 final class PhoneHeroBarUnitTests: PhoneUnitTestCase {
+    /// (The blur tests here are for `BarBlur` under Search's and Live TV's
+    /// bar; the floating bar itself has had none since 2026-11-22.)
     /// The untinted blur is what lets the bar take the artwork's colours.
     /// Fails first if a new iOS stops answering to the filter's name, which
     /// would leave the bar on its paler fallback.
@@ -94,22 +96,100 @@ final class PhoneHeroBarUnitTests: PhoneUnitTestCase {
 
     /// The blur is the thin one only at the very top of the page: it is the
     /// whole one once the page has moved `BarScroll.distance` points, part
-    /// of the way there in between, and thin again back at the top. Pulling
-    /// the page down past its top leaves it thin.
-    func testBlurFollowsTheFirstPointsOfScrolling() {
+    /// of the way there in between (eased at both ends), and thin again back
+    /// at the top. Pulling the page down past its top leaves it thin.
+    func testBlurFollowsThePageOffItsTop() {
         XCTAssertEqual(BarScroll.progress(offset: 0), 0)
         XCTAssertEqual(BarScroll.progress(offset: -40), 0, "rubber-banding past the top moved the blur")
         XCTAssertEqual(BarScroll.progress(offset: BarScroll.distance / 2), 0.5)
+        XCTAssertEqual(BarScroll.progress(offset: BarScroll.distance / 4), 0.15625, "the blur does not start gently")
+        XCTAssertEqual(BarScroll.progress(offset: BarScroll.distance * 3 / 4), 0.84375, "the blur does not arrive gently")
         XCTAssertEqual(BarScroll.progress(offset: BarScroll.distance), 1)
         XCTAssertEqual(BarScroll.progress(offset: 900), 1)
-        XCTAssertLessThanOrEqual(BarScroll.distance, Metrics.topBar,
-                                 "the blur should be whole before the page has moved a bar's height")
+        XCTAssertGreaterThanOrEqual(BarScroll.distance, Metrics.topBar * 1.5,
+                                    "the blur is whole almost at once: it reads as a switch, not as growing")
+        XCTAssertLessThanOrEqual(BarScroll.distance, 160,
+                                 "the blur should be whole long before a hero's title reaches the bar")
+    }
+
+    /// A flick takes the page past `BarScroll.distance` in a frame, and the
+    /// blur must not go with it: it takes `BarScroll.swing` seconds to go
+    /// the whole way, either way, and stops where the page is.
+    func testBlurTakesItsTimeOnAFlick() {
+        XCTAssertGreaterThanOrEqual(BarScroll.swing, 0.4, "a flick snaps the blur from one to the other")
+        let frame = BarScroll.swing / 10
+        XCTAssertEqual(BarScroll.step(from: 0, toward: 1, seconds: frame), 0.1, accuracy: 0.0001)
+        XCTAssertEqual(BarScroll.step(from: 1, toward: 0, seconds: frame), 0.9, accuracy: 0.0001)
+        XCTAssertEqual(BarScroll.step(from: 0.5, toward: 0.52, seconds: frame), 0.52, "overshot a slow drag")
+        XCTAssertEqual(BarScroll.step(from: 0.5, toward: 0.5, seconds: frame), 0.5)
+
         let scroll = BarScroll()
         XCTAssertEqual(scroll.progress, 0)
         scroll.set(offset: 500)
+        XCTAssertEqual(scroll.target, 1)
+        XCTAssertEqual(scroll.progress, 0, "the blur jumped with the page")
+        scroll.advance(by: BarScroll.swing / 2)
+        XCTAssertEqual(scroll.progress, 0.5, accuracy: 0.0001)
+        scroll.advance(by: BarScroll.swing)
         XCTAssertEqual(scroll.progress, 1)
         scroll.set(offset: 0)
+        scroll.advance(by: BarScroll.swing / 4)
+        XCTAssertEqual(scroll.progress, 0.75, accuracy: 0.0001)
+        // Turned round part-way: it heads for where the page is now.
+        scroll.set(offset: 900)
+        scroll.advance(by: BarScroll.swing)
+        XCTAssertEqual(scroll.progress, 1)
+        scroll.set(offset: 0)
+        scroll.advance(by: BarScroll.swing)
         XCTAssertEqual(scroll.progress, 0, "the blur did not go back at the top of the page")
+    }
+
+    /// The bar follows the Liquid Glass setting by having the system's own
+    /// glass over its blur (there is no setting to read): one sheet, a
+    /// sibling of the blur, run off the screen at the top and sides so its
+    /// rim does not show, whole where the blur is at full strength and gone
+    /// just past where the blur ends — at the top of the page and scrolled.
+    func testSystemGlassLiesOverTheBlurAndFadesWithIt() throws {
+        let under = BarBlur.overhang + BarBlur.margin
+        let height: CGFloat = 59 + 44 + under
+        let surface = BarBlurSurface(blur: VariableBlurView(radius: 5, fullUntil: 0.35))
+        surface.frame = CGRect(x: 0, y: 0, width: 402, height: height)
+        surface.blur.set(radius: 5, fullUntil: 0.35, clearBottom: 44 + 12 + under, least: BarBlur.least,
+                         scrolled: BarBlur.scrolled, progress: 0)
+        surface.setNeedsLayout()
+        surface.layoutIfNeeded()
+        XCTAssertEqual(surface.blur.frame, surface.bounds)
+        XCTAssertEqual(surface.blur.reach, 47)
+        XCTAssertTrue(surface.clipsToBounds)
+        XCTAssertFalse(surface.isUserInteractionEnabled, "the bar's surface takes touches meant for the page")
+
+        let glass = try XCTUnwrap(surface.glass, "no system glass over the blur: the bar ignores the Liquid Glass setting")
+        XCTAssertTrue(glass.effect is UIGlassEffect)
+        XCTAssertTrue(glass.superview === surface, "glass inside the blur's own view throws")
+        XCTAssertEqual(surface.subviews.last, glass, "the glass is under the blur")
+        XCTAssertFalse(glass.isHidden)
+        XCTAssertEqual(glass.frame, CGRect(x: -24, y: -24, width: 402 + 48, height: height + 24))
+        XCTAssertNotNil(glass.mask, "the glass ends in a hard edge across the artwork")
+        let whole = height + BarGlass.outset
+        XCTAssertEqual(surface.glassStops.from, (24 + 47 * 0.35) / whole, accuracy: 0.0001)
+        XCTAssertEqual(surface.glassStops.to, (24 + 47 + BarGlass.tail) / whole, accuracy: 0.0001)
+
+        surface.blur.set(radius: 5, fullUntil: 0.35, clearBottom: 44 + 12 + under, least: BarBlur.least,
+                         scrolled: BarBlur.scrolled, progress: 1)
+        surface.setNeedsLayout()
+        surface.layoutIfNeeded()
+        XCTAssertEqual(surface.glassStops.from, (24 + 125 * 0.75) / whole, accuracy: 0.0001)
+        XCTAssertEqual(surface.glassStops.to, (24 + 125 + BarGlass.tail) / whole, accuracy: 0.0001)
+        XCTAssertLessThan(BarGlass.tail, VariableBlurView.fadeLength, "tinted glass runs on past the blur")
+
+        // Never past its own foot, and nothing to show where nothing is blurred.
+        let short = BarGlass.stops(BlurShape.Drawn(radius: 18, fullUntil: 0.75, reach: 100), height: 100)
+        XCTAssertEqual(short.to, 1)
+        XCTAssertEqual(short.from, 99 / 124, accuracy: 0.0001)
+        surface.blur.set(radius: 5, fullUntil: 0.35, clearBottom: height, least: 0)
+        surface.setNeedsLayout()
+        surface.layoutIfNeeded()
+        XCTAssertTrue(glass.isHidden)
     }
 
     /// One blur that grows, not two crossfaded: on an iPhone 17 (59 of
@@ -155,6 +235,20 @@ final class PhoneHeroBarUnitTests: PhoneUnitTestCase {
         XCTAssertTrue(view.usesFilter, "fell back to the masked blur while growing")
     }
 
+    /// The bar is bare only at the very top of a page: the wordmark fades
+    /// out over the first points of scrolling, and the buttons take their
+    /// glass discs early in it, well before anything can scroll under them.
+    func testWordmarkFadesAndButtonsTakeDiscsAsThePageMoves() {
+        XCTAssertEqual(PhoneHeroBar.brandOpacity(progress: 0), 1)
+        XCTAssertEqual(PhoneHeroBar.brandOpacity(progress: 0.5), 0.5)
+        XCTAssertEqual(PhoneHeroBar.brandOpacity(progress: 1), 0)
+        XCTAssertEqual(PhoneHeroBar.brandOpacity(progress: 3), 0)
+        XCTAssertFalse(PhoneHeroBar.lifted(progress: 0), "discs at the top of the page")
+        XCTAssertTrue(PhoneHeroBar.lifted(progress: 0.5))
+        XCTAssertTrue(PhoneHeroBar.lifted(progress: 1))
+        XCTAssertLessThanOrEqual(PhoneHeroBar.liftAt, 0.5, "the buttons stay bare too far into the scroll")
+    }
+
     /// The frame the bar takes below the status bar, which is what a page's
     /// artwork reaches up by: the bar and the front screen's dead touch strip
     /// where there is no status strip, nothing where the bar is the strip.
@@ -180,12 +274,5 @@ final class PhoneHeroBarUnitTests: PhoneUnitTestCase {
         return (0..<rows).map { data[$0 * 4 + 3] }
     }
 
-    /// The bar turns from white to the page's colour only once the artwork
-    /// has gone from under it: Home's hero is the taller of the two. (The
-    /// blur does not wait for that — `testBlurFollowsTheFirstPointsOfScrolling`.)
-    func testThresholdsSitPastTheArtwork() {
-        XCTAssertGreaterThan(PhoneHeroBar.threshold(home: true), PhoneHeroBar.threshold(home: false))
-        XCTAssertGreaterThan(PhoneHeroBar.threshold(home: false), Metrics.topBar)
-    }
 }
 #endif

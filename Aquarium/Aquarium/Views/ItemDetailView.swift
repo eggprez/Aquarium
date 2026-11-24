@@ -121,12 +121,10 @@ struct ItemDetailView: View {
                 // in the frame its solid bar took (`TopBarFrame`).
                 ZStack(alignment: .top) {
                     scroll()
+                        .noTopEdgeBlur()
                         .ignoresSafeArea(.container, edges: .top)
-                        .modifier(PhoneHeroScrollWatcher(threshold: PhoneHeroBar.threshold(home: false),
-                                                         isPast: $phoneScrolled))
                         .modifier(BarScrollWatcher(scroll: barScroll))
                     PhoneHeroBar(page: .detail(title: navigationTitle),
-                                 overPage: phoneScrolled,
                                  scroll: barScroll)
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
@@ -335,9 +333,6 @@ struct ItemDetailView: View {
     /// What the top of the screen keeps for the clock, read from outside the
     /// scroll view that ignores it — see `body`. iPad only.
     @State private var padTopInset: CGFloat = 0
-    /// Whether the phone's artwork has scrolled out from under its bar,
-    /// which is when its glyphs take the page's colour.
-    @State private var phoneScrolled = false
     /// How far the page has moved off its top, for the bar's blur — the
     /// phone's and the iPad's.
     @State private var barScroll = BarScroll()

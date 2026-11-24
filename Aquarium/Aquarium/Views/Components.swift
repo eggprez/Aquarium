@@ -2865,6 +2865,23 @@ extension View {
 
 #if os(iOS)
 extension View {
+    /// Takes the system's own blur off the top of a scroll view. Since
+    /// iOS 26 a scroll view smears whatever passes under the status bar by
+    /// itself; under the phone's bare bar (`PhoneHeroBar`, 2026-11-22) that
+    /// would be the one blur left.
+    @ViewBuilder
+    func noTopEdgeBlur() -> some View {
+        if #available(iOS 26.0, *) {
+            scrollEdgeEffectHidden(true, for: .top)
+        } else {
+            self
+        }
+    }
+}
+#endif
+
+#if os(iOS)
+extension View {
     /// The surface under an iPad's floating bar: the untinted blur the
     /// phone's bar has (`HeroBarBlur`) — under the clock only at the very
     /// top of the page, and growing down past the bar's row as soon as the

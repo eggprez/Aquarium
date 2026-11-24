@@ -293,9 +293,6 @@ struct HomeView: View {
     #endif
 
     #if os(iOS)
-    /// Whether the phone's hero has scrolled out from under its bar, which
-    /// is when its glyphs take the page's colour.
-    @State private var phoneScrolled = false
     /// How far the page has moved off its top, for the bar's blur — the
     /// phone's and the iPad's.
     @State private var barScroll = BarScroll()
@@ -308,15 +305,13 @@ struct HomeView: View {
     private var phoneHome: some View {
         ZStack(alignment: .top) {
             scroll(bleed: EdgeInsets(top: PhoneHeroBar.bleed(topInset: padTopInset), leading: 0, bottom: 0, trailing: 0))
+                .noTopEdgeBlur()
                 .ignoresSafeArea(.container, edges: .top)
-                .modifier(PhoneHeroScrollWatcher(threshold: PhoneHeroBar.threshold(home: true),
-                                                 isPast: $phoneScrolled))
                 .modifier(BarScrollWatcher(scroll: barScroll))
             PhoneHeroBar(
                 page: .home(search: { app.push(.search("")) },
                             refresh: { Task { await reload(fresh: true) } },
                             isRefreshing: isRefreshing),
-                overPage: phoneScrolled,
                 scroll: barScroll
             )
         }

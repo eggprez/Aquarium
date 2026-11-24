@@ -7,16 +7,19 @@
 //  (`HeroHeader`).
 //
 //  It has no tint of its own, so it takes the colours of whatever is under
-//  it instead of laying a grey or white band across the picture. At the
+//  it instead of laying a grey or white band across the picture. What tint
+//  there is on iOS is the system's: a sheet of its glass lies over the blur
+//  (`BarGlass`), so the bar follows the person's Liquid Glass setting the
+//  way the tab bar does. At the
 //  very top of the page it covers only the strip the clock (or the window's
 //  title) sits in, so the top of a poster is left alone; as soon as the page
 //  moves off its top it reaches down past the bar's row, so a title never
 //  sits on a line of text.
 //
-//  It is one blur that grows with the first points of scrolling
-//  (`BarScroll`), under the finger, not two that crossfade: a system blur
-//  that is partly transparent stops blurring, which is what made the old
-//  crossfade stutter.
+//  It is one blur that grows as the page leaves its top (`BarScroll`), not
+//  two that crossfade: a system blur that is partly transparent stops
+//  blurring, which is what made the old crossfade stutter. It follows the
+//  finger on a slow drag and takes its time on a flick.
 //
 //  Built on the backdrop's variable-blur filter — the one the system draws
 //  under its own bars — which neither UIKit nor AppKit publishes, so it is
@@ -133,16 +136,100 @@ struct VariableBlur: UIViewRepresentable {
     var scrolled: BlurShape? = nil
     var progress: CGFloat = 0
 
-    func makeUIView(context: Context) -> VariableBlurView {
-        let view = VariableBlurView(radius: radius, fullUntil: fullUntil, clearBottom: clearBottom, least: least)
-        view.set(radius: radius, fullUntil: fullUntil, clearBottom: clearBottom, least: least,
-                 scrolled: scrolled, progress: progress)
+    func makeUIView(context: Context) -> BarBlurSurface {
+        let view = BarBlurSurface(blur: VariableBlurView(radius: radius, fullUntil: fullUntil,
+                                                         clearBottom: clearBottom, least: least))
+        updateUIView(view, context: context)
         return view
     }
 
-    func updateUIView(_ view: VariableBlurView, context: Context) {
-        view.set(radius: radius, fullUntil: fullUntil, clearBottom: clearBottom, least: least,
-                 scrolled: scrolled, progress: progress)
+    func updateUIView(_ view: BarBlurSurface, context: Context) {
+        view.blur.set(radius: radius, fullUntil: fullUntil, clearBottom: clearBottom, least: least,
+                      scrolled: scrolled, progress: progress)
+        view.setNeedsLayout()
+    }
+}
+
+/// The blur and, over it, a sheet of the system's glass cut to the same
+/// shape.
+///
+/// The glass is what makes the bar answer to Settings › Appearance › Liquid
+/// Glass (clear at one end, tinted at the other, and Reduce Transparency and
+/// Increase Contrast with it): the tab bar at the foot of the screen is that
+/// material, and a bar that stayed a bare blur was clear above a tab bar the
+/// person had asked to be nearly solid. There is no published way to read
+/// that setting, so the bar does not try to: the system's own material is
+/// laid in and does the following itself, live.
+///
+/// A sibling of the blur, not a child: a visual-effect view refuses
+/// subviews of its own.
+final class BarBlurSurface: UIView {
+    let blur: VariableBlurView
+    /// Nil before iOS 26, which has no glass (and no setting for it).
+    private(set) var glass: UIVisualEffectView?
+    private let glassFade = FadeMask()
+    /// Where the glass starts to fade and where it is gone, as fractions of
+    /// its own height — for the tests.
+    var glassStops: (from: CGFloat, to: CGFloat) { glassFade.stops }
+
+    init(blur: VariableBlurView) {
+        self.blur = blur
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        // The glass is wider and taller than the bar (`BarGlass.outset`).
+        clipsToBounds = true
+        addSubview(blur)
+        if #available(iOS 26.0, *) {
+            let glass = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+            glass.isUserInteractionEnabled = false
+            glass.mask = glassFade
+            addSubview(glass)
+            self.glass = glass
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        blur.frame = bounds
+        blur.layoutIfNeeded()
+        guard let glass else { return }
+        let drawn = blur.drawn
+        glass.isHidden = bounds.height <= 0 || drawn.reach <= 0
+        guard !glass.isHidden else { return }
+        glass.frame = BarGlass.frame(in: bounds)
+        glassFade.frame = glass.bounds
+        let stops = BarGlass.stops(drawn, height: bounds.height)
+        glassFade.set(from: stops.from, to: stops.to)
+    }
+}
+
+/// Where the glass over a bar's blur lies and how it fades.
+enum BarGlass {
+    /// How far the glass runs past the bar at the top and the sides, so the
+    /// bright rim the system draws round a piece of glass is off the screen
+    /// and what shows is a plain sheet.
+    static let outset: CGFloat = 24
+    /// How far past the blur's reach the glass is gone. Shorter than the
+    /// blur's own fade (`VariableBlurView.fadeLength`): tinted glass is
+    /// nearly solid, and a solid edge drawn out past the blur would sit on
+    /// sharp artwork.
+    static let tail: CGFloat = 12
+
+    static func frame(in bounds: CGRect) -> CGRect {
+        CGRect(x: -outset, y: -outset, width: bounds.width + outset * 2, height: bounds.height + outset)
+    }
+
+    /// The glass is whole where the blur is at full strength and fades with
+    /// it — fractions of the glass's own height, which is `outset` taller
+    /// than the bar's.
+    static func stops(_ drawn: BlurShape.Drawn, height: CGFloat) -> (from: CGFloat, to: CGFloat) {
+        let whole = height + outset
+        guard whole > 0 else { return (1, 1) }
+        let from = outset + drawn.reach * drawn.fullUntil
+        let to = min(outset + drawn.reach + tail, whole)
+        return (min(from, to) / whole, to / whole)
     }
 }
 
@@ -489,27 +576,113 @@ private extension CALayer {
 #if os(iOS) || os(macOS)
 /// How far a page has moved off its top, for the blur under its bar: 0 at
 /// the top, 1 once it has scrolled `distance` points, and every step
-/// between while it is on the way, so the blur grows under the finger.
+/// between while it is on the way, so the blur grows rather than switches.
+///
+/// It is paced as well as placed. On a slow drag the blur keeps to the
+/// finger; a flick covers `distance` in a frame or two, and a blur that kept
+/// to that snapped from one to the other, so `progress` never moves faster
+/// than the whole way in `swing` seconds and catches the page up after.
 ///
 /// An object the page owns and only the blur reads, so those first points
 /// of scrolling redraw the blur and not the page.
 @Observable
 final class BarScroll {
     /// Points of scrolling over which the blur goes from the strip under
-    /// the clock to the whole bar: enough to be seen growing, and short
-    /// enough that the page has barely left its top.
-    static let distance: CGFloat = 32
+    /// the clock to the whole bar. Long enough to be seen growing; short
+    /// enough that it is whole well before anything on the page (a hero's
+    /// title is the nearest thing, over two hundred points down) can reach
+    /// the bar.
+    static let distance: CGFloat = 96
+    /// The least time the blur takes to go the whole way, however fast the
+    /// page moved.
+    static let swing: TimeInterval = 0.5
 
+    /// What the blur draws.
     private(set) var progress: CGFloat = 0
+    /// Where the page says it should be; `progress` is on its way there.
+    @ObservationIgnored private(set) var target: CGFloat = 0
+    @ObservationIgnored private var ticker: BarScrollTicker?
+
+    deinit { ticker?.stop() }
 
     /// `offset` is how far the page has scrolled, in points.
     func set(offset: CGFloat) {
-        let next = Self.progress(offset: offset)
-        if next != progress { progress = next }
+        target = Self.progress(offset: offset)
+        guard target != progress else { return }
+        if ticker == nil {
+            ticker = BarScrollTicker { [weak self] elapsed in self?.advance(by: elapsed) }
+        }
     }
 
+    /// Moves `progress` toward where the page is by as much as `seconds`
+    /// allows. The ticker calls this once a frame until it has arrived.
+    func advance(by seconds: TimeInterval) {
+        let next = Self.step(from: progress, toward: target, seconds: seconds)
+        if next != progress { progress = next }
+        if progress == target {
+            ticker?.stop()
+            ticker = nil
+        }
+    }
+
+    /// 0 at the top of the page and 1 at `distance`, eased at both ends so
+    /// the blur neither starts nor stops with a jolt.
     static func progress(offset: CGFloat) -> CGFloat {
-        min(max(offset / distance, 0), 1)
+        let t = min(max(offset / distance, 0), 1)
+        return t * t * (3 - 2 * t)
+    }
+
+    /// `current` moved toward `target`, no further than `seconds` out of
+    /// `swing` of the whole way.
+    static func step(from current: CGFloat, toward target: CGFloat, seconds: TimeInterval) -> CGFloat {
+        let most = CGFloat(max(seconds, 0) / swing)
+        let gap = target - current
+        return abs(gap) <= most ? target : current + (gap < 0 ? -most : most)
+    }
+}
+
+/// Calls back once a frame with the seconds since the last one, until
+/// stopped: the screen's own refresh on iOS, a timer on the Mac. In the
+/// run loop's common modes, so it keeps going while a finger is scrolling.
+private final class BarScrollTicker: NSObject {
+    private let tick: (TimeInterval) -> Void
+    private var last = CACurrentMediaTime()
+    #if os(iOS)
+    private var link: CADisplayLink?
+    #else
+    private var timer: Timer?
+    #endif
+
+    init(tick: @escaping (TimeInterval) -> Void) {
+        self.tick = tick
+        super.init()
+        #if os(iOS)
+        let link = CADisplayLink(target: self, selector: #selector(fire))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+        #else
+        let timer = Timer(timeInterval: 1.0 / 60, target: self, selector: #selector(fire), userInfo: nil, repeats: true)
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+        #endif
+    }
+
+    func stop() {
+        #if os(iOS)
+        link?.invalidate()
+        link = nil
+        #else
+        timer?.invalidate()
+        timer = nil
+        #endif
+    }
+
+    @objc private func fire() {
+        let now = CACurrentMediaTime()
+        // A frame's worth at most: a stall should not be made up in one go.
+        let elapsed = min(now - last, 1.0 / 20)
+        last = now
+        tick(elapsed)
     }
 }
 

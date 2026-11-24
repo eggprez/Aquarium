@@ -60,7 +60,7 @@ final class PhoneHeroBarTests: PhoneUITestCase {
         app.element(TestID.Search.root).waitToExist(20)
     }
 
-    func testTitleArtworkRunsUpUnderTheBarAndTheTitleArrivesOnScroll() throws {
+    func testTitleArtworkRunsUpUnderTheBarAndBackStaysOnScroll() throws {
         launchHome()
         _ = try openFixture("show.long")
         let window = app.windows.firstMatch.frame
@@ -74,7 +74,9 @@ final class PhoneHeroBarTests: PhoneUITestCase {
         XCTAssertFalse(any(TestID.Detail.barTitle).exists, "the title is in the bar over the artwork")
         let top = back.frame.minY
         for _ in 0..<3 { app.swipeUp() }
-        XCTAssertTrue(any(TestID.Detail.barTitle).waitForExistence(timeout: 5), "no title in the bar once scrolled")
+        // Scrolled, Back is on a glass disc and the bar still has no title:
+        // nothing bare stands over the page (2026-11-22).
+        XCTAssertFalse(any(TestID.Detail.barTitle).exists, "the title came into the bar on scroll")
         XCTAssertEqual(back.frame.minY, top, accuracy: 1, "Back moved with the page")
         assertOnScreen(back, "Back after scrolling")
         attachScreenshot("title bar scrolled (\(device.rawValue))")

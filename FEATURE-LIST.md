@@ -279,8 +279,22 @@ the filter leaves what it does not blur slightly soft, which drew a line
 across the picture where the view stopped. Seen on the Duo simulator; the
 iPad and the Mac were built and unit-tested but not looked at.
 
+**Changed 2026-11-22, iPhone and Duo: bare at the top, glass discs on
+scroll, no blur.** The user first asked for no blur at all (just the logo,
+wordmark and buttons); built, uploaded as 1.6 (14) and rejected on sight,
+because the bare bar was unreadable once rows scrolled under it. Of five
+ideas they picked this one: at the top of the page the bar is bare and white
+on the artwork; as the page moves the wordmark fades out and Search, Refresh
+and Back each take a disc of the system's glass, the tab bar's material. A
+title's name no longer comes into the bar. The system's own scroll-edge blur
+under the clock is switched off on these two pages. The iPad, the Mac, Search
+and Live TV keep the blur bar for now.
+
 **To do:**
 
+- Decide whether the iPad and the Mac (and Search / Live TV) follow the
+  phone's bare-then-discs bar or keep the blur.
+- The clock sits straight on whatever scrolls under it on Home and a title.
 - The untinted blur is the backdrop's `variableBlur` filter, which UIKit
   does not publish (looked up by name, with a paler masked blur if it ever
   stops answering); on the Mac it goes on `NSVisualEffectView`'s backdrop
