@@ -1313,6 +1313,13 @@ describe("played and favourite", () => {
     ]);
   });
 
+  it("deleteItem asks the server to delete the item, and passes a refusal on", async () => {
+    const api = await signIn();
+    answer(null);
+    await api.deleteItem("m1");
+    expect(jfCalls()).toEqual([{ path: "/Items/m1", method: "DELETE", body: null }]);
+  });
+
   it("setFavorite posts to star and deletes to unstar", async () => {
     const api = await signIn();
     answer(null);

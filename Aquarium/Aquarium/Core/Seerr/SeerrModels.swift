@@ -42,6 +42,9 @@ struct SeerrPermissions: OptionSet, Sendable, Hashable, Codable {
         return contains(kind == .movie ? .requestMovie : .requestTV)
     }
 
+    /// Removing a title from Radarr or Sonarr, and other people's requests.
+    var canManageRequests: Bool { contains(.admin) || contains(.manageRequests) }
+
     func canRequest4K(_ kind: SeerrMediaKind) -> Bool {
         if contains(.admin) || contains(.request4K) { return true }
         return contains(kind == .movie ? .request4KMovie : .request4KTV)
@@ -91,6 +94,31 @@ enum SeerrRequestStatus: Int, Sendable {
     }
 }
 
+/// One of the Radarr or Sonarr servers Seerr is set up with, as
+/// `/service/radarr` and `/service/sonarr` list them to any account.
+struct SeerrServiceServer: Codable, Sendable, Hashable {
+    var id: Int?
+    var name: String?
+    var is4k: Bool?
+    var isDefault: Bool?
+}
+
+/// Taking a title out through Seerr: out of Radarr or Sonarr with its files,
+/// and its requests and Seerr's record of it with them. Only made when all of
+/// it can be done; see `SeerrClient.removal(for:)`.
+struct SeerrRemoval: Sendable, Hashable {
+    var kind: SeerrMediaKind
+    var tmdbId: Int
+    /// Seerr's own id for the title, which its media routes are addressed by.
+    var mediaId: Int
+    /// The copies to remove: `false` the ordinary one, `true` the 4K one.
+    var copies: [Bool]
+    var requestIds: [Int]
+
+    /// "Radarr" for a film, "Sonarr" for a show.
+    var service: String { kind == .movie ? "Radarr" : "Sonarr" }
+}
+
 struct SeerrSeasonState: Codable, Sendable, Hashable {
     var seasonNumber: Int?
     var status: Int?
@@ -108,6 +136,13 @@ struct SeerrMediaInfo: Codable, Sendable, Hashable {
     /// The title's id on the Jellyfin server, once it is there.
     var jellyfinMediaId: String?
     var jellyfinMediaId4k: String?
+    /// Which of Seerr's Radarr or Sonarr servers holds the title, and the
+    /// title's id there. Set once Seerr has sent it there or found it there;
+    /// absent for a title Seerr only knows from the Jellyfin library.
+    var serviceId: Int?
+    var serviceId4k: Int?
+    var externalServiceId: Int?
+    var externalServiceId4k: Int?
     var seasons: [SeerrSeasonState]?
     var requests: [SeerrRequest]?
 

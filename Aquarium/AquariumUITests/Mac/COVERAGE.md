@@ -247,3 +247,11 @@ Against the stand-in Seerr server (TESTING.md). Run 2026-11-16 (the class alone;
   `AQUARIUM_QA_DIR` is passed (`TEST_RUNNER_AQUARIUM_QA_DIR=…`).
 - Shared `JellyfinAPI.sessions()` sees nothing (`ControllableByUserId`); the Mac tests use
   `macSessions()` in `MacUISupport.swift`.
+
+## Delete from Server (added 2026-11-26) — `Views/ServerDelete.swift`
+
+| Function | Test | Kind | Status |
+|---|---|---|---|
+| When Seerr's way is offered (rights, Radarr/Sonarr set up, title on one, 4K), what removing asks of Seerr, Jellyfin's delete call, the menu entry's rule, the dialog's choices and wording | `ServerDeleteTests` (AquariumTests/Shared) | unit | pass 2026-11-26 (iPhone, Apple TV, Mac) |
+| Not offered in a card's menu to an account that may not delete | `MacBrowseUITests.testPosterContextMenuMarksWatchedAndFavorite` | UI | assertion added 2026-11-26, not run (the Mac screen suite is switched off) |
+| Both ways carried out, and the dialog as drawn | not automated: needs a deleting account, a real Seerr with Radarr/Sonarr, and titles to lose; `MANUAL.md` "Delete from Server" | manual | |

@@ -1158,7 +1158,7 @@ final class JellyfinClient {
     // MARK: - Fields
 
     private static let itemFields =
-        "PrimaryImageAspectRatio,Overview,Genres,MediaSources,UserData,SeriesPrimaryImage,ChildCount,RecursiveItemCount,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,ParentId"
+        "PrimaryImageAspectRatio,Overview,Genres,MediaSources,UserData,SeriesPrimaryImage,ChildCount,RecursiveItemCount,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,ParentId,CanDelete"
 
     /// `itemFields` plus what the library copy needs to sort the way the server
     /// does. See `LibraryIndex`.
@@ -1914,6 +1914,15 @@ final class JellyfinClient {
         guard let s = prefs.session else { throw APIError.notConfigured }
         try await request("/UserFavoriteItems/\(Self.pathId(itemId))?userId=\(s.userId)", method: favorite ? "POST" : "DELETE")
         LibraryIndex.shared.patchUserData(itemId) { $0.IsFavorite = favorite }
+    }
+
+    /// Delete an item from the server: its files off the disk and its entry
+    /// out of the library. A show or a season takes every episode under it.
+    /// The server refuses (403) an account without the right; there is no
+    /// undo. See `ServerDeleting`.
+    func deleteItem(_ itemId: String) async throws {
+        try await request("/Items/\(Self.pathId(itemId))", method: "DELETE")
+        LibraryIndex.shared.forget(itemId)
     }
 
     // MARK: - Trickplay

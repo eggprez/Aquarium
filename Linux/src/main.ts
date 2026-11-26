@@ -2883,6 +2883,12 @@ async function boot(): Promise<void> {
     if (atHome() && !playerActive) route();
   });
 
+  // A title was deleted from the server from a menu: the page showing it is
+  // drawn again without it.
+  document.addEventListener("aquarium-item-deleted", () => {
+    if (!playerActive) route();
+  });
+
   // A Seerr server was connected, disconnected, or its session ran out or
   // came back: the sidebar gains or loses Requests, and a page that shows
   // something of Seerr's is drawn again.

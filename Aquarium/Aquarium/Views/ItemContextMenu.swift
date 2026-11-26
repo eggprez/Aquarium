@@ -270,6 +270,25 @@ struct ItemMenu: View {
             #if !os(tvOS)
             downloadActions
             #endif
+            serverDeleteAction
+        }
+    }
+
+    // MARK: Off the server
+
+    /// Last and red. Shown from what is already known (the server's own
+    /// word on the item, the Seerr account's rights); which ways are really
+    /// open is found when it is pressed, and asked about then.
+    @ViewBuilder
+    private var serverDeleteAction: some View {
+        if ServerDeleting.mightDelete(item, seerr: SeerrClient.shared) {
+            Divider()
+            Button(role: .destructive) {
+                Task { await ServerDeleting.ask(item, client: client, seerr: SeerrClient.shared, app: app) }
+            } label: {
+                Label("Delete from Server…", systemImage: "trash")
+            }
+            .accessibilityIdentifier(TestID.Item.menuDeleteFromServer)
         }
     }
 

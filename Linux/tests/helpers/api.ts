@@ -19,7 +19,7 @@ export function fresh(): void {
 
 /** The field list every grid query in api.ts asks for. */
 export const ITEM_FIELDS =
-  "PrimaryImageAspectRatio,Overview,Genres,MediaSources,UserData,SeriesPrimaryImage,ChildCount,RecursiveItemCount,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,ParentId";
+  "PrimaryImageAspectRatio,Overview,Genres,MediaSources,UserData,SeriesPrimaryImage,ChildCount,RecursiveItemCount,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,ParentId,CanDelete";
 
 /** What the detail page adds to it. */
 export const DETAIL_FIELDS = `${ITEM_FIELDS},People,Studios,Taglines,ProviderIds`;

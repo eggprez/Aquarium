@@ -201,6 +201,7 @@ struct BaseItem: Codable, Hashable, Sendable, Identifiable {
         case ArtistItems, Artists, MediaType, HasLyrics, NormalizationGain
         case GenreItems, Chapters, PlaylistItemId, Trickplay
         case RemoteTrailers, LocalTrailerCount, ProductionLocations, ProviderIds
+        case CanDelete
         case type = "Type"
     }
     var Id: String = ""
@@ -299,6 +300,10 @@ struct BaseItem: Codable, Hashable, Sendable, Identifiable {
     var ProviderIds: [String: String]?
     var tmdbId: Int? { ProviderIds?.first { $0.key.lowercased() == "tmdb" }.flatMap { Int($0.value) } }
     var LocalTrailerCount: Int?
+    /// Whether the server lets this account delete the item's files: its
+    /// answer for this item, which follows the account's rights library by
+    /// library. Asked for by name (`Fields=CanDelete`). See `ServerDeleting`.
+    var CanDelete: Bool?
     /// On a person, where they were born — the one thing Jellyfin files here
     /// for them. Detail endpoint only.
     var ProductionLocations: [String]?

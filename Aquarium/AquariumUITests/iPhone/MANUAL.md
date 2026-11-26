@@ -316,3 +316,24 @@ The logic under each is unit-tested (`PhoneQuickActionsTests`,
    same film opens there at about the same point.
 4. Spotlight: search the Home Screen for a film in the library and tap the
    Aquarium result: its title page opens.
+
+## Delete from Server (added 2026-11-26)
+
+The test accounts may not delete, and no test Seerr has a Radarr or Sonarr, so
+the automated checks stop at "not offered". These need an account that may
+delete on Jellyfin, a real Seerr with Radarr and Sonarr, and titles you are
+willing to lose.
+
+- [ ] Press and hold a film Radarr looks after → Delete from Server… is last in the
+      menu, in red. The question names the film and offers "Delete File from
+      Jellyfin" and "Remove from Radarr with Seerr". Cancel changes nothing.
+- [ ] "Remove from Radarr with Seerr": the film leaves Radarr with its file,
+      its request is gone from Seerr, and the film can be requested again.
+- [ ] "Delete File from Jellyfin" on another film: the file is gone from the
+      server's disk and the film leaves the grid at once.
+- [ ] A show offers Sonarr; a season and an episode offer Jellyfin only.
+- [ ] With Seerr disconnected, or on an account without Manage Requests, or
+      for a title Seerr never sent to Radarr/Sonarr, only Jellyfin is offered.
+- [ ] On an account that may not delete on Jellyfin and has no Seerr rights,
+      the menu has no Delete from Server at all.
+- [ ] A copy downloaded to the device still plays after either way.

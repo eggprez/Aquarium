@@ -3,6 +3,7 @@ import * as api from "./api";
 import { blurhashUrl } from "./blurhash";
 import { icon, iconSvg, type IconName } from "./icons";
 import { playItem, startDownload, downloadSeries, queueNext, queueLater } from "./playback";
+import * as seerr from "./seerr";
 
 export { icon, type IconName } from "./icons";
 
@@ -945,6 +946,107 @@ async function removeShowFromNextUp(item: any, seriesId: string): Promise<void> 
   }
 }
 
+// ---------- Delete from Server ----------
+// Two ways, each offered only when it can be done. Jellyfin deletes the files
+// and the library entry (the server says per item whether this account may:
+// `CanDelete`). Seerr removes a film from Radarr or a show from Sonarr, which
+// deletes the files there, and clears its requests; that needs an account that
+// manages requests, a Radarr or Sonarr server set up in Seerr, and Seerr's
+// record of the title on one (`seerr.removal`). Downloads on this computer are
+// left alone.
+
+const DELETABLE = ["Movie", "Series", "Season", "Episode"];
+
+/** Whether the menu shows the entry at all, from what is already in hand. */
+export function mightDeleteFromServer(item: any): boolean {
+  if (!item?.Id || !DELETABLE.includes(item.Type)) return false;
+  return item.CanDelete === true || seerr.mightRemove(item);
+}
+
+function deleteNameOf(item: any): string {
+  const show = item.SeriesName;
+  if (show && item.Type === "Episode" && item.ParentIndexNumber != null && item.IndexNumber != null) {
+    return `${show} S${item.ParentIndexNumber}:E${item.IndexNumber}`;
+  }
+  if (show && (item.Type === "Episode" || item.Type === "Season")) return `${show}, ${item.Name ?? "this one"}`;
+  return item.Name ?? "this title";
+}
+
+/** The page under a deleted title has nothing left to show; any other page
+ *  is drawn again without it. */
+function afterServerDelete(item: any): void {
+  if (location.hash.startsWith(`#/item/${item.Id}`)) history.back();
+  else document.dispatchEvent(new CustomEvent("aquarium-item-deleted", { detail: { id: item.Id } }));
+}
+
+/**
+ * The menu entry was chosen: find out which ways are open, then ask which.
+ * A grid's item has no TMDB id, so it is fetched whole first when Seerr might
+ * have a part in this.
+ */
+export async function askDeleteFromServer(item: any): Promise<void> {
+  const name = deleteNameOf(item);
+  let full = item;
+  let removal: seerr.SeerrRemoval | null = null;
+  if (seerr.mightRemove(item)) {
+    if (seerr.tmdbIdOf(item) == null) full = (await api.getItem(item.Id).catch(() => null)) ?? item;
+    removal = await seerr.removal(full);
+  }
+  const viaJellyfin = (full.CanDelete ?? item.CanDelete) === true;
+  if (!viaJellyfin && !removal) {
+    const arr = seerr.serviceName(seerr.removalKind(item) ?? "movie");
+    toast(`${name} can't be deleted from here: Seerr has no ${arr} entry for it`, "error");
+    return;
+  }
+
+  const lines: string[] = [];
+  if (viaJellyfin) {
+    lines.push(
+      item.Type === "Series" ? "Jellyfin deletes every episode's file from the server."
+        : item.Type === "Season" ? "Jellyfin deletes the file of every episode in this season from the server."
+        : "Jellyfin deletes the file from the server."
+    );
+  }
+  if (removal) lines.push(`Seerr removes it from ${seerr.serviceName(removal.kind)}, which deletes its files, and clears its requests.`);
+  lines.push("This can't be undone. Downloads on this computer are kept.");
+
+  const actions: DialogAction[] = [{ label: "Cancel" }];
+  if (removal) {
+    const arr = seerr.serviceName(removal.kind);
+    const how = removal;
+    actions.push({
+      label: `Remove from ${arr} with Seerr`,
+      danger: true,
+      run: () => void (async () => {
+        try {
+          await seerr.remove(how);
+          toast(`Removed ${name} from ${arr}. Jellyfin drops it at its next library scan.`, "ok");
+          afterServerDelete(item);
+        } catch (e: any) {
+          toast(`Couldn't remove ${name}: ${e?.message ?? "Seerr couldn't be reached."}`, "error");
+        }
+      })(),
+    });
+  }
+  if (viaJellyfin) {
+    actions.push({
+      label: item.Type === "Series" || item.Type === "Season" ? "Delete Files from Jellyfin" : "Delete File from Jellyfin",
+      danger: true,
+      run: () => void (async () => {
+        try {
+          await api.deleteItem(item.Id);
+          toast(`Deleted ${name} from the server`, "ok");
+          afterServerDelete(item);
+        } catch (e: any) {
+          const refused = / 40[13] /.test(String(e?.message));
+          toast(refused ? `This account isn't allowed to delete ${name}` : `Couldn't delete ${name}`, "error");
+        }
+      })(),
+    });
+  }
+  openDialog({ title: `Delete ${name}?`, body: [el("p", {}, [lines.join(" ")])], actions });
+}
+
 export function itemActions(
   item: any,
   opts: {
@@ -1040,6 +1142,15 @@ export function itemActions(
       run: () => {
         location.hash = `#/item/${item.Id}`;
       },
+    });
+  }
+  // Last and red. Which ways are really open is found when it is chosen.
+  if (mightDeleteFromServer(item)) {
+    out.push({
+      label: "Delete from Server…",
+      icon: "trash",
+      danger: true,
+      run: () => askDeleteFromServer(item),
     });
   }
   return out;

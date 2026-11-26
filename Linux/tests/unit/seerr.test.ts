@@ -550,3 +550,96 @@ describe("the sentences Settings says", () => {
     expect(seerr.COPY.keptInFile).toContain("config.json");
   });
 });
+
+describe("removing a title through Seerr", () => {
+  const MANAGER = { permissions: 16 | 32 };
+  const film = (extra: Record<string, any> = {}): any => ({ Id: "m1", Type: "Movie", Name: "Heat", ProviderIds: { Tmdb: "949" }, ...extra });
+  const series = (): any => ({ Id: "s1", Type: "Series", Name: "Severance", ProviderIds: { Tmdb: "95396" } });
+  const onRadarr = { id: 949, title: "Heat", mediaInfo: { id: 41, status: 5, serviceId: 0, externalServiceId: 12, requests: [{ id: 7 }, { id: 9 }] } };
+  const paths = (): string[] => invokeCalls("seerr_request").map((c) => `${c.args.method} ${c.args.path}`);
+
+  it("is for accounts that manage requests, on films and whole shows", async () => {
+    expect(seerr.canManageRequests(32)).toBe(false);
+    expect(seerr.canManageRequests(16)).toBe(true);
+    expect(seerr.canManageRequests(2)).toBe(true);
+    expect(seerr.mightRemove(film())).toBe(false); // not connected
+    await connected(MANAGER);
+    expect(seerr.mightRemove(film())).toBe(true);
+    expect(seerr.mightRemove(series())).toBe(true);
+    expect(seerr.mightRemove({ Type: "Season" })).toBe(false);
+    expect(seerr.mightRemove({ Type: "Episode" })).toBe(false);
+    expect(seerr.serviceName("movie")).toBe("Radarr");
+    expect(seerr.serviceName("tv")).toBe("Sonarr");
+  });
+
+  it("is offered for a film Seerr has on Radarr", async () => {
+    await connected(MANAGER);
+    routes([["/service/radarr", () => [{ id: 0, is4k: false, isDefault: true }]], ["/movie/949", () => onRadarr]]);
+    expect(await seerr.removal(film())).toEqual({ kind: "movie", tmdbId: 949, mediaId: 41, copies: [false], requestIds: [7, 9] });
+    expect(paths()).toEqual(["GET /service/radarr", "GET /movie/949"]);
+  });
+
+  it("asks about Sonarr for a show", async () => {
+    await connected(MANAGER);
+    routes([["/service/sonarr", () => [{ id: 0 }]], ["/tv/95396", () => ({ id: 95396, mediaInfo: { id: 8, serviceId: 0 } })]]);
+    expect((await seerr.removal(series()))?.mediaId).toBe(8);
+    expect(paths()[0]).toBe("GET /service/sonarr");
+  });
+
+  it("is not offered without the right, and asks Seerr nothing", async () => {
+    await connected();
+    routes([["/service/radarr", () => [{ id: 0 }]], ["/movie/949", () => onRadarr]]);
+    expect(await seerr.removal(film())).toBeNull();
+    expect(paths()).toEqual([]);
+  });
+
+  it("is not offered when Seerr has no Radarr, or has not put the title on it, or has never met it", async () => {
+    await connected(MANAGER);
+    routes([["/service/radarr", () => []], ["/movie/949", () => onRadarr]]);
+    expect(await seerr.removal(film())).toBeNull();
+    routes([["/service/radarr", () => [{ id: 0 }]], ["/movie/949", () => ({ id: 949, mediaInfo: { id: 41, status: 5 } })]]);
+    expect(await seerr.removal(film())).toBeNull();
+    routes([["/service/radarr", () => [{ id: 0 }]], ["/movie/949", () => ({ id: 949 })]]);
+    expect(await seerr.removal(film())).toBeNull();
+    // No TMDB id, or Seerr unreachable: nothing to offer either.
+    expect(await seerr.removal(film({ ProviderIds: {} }))).toBeNull();
+    routes([]);
+    expect(await seerr.removal(film())).toBeNull();
+  });
+
+  it("removes the 4K copy only where there is a 4K server", async () => {
+    await connected(MANAGER);
+    const both = { id: 949, mediaInfo: { id: 41, serviceId: 0, serviceId4k: 1 } };
+    routes([["/service/radarr", () => [{ id: 0, is4k: false }]], ["/movie/949", () => both]]);
+    expect((await seerr.removal(film()))?.copies).toEqual([false]);
+    routes([["/service/radarr", () => [{ id: 0, is4k: false }, { id: 1, is4k: true }]], ["/movie/949", () => both]]);
+    expect((await seerr.removal(film()))?.copies).toEqual([false, true]);
+  });
+
+  it("takes it off Radarr, then clears the requests and the record, and tells the lists", async () => {
+    await connected(MANAGER);
+    const heard = vi.fn();
+    document.addEventListener(seerr.SEERR_REQUESTS_CHANGED, heard);
+    routes([
+      ["/request/9", () => { throw "refused|Seerr doesn't know that title."; }],
+      [/^\/(media|request)\//, () => ({ __status: 204 })],
+    ]);
+    await seerr.remove({ kind: "movie", tmdbId: 949, mediaId: 41, copies: [false, true], requestIds: [7, 9] });
+    expect(paths()).toEqual([
+      "DELETE /media/41/file?is4k=false",
+      "DELETE /media/41/file?is4k=true",
+      "DELETE /request/7",
+      "DELETE /request/9", // already gone: not a failure
+      "DELETE /media/41",
+    ]);
+    expect(heard).toHaveBeenCalledTimes(1);
+    document.removeEventListener(seerr.SEERR_REQUESTS_CHANGED, heard);
+  });
+
+  it("stops at a refusal from Radarr, leaving requests and the record alone", async () => {
+    await connected(MANAGER);
+    routes([]);
+    await expect(seerr.remove({ kind: "movie", tmdbId: 949, mediaId: 41, copies: [false], requestIds: [7] })).rejects.toMatchObject({ kind: "refused" });
+    expect(paths()).toEqual(["DELETE /media/41/file?is4k=false"]);
+  });
+});

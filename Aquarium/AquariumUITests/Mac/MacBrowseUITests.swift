@@ -390,6 +390,7 @@ final class MacBrowseUITests: MacUITestCase {
         for (id, title) in [(TestID.Item.menuOpenInNewWindow, "Open in New Window"), (TestID.Item.menuCopyTitle, "Copy Title")] {
             XCTAssertTrue(menuChoice(id, title: title).exists, title)
         }
+        XCTAssertFalse(app.menuItems["Delete from Server…"].exists, "the test account may not delete from the server, so Delete from Server is not offered")
         menuChoice(TestID.Item.menuWatched, title: "Mark as Watched").click()
         XCTAssertTrue(try eventually(20) { try api.userData(film.id).played })
         card.rightClick()

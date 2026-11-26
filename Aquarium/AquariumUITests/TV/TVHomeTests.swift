@@ -112,6 +112,7 @@ final class TVHomeTests: TVTestCase {
         let play = app.element(TestID.Item.menuPlay)
         play.waitToExist(10)
         XCTAssertTrue(app.element(TestID.Item.menuWatched).exists || app.staticTexts["Mark as Watched"].exists)
+        XCTAssertFalse(app.element(TestID.Item.menuDeleteFromServer).exists, "the test account may not delete from the server, so Delete from Server is not offered")
         attachTree("card menu")
         Remote.menu()
         XCTAssertTrue(play.waitToVanish(10))

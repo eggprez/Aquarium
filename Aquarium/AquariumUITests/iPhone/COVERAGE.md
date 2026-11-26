@@ -477,3 +477,11 @@ functional tests off the standard phone. Unit (iPhone 17, `-testPlan Unit`):
 iPhone ones all pass.
 
 Downloads: with a show and a film on the phone, the grids are headed "Shows" and "Movies" (PhoneDownloadQueueTests.testGridsAreHeadedShowsAndMovies, UI, new 2026-11-16; DownloadGroupsTests.testMoviesGridIsHeadedMovies, unit). It said "Films" before.
+
+## Delete from Server (added 2026-11-26) — `Views/ServerDelete.swift`
+
+| Function | Test | Kind | Status |
+|---|---|---|---|
+| When Seerr's way is offered (rights, Radarr/Sonarr set up, title on one, 4K), what removing asks of Seerr, Jellyfin's delete call, the menu entry's rule, the dialog's choices and wording | `ServerDeleteTests` (AquariumTests/Shared) | unit | pass 2026-11-26 (iPhone, Apple TV, Mac) |
+| Not offered in a card's menu to an account that may not delete | `PhoneDetailTests.testFilmCardMenuOffersItsActions` | UI | assertion added 2026-11-26, not yet run (the test iPhone was busy with another run) |
+| Both ways carried out, and the dialog as drawn | not automated: needs a deleting account, a real Seerr with Radarr/Sonarr, and titles to lose; `MANUAL.md` "Delete from Server" | manual | |

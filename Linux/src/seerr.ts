@@ -253,6 +253,12 @@ export interface SeerrMediaInfo {
   /** The title's id on the Jellyfin server, once it is there. */
   jellyfinMediaId?: string;
   jellyfinMediaId4k?: string;
+  /** Which of Seerr's Radarr or Sonarr servers holds the title, and its id
+   *  there. Absent for a title Seerr only knows from the Jellyfin library. */
+  serviceId?: number | null;
+  serviceId4k?: number | null;
+  externalServiceId?: number | null;
+  externalServiceId4k?: number | null;
   seasons?: SeerrSeasonState[];
   requests?: SeerrRequest[];
 }
@@ -732,6 +738,79 @@ export async function myRequests(take = 40, skip = 0): Promise<SeerrRequest[]> {
 export async function cancel(request: SeerrRequest): Promise<void> {
   await call(`/request/${request.id}`, "DELETE");
   requestsChanged();
+}
+
+// ---------- Removing a title ----------
+// Delete from Server's second way: out of Radarr (a film) or Sonarr (a show),
+// which deletes the files there, then the requests and Seerr's own record, so
+// the title can be asked for again. Whole titles only.
+
+/** Taking a title out through Seerr; only made when all of it can be done. */
+export interface SeerrRemoval {
+  kind: SeerrMediaKind;
+  tmdbId: number;
+  /** Seerr's own id for the title, which its media routes are addressed by. */
+  mediaId: number;
+  /** The copies to remove: `false` the ordinary one, `true` the 4K one. */
+  copies: boolean[];
+  requestIds: number[];
+}
+
+export function serviceName(kind: SeerrMediaKind): string {
+  return kind === "movie" ? "Radarr" : "Sonarr";
+}
+
+export function canManageRequests(permissions: number | null | undefined): boolean {
+  const p = permissions ?? 0;
+  return !!(p & PERMISSION.admin || p & PERMISSION.manageRequests);
+}
+
+/** What a library item is to Radarr or Sonarr: a film or a whole show. */
+export function removalKind(item: any): SeerrMediaKind | null {
+  return item?.Type === "Movie" ? "movie" : item?.Type === "Series" ? "tv" : null;
+}
+
+/** Worth looking into, from what is already known. Asks nothing. */
+export function mightRemove(item: any): boolean {
+  return isConnected() && canManageRequests(status.permissions) && removalKind(item) != null;
+}
+
+/**
+ * Whether this title can be taken out through Seerr, and how. Null unless the
+ * account may manage requests, Seerr has a Radarr (film) or Sonarr (show)
+ * server set up, and its record of the title says it is on one. `item` needs
+ * its TMDB id (the detail fields).
+ */
+export async function removal(item: any): Promise<SeerrRemoval | null> {
+  const kind = removalKind(item);
+  const tmdbId = tmdbIdOf(item);
+  if (!mightRemove(item) || !kind || tmdbId == null) return null;
+  try {
+    const servers = await get(`/service/${kind === "movie" ? "radarr" : "sonarr"}`);
+    if (!Array.isArray(servers) || !servers.length) return null;
+    const media = (await title(kind, tmdbId)).mediaInfo;
+    if (!media || typeof media.id !== "number") return null;
+    const copies: boolean[] = [];
+    if ((media.serviceId != null || media.externalServiceId != null) && servers.some((s: any) => s?.is4k !== true)) copies.push(false);
+    if ((media.serviceId4k != null || media.externalServiceId4k != null) && servers.some((s: any) => s?.is4k === true)) copies.push(true);
+    if (!copies.length) return null;
+    const requestIds = (media.requests ?? []).map((r) => r?.id).filter((id): id is number => typeof id === "number");
+    return { kind, tmdbId, mediaId: media.id, copies, requestIds };
+  } catch {
+    return null;
+  }
+}
+
+/** Do it. Only the first step's failure stops the rest; a request already
+ *  gone is not a failure. */
+export async function remove(what: SeerrRemoval): Promise<void> {
+  try {
+    for (const is4k of what.copies) await call(`/media/${what.mediaId}/file?is4k=${is4k}`, "DELETE");
+    for (const id of what.requestIds) await call(`/request/${id}`, "DELETE").catch(() => undefined);
+    await call(`/media/${what.mediaId}`, "DELETE");
+  } finally {
+    requestsChanged();
+  }
 }
 
 export async function quota(): Promise<SeerrQuota> {

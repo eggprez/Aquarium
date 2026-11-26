@@ -408,3 +408,11 @@ its identifiers, fixture names and the app's wording; `PadPlayerLogicTests`
 was cut to what an iPad host answers differently (its chrome-state and
 engine-rule duplicates of AquariumTests/Shared went).
 
+
+## Delete from Server (added 2026-11-26) — `Views/ServerDelete.swift`
+
+| Function | Test | Kind | Status |
+|---|---|---|---|
+| When Seerr's way is offered (rights, Radarr/Sonarr set up, title on one, 4K), what removing asks of Seerr, Jellyfin's delete call, the menu entry's rule, the dialog's choices and wording | `ServerDeleteTests` (AquariumTests/Shared) | unit | pass 2026-11-26 (iPhone, Apple TV, Mac) |
+| Not offered in a card's menu to an account that may not delete | `PadContextMenuTests.testFilmMenuHasThePlayAndLibraryActions` | UI | pass 2026-11-26 |
+| Both ways carried out, and the dialog as drawn | not automated: needs a deleting account, a real Seerr with Radarr/Sonarr, and titles to lose; `MANUAL.md` "Delete from Server" | manual | |
