@@ -26,15 +26,31 @@ vi.mock("../../src/api", async (importOriginal) => {
     removeFromNextUp: vi.fn(async () => {}),
     markPlayed: vi.fn(async () => {}),
     setFavorite: vi.fn(async () => {}),
+    deleteItem: vi.fn(async () => {}),
+    getItem: vi.fn(async () => null),
+  };
+});
+
+// Seerr's part in Delete from Server is decided in seerr.ts and tested there;
+// here it says whatever a test tells it to.
+vi.mock("../../src/seerr", async (importOriginal) => {
+  const real: any = await importOriginal();
+  return {
+    ...real,
+    mightRemove: vi.fn(() => false),
+    removal: vi.fn(async () => null),
+    remove: vi.fn(async () => {}),
   };
 });
 
 import * as ui from "../../src/ui";
 import * as playback from "../../src/playback";
 import * as api from "../../src/api";
+import * as seerrModule from "../../src/seerr";
 
 const pb = vi.mocked(playback);
 const mapi = vi.mocked(api);
+const mseerr = vi.mocked(seerrModule);
 
 const settle = async (turns = 20): Promise<void> => {
   for (let i = 0; i < turns; i++) await Promise.resolve();
@@ -1089,6 +1105,129 @@ describe("askAddToNextUp", () => {
     dialogButton("Add from Last Watched Episode").click();
     await settle();
     expect(toasts().at(-1)).toBe("Couldn't add Archer to Next Up");
+  });
+});
+
+describe("Delete from Server", () => {
+  const REMOVAL = { kind: "movie" as const, tmdbId: 949, mediaId: 41, copies: [false], requestIds: [7] };
+  const film = (extra: Record<string, any> = {}): any => ({ Id: "m1", Type: "Movie", Name: "Heat", ProviderIds: { Tmdb: "949" }, ...extra });
+  const dialogButtons = (): string[] => [...document.querySelectorAll<HTMLButtonElement>(".dialog button")].map((b) => b.textContent ?? "");
+  const dialogButton = (label: string): HTMLButtonElement =>
+    [...document.querySelectorAll<HTMLButtonElement>(".dialog button")].find((b) => b.textContent === label)!;
+  const last = (item: any): ui.MenuAction => ui.itemActions(item).at(-1)!;
+
+  it("is in the menu only when the server allows it or Seerr might, and only for films and television", () => {
+    expect(ui.mightDeleteFromServer(film())).toBe(false);
+    expect(ui.mightDeleteFromServer(film({ CanDelete: false }))).toBe(false);
+    expect(ui.mightDeleteFromServer(film({ CanDelete: true }))).toBe(true);
+    for (const Type of ["Series", "Season", "Episode"]) expect(ui.mightDeleteFromServer({ Id: "x", Type, CanDelete: true })).toBe(true);
+    for (const Type of ["MusicAlbum", "Audio", "BoxSet", "Playlist"]) expect(ui.mightDeleteFromServer({ Id: "x", Type, CanDelete: true })).toBe(false);
+    mseerr.mightRemove.mockReturnValue(true);
+    expect(ui.mightDeleteFromServer(film({ CanDelete: false }))).toBe(true);
+    mseerr.mightRemove.mockReturnValue(false);
+  });
+
+  it("is the last entry, and red", () => {
+    const entry = last(film({ CanDelete: true }));
+    expect(entry.label).toBe("Delete from Server…");
+    expect(entry.danger).toBe(true);
+    expect(ui.itemActions(film()).some((a) => a.label === "Delete from Server…")).toBe(false);
+  });
+
+  it("offers only Jellyfin when Seerr has no part, and deletes the file on a yes", async () => {
+    const heard = vi.fn();
+    document.addEventListener("aquarium-item-deleted", heard);
+    await ui.askDeleteFromServer(film({ CanDelete: true }));
+    expect(document.querySelector(".dialog h2")!.textContent).toBe("Delete Heat?");
+    expect(dialogButtons()).toEqual(["Cancel", "Delete File from Jellyfin"]);
+    expect(document.querySelector(".dialog p")!.textContent).toContain("can't be undone");
+    expect(document.querySelector(".dialog p")!.textContent).not.toContain("Seerr");
+    expect(mseerr.removal).not.toHaveBeenCalled();
+    dialogButton("Delete File from Jellyfin").click();
+    await settle();
+    expect(mapi.deleteItem).toHaveBeenCalledWith("m1");
+    expect(toasts()).toContain("Deleted Heat from the server");
+    expect(heard).toHaveBeenCalledTimes(1);
+    document.removeEventListener("aquarium-item-deleted", heard);
+  });
+
+  it("deletes nothing on Cancel", async () => {
+    await ui.askDeleteFromServer(film({ CanDelete: true }));
+    dialogButton("Cancel").click();
+    await settle();
+    expect(mapi.deleteItem).not.toHaveBeenCalled();
+  });
+
+  it("offers both ways when both are open, and Seerr's removes through Seerr only", async () => {
+    mseerr.mightRemove.mockReturnValue(true);
+    mseerr.removal.mockResolvedValueOnce(REMOVAL);
+    await ui.askDeleteFromServer(film({ CanDelete: true }));
+    expect(dialogButtons()).toEqual(["Cancel", "Remove from Radarr with Seerr", "Delete File from Jellyfin"]);
+    expect(document.querySelector(".dialog p")!.textContent).toContain("Radarr");
+    dialogButton("Remove from Radarr with Seerr").click();
+    await settle();
+    expect(mseerr.remove).toHaveBeenCalledWith(REMOVAL);
+    expect(mapi.deleteItem).not.toHaveBeenCalled();
+    expect(toasts().some((t) => t.startsWith("Removed Heat from Radarr"))).toBe(true);
+    mseerr.mightRemove.mockReturnValue(false);
+  });
+
+  it("offers only Seerr to an account Jellyfin won't let delete", async () => {
+    mseerr.mightRemove.mockReturnValue(true);
+    mseerr.removal.mockResolvedValueOnce(REMOVAL);
+    await ui.askDeleteFromServer(film({ CanDelete: false }));
+    expect(dialogButtons()).toEqual(["Cancel", "Remove from Radarr with Seerr"]);
+    mseerr.mightRemove.mockReturnValue(false);
+  });
+
+  it("asks nothing, and says why, when neither way turns out to be open", async () => {
+    mseerr.mightRemove.mockReturnValue(true);
+    await ui.askDeleteFromServer(film({ CanDelete: false }));
+    expect(document.querySelector(".dialog")).toBeNull();
+    expect(toasts().some((t) => t.includes("can't be deleted from here"))).toBe(true);
+    mseerr.mightRemove.mockReturnValue(false);
+  });
+
+  it("fetches a grid's item whole for its TMDB id before asking Seerr", async () => {
+    mseerr.mightRemove.mockReturnValue(true);
+    const whole = film({ CanDelete: true });
+    mapi.getItem.mockResolvedValueOnce(whole);
+    mseerr.removal.mockResolvedValueOnce(REMOVAL);
+    await ui.askDeleteFromServer({ Id: "m1", Type: "Movie", Name: "Heat" });
+    expect(mapi.getItem).toHaveBeenCalledWith("m1");
+    expect(mseerr.removal).toHaveBeenCalledWith(whole);
+    expect(dialogButtons()).toContain("Delete File from Jellyfin");
+    mseerr.mightRemove.mockReturnValue(false);
+  });
+
+  it("names an episode with its show, and says Files for a show or a season", async () => {
+    await ui.askDeleteFromServer({ Id: "e1", Type: "Episode", Name: "Pilot", SeriesName: "Archer", ParentIndexNumber: 1, IndexNumber: 3, CanDelete: true });
+    expect(document.querySelector(".dialog h2")!.textContent).toBe("Delete Archer S1:E3?");
+    keydown(document, "Escape");
+    await ui.askDeleteFromServer({ Id: "s1", Type: "Series", Name: "Archer", CanDelete: true });
+    expect(dialogButtons()).toContain("Delete Files from Jellyfin");
+    expect(document.querySelector(".dialog p")!.textContent).toContain("every episode");
+  });
+
+  it("says so when the server refuses, or Seerr does", async () => {
+    mapi.deleteItem.mockRejectedValueOnce(new Error("Server error 403 on /Items/m1"));
+    await ui.askDeleteFromServer(film({ CanDelete: true }));
+    dialogButton("Delete File from Jellyfin").click();
+    await settle();
+    expect(toasts()).toContain("This account isn't allowed to delete Heat");
+
+    mseerr.mightRemove.mockReturnValue(true);
+    mseerr.removal.mockResolvedValueOnce(REMOVAL);
+    mseerr.remove.mockRejectedValueOnce(new Error("No Radarr server configured to delete media files"));
+    const heard = vi.fn();
+    document.addEventListener("aquarium-item-deleted", heard);
+    await ui.askDeleteFromServer(film());
+    dialogButton("Remove from Radarr with Seerr").click();
+    await settle();
+    expect(toasts()).toContain("Couldn't remove Heat: No Radarr server configured to delete media files");
+    expect(heard).not.toHaveBeenCalled();
+    document.removeEventListener("aquarium-item-deleted", heard);
+    mseerr.mightRemove.mockReturnValue(false);
   });
 });
 

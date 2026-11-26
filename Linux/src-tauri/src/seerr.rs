@@ -483,6 +483,10 @@ fn allowed(method: &str, path: &str) -> bool {
         ("GET", ["user", n, "quota"]) => id(n),
         ("GET", ["request"]) | ("POST", ["request"]) => true,
         ("DELETE", ["request", n]) => id(n),
+        // Delete from Server: whether Seerr has a Radarr or Sonarr to remove
+        // a title from, the removal, and clearing Seerr's record after it.
+        ("GET", ["service", "radarr"]) | ("GET", ["service", "sonarr"]) => true,
+        ("DELETE", ["media", n, "file"]) | ("DELETE", ["media", n]) => id(n),
         _ => false,
     }
 }
@@ -1039,6 +1043,10 @@ mod tests {
             ("GET", "/request?take=40&skip=0&sort=added&requestedBy=3"),
             ("POST", "/request"),
             ("DELETE", "/request/12"),
+            ("GET", "/service/radarr"),
+            ("GET", "/service/sonarr"),
+            ("DELETE", "/media/41/file?is4k=false"),
+            ("DELETE", "/media/41"),
         ] {
             assert!(allowed(method, path), "{method} {path}");
         }
@@ -1052,6 +1060,11 @@ mod tests {
             ("POST", "/request/12/approve"),
             ("DELETE", "/request"),
             ("DELETE", "/movie/603"),
+            ("GET", "/service/radarr/0"),
+            ("GET", "/media"),
+            ("DELETE", "/media"),
+            ("DELETE", "/media/abc/file"),
+            ("POST", "/media/41/available"),
             ("PUT", "/request/12"),
             ("GET", "/movie/603/../../auth/me"),
             ("GET", "/movie/abc"),

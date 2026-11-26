@@ -807,6 +807,68 @@ final class SeerrClient {
         return try await get(SeerrQuota.self, "/user/\(connection.userId)/quota")
     }
 
+    // MARK: - Removing a title
+
+    /// What a library item is to Radarr or Sonarr: a film or a whole show.
+    /// A season or an episode is neither; Seerr can only remove whole titles.
+    nonisolated static func removalKind(of item: BaseItem) -> SeerrMediaKind? {
+        switch item.kind {
+        case "Movie": .movie
+        case "Series": .tv
+        default: nil
+        }
+    }
+
+    /// Whether removing through Seerr is worth looking into for this item,
+    /// from what is already known: connected, allowed, and a film or a show.
+    /// Asks nothing; `removal(for:)` is the real answer.
+    func mightRemove(_ item: BaseItem) -> Bool {
+        isConnected && connection?.rights.canManageRequests == true && Self.removalKind(of: item) != nil
+    }
+
+    /// Whether this title can be taken out through Seerr, and how. Nil unless
+    /// every part holds: the account may manage requests, Seerr has a Radarr
+    /// (film) or Sonarr (show) server set up, and Seerr's record of the title
+    /// says it is on one. `item` needs its TMDB id (the detail fields).
+    func removal(for item: BaseItem) async -> SeerrRemoval? {
+        guard mightRemove(item), let kind = Self.removalKind(of: item), let tmdbId = item.tmdbId else { return nil }
+        let path = kind == .movie ? "/service/radarr" : "/service/sonarr"
+        guard let servers = try? await get([SeerrServiceServer].self, path), !servers.isEmpty,
+              let media = try? await title(kind, tmdbId: tmdbId, fresh: true).mediaInfo,
+              let mediaId = media.id
+        else { return nil }
+        var copies: [Bool] = []
+        if media.serviceId != nil || media.externalServiceId != nil, servers.contains(where: { $0.is4k != true }) {
+            copies.append(false)
+        }
+        if media.serviceId4k != nil || media.externalServiceId4k != nil, servers.contains(where: { $0.is4k == true }) {
+            copies.append(true)
+        }
+        guard !copies.isEmpty else { return nil }
+        return SeerrRemoval(
+            kind: kind, tmdbId: tmdbId, mediaId: mediaId, copies: copies,
+            requestIds: (media.requests ?? []).map(\.id)
+        )
+    }
+
+    /// Do it: out of Radarr or Sonarr (which deletes the files), then the
+    /// requests, then Seerr's record, so the title can be asked for again.
+    /// The first step is the one that matters and the only one whose failure
+    /// stops the rest; a request already gone is not a failure.
+    func remove(_ removal: SeerrRemoval) async throws {
+        defer {
+            titles["\(removal.kind.rawValue)-\(removal.tmdbId)"] = nil
+            requestsChanged += 1
+        }
+        for is4k in removal.copies {
+            _ = try await call("/media/\(removal.mediaId)/file?is4k=\(is4k)", method: "DELETE")
+        }
+        for id in removal.requestIds {
+            _ = try? await call("/request/\(id)", method: "DELETE")
+        }
+        _ = try await call("/media/\(removal.mediaId)", method: "DELETE")
+    }
+
     // MARK: - Pictures
 
     enum ImageSize: String, Sendable {

@@ -478,7 +478,7 @@ async function expireSession(): Promise<void> {
 // server older than 10.9.
 
 const ITEM_FIELDS =
-  "PrimaryImageAspectRatio,Overview,Genres,MediaSources,UserData,SeriesPrimaryImage,ChildCount,RecursiveItemCount,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,ParentId";
+  "PrimaryImageAspectRatio,Overview,Genres,MediaSources,UserData,SeriesPrimaryImage,ChildCount,RecursiveItemCount,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,ParentId,CanDelete";
 
 /** `ITEM_FIELDS` plus the ones only the detail page draws. `People` is a long
  *  list on a feature film, so it isn't asked for on every grid query.
@@ -1176,6 +1176,15 @@ export async function setFavorite(itemId: string, favorite: boolean): Promise<vo
   await api(`/UserFavoriteItems/${itemId}?userId=${s.userId}`, {
     method: favorite ? "POST" : "DELETE",
   });
+}
+
+/**
+ * Delete an item from the server: its files off the disk and its entry out of
+ * the library. A show or a season takes every episode under it. The server
+ * refuses an account without the right, and there is no undo.
+ */
+export async function deleteItem(itemId: string): Promise<void> {
+  await api(`/Items/${itemId}`, { method: "DELETE" });
 }
 
 // ---------- Images ----------

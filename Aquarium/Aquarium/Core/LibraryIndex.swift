@@ -1022,6 +1022,26 @@ final class LibraryIndex {
         scheduleSave()
     }
 
+    /// An item was deleted from the server from this device: out of the copy
+    /// at once, with everything under it, so no grid goes on offering it
+    /// until the next sync.
+    func forget(_ id: String) {
+        guard isReady, items[id] != nil else { return }
+        var gone: Set<String> = [id]
+        for (key, item) in items where item.SeriesId == id || item.SeasonId == id || item.ParentId == id {
+            gone.insert(key)
+        }
+        for key in gone {
+            items[key] = nil
+            seasonsBySeries[key] = nil
+            episodesBySeason[key] = nil
+            episodesBySeries[key] = nil
+            locallyPatchedIds.remove(key)
+        }
+        queryCache = [:]
+        scheduleSave()
+    }
+
     // MARK: - Order
 
     private func rebuildDerived() {

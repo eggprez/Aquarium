@@ -302,3 +302,26 @@ and Live TV keep the blur bar for now.
 - Check dark mode and a real iPhone by eye (iPhone MANUAL.md, "The floating
   top bar"), and the Duo's inside screen held upright on hardware (the
   simulator's hinge was checked closed, half-open and open, sideways).
+
+## Delete from Server (2026-11-26)
+
+**Wanted:** a Delete option in the press-and-hold / context menu that asks
+which way: delete the file through Jellyfin, or remove the title through Seerr
+(Radarr for a film, Sonarr for a show) along with its request. Seerr's way only
+when Seerr really has Radarr/Sonarr set up.
+
+**Today:** "Delete from Server…" on films, shows, seasons and episodes, on
+iPhone, iPad, Mac, Apple TV and Linux (`Views/ServerDelete.swift`, Linux
+`src/ui.ts`). Jellyfin's way follows the server's `CanDelete` for the item.
+Seerr's way needs Manage Requests or Admin, a Radarr/Sonarr server in Seerr for
+that kind of title, and Seerr's record of the title on one; it removes the
+title there (files too), then its requests and Seerr's record. Whole films and
+shows only. Downloaded copies are kept.
+
+**To do:**
+
+- Try both ways against a real Seerr with Radarr and Sonarr (each platform's
+  MANUAL.md, "Delete from Server"); nothing here has run against one.
+- After Seerr's way, Jellyfin keeps listing the title until its next library
+  scan; the app only hides it from its own copy of the library.
+- Music, collections and playlists are not covered.

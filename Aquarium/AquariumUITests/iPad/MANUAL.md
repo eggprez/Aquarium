@@ -203,3 +203,24 @@ yet run").
 | Settings › Appearance › Sidebar on an iPad | Look at the small words at each row's trailing end: they read "Tab bar" / "More", the iPhone's placements, though the footer says the order is the sidebar's. Record whether that reads wrongly (TabBarSettingsView draws them on every device) | Wording to judge, not a state; `PadSidebarOrderTests` covers the order itself |
 | Now Playing: Instant Mix, a station's "What's leading" sheet, the volume slider | A mix replaces Up Next ("From …" changes); the sheet lists artists and genres by points; the slider moves the system volume | What a mix or station holds depends on the server's library and the station engine (tested in AquariumTests/Shared); the slider is the system's |
 | Downloads with the network cut part-way (Wi-Fi off mid-transfer), and the offline shell | Failed section with Retry / Retry All / Delete; Paused section; offline, the sidebar is Downloads alone and the Music and Audiobooks doors open what is on the iPad | `run-tests.sh ipad` has no switch proxy (the iPhone's `PhoneProxyTestCase`), so a transfer cannot be cut on cue |
+
+## Delete from Server (added 2026-11-26)
+
+The test accounts may not delete, and no test Seerr has a Radarr or Sonarr, so
+the automated checks stop at "not offered". These need an account that may
+delete on Jellyfin, a real Seerr with Radarr and Sonarr, and titles you are
+willing to lose.
+
+- [ ] Press and hold (or secondary click) a film Radarr looks after → Delete from Server… is last in the
+      menu, in red. The question names the film and offers "Delete File from
+      Jellyfin" and "Remove from Radarr with Seerr". Cancel changes nothing.
+- [ ] "Remove from Radarr with Seerr": the film leaves Radarr with its file,
+      its request is gone from Seerr, and the film can be requested again.
+- [ ] "Delete File from Jellyfin" on another film: the file is gone from the
+      server's disk and the film leaves the grid at once.
+- [ ] A show offers Sonarr; a season and an episode offer Jellyfin only.
+- [ ] With Seerr disconnected, or on an account without Manage Requests, or
+      for a title Seerr never sent to Radarr/Sonarr, only Jellyfin is offered.
+- [ ] On an account that may not delete on Jellyfin and has no Seerr rights,
+      the menu has no Delete from Server at all.
+- [ ] A copy downloaded to the device still plays after either way.

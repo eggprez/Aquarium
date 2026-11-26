@@ -57,6 +57,10 @@ extension TestID {
         static let nextUpFromLastWatched = "shell.nextUpDialog.fromLastWatched"
         static let nextUpFromFirstEpisode = "shell.nextUpDialog.fromFirstEpisode"
         static let nextUpCancel = "shell.nextUpDialog.cancel"
+        // The "Delete from Server" dialog: each way is there only when it can be done.
+        static let serverDeleteJellyfin = "shell.serverDeleteDialog.jellyfin"
+        static let serverDeleteSeerr = "shell.serverDeleteDialog.seerr"
+        static let serverDeleteCancel = "shell.serverDeleteDialog.cancel"
 
         /// The Mac sidebar's sign-out confirmation.
         static let signOutConfirm = "shell.signOutDialog.confirm"
@@ -202,6 +206,8 @@ extension TestID {
         static let menuAddToNextUp = "item.menu.addToNextUp"
         static let menuShowInFinder = "item.menu.showInFinder"
         static let menuDeleteDownload = "item.menu.deleteDownload"
+        /// "Delete from Server…", which opens the dialog below.
+        static let menuDeleteFromServer = "item.menu.deleteFromServer"
         static let menuShowDownloadProgress = "item.menu.showDownloadProgress"
         /// The Download submenu.
         static let menuDownload = "item.menu.download"

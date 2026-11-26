@@ -25,6 +25,7 @@ struct ItemDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(JellyfinClient.self) private var client
     @Environment(PlayerModel.self) private var player
+    @Environment(\.dismiss) private var dismiss
     #if os(iOS)
     @Environment(\.devicePose) private var pose
     #endif
@@ -326,7 +327,6 @@ struct ItemDetailView: View {
     #endif
 
     #if os(iOS)
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.sidebarToggle) private var sidebarToggle
     /// The way back to a collapsed sidebar — see `SidebarToggle`.
     private var showSidebar: (() -> Void)? { sidebarToggle?.show }
@@ -595,7 +595,11 @@ struct ItemDetailView: View {
             await load()
         }
         .reloadWhenPlaybackEnds { await load() }
-        .reloadWhenItemsChange { await load() }
+        .reloadWhenItemsChange {
+            // Deleted from the server: there is nothing left to show.
+            if app.deletedFromServer.contains(itemId) { dismiss(); return }
+            await load()
+        }
         #if !os(macOS)
         // A tap that changed something gets a tick in the hand. A Mac has no
         // hand to tick; the toggle in the toolbar changes state and that is

@@ -161,6 +161,7 @@ struct RouteWindow: View {
             Text(alert.message)
         }
         .nextUpChoiceDialog(isMine: app.isWorkingWindow(navigator))
+        .serverDeleteDialog(isMine: app.isWorkingWindow(navigator))
         // Outermost, so the toasts' overlay and every page know which window
         // they are in.
         .environment(\.routeWindowNavigator, navigator)

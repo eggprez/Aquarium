@@ -543,6 +543,15 @@ final class AppModel {
     /// which is gone by the time the question is asked.
     var addingToNextUp: BaseItem?
 
+    /// The title "Delete from Server" was chosen for, with the ways it can
+    /// go, while the app asks which — see `ServerDeleting`. Held here for the
+    /// reason `addingToNextUp` is.
+    var deletingFromServer: ServerDeleteChoice?
+    /// The ids deleted from the server this session, so a page still showing
+    /// one of them closes itself.
+    private(set) var deletedFromServer: Set<String> = []
+    func noteDeletedFromServer(_ id: String) { deletedFromServer.insert(id) }
+
     /// Raised when something needs the whole screen to explain itself — a
     /// server identity change, an expired session.
     var blockingMessage: String?

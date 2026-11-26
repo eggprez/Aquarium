@@ -20,6 +20,7 @@ final class PadContextMenuTests: PadUITestCase {
         XCTAssertFalse(app.element(TestID.Item.menuOpenInNewWindow).exists, "a Mac's command, not an iPad's")
         // A card opens its title with a tap, so its menu has no Details.
         XCTAssertFalse(app.element(TestID.Item.menuDetails).exists)
+        XCTAssertFalse(app.element(TestID.Item.menuDeleteFromServer).exists, "the test account may not delete from the server, so Delete from Server is not offered")
         attachScreenshot("film menu")
     }
 

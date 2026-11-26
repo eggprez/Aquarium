@@ -310,6 +310,7 @@ final class PhoneContextMenuTests: PhoneUITestCase {
                      TestID.Item.menuFavorite, TestID.Item.menuWatched, TestID.Item.menuDownload] {
             XCTAssertTrue(any(item).waitForExistence(timeout: 5), item)
         }
+        XCTAssertFalse(any(TestID.Item.menuDeleteFromServer).exists, "the test account may not delete from the server, so Delete from Server is not offered")
         attachScreenshot("card menu (\(device.rawValue))")
         any(TestID.Item.menuPlay).tap()
         app.element(TestID.Player.root).waitToExist(40)

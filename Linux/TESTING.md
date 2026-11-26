@@ -242,6 +242,13 @@ alone; end it with `kill <pid>`, never MPRIS Quit. Look in `~/.local/share/aquar
     lowercase with a purple bubble where the i's dot would be, sitting just above the stem. On a
     desktop with no rounded font it is Inter; the bubble should still clear the r and u. Orca reads
     "Aquarium" once.
+30. **Delete from Server.** Needs an account that may delete on Jellyfin, a real Seerr with Radarr
+    and Sonarr, and titles to lose. Right-click a film Radarr looks after: "Delete from Server…" is
+    last, in red; the dialog offers "Remove from Radarr with Seerr" and "Delete File from Jellyfin".
+    Seerr's way takes the film out of Radarr with its file and clears its request; Jellyfin's
+    deletes the file and the page is drawn again without the film. A show offers Sonarr; a season
+    or an episode only Jellyfin. With Seerr disconnected, no Manage Requests, or a title Seerr
+    never sent to Radarr/Sonarr, only Jellyfin is offered; with no right on either, no entry.
 
 ## Function inventory
 
@@ -1984,3 +1991,16 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | `seerr_disconnect` (Tauri command: seerr::disconnect) | src-tauri/src/lib.rs:311 | none | needs real Linux | untested: lib.rs is Linux-only; seerr::disconnect is tested |
 | `seerr_refresh` (Tauri command: seerr::refresh) | src-tauri/src/lib.rs:317 | none | needs real Linux | untested: lib.rs is Linux-only; seerr::refresh is tested |
 | `seerr_request` (Tauri command: seerr::request) | src-tauri/src/lib.rs:322 | none | needs real Linux | untested: lib.rs is Linux-only; seerr::request is tested |
+
+
+### Delete from Server (added 2026-11-26)
+
+| Function | Source | Test file | Kind | Status |
+|---|---|---|---|---|
+| deleteItem | src/api.ts | tests/unit/api-browse.test.ts | unit | tested |
+| canManageRequests, removalKind, mightRemove, serviceName | src/seerr.ts | tests/unit/seerr.test.ts | unit | tested |
+| removal | src/seerr.ts | tests/unit/seerr.test.ts | unit | tested |
+| remove | src/seerr.ts | tests/unit/seerr.test.ts | unit | tested |
+| mightDeleteFromServer, askDeleteFromServer, the menu entry in itemActions | src/ui.ts | tests/dom/ui.test.ts | DOM | tested |
+| `aquarium-item-deleted` listener (redraws the page) | src/main.ts | none | DOM | untested: one line calling route(); manual checklist item 30 |
+| allowed: `/service/radarr`, `/service/sonarr`, `DELETE /media/{id}/file`, `DELETE /media/{id}` | src-tauri/src/seerr.rs | seerr.rs tests | Rust unit | written 2026-11-26, not yet run: the Mac it was written on has no Cargo |
