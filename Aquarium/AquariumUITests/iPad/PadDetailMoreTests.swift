@@ -45,7 +45,9 @@ final class PadDetailMoreTests: PadUITestCase {
         XCTAssertTrue(line.waitForExistence(timeout: 20), "the line on FX Long Show")
         XCTAssertTrue(line.label.contains("Carry on with"), "S01E02 is in progress: \(line.label)")
         XCTAssertTrue(line.label.contains(e2.name), "names \(e2.name): \(line.label)")
-        XCTAssertTrue(app.element(TestID.Detail.resumeProgress).exists, "a resume bar for the episode in progress")
+        // The iPad's two-column header says how much is left under Resume
+        // ("8m left"); the resume bar is the phone's layout.
+        XCTAssertTrue(app.element(TestID.Detail.remaining).exists, "the time left in the episode in progress")
         XCTAssertTrue(app.button(TestID.Detail.play).label.localizedCaseInsensitiveContains("resume"),
                       "Play resumes it: \(app.button(TestID.Detail.play).label)")
 
@@ -54,10 +56,11 @@ final class PadDetailMoreTests: PadUITestCase {
         XCTAssertTrue(waitUntil(20, "the line on FX Short Show") { next.exists && next.label.contains(e3.name) },
                       "reads \(next.label)")
         XCTAssertTrue(next.label.contains("Up next"), "S01E03 has not been started: \(next.label)")
-        XCTAssertFalse(app.element(TestID.Detail.resumeProgress).exists, "no resume bar for an episode not started")
+        XCTAssertFalse(app.element(TestID.Detail.remaining).exists, "no time left for an episode not started")
     }
 
-    /// A film not started has no resume bar; one in progress has it.
+    /// A film not started says nothing about time left; one in progress says
+    /// it under Resume (the iPad's header; the resume bar is the phone's).
     func testTheResumeBarIsOnlyOnAFilmInProgress() throws {
         let started = try fx.item("film.long_direct")
         let fresh = try fx.item("film.pcm_mov")
@@ -66,10 +69,10 @@ final class PadDetailMoreTests: PadUITestCase {
         try? api.markUnplayed(fresh.id)
         launchHome()
         openItem(started.id)
-        XCTAssertTrue(app.element(TestID.Detail.resumeProgress).waitForExistence(timeout: 20), "the baseline's 5:00")
+        XCTAssertTrue(app.element(TestID.Detail.remaining).waitForExistence(timeout: 20), "the baseline's 5:00 in: time left")
         openItem(fresh.id)
         app.button(TestID.Detail.play).waitToExist(20)
-        XCTAssertFalse(app.element(TestID.Detail.resumeProgress).exists, "nothing to resume")
+        XCTAssertFalse(app.element(TestID.Detail.remaining).exists, "nothing to resume")
         XCTAssertFalse(app.button(TestID.Detail.play).label.localizedCaseInsensitiveContains("resume"))
     }
 
@@ -77,9 +80,11 @@ final class PadDetailMoreTests: PadUITestCase {
     /// title joins it once the header has gone 80 pt up, and leaves again at
     /// the top.
     func testTheTitleJoinsTheBarOnceTheHeaderHasScrolledAway() throws {
-        let film = try fx.item("film.long_direct")
+        // A show, for its episode rows: a film's page fits the iPad's screen
+        // with too little left over to scroll the header 80 pt away.
+        let show = try fx.item("show.long")
         launchHome()
-        openItem(film.id)
+        openItem(show.id)
         let barTitle = app.element(TestID.Detail.barTitle)
         XCTAssertTrue(app.button(TestID.Detail.back).waitForExistence(timeout: 10))
         XCTAssertFalse(barTitle.exists, "no title in the bar over the header")
@@ -91,7 +96,7 @@ final class PadDetailMoreTests: PadUITestCase {
             low.press(forDuration: 0.05, thenDragTo: high)
         }
         XCTAssertTrue(barTitle.waitForExistence(timeout: 5), "the title in the bar once the header is gone")
-        XCTAssertEqual(barTitle.label, "FX Long Direct Play")
+        XCTAssertEqual(barTitle.label, show.name)
         attachScreenshot("title in the bar")
 
         for _ in 0..<6 { high.press(forDuration: 0.05, thenDragTo: low) }

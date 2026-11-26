@@ -315,6 +315,16 @@ extension XCUIApplication {
             else if up { swipeUp() } else { swipeDown() }
             n += 1
         }
+        // A lazy list drops rows scrolled off the top, so a row above a page
+        // left scrolled down (Settings after a page's back trip) never
+        // exists and the swipes above only go further down: come back up.
+        // Only when it never turned up: a row that exists but reads as off
+        // screen (the Duo's bottom inset) is already as close as it gets.
+        n = 0
+        while up && !element.exists && n < maxSwipes {
+            swipeDown()
+            n += 1
+        }
         return element.isOnScreen(in: window)
     }
 }

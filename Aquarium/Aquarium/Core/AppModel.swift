@@ -1855,6 +1855,7 @@ final class AppModel {
         LiveTVStore.shared.reset()
         Preferences.shared.clearRecentSearches()
         #if os(iOS)
+        MusicFavoriteMarks.shared.reset()
         // The Follow tile's choices go with the account.
         FollowFeed.shared.wipe()
         #endif
