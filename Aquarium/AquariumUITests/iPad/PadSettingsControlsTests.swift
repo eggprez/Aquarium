@@ -28,7 +28,10 @@ final class PadSettingsControlsTests: PadUITestCase {
         let gear = app.button(TestID.Sidebar.settings)
         if !gear.exists || !gear.isHittable { revealSidebar() }
         gear.padTap(file: file, line: line)
-        app.element(Settings.root).waitToExist(20, file: file, line: line)
+        // The list, or whichever page Settings was left on (it reopens there).
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'settings.' AND identifier ENDSWITH '.root'")).firstMatch
+            .waitToExist(20, file: file, line: line)
         // Back to the list if Settings was left on a page.
         let link = app.element(Settings.pageLink("appearance"))
         for _ in 0..<4 where !link.waitForExistence(timeout: 2) { goBack() }
@@ -261,8 +264,16 @@ final class PadSettingsControlsTests: PadUITestCase {
         XCTAssertTrue(reveal(cloud), "the iCloud row")
         XCTAssertTrue(cloud.label.contains("Sync settings with iCloud"), cloud.label)
         XCTAssertFalse(cloud.isEnabled, "iCloud is unavailable in test mode, so the switch is off")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Not signed in to iCloud on this device"))
-                        .firstMatch.exists, "the footer says why")
+        // The footer is the list's last line: the row can sit on the bottom
+        // edge with it not drawn yet, and once scrolled to it lies in the
+        // strip `reveal` counts as off screen (and `reveal` would then scroll
+        // back up past it). Scroll down to the end and look for it.
+        let footer = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Not signed in to iCloud on this device")).firstMatch
+        let window = app.windows.firstMatch
+        let low = window.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.72))
+        let high = window.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.32))
+        for _ in 0..<4 where !footer.exists { low.press(forDuration: 0.05, thenDragTo: high) }
+        XCTAssertTrue(footer.exists, "the footer says why")
         XCTAssertFalse(app.element(Settings.pageLink("watch")).exists, "the Apple Watch row is the iPhone's")
     }
 }

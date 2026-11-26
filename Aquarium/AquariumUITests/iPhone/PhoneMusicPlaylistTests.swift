@@ -53,6 +53,10 @@ final class PhoneMusicPlaylistTests: PhoneMusicTestCase {
         tab("Music")
         if !any(TestID.Music.page("library")).waitForExistence(timeout: 3) { tab("Music") }
         any(TestID.Music.page("library")).tapNow(10)
+        // openAlbum searched for the album, and the tab keeps that search
+        // open (its results hide the Library doors) until it is cancelled.
+        let cancel = any(TestID.Music.searchCancel)
+        if cancel.waitForExistence(timeout: 2) { cancel.tap() }
         any(TestID.Music.libraryDoor("playlists")).tapNow(10)
         app.element(TestID.Playlists.root).waitToExist(20)
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
@@ -64,7 +68,14 @@ final class PhoneMusicPlaylistTests: PhoneMusicTestCase {
         attachScreenshot("playlist with the song")
 
         any(TestID.Music.songMore(song)).tapNow(10)
-        any(TestID.Playlists.removeSong).tapNow(10)
+        // The entry is in the tree while the menu is still opening, and a
+        // coordinate tap then falls through to the song row under it (which
+        // plays the song and leaves the playlist alone): wait until it can
+        // take the tap.
+        let remove = any(TestID.Playlists.removeSong)
+        remove.waitToExist(10)
+        XCTAssertTrue(eventually(timeout: 5) { remove.isHittable }, "Remove from Playlist never became tappable")
+        remove.tap()
         XCTAssertTrue(eventually(timeout: 20) { !self.entries(api, playlist).contains { $0.id == song } },
                       "Remove from Playlist did not reach the server")
         XCTAssertTrue(listed.waitToVanish(20), "the song is still on the playlist page")

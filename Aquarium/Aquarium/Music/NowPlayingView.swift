@@ -701,10 +701,11 @@ struct NowPlayingView: View {
     }
 
     private func toggleFavorite(_ song: BaseItem) async {
-        let next = !song.userData.isFavorite
+        let next = !MusicFavoriteMarks.shared.isFavorite(song)
         do {
             // Kept on this device and sent later when there is no server.
             _ = try await MusicFavorites.set(song, favorite: next)
+            MusicFavoriteMarks.shared.set(song.Id, next)
             music.markFavorite(song.Id, next)
             ItemMutations.shared.changed()
         } catch {

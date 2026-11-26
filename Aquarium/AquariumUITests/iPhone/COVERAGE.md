@@ -136,7 +136,7 @@ the other four on the standard phone).
 |---|---|---|---|
 | Connect to a server, banner (name, security) | testPasswordSignInReachesHome | UI | skip |
 | Password sign-in | testPasswordSignInReachesHome | UI | skip |
-| Sign-in shows the one-word wordmark (bubble for the dot on the i), read as "Aquarium" | testSignInShowsTheWordmark | UI | new, not yet run |
+| Sign-in shows the one-word wordmark (bubble for the dot on the i), read as "Aquarium" | testSignInShowsTheWordmark | UI | pass 2026-11-26 |
 | Wrong password | testWrongPasswordSaysSo | UI | skip |
 | Disabled account (fx-disabled) | testDisabledAccountIsRefused | UI | skip |
 | Public users, passwordless user (fx-guest, fx-public) | testPublicUsersAreListedAndAPasswordlessOneSignsIn | UI | pass (17) |
@@ -285,10 +285,11 @@ the other four on the standard phone).
 | Favourite from Now Playing | testFavouriteFromNowPlayingReachesTheServer | UI | pass (17) |
 | Instant Mix, station, leanings, Shuffle All | testInstantMixFromNowPlaying, testStationFromDiscover, testShuffleAll | UI | pass (17) |
 | Song menu, Song Info | testSongMenuOffersItsActions | UI | pass (17) |
+| A music item's menu follows a favourite set from it or from Now Playing, though the page keeps the item as fetched; cleared on sign-out (found by the iPad suite, fixed 2026-11-26) | MusicFavoriteMarksTests (4) | unit | pass (17) |
 | Artist page order | testArtistPageShowsTopSongsThenAlbums | UI | pass (17) |
 | Playlists | testPlaylistsListTheAccountsOwn | UI | pass (17) |
 | Smart playlist editor, save, delete | testSmartPlaylistEditorSavesAndDeletes | UI | pass (17) |
-| A song's Add to Playlist reaches the server's playlist, its page lists it, Remove from Playlist takes it off (server and page) | PhoneMusicPlaylistTests.testASongIsAddedToAPlaylistAndRemovedFromIt | UI | new, not yet run |
+| A song's Add to Playlist reaches the server's playlist, its page lists it, Remove from Playlist takes it off (server and page) | PhoneMusicPlaylistTests.testASongIsAddedToAPlaylistAndRemovedFromIt | UI | pass 2026-11-26 |
 | Music search | testMusicSearchFindsArtistsAlbumsSongs | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Mini player clear of the list's end | testMiniPlayerDoesNotCoverTheEndOfAList | UI, layout | pass (17, SE, Pro Max, Duo) (R-f41df90) |
 | Audiobooks tab, Continue Listening | testAudiobooksTabShowsContinueListening | UI, layout | pass (17, SE, Pro Max, Duo) |
@@ -381,10 +382,10 @@ cuts the server; without it these three classes skip. Standard phone only.
 | Pages fit | testSettingsPagesFitTheScreen | UI, layout | pass (17, SE, Pro Max, Duo) |
 | Measure Apple TV sync (camera) | — | manual | needs a camera and an Apple TV |
 | Tab bar drag to reorder | — | none | drag handles carry no identifiers (TESTING.md known gaps) |
-| Switches and choices on Appearance (Next Up rewatching, in progress, days), Video (Resume, Autoplay next), Audio (language), Subtitles (Never), Music (normalize, romanize, mix source) and Downloads (Wi-Fi only) are kept across a relaunch | PhoneSettingsControlsTests.testSwitchesAndChoicesSurviveARelaunch | UI | new, not yet run |
-| Downloads at once: never below 1 or above 6, kept across a relaunch | PhoneSettingsControlsTests.testDownloadsAtOnceStaysInItsRangeAndIsKept | UI | new, not yet run |
-| Video › Resume off: Play starts at the beginning despite a 5:00 resume point | PhoneSettingsControlsTests.testResumeOffStartsFromTheBeginning | UI | new, not yet run |
-| Live TV › Custom playlist: an M3U served from this Mac fills the guide with its channels; Settings says "2 channels" and names the host | PhoneSettingsControlsTests.testACustomPlaylistFillsTheGuide | UI | new, not yet run |
+| Switches and choices on Appearance (Next Up rewatching, in progress, days), Video (Resume, Autoplay next), Audio (language), Subtitles (Never), Music (normalize, romanize, mix source) and Downloads (Wi-Fi only) are kept across a relaunch | PhoneSettingsControlsTests.testSwitchesAndChoicesSurviveARelaunch | UI | pass 2026-11-26 |
+| Downloads at once: never below 1 or above 6, kept across a relaunch | PhoneSettingsControlsTests.testDownloadsAtOnceStaysInItsRangeAndIsKept | UI | pass 2026-11-26 |
+| Video › Resume off: Play starts at the beginning despite a 5:00 resume point | PhoneSettingsControlsTests.testResumeOffStartsFromTheBeginning | UI | pass 2026-11-26 |
+| Live TV › Custom playlist: an M3U served from this Mac fills the guide with its channels; Settings says "2 channels" and names the host | PhoneSettingsControlsTests.testACustomPlaylistFillsTheGuide | UI | pass 2026-11-26 |
 | Next Up days / in progress / rewatching changing what Home's Next Up shows; Audio language and Subtitles Never changing what the player picks; Normalize volume and lossless on cellular changing what is heard | — | none | the rules are unit-tested (NextUpTargetTests, TrackPreferenceTests, MusicPlayerPlaybackTests); an end-to-end test needs server watch history set up per case, not written |
 | Home Screen quick actions, App Icon actually changing, Handoff, Spotlight results | — | manual | MANUAL.md (Shell items with no automated driver) |
 

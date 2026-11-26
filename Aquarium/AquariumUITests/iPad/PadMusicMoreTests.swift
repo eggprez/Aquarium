@@ -117,14 +117,19 @@ class PadMusicMoreTestCase: PadUITestCase {
     func tapMenuRow(_ id: String, beginning label: String, file: StaticString = #filePath, line: UInt = #line) {
         let row = menuRow(id, beginning: label)
         row.waitToExist(10, file: file, line: line)
-        // A menu still sliding into place takes a tap beside the row.
-        var last = CGRect.null
-        _ = eventually(4) {
-            let now = row.frame
-            defer { last = now }
-            return now == last && !now.isEmpty
+        // A menu still sliding into place takes a tap beside the row, and
+        // stays open with nothing chosen (the sleep timer's, 2026-11-26):
+        // wait for the row to stop moving, and tap again while it is there.
+        for _ in 0..<3 {
+            var last = CGRect.null
+            _ = eventually(4) {
+                let now = row.frame
+                defer { last = now }
+                return now == last && !now.isEmpty
+            }
+            row.padTap(file: file, line: line)
+            if row.waitToVanish(2) { return }
         }
-        row.padTap(file: file, line: line)
     }
 
     /// Puts a menu away without choosing: a tap at the foot of the page.
@@ -136,10 +141,18 @@ class PadMusicMoreTestCase: PadUITestCase {
 
     /// Up Next's rows, top to bottom, by song id.
     func queueIds() -> [String] {
+        // One snapshot of the whole tree: reading the rows one by one fails
+        // ("no matches found for element at index 4") when the list is
+        // re-ordering under the reads, as it is just after Shuffle.
         let prefix = TestID.NowPlaying.queueRow("")
-        let rows = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix)).allElementsBoundByIndex
-        return rows.sorted { $0.frame.minY < $1.frame.minY }.map { String($0.identifier.dropFirst(prefix.count)) }
+        guard let root = try? app.snapshot() else { return [] }
+        var rows: [(id: String, y: CGFloat)] = []
+        func walk(_ node: XCUIElementSnapshot) {
+            if node.identifier.hasPrefix(prefix) { rows.append((String(node.identifier.dropFirst(prefix.count)), node.frame.minY)) }
+            node.children.forEach(walk)
+        }
+        walk(root)
+        return rows.sorted { $0.y < $1.y }.map(\.id)
     }
 
     func openQueue(file: StaticString = #filePath, line: UInt = #line) {
@@ -178,10 +191,16 @@ final class PadMusicMoreTests: PadMusicMoreTestCase {
 
         app.button(TestID.Music.sortMenu).padTap()
         tapMenuRow(TestID.Music.sortOption(sortKeyArtist), beginning: "Artist")
+        // By Artist the compilation goes near the end (Various Artists, after
+        // Vangelis), far enough down a 37-album grid that it isn't loaded at
+        // the top: FX Two Discs there and the compilation not yet, or behind it.
         XCTAssertTrue(waitUntil(20, "the grid to be by artist") { [self] in
-            first.exists && last.exists && reads(last, before: first)
+            last.exists && (!first.exists || reads(last, before: first))
         }, "by Artist: FX Band's albums before Various Artists'")
         attachScreenshot("albums by artist")
+        XCTAssertTrue(reveal(first), "the compilation further down the grid")
+        XCTAssertTrue(!last.exists || reads(last, before: first), "FX Two Discs still reads before it")
+        _ = reveal(last)   // back up, where both are by Title
 
         app.button(TestID.Music.sortMenu).padTap()
         tapMenuRow(TestID.Music.sortOption(sortKeyTitle), beginning: "Title")
@@ -287,8 +306,13 @@ final class PadMusicMoreTests: PadMusicMoreTestCase {
         XCTAssertEqual(remove.label, "Remove from Favorites", "the menu follows the favourite")
         dismissMenu()
 
-        goBack()
-        app.element(TestID.Music.library).waitToExist(10)
+        // A back tap while the menu is still closing is taken by the menu.
+        let library = app.element(TestID.Music.library)
+        for _ in 0..<3 where !library.exists {
+            goBack()
+            _ = library.waitForExistence(timeout: 4)
+        }
+        library.waitToExist(10)
         let door = app.button(TestID.Music.libraryDoor("favorites"))
         XCTAssertTrue(reveal(door))
         door.padTap()

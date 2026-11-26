@@ -10,6 +10,28 @@ import AppKit
 #endif
 
 #if os(iOS)
+/// Whether the page has scrolled a bar's worth (80 pt) off its top, from the
+/// scroll view's own geometry, the way the bar's blur reads it
+/// (`BarScrollWatcher`). iOS 18 and later; iOS 17 uses `DetailScrollKey`.
+struct PastHeroWatcher: ViewModifier {
+    @Binding var isPast: Bool
+    static let threshold: CGFloat = 80
+
+    static func isPast(offset: CGFloat) -> Bool { offset > threshold }
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: Bool.self) { geometry in
+                Self.isPast(offset: geometry.contentOffset.y + geometry.contentInsets.top)
+            } action: { _, past in
+                isPast = past
+            }
+        } else {
+            content
+        }
+    }
+}
+
 /// How far the detail page has been scrolled.
 private struct DetailScrollKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
@@ -137,6 +159,7 @@ struct ItemDetailView: View {
                     scroll()
                         .ignoresSafeArea(.container, edges: .top)
                         .modifier(BarScrollWatcher(scroll: barScroll))
+                        .modifier(PastHeroWatcher(isPast: $scrolledPastHero))
                     padBar
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { padTopInset = $0 }
@@ -152,7 +175,10 @@ struct ItemDetailView: View {
             // artwork has cleared the bar, and a threshold measured from the
             // hero's own height would leave that page permanently without
             // its title.
-            scrolledPastHero = -offset > 80
+            // From iOS 18 the scroll view's own geometry says it
+            // (`PastHeroWatcher`): this probe's preference stopped arriving
+            // on the iPad, whose bar then never took the title (2026-11-26).
+            if #unavailable(iOS 18.0) { scrolledPastHero = -offset > 80 }
         }
         .testAnchor(TestID.Detail.root)
         .testAnchor(TestID.Detail.page(itemId))

@@ -787,6 +787,23 @@ extension View {
     }
 }
 
+/// What this device last set each item's favourite to, for the menu to read
+/// over the item it was handed. The music pages don't reload when a menu
+/// changes something (they hold the items they fetched), so without this an
+/// album starred from the grid kept offering "Add to Favorites".
+@MainActor @Observable
+final class MusicFavoriteMarks {
+    static let shared = MusicFavoriteMarks()
+    private var marks: [String: Bool] = [:]
+
+    func isFavorite(_ item: BaseItem) -> Bool { marks[item.Id] ?? item.userData.isFavorite }
+    func set(_ itemId: String, _ favorite: Bool) { marks[itemId] = favorite }
+    /// On sign-out or a server change: another account's stars are not these.
+    func reset() { marks = [:] }
+
+    private init() {}
+}
+
 /// The actions themselves, ordered the way they are reached for: play it,
 /// queue it, go to it, keep it.
 struct MusicItemMenu: View {
@@ -849,10 +866,11 @@ struct MusicItemMenu: View {
         if !item.isAudiobook, !item.isPlaylist, !client.showsOffline {
             addToPlaylist
         }
+        let isFavorite = MusicFavoriteMarks.shared.isFavorite(item)
         Button { Task { await toggleFavorite() } } label: {
             Label(
-                item.userData.isFavorite ? "Remove from Favorites" : "Add to Favorites",
-                systemImage: item.userData.isFavorite ? "star.slash" : "star"
+                isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                systemImage: isFavorite ? "star.slash" : "star"
             )
         }
         .accessibilityIdentifier(TestID.Music.menuFavorite)
@@ -948,9 +966,10 @@ struct MusicItemMenu: View {
     }
 
     private func toggleFavorite() async {
-        let next = !item.userData.isFavorite
+        let next = !MusicFavoriteMarks.shared.isFavorite(item)
         do {
             let outcome = try await MusicFavorites.set(item, favorite: next)
+            MusicFavoriteMarks.shared.set(item.Id, next)
             music.markFavorite(item.Id, next)
             ItemMutations.shared.changed()
             let text = next ? "Added to Favorites" : "Removed from Favorites"
