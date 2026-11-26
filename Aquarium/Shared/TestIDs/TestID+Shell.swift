@@ -60,6 +60,7 @@ extension TestID {
         // The "Delete from Server" dialog: each way is there only when it can be done.
         static let serverDeleteJellyfin = "shell.serverDeleteDialog.jellyfin"
         static let serverDeleteSeerr = "shell.serverDeleteDialog.seerr"
+        static let serverDeleteBoth = "shell.serverDeleteDialog.both"
         static let serverDeleteCancel = "shell.serverDeleteDialog.cancel"
 
         /// The Mac sidebar's sign-out confirmation.

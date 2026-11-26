@@ -60,13 +60,11 @@ enum ServerDeleting {
         return item.title
     }
 
-    nonisolated static func jellyfinLabel(for item: BaseItem) -> String {
-        item.isFolderLike ? "Delete Files from Jellyfin" : "Delete File from Jellyfin"
-    }
-
-    nonisolated static func seerrLabel(for removal: SeerrRemoval) -> String {
-        "Remove from \(removal.service) with Seerr"
-    }
+    nonisolated static let jellyfinLabel = "Delete from Jellyfin"
+    nonisolated static let seerrLabel = "Delete from Seerr"
+    /// Offered when both ways are open: Seerr's, then Jellyfin's, so the
+    /// title is gone from the library at once and is not fetched again.
+    nonisolated static let bothLabel = "Delete from Both"
 
     /// The small print under the question: what each way on offer does.
     nonisolated static func message(for choice: ServerDeleteChoice) -> String {
@@ -80,6 +78,9 @@ enum ServerDeleting {
         }
         if let removal = choice.seerr {
             lines.append("Seerr removes it from \(removal.service), which deletes its files, and clears its requests.")
+            if choice.jellyfin {
+                lines.append("Both does the two together, so it leaves the library now and isn't fetched again.")
+            }
         }
         lines.append("This can't be undone. Copies downloaded to your devices are kept.")
         return lines.joined(separator: " ")
@@ -136,13 +137,44 @@ enum ServerDeleting {
         }
     }
 
+    /// Both ways, Seerr's first: if Radarr or Sonarr won't let go of the title
+    /// nothing is deleted, since they would only fetch it again. Once they
+    /// have, Jellyfin failing leaves no more than a library entry that goes
+    /// at the next scan, and is said as that.
+    static func deleteFromBoth(_ choice: ServerDeleteChoice, client: JellyfinClient, seerr: SeerrClient, app: AppModel) async {
+        guard let removal = choice.seerr else { return }
+        let name = name(of: choice.item)
+        do {
+            try await seerr.remove(removal)
+        } catch {
+            let why = (error as? SeerrError)?.errorDescription ?? "Seerr couldn't be reached."
+            app.toast("Couldn't remove \(name), so nothing was deleted: \(why)", tone: .error)
+            return
+        }
+        var jellyfinDid = true
+        do {
+            try await client.deleteItem(choice.item.Id)
+        } catch APIError.server(let status, _) where status == 404 {
+            // Already gone, which is what was asked for.
+        } catch {
+            jellyfinDid = false
+            LibraryIndex.shared.forget(choice.item.Id)
+        }
+        finished(choice.item, app: app)
+        if jellyfinDid {
+            app.toast("Deleted \(name) from Jellyfin and \(removal.service)", tone: .ok)
+        } else {
+            app.toast("Removed \(name) from \(removal.service), but Jellyfin couldn't delete it. It drops it at its next library scan.", tone: .error)
+        }
+    }
+
     private static func finished(_ item: BaseItem, app: AppModel) {
         app.noteDeletedFromServer(item.Id)
         ItemMutations.shared.changed()
     }
 }
 
-/// The question "Delete from Server" asks: which way. Both are red; neither
+/// The question "Delete from Server" asks: Jellyfin, Seerr, or both. All are red; none
 /// can be taken back. Shown by whichever window or screen is in front, as
 /// `NextUpChoiceDialog` is.
 struct ServerDeleteDialog: ViewModifier {
@@ -162,18 +194,25 @@ struct ServerDeleteDialog: ViewModifier {
             presenting: app.deletingFromServer
         ) { choice in
             if choice.jellyfin {
-                Button(ServerDeleting.jellyfinLabel(for: choice.item), role: .destructive) {
+                Button(ServerDeleting.jellyfinLabel, role: .destructive) {
                     app.deletingFromServer = nil
                     Task { await ServerDeleting.deleteFromJellyfin(choice.item, client: client, app: app) }
                 }
                 .accessibilityIdentifier(TestID.Shell.serverDeleteJellyfin)
             }
-            if let removal = choice.seerr {
-                Button(ServerDeleting.seerrLabel(for: removal), role: .destructive) {
+            if choice.seerr != nil {
+                Button(ServerDeleting.seerrLabel, role: .destructive) {
                     app.deletingFromServer = nil
                     Task { await ServerDeleting.removeWithSeerr(choice, seerr: SeerrClient.shared, app: app) }
                 }
                 .accessibilityIdentifier(TestID.Shell.serverDeleteSeerr)
+            }
+            if choice.jellyfin, choice.seerr != nil {
+                Button(ServerDeleting.bothLabel, role: .destructive) {
+                    app.deletingFromServer = nil
+                    Task { await ServerDeleting.deleteFromBoth(choice, client: client, seerr: SeerrClient.shared, app: app) }
+                }
+                .accessibilityIdentifier(TestID.Shell.serverDeleteBoth)
             }
             Button("Cancel", role: .cancel) { app.deletingFromServer = nil }
                 .accessibilityIdentifier(TestID.Shell.serverDeleteCancel)

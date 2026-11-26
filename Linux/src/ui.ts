@@ -1008,14 +1008,41 @@ export async function askDeleteFromServer(item: any): Promise<void> {
     );
   }
   if (removal) lines.push(`Seerr removes it from ${seerr.serviceName(removal.kind)}, which deletes its files, and clears its requests.`);
+  if (removal && viaJellyfin) lines.push("Both does the two together, so it leaves the library now and isn't fetched again.");
   lines.push("This can't be undone. Downloads on this computer are kept.");
 
   const actions: DialogAction[] = [{ label: "Cancel" }];
+  if (removal && viaJellyfin) {
+    // Seerr's way first: if Radarr or Sonarr won't let go of the title
+    // nothing is deleted, since they would only fetch it again.
+    const arr = seerr.serviceName(removal.kind);
+    const how = removal;
+    actions.push({
+      label: "Delete from Both",
+      danger: true,
+      run: () => void (async () => {
+        try {
+          await seerr.remove(how);
+        } catch (e: any) {
+          toast(`Couldn't remove ${name}, so nothing was deleted: ${e?.message ?? "Seerr couldn't be reached."}`, "error");
+          return;
+        }
+        try {
+          await api.deleteItem(item.Id);
+          toast(`Deleted ${name} from Jellyfin and ${arr}`, "ok");
+        } catch (e: any) {
+          if (/ 404 /.test(String(e?.message))) toast(`Deleted ${name} from Jellyfin and ${arr}`, "ok");
+          else toast(`Removed ${name} from ${arr}, but Jellyfin couldn't delete it. It drops it at its next library scan.`, "error");
+        }
+        afterServerDelete(item);
+      })(),
+    });
+  }
   if (removal) {
     const arr = seerr.serviceName(removal.kind);
     const how = removal;
     actions.push({
-      label: `Remove from ${arr} with Seerr`,
+      label: "Delete from Seerr",
       danger: true,
       run: () => void (async () => {
         try {
@@ -1030,7 +1057,7 @@ export async function askDeleteFromServer(item: any): Promise<void> {
   }
   if (viaJellyfin) {
     actions.push({
-      label: item.Type === "Series" || item.Type === "Season" ? "Delete Files from Jellyfin" : "Delete File from Jellyfin",
+      label: "Delete from Jellyfin",
       danger: true,
       run: () => void (async () => {
         try {

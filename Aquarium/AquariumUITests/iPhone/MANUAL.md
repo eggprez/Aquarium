@@ -325,12 +325,14 @@ delete on Jellyfin, a real Seerr with Radarr and Sonarr, and titles you are
 willing to lose.
 
 - [ ] Press and hold a film Radarr looks after → Delete from Server… is last in the
-      menu, in red. The question names the film and offers "Delete File from
-      Jellyfin" and "Remove from Radarr with Seerr". Cancel changes nothing.
-- [ ] "Remove from Radarr with Seerr": the film leaves Radarr with its file,
+      menu, in red. The question names the film and offers "Delete from
+      Jellyfin", "Delete from Seerr" and "Delete from Both". Cancel changes nothing.
+- [ ] "Delete from Seerr": the film leaves Radarr with its file,
       its request is gone from Seerr, and the film can be requested again.
-- [ ] "Delete File from Jellyfin" on another film: the file is gone from the
+- [ ] "Delete from Jellyfin" on another film: the file is gone from the
       server's disk and the film leaves the grid at once.
+- [ ] "Delete from Both" on a third film: it leaves the grid at once, Radarr
+      and Seerr\'s requests no longer have it, and it is not fetched again.
 - [ ] A show offers Sonarr; a season and an episode offer Jellyfin only.
 - [ ] With Seerr disconnected, or on an account without Manage Requests, or
       for a title Seerr never sent to Radarr/Sonarr, only Jellyfin is offered.

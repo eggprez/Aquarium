@@ -244,7 +244,7 @@ alone; end it with `kill <pid>`, never MPRIS Quit. Look in `~/.local/share/aquar
     "Aquarium" once.
 30. **Delete from Server.** Needs an account that may delete on Jellyfin, a real Seerr with Radarr
     and Sonarr, and titles to lose. Right-click a film Radarr looks after: "Delete from Server…" is
-    last, in red; the dialog offers "Remove from Radarr with Seerr" and "Delete File from Jellyfin".
+    last, in red; the dialog offers "Delete from Both", "Delete from Seerr" and "Delete from Jellyfin"; Both leaves nothing for Radarr to fetch again.
     Seerr's way takes the film out of Radarr with its file and clears its request; Jellyfin's
     deletes the file and the page is drawn again without the film. A show offers Sonarr; a season
     or an episode only Jellyfin. With Seerr disconnected, no Manage Requests, or a title Seerr

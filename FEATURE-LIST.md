@@ -317,6 +317,9 @@ Seerr's way needs Manage Requests or Admin, a Radarr/Sonarr server in Seerr for
 that kind of title, and Seerr's record of the title on one; it removes the
 title there (files too), then its requests and Seerr's record. Whole films and
 shows only. Downloaded copies are kept.
+The dialog's buttons are "Delete from Jellyfin", "Delete from Seerr" and, when
+both are open, "Delete from Both" (Seerr's way first, then Jellyfin's; if Seerr
+refuses, nothing is deleted).
 
 **To do:**
 

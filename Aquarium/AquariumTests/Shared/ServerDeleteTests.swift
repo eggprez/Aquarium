@@ -172,6 +172,32 @@ final class ServerDeleteTests: XCTestCase {
         }
     }
 
+    // MARK: Both
+
+    private var bothChoice: ServerDeleteChoice {
+        ServerDeleteChoice(
+            item: film { $0.CanDelete = true }, jellyfin: true,
+            seerr: SeerrRemoval(kind: .movie, tmdbId: 949, mediaId: 41, copies: [false], requestIds: [7])
+        )
+    }
+
+    func testBothRemovesThroughSeerrThenDeletesFromJellyfin() async throws {
+        try await connect()
+        StubURLProtocol.stub("/Items/film1", method: "DELETE", status: 204)
+        await ServerDeleting.deleteFromBoth(bothChoice, client: client, seerr: seerr, app: AppModel.shared)
+        XCTAssertEqual(SeerrStub.calls, ["DELETE /api/v1/media/41/file", "DELETE /api/v1/request/7", "DELETE /api/v1/media/41"])
+        let sent = StubURLProtocol.requests.filter { $0.httpMethod == "DELETE" }
+        XCTAssertEqual(sent.map { $0.url?.path }, ["/Items/film1"])
+    }
+
+    func testBothDeletesNothingFromJellyfinWhenSeerrRefuses() async throws {
+        try await connect(fileStatus: 409)
+        StubURLProtocol.stub("/Items/film1", method: "DELETE", status: 204)
+        await ServerDeleting.deleteFromBoth(bothChoice, client: client, seerr: seerr, app: AppModel.shared)
+        XCTAssertTrue(StubURLProtocol.requests.filter { $0.httpMethod == "DELETE" }.isEmpty,
+                      "Radarr would only fetch the film again")
+    }
+
     // MARK: Jellyfin's way
 
     func testDeletingAsksJellyfinToDeleteTheItem() async throws {
@@ -269,10 +295,10 @@ final class ServerDeleteTests: XCTestCase {
     }
 
     func testLabelsAndSmallPrint() {
-        XCTAssertEqual(ServerDeleting.jellyfinLabel(for: film()), "Delete File from Jellyfin")
-        XCTAssertEqual(ServerDeleting.jellyfinLabel(for: show()), "Delete Files from Jellyfin")
+        XCTAssertEqual(ServerDeleting.jellyfinLabel, "Delete from Jellyfin")
+        XCTAssertEqual(ServerDeleting.seerrLabel, "Delete from Seerr")
+        XCTAssertEqual(ServerDeleting.bothLabel, "Delete from Both")
         let removal = SeerrRemoval(kind: .tv, tmdbId: 1, mediaId: 2, copies: [false], requestIds: [])
-        XCTAssertEqual(ServerDeleting.seerrLabel(for: removal), "Remove from Sonarr with Seerr")
 
         let both = ServerDeleting.message(for: ServerDeleteChoice(item: show(), jellyfin: true, seerr: removal))
         XCTAssertTrue(both.contains("every episode"))
@@ -282,5 +308,7 @@ final class ServerDeleteTests: XCTestCase {
 
         let jellyfinOnly = ServerDeleting.message(for: ServerDeleteChoice(item: film(), jellyfin: true, seerr: nil))
         XCTAssertFalse(jellyfinOnly.contains("Seerr"))
+        XCTAssertFalse(jellyfinOnly.contains("Both"))
+        XCTAssertTrue(both.contains("Both does the two together"))
     }
 }
