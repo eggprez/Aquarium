@@ -109,6 +109,19 @@ final class LibraryIndexMergeTests: XCTestCase {
         return entry
     }
 
+    /// A copy saved before a field was asked for can't be brought up to date
+    /// by a sync of what changed, so it is not read: "Delete from Server" was
+    /// missing from every library title for that.
+    @MainActor
+    func testACopyMadeWithOtherFieldsIsNotRead() {
+        XCTAssertTrue(JellyfinClient.indexFields.contains("CanDelete"))
+        XCTAssertTrue(LibraryIndex.holdsEveryField(JellyfinClient.indexFields))
+        XCTAssertFalse(LibraryIndex.holdsEveryField(nil))
+        XCTAssertFalse(LibraryIndex.holdsEveryField(
+            JellyfinClient.indexFields.replacingOccurrences(of: ",CanDelete", with: "")
+        ))
+    }
+
     func testFullItemsGoIntoTheTableAndCountAsAChange() {
         let a = CoreItem.movie("a")
         let merge = LibraryIndex.merge(full: [a], light: [light("a")], into: [:], known: nil, trackParents: false)

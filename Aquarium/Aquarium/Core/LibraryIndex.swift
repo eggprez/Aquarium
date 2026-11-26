@@ -272,7 +272,7 @@ final class LibraryIndex {
             }.value
             guard !Task.isCancelled, isEnabled, currentOwner == owner else { return }
             if case let (snapshot, table, derived)? = loaded, snapshot.version == Snapshot.currentVersion,
-               snapshot.owner == owner, !isReady {
+               Self.holdsEveryField(snapshot.fields), snapshot.owner == owner, !isReady {
                 apply(snapshot, items: table, derived: derived)
             }
             artworkBytes = await ImageLoader.shared.diskUsage()
@@ -280,6 +280,16 @@ final class LibraryIndex {
         loadTask = task
         await task.value
         loadTask = nil
+    }
+
+    /// Whether a saved copy was made with the fields asked for today. A later
+    /// sync only refetches what changed on the server, so an item copied
+    /// before a field was added would never get it: every title in a library
+    /// went without `CanDelete`, and so without "Delete from Server", until
+    /// this was checked. A copy made with another list is left unread and the
+    /// next sync copies the libraries afresh.
+    static func holdsEveryField(_ saved: String?, asked: String = JellyfinClient.indexFields) -> Bool {
+        saved == asked
     }
 
     private func apply(_ snapshot: Snapshot, items table: [String: BaseItem], derived: Derived) {
@@ -612,10 +622,11 @@ final class LibraryIndex {
         guard let owner else { return }
         hasUnsavedChanges = false
         // The table flattened beside the write, not here: a copy of every item.
+        let fields = JellyfinClient.indexFields
         await Task.detached(priority: .utility) {
             [cursor, lastSynced, views, members, items] in
             LibraryIndex.write(Snapshot(
-                version: Snapshot.currentVersion, owner: owner, cursor: cursor, syncedAt: lastSynced,
+                version: Snapshot.currentVersion, fields: fields, owner: owner, cursor: cursor, syncedAt: lastSynced,
                 views: views, members: members, items: Array(items.values)
             ))
         }.value
@@ -1174,6 +1185,8 @@ private struct Snapshot: Codable, Sendable {
     static let currentVersion = 1
 
     var version: Int
+    /// The `Fields` the items were asked for with. See `holdsEveryField`.
+    var fields: String?
     var owner: String
     var cursor: Date?
     var syncedAt: Date?
