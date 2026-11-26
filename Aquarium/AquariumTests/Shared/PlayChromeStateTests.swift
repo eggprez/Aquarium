@@ -176,14 +176,14 @@ final class PlayChromeStateTests: XCTestCase {
     // MARK: The panel's pages
 
     func testEveryPanelPageHasAName() {
-        XCTAssertEqual(PlayerTab.allCases.count, 9)
+        XCTAssertEqual(PlayerTab.allCases.count, 8)
         XCTAssertEqual(PlayerTab.allCases.map(\.title),
-                       ["Info", "Channels", "Audio", "Subtitles", "Quality", "Speed", "Sync", "Picture", "Watch Together"])
+                       ["Info", "Channels", "Audio", "Subtitles", "Quality", "Speed", "Sync", "Watch Together"])
         for tab in PlayerTab.allCases {
             XCTAssertEqual(tab.id, tab.rawValue)
             XCTAssertFalse(tab.symbol.isEmpty, "\(tab) has a symbol")
         }
-        XCTAssertEqual(Set(PlayerTab.allCases.map(\.symbol)).count, 9, "no two pages share a symbol")
+        XCTAssertEqual(Set(PlayerTab.allCases.map(\.symbol)).count, 8, "no two pages share a symbol")
     }
 }
 

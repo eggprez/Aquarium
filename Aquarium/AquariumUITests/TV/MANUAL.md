@@ -59,8 +59,20 @@ Match Frame Rate on the Apple TV first, then off, and run both ways.
       once on a real Apple TV").
 - [ ] A long film keeps the screensaver off throughout and lets it come back
       when paused for the screensaver's time (bffc9e7).
-- [ ] Picture tab: brightness/contrast/gamma steps change the live picture;
-      Zoom and Aspect behave on a 2.39:1 film; Fill crops on a 4:3 source.
+- [ ] Settings → Video → Picture (the player has no Picture tab): brightness,
+      contrast and gamma change the picture of the next thing played; Zoom and
+      Aspect behave on a 2.39:1 film; Fill crops on a 4:3 source.
+- [ ] Auto quality on a slow line: Settings → Video → Default quality → Auto,
+      then play FX Long Direct Play through the 8098 throttle proxy at about
+      4 Mbps. It opens at Original, stalls, and steps down by itself with a
+      "Network slowed" notice; the Quality tab's Auto card stays ticked and
+      names the rung. Lift the throttle and it climbs back after about five
+      clean minutes. Then pick 720p in the Quality tab and throttle again: it
+      stalls but never moves.
+- [ ] An Apple TV updated from a build without Auto: Default quality still
+      reads the rung it had (Original if none was picked), not Auto, and a
+      phone on the same iCloud account switching Auto on or off changes
+      nothing on the TV.
 
 ## 3. Sound: HDMI formats and sync
 
@@ -140,10 +152,6 @@ screen shows what the extension draws.
 The automated suite sets and cancels these, but doesn't wait them out or
 break the server for them (COVERAGE.md "untested" rows).
 
-- [ ] Sleep timer: on FX Long Direct Play, swipe down → Info → Sleep 15m. The
-      card reads "Sleep: 15 min left" and counts down; after 15 minutes the
-      player closes by itself, the resume point is kept, and nothing plays
-      next. On an episode, the next one doesn't start either.
 - [ ] Guide unavailable: with the guide open, stop the QA server's Live TV
       guide (or the network) and wait for a refresh. The strip over the grid
       says the guide is unavailable, Retry can be reached with the remote,

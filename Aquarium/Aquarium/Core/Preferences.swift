@@ -452,8 +452,9 @@ final class Preferences {
     /// The player's quality is Auto: it may drop to a smaller stream by
     /// itself when one keeps stalling, and climb back. On unless a rung is
     /// picked in the player, as on Linux. See `PlayerModel.QualitySelection`.
+    /// This device's own, not synced, like the rung beside it.
     var adaptiveQuality: Bool {
-        didSet { write(adaptiveQuality, forKey: "adaptive") }
+        didSet { defaults.set(adaptiveQuality, forKey: "adaptive") }
     }
 
     /// Ease the stream off when the device itself is the limit: a phone that
@@ -585,16 +586,27 @@ final class Preferences {
     }
 
     /// What a new stream opens at. Auto opens at the best there is and
-    /// leaves the rest to `AdaptiveQuality`; a rung picked in the player
-    /// opens there. The Apple TV keeps its Settings row, which is read as
-    /// it always was.
+    /// leaves the rest to `AdaptiveQuality`; a rung picked in the player,
+    /// or in the Apple TV's Settings, opens there.
     var openingBitrate: Int? {
-        #if os(tvOS)
-        defaultBitrate
-        #else
         adaptiveQuality ? nil : defaultBitrate
-        #endif
     }
+
+    #if os(tvOS)
+    /// Set once the Apple TV has settled whether it starts on Auto.
+    static let tvAutoDecidedKey = "adaptive_tv_decided"
+
+    /// The Apple TV had no Auto before this build, and whatever sat under
+    /// `adaptive` there was the default or a phone's choice arriving through
+    /// iCloud. Decided once, before the setting is first read: a box already
+    /// set up keeps the rung it was playing at, a new one starts on Auto.
+    static func settleTVAuto(in d: UserDefaults, signedIn: Bool) {
+        guard !d.bool(forKey: tvAutoDecidedKey) else { return }
+        let alreadySetUp = signedIn || d.object(forKey: "default_bitrate") != nil
+        d.set(!alreadySetUp, forKey: "adaptive")
+        d.set(true, forKey: tvAutoDecidedKey)
+    }
+    #endif
 
     /// Fold surround down to stereo. Unlike on Linux this is asked of the
     /// server (MaxAudioChannels in the device profile), because AVPlayer has no
@@ -1084,6 +1096,9 @@ final class Preferences {
         }
         accounts = savedAccounts
         theme = ThemePref(rawValue: d.string(forKey: "theme") ?? "") ?? .auto
+        #if os(tvOS)
+        Self.settleTVAuto(in: d, signedIn: savedSession != nil)
+        #endif
         adaptiveQuality = d.object(forKey: "adaptive") == nil ? true : d.bool(forKey: "adaptive")
         powerAwareQuality = d.object(forKey: "power_aware_quality") == nil ? true : d.bool(forKey: "power_aware_quality")
         speedCheck = d.bool(forKey: "speed_check")
@@ -1272,7 +1287,6 @@ final class Preferences {
             CloudSync.set(value, forKey: key)
         }
         publish(theme.rawValue, forKey: "theme")
-        publish(adaptiveQuality, forKey: "adaptive")
         publish(powerAwareQuality, forKey: "power_aware_quality")
         publish(autoplayNext, forKey: "autoplay_next")
         publish(hidesContinueWatching, forKey: "home_hide_continue_watching")
@@ -1366,7 +1380,6 @@ final class Preferences {
 
         if let v = CloudSync.object(forKey: "theme") as? String,
            let t = ThemePref(rawValue: v), t != theme { theme = t }
-        if let v = CloudSync.object(forKey: "adaptive") as? Bool, v != adaptiveQuality { adaptiveQuality = v }
         if let v = CloudSync.object(forKey: "power_aware_quality") as? Bool, v != powerAwareQuality { powerAwareQuality = v }
         if let v = CloudSync.object(forKey: "autoplay_next") as? Bool, v != autoplayNext { autoplayNext = v }
         if let v = CloudSync.object(forKey: "home_hide_continue_watching") as? Bool, v != hidesContinueWatching { hidesContinueWatching = v }

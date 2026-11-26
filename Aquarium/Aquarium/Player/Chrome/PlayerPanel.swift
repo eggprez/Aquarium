@@ -1,23 +1,22 @@
 //  The panel. On the Apple TV: a row of tabs, and under it the choices for
 //  the tab that is open — Info · Channels · Audio · Subtitles · Quality ·
-//  Speed · Sync · Picture — as the card that comes down from the top of the
+//  Speed · Sync — as the card that comes down from the top of the
 //  picture on a swipe down: wide and shallow, its tabs focusable, its rows
 //  cards in a row that scrolls sideways, so as much of the picture as
-//  possible stays in view — most of all on Sync and Picture, where the
-//  picture is what's being judged.
+//  possible stays in view — most of all on Sync, where the picture is
+//  what's being judged.
 //
 //  On an iPhone, an iPad or a Mac there is no row of tabs: the panel is one
 //  page, opened by the button that owns it — Info from its pill, Channels
 //  from the "…" card — as a sheet with medium and large detents on a phone
 //  and a popover off that button on an iPad or a Mac. Info carries the
 //  episode and every fact about the file and the stream. The tracks, speed
-//  and quality are cards there (`PlayerMenus`), and the sync and picture
-//  pages are the television's alone.
+//  and quality are cards there (`PlayerMenus`), and the sync page is the
+//  television's alone.
 //
 //  A row the engine cannot honour says why rather than vanishing: the quality
-//  rungs under a download, the audio offset on a transcode, the picture
-//  sliders on AVPlayer — the last two with a button that hands the title to
-//  the mpv engine at the same position. The one thing a stream has nothing
+//  rungs under a download, and the audio offset on a transcode — the last
+//  with a button that hands the title to the mpv engine at the same position. The one thing a stream has nothing
 //  of (a film has no channels) is left out of the tabs.
 //
 //  Focus, on a television: focusing a tab opens it, the way the system's own
@@ -160,12 +159,11 @@ struct PlayerPanel: View {
         case .quality: QualityTab()
         case .speed: SpeedTab()
         case .sync: SyncTab()
-        case .picture: PictureTab()
         case .together: PanelRows { WatchTogetherRows(onInteract: {}, close: { close?() }) }
         #else
         // Cards off the pills and the "…" button, or not offered: never a
         // page here. `panelTabs` doesn't list them.
-        case .audio, .subtitles, .quality, .speed, .sync, .picture, .together: EmptyView()
+        case .audio, .subtitles, .quality, .speed, .sync, .together: EmptyView()
         #endif
         }
     }
@@ -534,8 +532,8 @@ private struct PanelCardLabel<Leading: View>: View {
     }
 }
 
-/// A short button in a row of them: a sync step, a picture step, a sleep
-/// timer's minutes. A small card on a television, a square elsewhere.
+/// A short button in a row of them: a sync step. A small card on a
+/// television, a square elsewhere.
 struct PanelStepButton: View {
     let title: String
     var width: CGFloat? = nil
@@ -602,94 +600,6 @@ struct PanelNote: View {
     }
 }
 
-/// A value from a range: a slider where there is a finger or a pointer to
-/// drag one; on a television, which has no slider a remote can drive, a
-/// step down and a step up either side of the value and a bar showing where
-/// in the range it is.
-private struct PanelSlider: View {
-    let name: String
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-    let step: Double
-    var enabled = true
-    /// On a television, the control Down lands on from the row of tabs —
-    /// see `panelEntryOnly`.
-    var isEntry = false
-    let format: (Double) -> String
-
-    /// The label's column and the value's, in points at the default type
-    /// size; wider as the type grows so neither clips at the
-    /// accessibility sizes.
-    @ScaledMetric(relativeTo: .subheadline) private var labelWidth: CGFloat = 88
-    @ScaledMetric(relativeTo: .subheadline) private var valueWidth: CGFloat = 52
-
-    var body: some View {
-        #if os(tvOS)
-        HStack(spacing: 12) {
-            Text(name)
-                .font(.headline)
-                .lineLimit(1)
-                .frame(width: 230, alignment: .leading)
-            PanelStepButton(title: "−", width: 84, isDisabled: !enabled || value <= range.lowerBound) {
-                value = max(range.lowerBound, value - step)
-            }
-            .panelEntryOnly(isEntry)
-            .accessibilityLabel("Decrease \(name)")
-            .accessibilityIdentifier(TestID.Player.pictureDecrease(TestID.key(name)))
-            VStack(spacing: 6) {
-                Text(format(value))
-                    .font(.headline.monospacedDigit())
-                    .foregroundStyle(Theme.text)
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(.white.opacity(0.15))
-                        Capsule().fill(Theme.accent)
-                            .frame(width: geo.size.width * fraction)
-                    }
-                }
-                .frame(height: 6)
-            }
-            .frame(width: 150)
-            PanelStepButton(title: "+", width: 84, isDisabled: !enabled || value >= range.upperBound) {
-                value = min(range.upperBound, value + step)
-            }
-            .panelEntryOnly(false)
-            .accessibilityLabel("Increase \(name)")
-            .accessibilityIdentifier(TestID.Player.pictureIncrease(TestID.key(name)))
-        }
-        .opacity(enabled ? 1 : 0.5)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(name)
-        .accessibilityValue(format(value))
-        .accessibilityIdentifier(TestID.Player.pictureSlider(TestID.key(name)))
-        #else
-        HStack(spacing: 12) {
-            Text(name)
-                .font(.subheadline)
-                .frame(width: labelWidth, alignment: .leading)
-            Slider(value: $value, in: range, step: step)
-                .tint(Theme.accent)
-                .disabled(!enabled)
-                .accessibilityLabel(name)
-                .accessibilityValue(format(value))
-                .accessibilityIdentifier(TestID.Player.pictureSlider(TestID.key(name)))
-            Text(format(value))
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(Theme.textDim)
-                .frame(width: valueWidth, alignment: .trailing)
-                .accessibilityHidden(true)
-        }
-        .opacity(enabled ? 1 : 0.5)
-        #endif
-    }
-
-    private var fraction: CGFloat {
-        let span = range.upperBound - range.lowerBound
-        guard span > 0 else { return 0 }
-        return CGFloat(min(max((value - range.lowerBound) / span, 0), 1))
-    }
-}
-
 // MARK: - Info
 
 struct InfoTab: View {
@@ -740,7 +650,8 @@ struct InfoTab: View {
     }
 
     /// What the Info tab can change, on a television: whether the next
-    /// episode starts by itself, and the sleep timer.
+    /// episode starts by itself. No sleep timer there: the television's own
+    /// does that.
     @ViewBuilder
     private var actions: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -750,25 +661,6 @@ struct InfoTab: View {
                     on ? player.cancelAutoplay() : player.resumeAutoplay()
                 }
                 .accessibilityIdentifier(TestID.Player.stopAfterThis)
-            }
-            if let left = player.sleepMinutesRemaining {
-                PanelRow(title: "Sleep: \(left) min left", detail: "Click to cancel", isSelected: true, width: 340) {
-                    player.cancelSleepTimer()
-                }
-                .accessibilityIdentifier(TestID.Player.sleepCancel)
-            } else {
-                HStack(spacing: 10) {
-                    Text("Sleep")
-                        .font(.caption.weight(.heavy))
-                        .foregroundStyle(Theme.link)
-                    ForEach([15, 30, 60, 90], id: \.self) { minutes in
-                        PanelRow(title: "\(minutes)m", width: 130, height: 64, centered: true) {
-                            player.setSleepTimer(minutes: minutes)
-                        }
-                        .accessibilityLabel("Stop in \(minutes) minutes")
-                        .accessibilityIdentifier(TestID.Player.sleepOption(minutes))
-                    }
-                }
             }
         }
     }
@@ -1166,17 +1058,37 @@ private struct QualityTab: View {
                     .accessibilityIdentifier(TestID.Player.qualityUnavailable)
             }
             if !player.isLocal {
+                // Auto first, then every rung. Auto's card says what it has
+                // landed on; a rung is ticked only while it is the one kept.
+                // Either is the choice from now on, as in Settings — see
+                // `PlayerModel.chooseQuality`.
+                let auto = player.qualitySelection == .auto
                 PanelRows(fills: true) {
+                    if PlayerMetrics.television {
+                        PanelRow(title: auto ? "Auto\n\(Self.playingNow(player))" : "Auto",
+                                 isSelected: auto,
+                                 disabledReason: player.qualityUnavailableReason == nil ? nil : "Not for this stream",
+                                 height: 96) {
+                            guard !auto else { return }
+                            Task { await player.chooseQuality(.auto) }
+                        }
+                        .accessibilityIdentifier(TestID.Player.qualityAuto)
+                    }
                     ForEach(Quality.choices) { choice in
                         let current = player.currentBitrate == choice.maxBitrate
                         PanelRow(title: Self.title(choice),
                                  detail: PlayerMetrics.television ? nil
                                     : current && player.isTranscoding ? "Playing now · transcoding" : current ? "Playing now" : nil,
-                                 isSelected: current,
+                                 isSelected: current && !(auto && PlayerMetrics.television),
                                  disabledReason: player.qualityUnavailableReason == nil ? nil : "Not for this stream",
                                  height: PlayerMetrics.television ? 96 : nil) {
-                            guard !current else { return }
-                            Task { await player.switchQuality(to: choice.maxBitrate) }
+                            if PlayerMetrics.television {
+                                guard auto || !current else { return }
+                                Task { await player.chooseQuality(.stream(choice.maxBitrate)) }
+                            } else {
+                                guard !current else { return }
+                                Task { await player.switchQuality(to: choice.maxBitrate) }
+                            }
                         }
                         .accessibilityIdentifier(TestID.Player.qualityOption(TestID.Player.qualityKey(choice.maxBitrate)))
                     }
@@ -1187,6 +1099,13 @@ private struct QualityTab: View {
                     .accessibilityIdentifier(TestID.Player.qualityNote)
             }
         }
+    }
+
+    /// What Auto is playing right now, for its card: "Original", or the
+    /// rung's size.
+    private static func playingNow(_ player: PlayerModel) -> String {
+        guard let bitrate = player.currentBitrate else { return "Original" }
+        return Quality.shortLabel(for: bitrate)
     }
 
     /// "4K" over "36 Mbps" on a television: seven cards to a row leaves no
@@ -1369,137 +1288,6 @@ private struct SyncTab: View {
         guard let pending, pending != player.audioDelayMilliseconds else { return }
         player.setAudioDelay(milliseconds: pending)
         self.pending = nil
-    }
-}
-
-// MARK: - Picture
-
-/// Brightness, contrast, saturation and gamma, a zoom and an aspect
-/// override, applied to the live picture: the mpv engine's. On AVPlayer every
-/// row says so and the row under them hands the title over. The values are
-/// the Settings ones, so what is set here holds for everything played after,
-/// and Reset puts the file's own picture back. On a television the sliders
-/// are steppers in two columns and the aspect ratios a row of cards, so the
-/// picture being judged stays mostly in view.
-private struct PictureTab: View {
-    @Environment(PlayerModel.self) private var player
-    @Environment(Preferences.self) private var prefs
-
-    var body: some View {
-        @Bindable var prefs = prefs
-        let reason = player.pictureUnavailableReason
-        let live = reason == nil
-        VStack(alignment: .leading, spacing: 10) {
-            if let reason {
-                PanelNote(text: reason)
-                    .accessibilityIdentifier(TestID.Player.pictureUnavailable)
-                if player.canSwitchEngine(to: .mpv) {
-                    EngineSwitchRow(reason: "picture controls")
-                }
-            }
-
-            if PlayerMetrics.television {
-                // Down from the row of tabs lands on Brightness's "−", the
-                // first control, whichever tab it comes from: the others
-                // are kept from taking focus until it is in the columns.
-                HStack(alignment: .top, spacing: 40) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        adjustment("Brightness", value: $prefs.pictureBrightness, enabled: live, isEntry: true)
-                        adjustment("Contrast", value: $prefs.pictureContrast, enabled: live)
-                        adjustment("Saturation", value: $prefs.pictureSaturation, enabled: live)
-                    }
-                    VStack(alignment: .leading, spacing: 10) {
-                        adjustment("Gamma", value: $prefs.pictureGamma, enabled: live)
-                        zoom(enabled: live)
-                        HStack(spacing: 20) {
-                            reset.panelEntryOnly(false)
-                            nightMode.panelEntryOnly(false)
-                        }
-                    }
-                }
-            } else {
-                PanelHeading(text: "Picture")
-                adjustment("Brightness", value: $prefs.pictureBrightness, enabled: live)
-                adjustment("Contrast", value: $prefs.pictureContrast, enabled: live)
-                adjustment("Saturation", value: $prefs.pictureSaturation, enabled: live)
-                adjustment("Gamma", value: $prefs.pictureGamma, enabled: live)
-                PanelHeading(text: "Zoom")
-                zoom(enabled: live)
-            }
-
-            if !PlayerMetrics.television { PanelHeading(text: "Aspect ratio") }
-            PanelRows(fills: PlayerMetrics.television) {
-                ForEach(Preferences.aspectChoices, id: \.ratio) { choice in
-                    PanelRow(title: choice.label,
-                             isSelected: abs(prefs.aspectOverride - choice.ratio) < 0.001,
-                             disabledReason: live ? nil : "Needs the mpv engine",
-                             height: PlayerMetrics.television ? 64 : nil,
-                             centered: PlayerMetrics.television) {
-                        prefs.aspectOverride = choice.ratio
-                        player.applyFraming()
-                    }
-                    .accessibilityIdentifier(TestID.Player.pictureAspect(TestID.Player.aspectKey(choice.ratio)))
-                }
-            }
-            .panelEntryOnly(false)
-
-            if !PlayerMetrics.television {
-                reset
-                PanelHeading(text: "Sound")
-                nightMode
-                if live {
-                    PanelNote(text: "Saved for everything you play on this device.")
-                }
-            }
-        }
-    }
-
-    /// One of the four adjustments: -100…100, 0 being the file's own.
-    private func adjustment(_ name: String, value: Binding<Double>, enabled: Bool, isEntry: Bool = false) -> some View {
-        PanelSlider(name: name, value: value, range: -100...100, step: PlayerMetrics.television ? 5 : 1,
-                    enabled: enabled, isEntry: isEntry) { "\(Int($0))" }
-            .onChange(of: value.wrappedValue) { _, _ in player.applyPicture() }
-    }
-
-    /// Dynamic range compression on the sound: the engine's existing knob,
-    /// with a reason in place of the switch where the engine has none.
-    private var nightMode: some View {
-        let tv = PlayerMetrics.television
-        let reason = player.nightModeUnavailableReason
-        // Ticked only while it is in force: a setting left on against an
-        // engine that refused it is not a night mode.
-        return PanelRow(title: tv ? (prefs.nightMode && reason == nil ? "Night mode: On" : "Night mode: Off") : "Night mode",
-                        detail: tv ? nil : "Quiet dialogue up, loud passages down, for a room where the volume has to stay low",
-                        isSelected: prefs.nightMode && reason == nil,
-                        disabledReason: reason,
-                        width: 460, height: tv ? 64 : nil, centered: tv) {
-            prefs.nightMode.toggle()
-            player.applyNightMode()
-        }
-        .accessibilityValue(prefs.nightMode ? "On" : "Off")
-        .accessibilityIdentifier(TestID.Player.nightMode)
-    }
-
-    private func zoom(enabled: Bool) -> some View {
-        @Bindable var prefs = prefs
-        return PanelSlider(name: "Zoom", value: $prefs.pictureZoom, range: 1...2,
-                           step: PlayerMetrics.television ? 0.1 : 0.05, enabled: enabled) {
-            "\($0.formatted(.number.precision(.fractionLength(2))))×"
-        }
-        .onChange(of: prefs.pictureZoom) { _, _ in player.applyFraming() }
-    }
-
-    private var reset: some View {
-        let tv = PlayerMetrics.television
-        return PanelRow(title: tv ? "Reset picture" : "Reset",
-                        detail: tv ? nil : "The file's own picture: no adjustment, no zoom, its own shape",
-                        disabledReason: prefs.pictureIsAdjusted ? nil : tv ? "" : "Nothing is adjusted",
-                        width: 460, height: tv ? 64 : nil, centered: tv) {
-            prefs.resetPicture()
-            player.applyPicture()
-            player.applyFraming()
-        }
-        .accessibilityIdentifier(TestID.Player.pictureReset)
     }
 }
 

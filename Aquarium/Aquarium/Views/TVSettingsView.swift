@@ -313,17 +313,17 @@ private struct VideoSettingsPage: View {
         @Bindable var prefs = prefs
         SettingsColumns(title: "Video", intro: SettingsView.intro(.video)) {
             SettingGroup(nil, page: .video) {
-                SettingChoice(Copy.defaultQuality, selection: SettingsView.bitrateBinding,
-                              options: Quality.choices.map { ($0.maxBitrate, $0.label) }, isFirst: true)
+                // Auto first, then every rung: the same choice the player's
+                // Quality tab makes, kept on this Apple TV alone.
+                SettingChoice(Copy.defaultQuality, selection: SettingsView.qualityBinding,
+                              options: [(PlayerModel.QualitySelection.auto, "Auto")]
+                                + Quality.choices.map { (.stream($0.maxBitrate), $0.label) },
+                              also: [Copy.defaultQualityAuto], isFirst: true)
                 .accessibilityIdentifier(TestID.Settings.videoQuality)
-                // No "Adapt quality automatically" here: the Apple TV's mpv
-                // player never steps a stream down by itself, so the switch
-                // would do nothing. Quality is changed by hand from the
-                // player's Quality tab instead.
             }
             // The picture controls are mpv's, and the Apple TV is always on
-            // mpv, so every row here is live; the player's Picture tab has
-            // the same over the live picture. No engine row and no Battery
+            // mpv, so every row here is live, and this is the one place
+            // they are set. No engine row and no Battery
             // saver: the box plays through mpv alone, on mains.
             SettingGroup("Picture", page: .video) {
                 SettingChoice(Copy.framing, selection: $prefs.fillScreen,

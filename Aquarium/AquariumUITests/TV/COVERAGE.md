@@ -131,19 +131,18 @@ the tab strip rather than to Cancel Request.
 | Swipe up from the tabs closes the panel | `TVPlayerTests.testSwipeUpFromTheTabsPutsThePanelAway` | UI | pass |
 | Info tab: title, stream line (engine), chapter | `TVPlayerTests.testInfoNamesTheFileTheChapterAndHDRRange` | UI | pass |
 | Info tab: runtime line of facts | `TVPanelFactsTests` (2) | unit | see the run |
-| Info tab: sleep timer choices, set, Cancel | `TVPlayerInfoTabTests.testTheSleepTimerIsSetAndCancelledFromInfo` | UI | pass 2026-11-22 |
+| Info tab: no sleep timer (removed 2026-11-26) | `TVPlayerInfoTabTests.testInfoHasNoSleepTimer` | UI | pass 2026-11-26 |
 | Info tab: Autoplay switch only on an episode with a next one; Off stops the next starting | `TVPlayerInfoTabTests.testAFilmHasNoAutoplaySwitch`, `testAutoplayOffInInfoStopsTheNextEpisodeStarting` | UI | pass 2026-11-22 |
-| The sleep timer running out closes the player | not automated: the shortest choice is 15 minutes; the elapse path is shared (`SiriIntentsTests` covers set/cancel through `PlayerActions`); `MANUAL.md` §6 | manual |
 | Audio tracks: every one listed, choosing one reaches the server (jellyfin-track-index-needs-source-id.md) | `TVPlayerTests.testEveryAudioTrackIsListedAndOneCanBeChosen` | UI | pass |
 | Every subtitle kind listed; none claims a server burn-in on direct play (master-fix-list) | `TVPlayerTests.testEverySubtitleKindIsListedAndNoneClaimsTheServerDrawsIt` | UI | pass |
 | PGS stays DirectPlay on mpv; ASS, WebVTT, VobSub each shown | `TVPlayerTests.testAPictureSubtitleStaysDirectPlayOnMPV`, `testAnASSAndAWebVTTAndAVobSubTrackCanEachBeShown` | UI | pass |
 | Sidecar subtitles | `TVPlayerTests.testSidecarSubtitlesAreListed` | UI | pass |
 | Forced subtitles on by themselves for foreign audio (hls-subtitle-timing.md) | `TVPlayerTests.testForcedSubtitlesComeOnByThemselvesForForeignAudio` | UI | pass |
-| Quality tab: no Auto, a rung transcodes, same place kept (f6b43c9) | `TVPlayerTests.testQualityTabHasNoAutoAndPickingARungTranscodes` | UI | pass |
+| Quality tab: Auto first, a rung transcodes and is kept, same place kept (f6b43c9) | `TVPlayerTests.testQualityTabOpensOnAutoAndPickingARungTranscodesAndKeepsIt` | UI | pass 2026-11-26 |
 | Quality change while paused stays paused (qa-2026-11-11 B2) | `TVPlayerTests.testAQualityChangeWhilePausedStaysPaused` | UI | pass |
 | Reopens don't add plays (master-fix-list "Every stream reopen adds to PlayCount") | `TVPlayerTests.testAReopenDoesNotAddToThePlayCount` | UI | xfail |
 | Speed tab | `TVPlayerTests.testSpeedTabChangesTheRate` | UI | pass |
-| Picture tab steps and reset | `TVPlayerTests.testPictureTabStepsAndResets` | UI | pass |
+| No Picture tab (removed 2026-11-26; the picture rows are in Settings) | `TVPlayerTests.testSwipeDownOpensInfoWithAFilmsTabs` | UI | pass 2026-11-26 |
 | Skip Intro | `TVPlayerTests.testSkipIntroAppearsAndSkipsTheIntro` | UI | pass |
 | Skip Credits (qa-2026-11-11 B3) | `TVPlayerTests.testSkipCreditsAppearsAtTheOutro` | UI | pass |
 | Up Next card plays the next episode; Menu stops autoplay | `TVPlayerTests.testUpNextCardPlaysTheNextEpisode`, `testMenuOnTheUpNextCardStopsAutoplay` | UI | pass |
@@ -158,12 +157,17 @@ the tab strip rather than to Cancel Request.
 
 | Function | Test | Kind | Status |
 |---|---|---|---|
-| Auto never steers the TV (5095d5e) | `TVQualityEngineTests.testAutoNeverSteersTheTVsStreams_regression5095d5e` | unit | pass |
-| Opening quality is the TV's Settings row whatever Auto says | `TVQualityEngineTests.testOpeningQualityIsTheTVsOwnRowWhateverAutoSays` | unit | pass |
+| Auto steers the TV when it is the TV's choice, and a kept rung is never stepped | `TVQualityEngineTests.testAutoSteersTheTVsStreamsWhenItIsTheTVsChoice` | unit | pass 2026-11-26 |
+| Auto is this device's, never synced (5095d5e) | `TVQualityEngineTests.testAutoIsThisDevicesAndNeverSynced_regression5095d5e`, `PhoneSettingsRulesTests.testDeviceSettingsStayOnTheDevice` | unit | pass 2026-11-26 |
+| Opening quality: Original under Auto, the rung otherwise | `TVQualityEngineTests.testOpeningQualityIsOriginalUnderAutoAndTheRungOtherwise` | unit | pass 2026-11-26 |
 | The quality is this device's, not synced | `TVQualityEngineTests.testTheQualityIsThisDevicesNotSynced` | unit | pass |
-| No speed check, no power cap, never on battery | `TVQualityEngineTests.testSpeedCheckNeverRunsOnTheTV`, `testTheTVIsNeverOnABattery` | unit | pass |
-| Choosing in the player stores the rung | `TVQualityEngineTests.testChoosingAutoInThePlayerStoresTheChoiceButStillDoesNotSteer` | unit | pass |
-| No Auto in Settings or in the panel | `TVSettingsTests.testDefaultQualityListsEveryRungAndKeepsTheChoice`, `TVPlayerTests.testQualityTabHasNoAutoAndPickingARungTranscodes` | UI | pass |
+| Speed check always on under Auto, never for a kept rung; never on battery | `TVQualityEngineTests.testTheSpeedCheckIsAlwaysOnUnderAutoWithNoRowForIt`, `testTheTVIsNeverOnABattery` | unit | pass 2026-11-26 |
+| Choosing in the player is kept and decides who steers | `TVQualityEngineTests.testChoosingInThePlayerIsKeptAndDecidesWhoSteers` | unit | pass 2026-11-26 |
+| The Settings row is Auto or the kept rung | `TVQualityEngineTests.testTheSettingsRowIsAutoOrTheKeptRung` | unit | pass 2026-11-26 |
+| A new Apple TV starts on Auto; one already set up keeps its rung; settled once | `TVQualityEngineTests.testANewAppleTVStartsOnAuto`, `testAnAppleTVAlreadySetUpKeepsItsRung`, `testTheChoiceIsSettledOnceAndAutoPickedLaterSticks` | unit | pass 2026-11-26 |
+| Auto at the top of Settings' list and first in the panel, ticked on a new TV | `TVSettingsTests.testDefaultQualityListsEveryRungAndKeepsTheChoice`, `TVPlayerTests.testQualityTabOpensOnAutoAndPickingARungTranscodesAndKeepsIt` | UI | pass 2026-11-26 |
+| Auto picked in the panel goes back to the original and is ticked | `TVPlayerTests.testChoosingAutoInThePlayerGoesBackToTheOriginal` | UI | pass 2026-11-26 |
+| Auto stepping down on a slow line and climbing back | not automated: needs the 8098 throttle, which can hang below 2.6 Mbps; the policy is `AdaptiveQualityTests` (unit, shared); `MANUAL.md` §2 | manual |
 
 ## Sync code and audio delay
 
@@ -200,7 +204,7 @@ the tab strip rather than to Cancel Request.
 |---|---|---|---|
 | Every page opens and Menu comes back; Up reaches the strip | `TVSettingsTests.testEveryPageOpensAndMenuComesBack` | UI | pass |
 | Side panel describes the focused row | `TVSettingsTests.testThePanelDescribesTheFocusedRow` | UI | pass |
-| Default quality list | `TVSettingsTests.testDefaultQualityListsEveryRungAndKeepsTheChoice` | UI | pass |
+| Default quality list: Auto, then every rung | `TVSettingsTests.testDefaultQualityListsEveryRungAndKeepsTheChoice` | UI | pass 2026-11-26 |
 | No engine, battery, adaptive or speed-check rows; picture rows present (c964e31) | `TVSettingsTests.testNoEngineBatteryOrAdaptiveRows` | UI | pass |
 | No Night mode where mpv can't do it (master-fix-list round 2) | `TVSettingsTests.testNightModeIsNotOfferedWhereItCannotWork` | UI | xfail |
 | Picture adjustment and Reset | `TVSettingsTests.testPictureAdjustmentEnablesReset` | UI | pass |
@@ -210,7 +214,7 @@ the tab strip rather than to Cancel Request.
 | About says mpv | `TVSettingsTests.testAboutSaysMPV` | UI | pass |
 | No Music, Downloads or Watch pages | `TVSettingsTests.testNoMusicPageOnTheTV` | UI | pass |
 | First page: General switches flip and are kept over a relaunch; Next Up window list; iCloud row a switch or Unavailable; each page's summary in grey | `TVSettingsRowsTests.testGeneralSwitchesFlipAndAreKeptOverARelaunch`, `testNextUpWindowListsItsChoicesAndKeepsOne`, `testTheICloudRowIsASwitchOrSaysUnavailable`, `testTheFirstPageSaysWhereEachPageStands` | UI | pass 2026-11-22 |
-| The summaries as the tvOS build words them (no Auto; the 60 fps delay and Stereo; Never; Custom playlist; the Next Up window in words) | `TVSettingsSummaryTests` (8) | unit | pass 2026-11-22 |
+| The summaries as the tvOS build words them (Auto or the rung; the 60 fps delay and Stereo; Never; Custom playlist; the Next Up window in words) | `TVSettingsSummaryTests` (8) | unit | pass 2026-11-22 |
 | Account: connection facts; this account listed and clicking it asks nothing; Add Account opens sign-in and Cancel comes back; SyncPlay… asks which group, Menu leaves it Off | `TVSettingsRowsTests.testAccountPageGivesTheConnectionFacts`, `testTheAccountsListHasThisAccountAndClickingItAsksNothing`, `testAddAccountOpensSignInAndCancelComesBack`, `testSyncPlayInSettingsAsksWhichGroupAndMenuLeavesItOff` | UI | pass 2026-11-22 |
 | Two accounts: the other's row asks Switch / Sign Out of This Apple TV; Switch signs it in; Sign Out takes it off the list; signing out leaves it on "Who's watching?", a press signs it in | `TVSettingsAccountsTests` (4) | UI | pass 2026-11-22 |
 | Video: framing on its row and the first page; Resume and Autoplay switches; audio language list; zoom and aspect with Reset | `TVSettingsRowsTests.testFramingChoiceShowsOnItsRowAndOnTheFirstPage`, `testResumeAndAutoplaySwitchesFlip`, `testAudioLanguageListStartsWithTheFilesOwnAndKeepsAChoice`, `testZoomAndAspectAreListedAndResetPutsThemBack` | UI | pass 2026-11-22 |

@@ -26,15 +26,15 @@ final class TVSettingsEffectTests: TVSettingsPagesCase {
     }
 
     func testTheQualityChosenInSettingsIsWhatATitleOpensAt() throws {
-        // The TV has no Auto: `Preferences.openingBitrate` is the Settings
-        // row, whatever else is set (5095d5e). A direct-playable MP4 opened
-        // with 5 Mbps chosen is transcoded from the first frame.
+        // A rung kept in Settings is where a title opens, and Auto leaves it
+        // alone. A direct-playable MP4 opened with 5 Mbps chosen is
+        // transcoded from the first frame.
         try Fixtures.require()
         try api().setResume(film, seconds: 300)
         defer { leaveAndRestore(film) }
         openSettings()
         openPage("video")
-        pick(TestID.Settings.videoQuality, option: "Optional(5000000)", backOn: TestID.Settings.pageRoot("video"))
+        pick(TestID.Settings.videoQuality, option: "stream(Optional(5000000))", backOn: TestID.Settings.pageRoot("video"))
         let row = app.element(TestID.Settings.videoQuality)
         waitUntil("the row to read 5 Mbps", timeout: 5) { row.label.contains("5 Mbps") }
         relaunchPlaying(film)
@@ -45,6 +45,7 @@ final class TVSettingsEffectTests: TVSettingsPagesCase {
         waitUntil("5 Mbps to be the rung playing", timeout: 30) { [weak self] in
             self?.app.element(TestID.Player.qualityOption("5000000")).isSelected ?? false
         }
+        XCTAssertFalse(app.element(TestID.Player.qualityAuto).isSelected, "Auto ticked beside a kept rung")
     }
 
     func testWithResumeOffATitleStartsFromTheTop() throws {

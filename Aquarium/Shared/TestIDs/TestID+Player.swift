@@ -231,22 +231,6 @@ extension TestID {
         /// The row that hands the title to the mpv engine (Sync and Picture).
         static let switchToMpv = "player.engine.switchToMpv"
 
-        // MARK: Picture (Apple TV tab)
-
-        /// An adjustment by key: brightness, contrast, saturation, gamma,
-        /// zoom. A slider off a television; on one, the group whose value is
-        /// the setting, with `pictureDecrease` and `pictureIncrease` in it.
-        static func pictureSlider(_ key: String) -> String { "player.picture.slider.\(key)" }
-        static func pictureDecrease(_ key: String) -> String { "player.picture.decrease.\(key)" }
-        static func pictureIncrease(_ key: String) -> String { "player.picture.increase.\(key)" }
-        /// The key for an aspect override: the ratio in hundredths, `0` for
-        /// the file's own, `178` for 16:9.
-        static func aspectKey(_ ratio: Double) -> String { String(Int((ratio * 100).rounded())) }
-        static func pictureAspect(_ key: String) -> String { "player.picture.aspect.\(key)" }
-        static let pictureReset = "player.picture.reset"
-        static let nightMode = "player.picture.nightMode"
-        static let pictureUnavailable = "player.picture.unavailable"
-
         // MARK: Overlays
 
         /// The Apple TV's spinner in the middle of the picture. Elsewhere

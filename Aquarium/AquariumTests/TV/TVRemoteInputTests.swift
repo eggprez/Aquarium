@@ -275,7 +275,7 @@ final class TVRemoteInputTests: TVUnitTestCase {
 
     func testPanelTabsCoverEveryPage() {
         XCTAssertEqual(PlayerTab.allCases.map(\.rawValue),
-                       ["info", "channels", "audio", "subtitles", "quality", "speed", "sync", "picture", "together"])
+                       ["info", "channels", "audio", "subtitles", "quality", "speed", "sync", "together"])
         for tab in PlayerTab.allCases {
             XCTAssertFalse(tab.title.isEmpty)
             XCTAssertNotNil(UIImage(systemName: tab.symbol), "\(tab) symbol \(tab.symbol) is not an SF Symbol here")

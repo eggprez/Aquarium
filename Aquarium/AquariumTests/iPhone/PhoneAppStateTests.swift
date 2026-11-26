@@ -109,7 +109,7 @@ final class PhoneSettingsRulesTests: PhoneUnitTestCase {
     }
 
     func testDeviceSettingsStayOnTheDevice() {
-        for key in ["device_id", "volume", "last_route", "recent_searches", "audio_delay", "default_bitrate", "download_concurrency"] {
+        for key in ["device_id", "volume", "last_route", "recent_searches", "audio_delay", "default_bitrate", "adaptive", "download_concurrency"] {
             XCTAssertFalse(CloudSync.syncedKeys.contains(key), key)
         }
     }

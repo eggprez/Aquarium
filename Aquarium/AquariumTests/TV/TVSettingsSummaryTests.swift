@@ -18,6 +18,8 @@ final class TVSettingsSummaryTests: TVUnitTestCase {
     override func setUp() async throws {
         saved = (prefs.adaptiveQuality, prefs.defaultBitrate, prefs.fillScreen, prefs.audioDelay, prefs.audioDelaysByRate,
                  prefs.stereoDownmix, prefs.subtitleLanguage, prefs.forcedSubtitlesOnly, prefs.liveTVSource)
+        // A kept rung unless a test says Auto.
+        prefs.adaptiveQuality = false
     }
 
     override func tearDown() async throws {
@@ -34,16 +36,19 @@ final class TVSettingsSummaryTests: TVUnitTestCase {
 
     // MARK: Video
 
-    func testVideoNamesTheRungAndNeverAuto() {
-        prefs.adaptiveQuality = true  // synced from a phone; nothing on the TV reads it
+    func testVideoNamesAutoOrTheRung() {
         prefs.fillScreen = false
+        prefs.adaptiveQuality = true
+        prefs.defaultBitrate = nil
+        XCTAssertEqual(SettingsSummary.video(prefs), "Auto")
+        prefs.adaptiveQuality = false
         prefs.defaultBitrate = nil
         XCTAssertEqual(SettingsSummary.video(prefs), "Original")
         prefs.defaultBitrate = 5_000_000
         XCTAssertEqual(SettingsSummary.video(prefs), "720p")
         prefs.defaultBitrate = 36_000_000
         XCTAssertEqual(SettingsSummary.video(prefs), "4K")
-        XCTAssertFalse(SettingsSummary.video(prefs).contains("Auto"), "the TV's summary says Auto")
+        XCTAssertFalse(SettingsSummary.video(prefs).contains("Auto"), "a kept rung reads as Auto")
     }
 
     func testVideoAddsFillWhenTheFrameIsCropped() {

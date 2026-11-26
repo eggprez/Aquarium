@@ -1,16 +1,13 @@
 //  The pages of the player's panel. The Apple TV's swipe-down panel shows
 //  them as a row of tabs; on an iPhone, an iPad or a Mac each is a page of
-//  its own, opened by its own button, and the tracks, speed, quality, sync
-//  and picture are cards or not offered, never pages. Which of them a stream offers is
+//  its own, opened by its own button, and the tracks, speed, quality and sync
+//  are cards or not offered, never pages. Which of them a stream offers is
 //  `PlayerModel.panelTabs` (a channel has no Quality, a film no Channels).
 
 import Foundation
 
 enum PlayerTab: String, Hashable, CaseIterable, Identifiable {
     case info, channels, audio, subtitles, quality, speed, sync
-    /// Brightness, contrast, saturation, gamma, zoom and aspect: the mpv
-    /// engine's, over the live picture.
-    case picture
     /// SharePlay and SyncPlay, on the Apple TV, whose panel is where its
     /// choices live. Elsewhere they are rows in the "…" card.
     case together
@@ -26,7 +23,6 @@ enum PlayerTab: String, Hashable, CaseIterable, Identifiable {
         case .quality: "Quality"
         case .speed: "Speed"
         case .sync: "Sync"
-        case .picture: "Picture"
         case .together: "Watch Together"
         }
     }
@@ -40,7 +36,6 @@ enum PlayerTab: String, Hashable, CaseIterable, Identifiable {
         case .quality: "slider.horizontal.3"
         case .speed: "gauge.with.dots.needle.67percent"
         case .sync: "waveform.path.ecg"
-        case .picture: "camera.filters"
         case .together: "person.2"
         }
     }

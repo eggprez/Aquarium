@@ -39,7 +39,10 @@ enum CloudSync {
     /// the box in front of you rather than the account behind it.
     static let syncedKeys: Set<String> = [
         "theme",
-        "adaptive", "autoplay_next", "stereo_downmix",
+        // No `adaptive`: Auto or a kept rung is this device's choice, like
+        // the rung itself. Synced, a phone's Auto overruled the quality
+        // picked on an Apple TV.
+        "autoplay_next", "stereo_downmix",
         "home_hide_continue_watching", "home_clear_abandoned", "next_up_hidden",
         "next_up_days", "next_up_in_progress", "next_up_rewatching",
         // No `audio_delay`: it is the lag of one room's soundbar, and two

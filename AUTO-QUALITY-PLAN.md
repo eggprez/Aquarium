@@ -4,6 +4,13 @@ Written 2026-11-01. Both apps get the same behaviour, the same numbers and the s
 
 ## Where things stand
 
+**Update 2026-11-26:** phase 4 was built ahead of phases 1–3. The Apple TV now
+has Auto, on the policy the other Apple devices run today (the left-hand
+column below, with the speed check always on under Auto and no row for it),
+`adaptive` no longer syncs, Auto is at the top of the TV's Quality list in
+Settings and in the player, new installs start on Auto and a TV already set
+up keeps its rung. The table's Apple TV column describes how it was before.
+
 | | iPhone / iPad / Mac | Apple TV | Linux | Watch, Music |
 |---|---|---|---|---|
 | Auto exists | Yes, on by default (`Preferences.adaptiveQuality`) | **No.** `adaptsQuality` is hard-wired `false`; Settings shows one fixed rung | Yes, on by default (`isAdaptiveEnabled`) | No: fixed audio caps (Watch 320k, Music 384k on cellular only) |

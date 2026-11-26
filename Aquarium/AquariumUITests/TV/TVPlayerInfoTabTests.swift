@@ -1,13 +1,14 @@
 //  What the Apple TV player's Info tab can change (Player/Chrome/PlayerPanel
-//  `InfoTab.actions`): the sleep timer's choices and its Cancel, and on an
-//  episode with one after it, the Autoplay switch, which stops the next one
-//  starting by itself. `TVPlayerTests` covers what the tab says.
+//  `InfoTab.actions`): on an episode with one after it, the Autoplay switch,
+//  which stops the next one starting by itself. No sleep timer. `TVPlayerTests` covers what the tab says.
 
 #if os(tvOS)
 import XCTest
 
 final class TVPlayerInfoTabTests: TVPlayerTestCase {
-    func testTheSleepTimerIsSetAndCancelledFromInfo() throws {
+    func testInfoHasNoSleepTimer() throws {
+        // The sleep timer was taken off the Apple TV: the television has its
+        // own.
         let film = try Fixtures.require().item("film.long_direct").id
         try play(film, from: 300)
         defer {
@@ -15,20 +16,11 @@ final class TVPlayerInfoTabTests: TVPlayerTestCase {
             try? api().setResume(film, seconds: 300)
         }
         openPanel("info")
+        app.element(TestID.Player.infoTitle).waitToExist(10)
         for minutes in [15, 30, 60, 90] {
-            XCTAssertTrue(app.element(TestID.Player.sleepOption(minutes)).waitForExistence(timeout: 10), "no \(minutes)-minute sleep choice")
+            XCTAssertFalse(app.element(TestID.Player.sleepOption(minutes)).exists, "a \(minutes)-minute sleep choice on the TV")
         }
-        XCTAssertFalse(app.element(TestID.Player.sleepCancel).exists, "a timer is running before one was set")
-        pick(TestID.Player.sleepOption(30))
-        let cancel = app.element(TestID.Player.sleepCancel)
-        XCTAssertTrue(cancel.waitForExistence(timeout: 10), "choosing 30 minutes set no timer")
-        XCTAssertTrue(cancel.label.contains("30 min left") || cancel.label.contains("29 min left"), cancel.label)
-        XCTAssertFalse(app.element(TestID.Player.sleepOption(15)).exists, "the choices stayed beside a running timer")
-        attachScreenshot("sleep timer running")
-        pick(TestID.Player.sleepCancel)
-        XCTAssertTrue(app.element(TestID.Player.sleepOption(30)).waitForExistence(timeout: 10), "Cancel left the timer running")
-        XCTAssertFalse(cancel.exists)
-        XCTAssertTrue(app.element(TestID.Player.root).exists, "cancelling the timer closed the player")
+        XCTAssertFalse(app.element(TestID.Player.sleepCancel).exists)
     }
 
     func testAFilmHasNoAutoplaySwitch() throws {
@@ -40,7 +32,7 @@ final class TVPlayerInfoTabTests: TVPlayerTestCase {
             try? api().setResume(film, seconds: 300)
         }
         openPanel("info")
-        app.element(TestID.Player.sleepOption(15)).waitToExist(10)
+        app.element(TestID.Player.infoTitle).waitToExist(10)
         XCTAssertFalse(app.element(TestID.Player.stopAfterThis).exists, "a film offers Autoplay")
     }
 

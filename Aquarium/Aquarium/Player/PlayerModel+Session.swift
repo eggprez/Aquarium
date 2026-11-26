@@ -280,15 +280,21 @@ extension PlayerModel {
         }
     }
 
-    /// Whether Auto steers this player's quality. Never on an Apple TV: its
-    /// Settings hold one quality rather than offering Auto, and nothing there
-    /// turns the synced switch off — so the iPhone's Auto was quietly
-    /// stepping down the TV's streams, overruling the rung picked on it.
+    /// Whether Auto steers this player's quality: the device's own setting
+    /// (never synced — a phone's Auto once stepped down an Apple TV's
+    /// streams), unless a rung was pinned for this sitting.
     var adaptsQuality: Bool {
-        #if os(tvOS)
-        false
-        #else
         prefs.adaptiveQuality && !qualityPinned
+    }
+
+    /// Whether a fresh stream is timed before it opens. The Apple TV has no
+    /// row for it: under Auto it always is, as AUTO-QUALITY-PLAN.md has it
+    /// for every device, and a server on the home network is skipped anyway.
+    var checksSpeed: Bool {
+        #if os(tvOS)
+        true
+        #else
+        prefs.speedCheck
         #endif
     }
 
@@ -300,7 +306,7 @@ extension PlayerModel {
     /// that memory; a server on the home network is opened as it always was.
     /// Everything else is timed, with the quality pill turning meanwhile.
     func speedCheckedOpening(for item: BaseItem, options opts: StreamOptions, meta: StartMeta) async -> Int?? {
-        guard adaptsQuality, prefs.speedCheck, !opts.live else { return nil }
+        guard adaptsQuality, checksSpeed, !opts.live else { return nil }
         let interface = client.lastInterface
         if meta.inherited {
             if let memory = speedMemory, memory.itemId != item.Id, memory.isFollowed(by: item, interface: interface) {
@@ -339,7 +345,7 @@ extension PlayerModel {
     /// carries, and sat frozen there. It only ever sizes a step down.
     var knownThroughput: Double? {
         guard let item else { return nil }
-        let remembered = prefs.speedCheck && speedMemory?.itemId == item.Id ? speedMemory?.bitsPerSecond : nil
+        let remembered = checksSpeed && speedMemory?.itemId == item.Id ? speedMemory?.bitsPerSecond : nil
         let observed = engine?.streamFacts.observedBitrate
         return [remembered, observed].compactMap { $0 }.filter { $0 > 0 }.min()
     }

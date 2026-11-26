@@ -2327,10 +2327,24 @@ extension SettingsView {
         return values
     }
 
-    static var bitrateBinding: Binding<Int?> {
+    /// Auto, or the rung kept in `defaultBitrate`: the Apple TV's Quality
+    /// row.
+    static var qualityBinding: Binding<PlayerModel.QualitySelection> {
         Binding(
-            get: { Preferences.shared.defaultBitrate },
-            set: { Preferences.shared.defaultBitrate = $0 }
+            get: {
+                let prefs = Preferences.shared
+                return prefs.adaptiveQuality ? .auto : .stream(prefs.defaultBitrate)
+            },
+            set: { selection in
+                let prefs = Preferences.shared
+                if case .stream(let bitrate) = selection {
+                    prefs.adaptiveQuality = false
+                    prefs.defaultBitrate = bitrate
+                } else {
+                    prefs.adaptiveQuality = true
+                    prefs.defaultBitrate = nil
+                }
+            }
         )
     }
 
@@ -2863,7 +2877,7 @@ enum SettingsSummary {
 
     static func video(_ prefs: Preferences) -> String {
         #if os(tvOS)
-        var parts = [Quality.shortLabel(for: prefs.defaultBitrate)]
+        var parts = [prefs.adaptiveQuality ? "Auto" : Quality.shortLabel(for: prefs.defaultBitrate)]
         #else
         var parts = [prefs.adaptiveQuality ? "Auto" : prefs.defaultBitrate == nil ? "Direct" : Quality.shortLabel(for: prefs.defaultBitrate)]
         #endif

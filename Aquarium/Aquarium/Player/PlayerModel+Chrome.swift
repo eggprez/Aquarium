@@ -79,7 +79,7 @@ extension PlayerModel {
 
     /// The tabs this stream has something to show in. On an iPhone, an iPad
     /// or a Mac the panel has no row of tabs: each is its own page, opened
-    /// by its own button, and the tracks, speed, quality, sync and picture
+    /// by its own button, and the tracks, speed, quality and sync
     /// are cards or not offered at all — see `PlayerTransport`.
     var panelTabs: [PlayerTab] {
         var out: [PlayerTab] = [.info]
@@ -91,7 +91,6 @@ extension PlayerModel {
         // A group's speed is normal — see PlayerModel+Group.swift.
         if !isLive, !isInGroup { out.append(.speed) }
         out.append(.sync)
-        out.append(.picture)
         if offersWatchTogether { out.append(.together) }
         #endif
         return out
@@ -108,15 +107,6 @@ extension PlayerModel {
         if isExternal { return "This channel comes straight from its playlist as a live stream, and the sound of a live stream can't be shifted on Apple's engine." + fix }
         if isLive { return "A live channel's sound can't be shifted on Apple's engine." + fix }
         return "Apple's engine can only shift the sound of a file the server sends untouched. This stream is being transcoded, so the picture and sound arrive already mixed." + fix
-    }
-
-    /// Why the picture controls are not live on this stream, or nil when
-    /// they are. The row under it offers the switch.
-    var pictureUnavailableReason: String? {
-        if engine?.capabilities.contains(.pictureAdjust) == true { return nil }
-        if !isActive || isOpening { return "Once the stream has opened." }
-        if canSwitchEngine(to: .mpv) { return "Picture controls need the mpv engine — switch for this title?" }
-        return "Picture controls need the mpv engine. " + (engineSwitchUnavailableReason(to: .mpv) ?? "")
     }
 
     /// The title behind the Up Next card, where it is a server item: what is

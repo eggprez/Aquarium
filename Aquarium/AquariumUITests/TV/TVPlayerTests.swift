@@ -93,8 +93,8 @@ class TVPlayerTestCase: TVTestCase {
     /// The panel tab a row of it lives on, from the row's identifier.
     static func tab(for id: String) -> String? {
         let map = ["player.audio.": "audio", "player.subtitles.": "subtitles", "player.quality.": "quality",
-                   "player.speed.": "speed", "player.sleep.": "info", "player.afterThis.": "info",
-                   "player.sync.": "sync", "player.picture.": "picture", "player.channels.": "channels",
+                   "player.speed.": "speed", "player.afterThis.": "info",
+                   "player.sync.": "sync", "player.channels.": "channels",
                    "player.more.syncPlay": "together", "player.more.sharePlay": "together"]
         return map.first { id.hasPrefix($0.key) }?.value
     }
@@ -229,9 +229,10 @@ final class TVPlayerTests: TVPlayerTestCase {
         waitUntil("the Info tab focused", timeout: 10) { [weak self] in
             self?.app.element(TestID.Player.panelTab("info")).hasFocusInside ?? false
         }
-        for tab in ["info", "audio", "subtitles", "quality", "speed", "sync", "picture"] {
+        for tab in ["info", "audio", "subtitles", "quality", "speed", "sync"] {
             XCTAssertTrue(app.element(TestID.Player.panelTab(tab)).exists, "no \(tab) tab on a film")
         }
+        XCTAssertFalse(app.element(TestID.Player.panelTab("picture")).exists, "the Picture tab is back")
         XCTAssertFalse(app.element(TestID.Player.panelTab("channels")).exists, "Channels on a film")
         app.element(TestID.Player.infoTitle).waitToExist(10)
         XCTAssertTrue(app.element(TestID.Player.infoSummary).exists)
@@ -393,20 +394,46 @@ final class TVPlayerTests: TVPlayerTestCase {
 
     // MARK: Quality
 
-    func testQualityTabHasNoAutoAndPickingARungTranscodes() throws {
+    func testQualityTabOpensOnAutoAndPickingARungTranscodesAndKeepsIt() throws {
         try play(film, from: 120)
         openPanel("quality")
-        XCTAssertFalse(app.element(TestID.Player.qualityAuto).exists, "Auto offered on the TV (5095d5e)")
-        XCTAssertFalse(app.element(TestID.Player.qualityNote).exists)
+        // A new Apple TV is on Auto: its card is first and ticked, says what
+        // it is playing, and no rung is ticked beside it.
+        let auto = app.element(TestID.Player.qualityAuto)
         let original = app.element(TestID.Player.qualityOption(TestID.Player.qualityOriginalKey))
+        auto.waitToExist(10)
         original.waitToExist(10)
-        XCTAssertTrue(original.isSelected, "direct play is what's playing")
+        XCTAssertTrue(auto.isSelected, "Auto is not the choice on a new Apple TV")
+        XCTAssertTrue(auto.label.contains("Original"), "Auto doesn't say what it is playing: \(auto.label)")
+        XCTAssertFalse(original.isSelected, "a rung ticked beside Auto")
+        XCTAssertLessThan(auto.frame.minX, original.frame.minX, "Auto is not the first card")
+        attachScreenshot("quality tab on Auto")
         pick(TestID.Player.qualityOption("2500000"))
         waitUntil("the server to report a transcode", timeout: 60) { [weak self] in
             (self?.playState(self?.film)["PlayMethod"] as? String) == "Transcode"
         }
         // The same title reopened keeps its place (f6b43c9).
         XCTAssertGreaterThan(reportedPosition(film) ?? 0, 100, "the reopen started from the top")
+        // The rung is kept, and Auto has let go.
+        if !app.element(TestID.Player.panel).exists { openPanel("quality") }
+        waitUntil("480p to be the kept rung", timeout: 30) { [weak self] in
+            self?.app.element(TestID.Player.qualityOption("2500000")).isSelected ?? false
+        }
+        XCTAssertFalse(auto.isSelected, "Auto still ticked after a rung was picked")
+    }
+
+    func testChoosingAutoInThePlayerGoesBackToTheOriginal() throws {
+        try play(film, from: 120)
+        openPanel("quality")
+        pick(TestID.Player.qualityOption("5000000"))
+        waitUntil("the transcode", timeout: 60) { [weak self] in (self?.playState(self?.film)["PlayMethod"] as? String) == "Transcode" }
+        if !app.element(TestID.Player.panel).exists { openPanel("quality") }
+        pick(TestID.Player.qualityAuto)
+        waitUntil("direct play again", timeout: 60) { [weak self] in (self?.playState(self?.film)["PlayMethod"] as? String) == "DirectPlay" }
+        if !app.element(TestID.Player.panel).exists { openPanel("quality") }
+        waitUntil("Auto to be ticked", timeout: 30) { [weak self] in
+            self?.app.element(TestID.Player.qualityAuto).isSelected ?? false
+        }
     }
 
     func testAQualityChangeWhilePausedStaysPaused() throws {
@@ -450,7 +477,7 @@ final class TVPlayerTests: TVPlayerTestCase {
         XCTAssertLessThanOrEqual(after, before + 1, "reopens counted as plays: \(before) → \(after)")
     }
 
-    // MARK: Speed and picture
+    // MARK: Speed
 
     func testSpeedTabChangesTheRate() throws {
         try play(film, from: 120)
@@ -458,19 +485,6 @@ final class TVPlayerTests: TVPlayerTestCase {
         pick(TestID.Player.speedOption("150"))
         waitUntil("1.5× selected", timeout: 10) { [weak self] in self?.app.element(TestID.Player.speedOption("150")).isSelected ?? false }
         pick(TestID.Player.speedOption("100"))
-    }
-
-    func testPictureTabStepsAndResets() throws {
-        try play(film, from: 120)
-        openPanel("picture")
-        let increase = app.element(TestID.Player.pictureIncrease("gamma"))
-        increase.waitToExist(10)
-        let slider = app.element(TestID.Player.pictureSlider("gamma"))
-        let before = slider.value as? String
-        pick(TestID.Player.pictureIncrease("gamma"))
-        waitUntil("gamma to move", timeout: 10) { (slider.value as? String) != before }
-        pick(TestID.Player.pictureReset)
-        waitUntil("gamma back", timeout: 10) { (slider.value as? String) == before }
     }
 
     // MARK: Intro, credits, Up Next

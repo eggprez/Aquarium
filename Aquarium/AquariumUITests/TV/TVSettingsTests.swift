@@ -63,24 +63,29 @@ final class TVSettingsTests: TVTestCase {
         openPage("video")
         choose(TestID.Settings.videoQuality)
         app.element(TestID.TVSettings.choiceList).waitToExist(10)
-        for value in ["nil", "Optional(36000000)", "Optional(20000000)", "Optional(16000000)",
-                      "Optional(10000000)", "Optional(5000000)", "Optional(2500000)"] {
+        // Auto first, then every rung; a new Apple TV starts on Auto.
+        for value in ["auto", "stream(nil)", "stream(Optional(36000000))", "stream(Optional(20000000))",
+                      "stream(Optional(16000000))", "stream(Optional(10000000))", "stream(Optional(5000000))",
+                      "stream(Optional(2500000))"] {
             XCTAssertTrue(app.element(TestID.TVSettings.choiceOption(value)).exists, "no \(value) in the quality list")
         }
-        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] 'Auto'")).firstMatch.exists,
-                       "Auto is not offered on the TV (commit 5095d5e: nothing steers the TV's quality)")
-        choose(TestID.TVSettings.choiceOption("Optional(5000000)"))
+        let auto = app.element(TestID.TVSettings.choiceOption("auto"))
+        let original = app.element(TestID.TVSettings.choiceOption("stream(nil)"))
+        XCTAssertLessThan(auto.frame.minY, original.frame.minY, "Auto is not at the top of the list")
+        choose(TestID.TVSettings.choiceOption("stream(Optional(5000000))"))
         app.element(TestID.Settings.pageRoot("video")).waitToExist(10)
         let row = app.element(TestID.Settings.videoQuality)
         waitUntil("the row to read 5 Mbps", timeout: 5) { row.label.contains("5 Mbps") }
-        // Put it back for the rest of the suite.
+        // Back to Auto, which is where the suite starts.
         choose(TestID.Settings.videoQuality)
-        choose(TestID.TVSettings.choiceOption("nil"))
+        choose(TestID.TVSettings.choiceOption("auto"))
+        app.element(TestID.Settings.pageRoot("video")).waitToExist(10)
+        waitUntil("the row to read Auto", timeout: 5) { row.label.contains("Auto") }
     }
 
     func testNoEngineBatteryOrAdaptiveRows() {
-        // The TV plays through mpv alone, on mains, with no Auto (c964e31
-        // "tvOS Settings: … no adaptive switch").
+        // The TV plays through mpv alone, on mains; Auto is a choice in the
+        // quality list, not a switch of its own (c964e31).
         openSettings()
         openPage("video")
         for id in [TestID.Settings.videoEngine, TestID.Settings.videoBatterySaver, TestID.Settings.videoPowerAwareQuality,
