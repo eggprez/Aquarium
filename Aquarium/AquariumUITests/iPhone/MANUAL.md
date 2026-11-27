@@ -58,6 +58,12 @@ Simulator coverage is in `DuoPoseTests` (front screen; tent and laptop held by
   the last touch) on the front screen in landscape; the card opens
   [memory `player-fade-dead-buttons`, 58f77cf: confirmed on the simulator
   only].
+- **Controls fading in**: on the inner screen held sideways, let the controls
+  hide, then tap the picture. AirPlay, Picture in Picture and "…" fade in
+  where they stay; they do not start further right and jump left as the
+  clock column comes back. Try the front screen in landscape and the inner
+  screen upright too (not measured there). The rule is unit-tested
+  (`PhonePlayerHeldFrameTests`); the hinge cannot be opened by a UI test.
 
 ## AirPlay
 

@@ -41,6 +41,9 @@ struct PlayerScreen: View {
     /// The frame the chrome was laid out in while the status bar was up —
     /// see `framed`.
     @State private var heldFrame: HeldFrame?
+    /// The bar has been asked back and the system may not have put its
+    /// column back yet — see `framed`.
+    @State private var barReturning = false
     #endif
 
     /// How far down a foldable's front screen the status bar still takes
@@ -124,9 +127,14 @@ struct PlayerScreen: View {
                 // clearance, which shoved the title row's buttons in from
                 // an edge nothing was on.
                 let orientation = Self.interfaceOrientation
-                let held = statusBarHidden
-                    ? heldFrame.flatMap { $0.screen == screen && $0.orientation == orientation ? $0 : nil } : nil
-                let insets = held?.insets ?? live
+                // The bar is asked back the moment the controls are, and
+                // the system gives its column back a few frames later:
+                // measured on the inside screen held sideways, the title
+                // row was laid out 56 points too wide and jumped in partway
+                // through the fade, which read as a stutter. So the held
+                // frame is kept a little past the bar's return as well.
+                let insets = HeldFrame.insets(live: live, held: heldFrame, screen: screen, orientation: orientation,
+                                              barHidden: statusBarHidden, barReturning: barReturning)
                 // The front screen reports no top inset — its clock is in
                 // the column down the trailing edge — yet the top 24 points
                 // still belong to the status bar's touch strip: measured on
@@ -179,6 +187,18 @@ struct PlayerScreen: View {
                 .onChange(of: frame, initial: true) { _, frame in
                     if !statusBarHidden { heldFrame = frame }
                 }
+                // Set while the bar is away, so it is already true in the
+                // pass that asks the bar back; let go once the system has
+                // had time to return the column, after which the live
+                // insets are believed again whatever they say.
+                .task(id: statusBarHidden) {
+                    if statusBarHidden {
+                        barReturning = true
+                    } else {
+                        try? await Task.sleep(for: HeldFrame.barReturn)
+                        if !Task.isCancelled { barReturning = false }
+                    }
+                }
             }
         } else {
             stage
@@ -191,10 +211,26 @@ struct PlayerScreen: View {
     #if os(iOS)
     private var statusBarHidden: Bool { !chrome.controlsVisible && !player.isPaused }
 
-    private struct HeldFrame: Equatable {
+    struct HeldFrame: Equatable {
         var screen: CGSize
         var orientation: UIInterfaceOrientation
         var insets: EdgeInsets
+
+        /// How long after the bar is asked back the held frame is kept:
+        /// longer than the chrome's fade, so a column that is late lands
+        /// after the fade rather than in it.
+        static let barReturn: Duration = .milliseconds(500)
+
+        /// The insets the chrome is laid out to: the held frame's while the
+        /// bar is hidden or on its way back, as long as the frame was held
+        /// on this screen this way up; otherwise the live ones.
+        static func insets(live: EdgeInsets, held: HeldFrame?, screen: CGSize, orientation: UIInterfaceOrientation,
+                           barHidden: Bool, barReturning: Bool) -> EdgeInsets {
+            guard barHidden || barReturning, let held, held.screen == screen, held.orientation == orientation else {
+                return live
+            }
+            return held.insets
+        }
     }
 
     /// Which way the screen is turned, from the scene that is up.
