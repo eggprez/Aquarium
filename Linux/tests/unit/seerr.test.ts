@@ -593,9 +593,12 @@ describe("removing a title through Seerr", () => {
     expect(paths()).toEqual([]);
   });
 
-  it("is not offered when Seerr has no Radarr, or has not put the title on it, or has never met it", async () => {
+  it("is not offered when Seerr has no Radarr, or no title behind its record, or has never met it", async () => {
     await connected(MANAGER);
     routes([["/service/radarr", () => []], ["/movie/949", () => onRadarr]]);
+    expect(await seerr.removal(film())).toBeNull();
+    // A record with nothing behind it, or a library title with no default server to ask.
+    routes([["/service/radarr", () => [{ id: 0, isDefault: true }]], ["/movie/949", () => ({ id: 949, mediaInfo: { id: 41, status: 1 } })]]);
     expect(await seerr.removal(film())).toBeNull();
     routes([["/service/radarr", () => [{ id: 0 }]], ["/movie/949", () => ({ id: 949, mediaInfo: { id: 41, status: 5 } })]]);
     expect(await seerr.removal(film())).toBeNull();
@@ -605,6 +608,13 @@ describe("removing a title through Seerr", () => {
     expect(await seerr.removal(film({ ProviderIds: {} }))).toBeNull();
     routes([]);
     expect(await seerr.removal(film())).toBeNull();
+  });
+
+  it("is offered for a library title Seerr has no Radarr link for: Seerr removes by TMDB id from its default server", async () => {
+    await connected(MANAGER);
+    routes([["/service/radarr", () => [{ id: 0, is4k: false, isDefault: true }]], ["/movie/949", () => ({ id: 949, mediaInfo: { id: 41, status: 5 } })]]);
+    expect(await seerr.removal(film())).toEqual({ kind: "movie", tmdbId: 949, mediaId: 41, copies: [false], requestIds: [] });
+    expect(seerr.removableCopies({ status: 5 }, [{ id: 1, is4k: true, isDefault: true }])).toEqual([]);
   });
 
   it("removes the 4K copy only where there is a 4K server", async () => {

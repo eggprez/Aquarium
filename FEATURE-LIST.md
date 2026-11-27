@@ -323,8 +323,13 @@ refuses, nothing is deleted).
 
 **To do:**
 
-- Try both ways against a real Seerr with Radarr and Sonarr (each platform's
-  MANUAL.md, "Delete from Server"); nothing here has run against one.
+- Tried against a real Seerr 3.5.2, Radarr 7 and Sonarr 4 on 2026-11-26
+  (`AquariumQA/arr`, `PhoneServerDeleteLiveTests`), on the iPhone only. That
+  found two faults, both fixed: the title page had no entry at all (only the
+  press-and-hold menu), and Seerr's way was hidden unless Seerr's record
+  linked the title to Radarr/Sonarr, which Seerr itself does not need (it
+  removes by TMDB/TVDB id from its default server). iPad, Mac, Apple TV and
+  Linux have not been run against the real stack.
 - After Seerr's way, Jellyfin keeps listing the title until its next library
   scan; the app only hides it from its own copy of the library.
 - Music, collections and playlists are not covered.

@@ -76,6 +76,7 @@ extension TestID {
         static let watched = "detail.action.watched"
         static let addToNextUp = "detail.action.addToNextUp"
         static let trailer = "detail.action.trailer"
+        static let deleteFromServer = "detail.action.deleteFromServer"
         /// The phone's overflow menu.
         static let more = "detail.action.more"
 

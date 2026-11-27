@@ -99,11 +99,33 @@ final class ServerDeleteTests: XCTestCase {
         XCTAssertNotNil(show, "the show's side is its own question")
     }
 
-    func testNotOfferedForATitleSeerrHasNotPutOnRadarr() async throws {
-        // In the Jellyfin library, known to Seerr, but never sent to Radarr.
+    /// Seerr removes by TMDB id from its default Radarr, so a film it only
+    /// knows from the Jellyfin library (put on Radarr by hand, never scanned
+    /// in) is offered too. Asking for a Radarr link on the record hid Seerr's
+    /// way on a real server for every such title.
+    func testOfferedForALibraryTitleSeerrHasNoRadarrLinkFor() async throws {
         try await connect(title: #"{"id":949,"title":"Heat","mediaInfo":{"id":41,"status":5}}"#)
         let removal = await seerr.removal(for: film())
+        XCTAssertEqual(removal?.copies, [false])
+        XCTAssertEqual(removal?.mediaId, 41)
+    }
+
+    func testNotOfferedForATitleSeerrOnlyKnowsOf() async throws {
+        // A record with nothing behind it: not in the library, not on Radarr.
+        try await connect(title: #"{"id":949,"title":"Heat","mediaInfo":{"id":41,"status":1}}"#)
+        let removal = await seerr.removal(for: film())
         XCTAssertNil(removal)
+    }
+
+    func testAnUnlinkedTitleNeedsADefaultServer() {
+        let library = SeerrMediaInfo(id: 41, status: 5)
+        let plain = SeerrServiceServer(id: 0, name: "Radarr", is4k: false, isDefault: false)
+        XCTAssertEqual(SeerrClient.removableCopies(of: library, on: [plain]), [], "Seerr would have no server to ask")
+        var named = library
+        named.serviceId = 0
+        XCTAssertEqual(SeerrClient.removableCopies(of: named, on: [plain]), [false], "the record names the server")
+        let fourK = SeerrServiceServer(id: 1, name: "Radarr 4K", is4k: true, isDefault: true)
+        XCTAssertEqual(SeerrClient.removableCopies(of: library, on: [fourK]), [], "an ordinary copy is not removed from the 4K server")
     }
 
     func testNotOfferedForATitleSeerrHasNeverMet() async throws {

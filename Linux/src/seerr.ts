@@ -776,9 +776,28 @@ export function mightRemove(item: any): boolean {
 }
 
 /**
+ * Which copies of a title Seerr can take out: `false` the ordinary one, `true`
+ * the 4K one. Seerr's own rule (`DELETE /media/{id}/file`): it finds the title
+ * on Radarr or Sonarr by its TMDB or TVDB id, on its default server of that
+ * kind or the one its record names, so the record needs no link to a server.
+ * A title put on Radarr by hand, known to Seerr only from the Jellyfin
+ * library, can be removed too.
+ */
+export function removableCopies(media: any, servers: any[]): boolean[] {
+  const offered = (fourK: boolean): boolean => {
+    const service = fourK ? media.serviceId4k : media.serviceId;
+    const linked = service != null || (fourK ? media.externalServiceId4k : media.externalServiceId) != null;
+    const status = (fourK ? media.status4k : media.status) ?? 1;
+    if (!linked && !(status >= 3 && status <= 5)) return false;
+    return servers.some((s: any) => (s?.is4k === true) === fourK && (s?.isDefault === true || (service != null && s?.id === service)));
+  };
+  return [false, true].filter(offered);
+}
+
+/**
  * Whether this title can be taken out through Seerr, and how. Null unless the
  * account may manage requests, Seerr has a Radarr (film) or Sonarr (show)
- * server set up, and its record of the title says it is on one. `item` needs
+ * server it would use, and a record of the title as on one or in the library. `item` needs
  * its TMDB id (the detail fields).
  */
 export async function removal(item: any): Promise<SeerrRemoval | null> {
@@ -790,9 +809,7 @@ export async function removal(item: any): Promise<SeerrRemoval | null> {
     if (!Array.isArray(servers) || !servers.length) return null;
     const media = (await title(kind, tmdbId)).mediaInfo;
     if (!media || typeof media.id !== "number") return null;
-    const copies: boolean[] = [];
-    if ((media.serviceId != null || media.externalServiceId != null) && servers.some((s: any) => s?.is4k !== true)) copies.push(false);
-    if ((media.serviceId4k != null || media.externalServiceId4k != null) && servers.some((s: any) => s?.is4k === true)) copies.push(true);
+    const copies = removableCopies(media, servers);
     if (!copies.length) return null;
     const requestIds = (media.requests ?? []).map((r) => r?.id).filter((id): id is number => typeof id === "number");
     return { kind, tmdbId, mediaId: media.id, copies, requestIds };

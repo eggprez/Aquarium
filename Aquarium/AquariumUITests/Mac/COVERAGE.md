@@ -254,4 +254,4 @@ Against the stand-in Seerr server (TESTING.md). Run 2026-11-16 (the class alone;
 |---|---|---|---|
 | When Seerr's way is offered (rights, Radarr/Sonarr set up, title on one, 4K), what removing asks of Seerr, Jellyfin's delete call, the menu entry's rule, the dialog's choices and wording | `ServerDeleteTests` (AquariumTests/Shared) | unit | pass 2026-11-26 (iPhone, Apple TV, Mac) |
 | Not offered in a card's menu to an account that may not delete | `MacBrowseUITests.testPosterContextMenuMarksWatchedAndFavorite` | UI | assertion added 2026-11-26, not run (the Mac screen suite is switched off) |
-| Both ways carried out, and the dialog as drawn | not automated: needs a deleting account, a real Seerr with Radarr/Sonarr, and titles to lose; `MANUAL.md` "Delete from Server" | manual | |
+| The three ways carried out, the dialog as drawn, and the entry in the title page's action row | not automated on this platform: the live tests against the real Seerr/Radarr/Sonarr stack (`AquariumQA/arr`) run on the iPhone only (`PhoneServerDeleteLiveTests`); `MANUAL.md` "Delete from Server" | manual | |

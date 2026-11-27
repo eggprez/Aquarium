@@ -1999,7 +1999,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 |---|---|---|---|---|
 | deleteItem | src/api.ts | tests/unit/api-browse.test.ts | unit | tested |
 | canManageRequests, removalKind, mightRemove, serviceName | src/seerr.ts | tests/unit/seerr.test.ts | unit | tested |
-| removal | src/seerr.ts | tests/unit/seerr.test.ts | unit | tested |
+| removal, removableCopies (Seerr's own rule: a default server, and a record that is linked or in the library) | src/seerr.ts | tests/unit/seerr.test.ts | unit | tested |
 | remove | src/seerr.ts | tests/unit/seerr.test.ts | unit | tested |
 | mightDeleteFromServer, askDeleteFromServer, the menu entry in itemActions | src/ui.ts | tests/dom/ui.test.ts | DOM | tested |
 | `aquarium-item-deleted` listener (redraws the page) | src/main.ts | none | DOM | untested: one line calling route(); manual checklist item 30 |

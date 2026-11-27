@@ -1207,6 +1207,11 @@ struct ItemDetailView: View {
                 .accessibilityIdentifier(TestID.Detail.trailer)
             }
 
+            serverDeleteButton(item)
+                .labelStyle(IconDiscLabelStyle())
+                .buttonStyle(.plain)
+                .help("Delete from Server…")
+
             if let playable {
                 Menu {
                     qualityMenu(playable)
@@ -1516,6 +1521,21 @@ struct ItemDetailView: View {
         return item
     }
 
+    /// "Delete from Server…" on the title's own page, as in its press-and-hold
+    /// menu: there when the server or Seerr might allow it, and the question
+    /// of which way is asked once it is pressed. See `ServerDeleting`.
+    @ViewBuilder
+    private func serverDeleteButton(_ item: BaseItem) -> some View {
+        if ServerDeleting.mightDelete(item, seerr: SeerrClient.shared) {
+            Button(role: .destructive) {
+                Task { await ServerDeleting.ask(item, client: client, seerr: SeerrClient.shared, app: app) }
+            } label: {
+                Label("Delete from Server…", systemImage: "trash")
+            }
+            .accessibilityIdentifier(TestID.Detail.deleteFromServer)
+        }
+    }
+
     #if !os(macOS)
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -1696,6 +1716,9 @@ struct ItemDetailView: View {
         downloadMenu(item)
             .buttonStyle(.bordered)
         #endif
+
+        serverDeleteButton(item)
+            .appButtonStyle()
     }
 
     /// Phone-width actions: play, favourite, download, and everything else
@@ -1771,6 +1794,10 @@ struct ItemDetailView: View {
                     Label("Add to Next Up", systemImage: "text.badge.plus")
                 }
                 .accessibilityIdentifier(TestID.Detail.addToNextUp)
+            }
+            if ServerDeleting.mightDelete(item, seerr: SeerrClient.shared) {
+                Divider()
+                serverDeleteButton(item)
             }
         } label: {
             // Sized by a star it doesn't show. A button is as tall as its

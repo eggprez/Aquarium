@@ -828,8 +828,9 @@ final class SeerrClient {
 
     /// Whether this title can be taken out through Seerr, and how. Nil unless
     /// every part holds: the account may manage requests, Seerr has a Radarr
-    /// (film) or Sonarr (show) server set up, and Seerr's record of the title
-    /// says it is on one. `item` needs its TMDB id (the detail fields).
+    /// (film) or Sonarr (show) server it would use, and Seerr has a record of
+    /// the title as being on one or in the library. `item` needs its TMDB id
+    /// (the detail fields).
     func removal(for item: BaseItem) async -> SeerrRemoval? {
         guard mightRemove(item), let kind = Self.removalKind(of: item), let tmdbId = item.tmdbId else { return nil }
         let path = kind == .movie ? "/service/radarr" : "/service/sonarr"
@@ -837,18 +838,34 @@ final class SeerrClient {
               let media = try? await title(kind, tmdbId: tmdbId, fresh: true).mediaInfo,
               let mediaId = media.id
         else { return nil }
-        var copies: [Bool] = []
-        if media.serviceId != nil || media.externalServiceId != nil, servers.contains(where: { $0.is4k != true }) {
-            copies.append(false)
-        }
-        if media.serviceId4k != nil || media.externalServiceId4k != nil, servers.contains(where: { $0.is4k == true }) {
-            copies.append(true)
-        }
+        let copies = Self.removableCopies(of: media, on: servers)
         guard !copies.isEmpty else { return nil }
         return SeerrRemoval(
             kind: kind, tmdbId: tmdbId, mediaId: mediaId, copies: copies,
             requestIds: (media.requests ?? []).map(\.id)
         )
+    }
+
+    /// Which copies of a title Seerr can take out: `false` the ordinary one,
+    /// `true` the 4K one. This is Seerr's own rule (`DELETE /media/{id}/file`),
+    /// not a stricter one. Seerr finds the title on Radarr or Sonarr by its
+    /// TMDB or TVDB id, on its default server of that kind or the one its
+    /// record names, so the record needs no link to that server: a title put
+    /// on Radarr by hand, which Seerr only knows from the Jellyfin library,
+    /// can be removed too. Asking for a link hid Seerr's way for every such
+    /// title. A copy is offered when Seerr has it linked or counts it as in
+    /// the library or on its way, and has a server it would ask.
+    nonisolated static func removableCopies(of media: SeerrMediaInfo, on servers: [SeerrServiceServer]) -> [Bool] {
+        func offered(fourK: Bool) -> Bool {
+            let service = fourK ? media.serviceId4k : media.serviceId
+            let linked = service != nil || (fourK ? media.externalServiceId4k : media.externalServiceId) != nil
+            let held = (3...5).contains((fourK ? media.status4k : media.status) ?? 1)
+            guard linked || held else { return false }
+            return servers.contains { server in
+                (server.is4k == true) == fourK && (server.isDefault == true || (service != nil && server.id == service))
+            }
+        }
+        return [false, true].filter(offered)
     }
 
     /// Do it: out of Radarr or Sonarr (which deletes the files), then the

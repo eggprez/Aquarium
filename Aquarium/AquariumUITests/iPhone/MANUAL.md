@@ -334,6 +334,10 @@ willing to lose.
 - [ ] "Delete from Both" on a third film: it leaves the grid at once, Radarr
       and Seerr\'s requests no longer have it, and it is not fetched again.
 - [ ] A show offers Sonarr; a season and an episode offer Jellyfin only.
+- [ ] The title's own page has Delete from Server… too (the "…" menu on a phone,
+      a button in the action row elsewhere), and it asks the same question.
+- [ ] A film added to Radarr by hand, which Seerr only knows from the Jellyfin
+      library, still offers Seerr and Both.
 - [ ] With Seerr disconnected, or on an account without Manage Requests, or
       for a title Seerr never sent to Radarr/Sonarr, only Jellyfin is offered.
 - [ ] On an account that may not delete on Jellyfin and has no Seerr rights,
