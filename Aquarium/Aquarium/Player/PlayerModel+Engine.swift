@@ -12,6 +12,9 @@
 
 import Foundation
 import OSLog
+#if os(iOS)
+import AVFoundation
+#endif
 
 #if canImport(UIKit)
 import UIKit
@@ -241,6 +244,59 @@ extension PlayerModel {
     func handOverForAirPlay() {
         guard engine?.kind == .mpv, canSwitchEngine(to: .apple) else { return }
         Task { await switchEngine(to: .apple, reason: "AirPlay") }
+    }
+
+    /// The player's AirPlay picker has opened or closed.
+    func airPlayPicker(open: Bool) {
+        airPlayPickerOpen = open
+        // Before the hand-over, so the stream reopens on AVPlayer without
+        // the offset rather than with it and then again without.
+        refreshAirPlayHold()
+        if open { handOverForAirPlay() }
+    }
+
+    /// Whether the saved audio offset has to be left out for AirPlay.
+    ///
+    /// AVPlayer shifts the sound by playing a composition, and a
+    /// composition cannot be sent to a television: with an offset saved,
+    /// AirPlay carried the sound and no picture. So while the picker is
+    /// open or the sound is going to an AirPlay device the stream plays as
+    /// it is, and the offset comes back when AirPlay is over. A speaker
+    /// loses the offset too: nothing says which kind of device is about to
+    /// be chosen.
+    nonisolated static func airPlayHoldsDelay(pickerOpen: Bool, routeIsAirPlay: Bool) -> Bool {
+        pickerOpen || routeIsAirPlay
+    }
+
+    /// Whether a change of that answer means opening the stream again: only
+    /// on AVPlayer, with an offset saved, when the item is a composition
+    /// that has to go or a file that can take one back.
+    nonisolated static func airPlayHoldRebuilds(
+        holds: Bool, isActive: Bool, onApple: Bool, delay: Double, composed: Bool, carriesDelay: Bool
+    ) -> Bool {
+        guard isActive, onApple, delay != 0 else { return false }
+        return holds ? composed : carriesDelay
+    }
+
+    /// Called when the picker opens or closes, when the audio route changes
+    /// and before a stream is opened.
+    /// True when it opened the stream again.
+    @discardableResult
+    func refreshAirPlayHold(rebuilding: Bool = true) -> Bool {
+        #if os(iOS)
+        let route = AVAudioSession.sharedInstance().currentRoute.outputs.contains { $0.portType == .airPlay }
+        let holds = Self.airPlayHoldsDelay(pickerOpen: airPlayPickerOpen, routeIsAirPlay: route)
+        guard holds != airPlayHoldsDelay else { return false }
+        airPlayHoldsDelay = holds
+        Self.log.notice("AirPlay \(holds ? "holds" : "releases") the audio offset")
+        guard rebuilding, Self.airPlayHoldRebuilds(
+            holds: holds, isActive: isActive, onApple: engine?.kind == .apple, delay: audioDelay,
+            composed: audioDelayIsApplied, carriesDelay: streamCarriesDelay) else { return false }
+        rebuildForAudioDelay()
+        return true
+        #else
+        return false
+        #endif
     }
 
     /// Watch Together is AVPlayer's; the stream goes there first — even with

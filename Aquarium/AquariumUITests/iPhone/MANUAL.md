@@ -74,6 +74,17 @@ The route picker is system UI with no identifiers (TESTING.md known gaps).
 2. Same for a song from Now Playing.
 3. Picture in Picture and SharePlay both need AVFoundation: an mpv title
    switches engine first (`EnginePolicyTests.testPictureInPictureAirPlayAndSharePlayNeedApple`).
+4. Picture, not sound alone, with an audio offset saved (added 2026-11-27,
+   not yet tried on a television): set "…" › Sync to 150 ms on a film that
+   plays directly, tap AirPlay, choose an Apple TV: the picture goes to the
+   television. Stop AirPlay: the film carries on on the phone with the
+   offset back (Info shows it). The same with AirPlay chosen from Control
+   Center, and with a film started while AirPlay is already on
+   (`PhonePlayerAirPlayTests`).
+5. Picture after music: play a song, stop it, play a film, AirPlay to an
+   Apple TV: the picture goes, not the sound alone.
+6. A speaker (HomePod) chosen from the player's AirPlay button plays the
+   film's sound while the picture stays on the phone.
 
 ## Picture in Picture
 

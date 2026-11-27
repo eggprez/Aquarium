@@ -46,13 +46,27 @@ extension PlayerModel {
     /// gets the category before the session goes active.
     func reactivateAudioSession() {
         #if os(iOS) || os(tvOS)
-        guard audioSessionConfigured else {
+        let session = AVAudioSession.sharedInstance()
+        guard audioSessionConfigured, !Self.sessionNeedsVideoCategory(
+            category: session.category, mode: session.mode, policy: session.routeSharingPolicy) else {
             configureAudioSession(activate: true)
             return
         }
-        try? AVAudioSession.sharedInstance().setActive(true)
+        try? session.setActive(true)
         #endif
     }
+
+    #if os(iOS) || os(tvOS)
+    /// Whether the session is no longer the one a video wants. Music takes
+    /// it for long-form audio (`MusicPlayer.activateSession`), which sends
+    /// AirPlay sound only; the category was set once here and never again,
+    /// so a film started after a song kept the song's session.
+    nonisolated static func sessionNeedsVideoCategory(
+        category: AVAudioSession.Category, mode: AVAudioSession.Mode, policy: AVAudioSession.RouteSharingPolicy
+    ) -> Bool {
+        category != .playback || mode != .moviePlayback || policy != .default
+    }
+    #endif
 
     /// Put the session back and give the engine a reason to rebuild its audio.
     func recoverAudio(rebuildingComposition: Bool = false) {
@@ -100,6 +114,9 @@ extension PlayerModel {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+                // AirPlay chosen from Control Center, or ended: the offset
+                // goes or comes back with it.
+                if self.refreshAirPlayHold() { return }
                 switch raw.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:)) {
                 case .newDeviceAvailable, .routeConfigurationChange, .override, .categoryChange:
                     // `oldDeviceUnavailable` is deliberately not here: it fires

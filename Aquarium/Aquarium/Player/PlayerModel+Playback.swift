@@ -45,6 +45,8 @@ extension PlayerModel {
     ) {
         currentStreamURL = url
         lastVariantBitrate = nil
+        // Already on AirPlay when the title starts: no offset from the top.
+        refreshAirPlayHold(rebuilding: false)
         engine?.audioDelay = appliedAudioDelay
         #if os(tvOS)
         engine?.setDisplayRefreshRate(DisplayMatch.matchedRate)

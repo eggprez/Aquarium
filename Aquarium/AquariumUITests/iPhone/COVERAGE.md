@@ -245,6 +245,7 @@ the other four on the standard phone).
 | After this (stop after) | testStopAfterThisNotOfferedOnAFilm, testStopAfterThisOfferedOnAnEpisode | UI | pass (17) (R-d5792c6) |
 | Info panel | testInfoPanelDescribesTheStream, testInfoNamesTheAudioTrack | UI, layout | pass (17) / pass (17, SE, Pro Max, Duo) |
 | AirPlay button | testAirPlayButtonIsThere | UI | pass (17); the route picker is manual |
+| AirPlay sends the picture: a saved audio offset steps aside while the picker is open or the route is AirPlay and comes back after; the session music leaves is replaced before a video | PhonePlayerAirPlayTests | unit | new 2026-11-27; the route itself is manual (MANUAL, AirPlay 4–6), not yet tried on a television |
 | Picture in Picture | testPictureInPictureButtonFollowsSupport | UI | skip on the iPhone simulator (PiP unsupported); manual |
 | Skip Intro, Skip Credits | testSkipIntro, testSkipCreditsAppearsAtTheOutro | UI, layout | pass (17) / pass (17, SE, Pro Max, Duo) (R-B3) |
 | Up Next pill, card, Play, Not now | testUpNextPillListsTheNextEpisode, testUpNextCardPlaysTheNextEpisode, testUpNextCancelKeepsTheEpisode | UI, layout | pass (17) / pass (17, SE, Pro Max, Duo) |

@@ -813,6 +813,10 @@ struct PlayerAirPlayButton: NSViewRepresentable {
 
 final class PlayerAirPlayDelegate: NSObject, AVRoutePickerViewDelegate {
     nonisolated func routePickerViewWillBeginPresentingRoutes(_ routePickerView: AVRoutePickerView) {
-        Task { @MainActor in PlayerModel.shared.handOverForAirPlay() }
+        Task { @MainActor in PlayerModel.shared.airPlayPicker(open: true) }
+    }
+
+    nonisolated func routePickerViewDidEndPresentingRoutes(_ routePickerView: AVRoutePickerView) {
+        Task { @MainActor in PlayerModel.shared.airPlayPicker(open: false) }
     }
 }

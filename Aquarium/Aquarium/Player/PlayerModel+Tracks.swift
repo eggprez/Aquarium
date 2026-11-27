@@ -891,7 +891,7 @@ extension PlayerModel {
         #endif
     }
 
-    var appliedAudioDelay: Double { audioDelay }
+    var appliedAudioDelay: Double { airPlayHoldsDelay ? 0 : audioDelay }
     var appliedAudioDelayMilliseconds: Int { Int((appliedAudioDelay * 1000).rounded()) }
 
     /// What the Sync tab says the offset it is moving is for, where there is
@@ -925,6 +925,11 @@ extension PlayerModel {
         guard isActive else { return }
         let seconds = Double(min(max(milliseconds, -audioDelayReach), audioDelayReach)) / 1000
         guard abs(seconds - audioDelay) > 0.0005 else { return }
+        // Kept for when AirPlay is over; nothing to rebuild meanwhile.
+        if airPlayHoldsDelay {
+            storeAudioDelay(seconds)
+            return
+        }
         if !streamCarriesDelay {
             // An HLS stream on AVPlayer: the offset reaches it only through
             // mpv, which moves the sound on anything. Reopened there.

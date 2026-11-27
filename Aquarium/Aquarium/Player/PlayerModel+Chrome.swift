@@ -100,6 +100,7 @@ extension PlayerModel {
     /// or nil when it can.
     var audioDelayUnavailableReason: String? {
         if !isActive || isOpening { return "Once the stream has opened." }
+        if airPlayHoldsDelay { return "The sound isn't shifted over AirPlay: the television keeps it in step itself." }
         if streamCarriesDelay { return nil }
         let fix = canDelayAudioBySwitching
             ? " The mpv engine moves the sound on any stream — switch for this title?"

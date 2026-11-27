@@ -485,6 +485,11 @@ final class PlayerModel {
     /// Whether the item now in the player is a composition carrying an offset.
     var audioDelayIsApplied = false
     func setAudioDelayApplied(_ applied: Bool) { audioDelayIsApplied = applied }
+    /// AirPlay is in use or being chosen, so the saved offset is left out:
+    /// see `refreshAirPlayHold`.
+    var airPlayHoldsDelay = false
+    /// The player's AirPlay picker is on screen.
+    @ObservationIgnored var airPlayPickerOpen = false
 
     /// A channel that came from a custom M3U playlist rather than Jellyfin.
     struct ExternalChannel {
