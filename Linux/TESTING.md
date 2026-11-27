@@ -2001,6 +2001,7 @@ One row per function, method, Tauri command and constant with logic. Kind: `unit
 | canManageRequests, removalKind, mightRemove, serviceName | src/seerr.ts | tests/unit/seerr.test.ts | unit | tested |
 | removal, removableCopies (Seerr's own rule: a default server, and a record that is linked or in the library) | src/seerr.ts | tests/unit/seerr.test.ts | unit | tested |
 | remove | src/seerr.ts | tests/unit/seerr.test.ts | unit | tested |
+| removal and remove against a real Seerr 3.5, Radarr and Sonarr (`AquariumQA/arr` on the Mac; the deleting test only with `AQUARIUM_ARR_DELETE=1`) | src/seerr.ts | tests/integration/seerr-real.test.ts | integration | tested 2026-11-26 |
 | mightDeleteFromServer, askDeleteFromServer, the menu entry in itemActions | src/ui.ts | tests/dom/ui.test.ts | DOM | tested |
 | `aquarium-item-deleted` listener (redraws the page) | src/main.ts | none | DOM | untested: one line calling route(); manual checklist item 30 |
 | allowed: `/service/radarr`, `/service/sonarr`, `DELETE /media/{id}/file`, `DELETE /media/{id}` | src-tauri/src/seerr.rs | seerr.rs tests | Rust unit | written 2026-11-26, not yet run: the Mac it was written on has no Cargo |

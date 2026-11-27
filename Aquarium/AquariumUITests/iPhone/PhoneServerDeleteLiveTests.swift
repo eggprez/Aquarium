@@ -15,25 +15,16 @@ final class PhoneServerDeleteLiveTests: PhoneUITestCase {
     override func setUpWithError() throws {
         try super.setUpWithError()
         try standardOnly()
-        try ArrQA.require()
-        account = try XCTUnwrap(ArrQA.admin, "qa-account.txt has no admin account")
-        admin = try JellyfinAPI.signIn(account, server: ArrQA.jellyfin)
+        (account, admin) = try ArrQA.start()
     }
 
-    /// The film or show of this name in the Arr libraries, as Jellyfin has it.
-    private func itemId(_ name: String, _ kind: String) throws -> String {
-        let term = name.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed) ?? name
-        let found = try admin.json("/Items?Recursive=true&IncludeItemTypes=\(kind)&SearchTerm=\(term)&Fields=Path") as? [String: Any]
-        let items = (found?["Items"] as? [[String: Any]] ?? []).filter { ($0["Path"] as? String)?.contains("/arr/media/") == true }
-        return try XCTUnwrap(items.first?["Id"] as? String, "\(name) is not in the Arr libraries (run arr/setup.py)")
-    }
-
-    private func gone(_ id: String) -> Bool { (try? admin.json("/Items/\(id)")) == nil }
+    private func itemId(_ name: String, _ kind: String) throws -> String { try ArrQA.itemId(name, kind, admin) }
+    private func gone(_ id: String) -> Bool { ArrQA.gone(id, admin) }
 
     /// The film's own page, signed in as the admin and connected to the real
     /// Seerr, with Delete from Server… chosen from its More menu.
     private func askToDelete(_ id: String, named name: String) throws {
-        launch(account: account, environment: [TestLaunch.seerrEnv: ArrQA.seerr])
+        launch(account: account, environment: ArrQA.environment)
         app.element(TestID.Home.root).waitToExist(90)
         openTitle(id, searching: name)
         app.button(TestID.Detail.more).tapNow(20)
@@ -48,6 +39,34 @@ final class PhoneServerDeleteLiveTests: PhoneUITestCase {
         attachScreenshot("delete dialog, real Seerr")
         XCTAssertTrue(dialogButton("Delete from Seerr").exists, "Seerr's way is not offered")
         XCTAssertTrue(dialogButton("Delete from Both").exists, "Both is not offered")
+    }
+
+    /// The press-and-hold menu on a Home card has the entry, and it asks the
+    /// same three-way question.
+    func testTheCardMenuOffersItToo() throws {
+        let id = try itemId("Nosferatu", "Movie")
+        try ArrQA.putFirstOnContinueWatching(id, admin)
+        launch(account: account, environment: ArrQA.environment)
+        app.element(TestID.Home.root).waitToExist(90)
+        let card = app.buttons.matching(identifier: TestID.Item.card(id)).firstMatch
+        app.reveal(card)
+        card.waitToExist(30)
+        let window = app.windows.firstMatch
+        for _ in 0..<3 {
+            let mid = card.frame.midY
+            guard mid < window.frame.minY + 140 || mid > window.frame.maxY - 140 else { break }
+            let middle = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
+            middle.press(forDuration: 0.05, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: mid < window.frame.midY ? 160 : -160)))
+        }
+        card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 1.2)
+        any(TestID.Item.menuDeleteFromServer).tapNow(15)
+        XCTAssertTrue(dialogButton("Delete from Both").waitForExistence(timeout: 20), "Both is not offered from the card menu")
+        XCTAssertTrue(dialogButton("Delete from Seerr").exists)
+        XCTAssertTrue(dialogButton("Delete from Jellyfin").exists)
+        attachScreenshot("delete dialog from the card menu")
+        // The question has no Cancel on a phone: a tap above it is the way out.
+        app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+        XCTAssertEqual(ArrQA.radarrHas(tmdb: 653), true, "leaving the question deleted nothing")
     }
 
     func testSeerrAloneTakesTheFilmOffRadarr() throws {
@@ -75,54 +94,4 @@ final class PhoneServerDeleteLiveTests: PhoneUITestCase {
     }
 }
 
-/// The real Seerr, Radarr and Sonarr beside the QA Jellyfin.
-enum ArrQA {
-    static let seerr = "http://127.0.0.1:8194"
-    static let jellyfin = "http://127.0.0.1:8196"
-    static var folder: URL { QA.folder.appendingPathComponent("arr", isDirectory: true) }
-
-    static var admin: QA.Account? {
-        guard let text = try? String(contentsOf: QA.folder.appendingPathComponent("qa-account.txt"), encoding: .utf8) else { return nil }
-        var fields: [String: String] = [:]
-        for line in text.split(separator: "\n") {
-            let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
-            if parts.count == 2 { fields[parts[0]] = parts[1] }
-        }
-        guard let user = fields["user"], let password = fields["password"] else { return nil }
-        return QA.Account(name: user, password: password)
-    }
-
-    private static func get(_ url: String, key: String? = nil) -> (Int, Data)? {
-        guard let target = URL(string: url) else { return nil }
-        var request = URLRequest(url: target)
-        request.timeoutInterval = 10
-        if let key { request.setValue(key, forHTTPHeaderField: "X-Api-Key") }
-        let done = DispatchSemaphore(value: 0)
-        var answer: (Int, Data)?
-        URLSession.shared.dataTask(with: request) { data, response, _ in
-            if let http = response as? HTTPURLResponse { answer = (http.statusCode, data ?? Data()) }
-            done.signal()
-        }.resume()
-        done.wait()
-        return answer
-    }
-
-    static func require(file: StaticString = #filePath, line: UInt = #line) throws {
-        guard get(seerr + "/api/v1/settings/public")?.0 == 200, radarrHas(tmdb: 0) != nil else {
-            throw XCTSkip("the real Seerr and Radarr aren't answering (AquariumQA/arr)", file: file, line: line)
-        }
-    }
-
-    /// Nil when Radarr can't be asked.
-    static func radarrHas(tmdb: Int) -> Bool? { has("radarr", 8198, "movie", "tmdbId", tmdb) }
-    static func sonarrHas(tvdb: Int) -> Bool? { has("sonarr", 8199, "series", "tvdbId", tvdb) }
-
-    private static func has(_ name: String, _ port: Int, _ list: String, _ field: String, _ id: Int) -> Bool? {
-        guard let key = try? String(contentsOf: folder.appendingPathComponent("\(name).key"), encoding: .utf8),
-              let (status, data) = get("http://127.0.0.1:\(port)/api/v3/\(list)", key: key.trimmingCharacters(in: .whitespacesAndNewlines)),
-              status == 200, let titles = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else { return nil }
-        return titles.contains { $0[field] as? Int == id }
-    }
-}
 #endif
