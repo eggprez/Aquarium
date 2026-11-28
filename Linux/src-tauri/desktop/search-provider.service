@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=dev.aquarium.app.SearchProvider
+Exec=/usr/bin/aquarium --search-provider

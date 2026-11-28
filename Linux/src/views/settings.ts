@@ -1,32 +1,107 @@
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "../api";
+import * as audio from "../audio";
 import * as iptv from "../iptv";
 import { cachedLineup, loadLineup, refreshNow as refreshLineup } from "../lineup";
+import { getMixPoints, presetName } from "../stations";
 import { el, clear, toast, openDialog, wordmark } from "../ui";
 import {
   isAdaptiveEnabled,
   setAdaptiveEnabled,
+  speedCheckEnabled,
   playerCtl,
   PICTURE_CONTROLS,
+  AUDIO_DELAY_STEP,
   setLiveSetting,
   downloadPrefsChanged,
+  getDownloadConcurrency,
+  setDownloadConcurrency,
+  MAX_DOWNLOAD_CONCURRENCY,
 } from "../playback";
 import { getThemePref, setThemePref, type ThemePref } from "../theme";
+import { openMixDialog } from "./music";
 import { seerrSettingsBlock } from "./seerrSettings";
+
+// ---------- Panes ----------
+
+/**
+ * The panes, in the order the Apple app's Settings window has them. The id is
+ * what follows `#/settings/` in the address, so a pane can be linked to.
+ */
+const PANES = [
+  ["general", "General"],
+  ["account", "Account"],
+  ["video", "Video"],
+  ["audio", "Audio"],
+  ["subtitles", "Subtitles"],
+  ["music", "Music"],
+  ["livetv", "Live TV"],
+  ["storage", "Storage"],
+] as const;
+type PaneId = (typeof PANES)[number][0];
+
+const PANE_KEY = "aquarium.settings-pane";
+
+function isPane(v: unknown): v is PaneId {
+  return PANES.some(([id]) => id === v);
+}
+
+/** The pane to open on: the one asked for, else the one in the address, else
+ *  the one last looked at. */
+function startingPane(asked?: string): PaneId {
+  const fromHash = location.hash.match(/^#\/settings\/([^/?]+)/)?.[1];
+  let remembered: string | null = null;
+  try {
+    remembered = localStorage.getItem(PANE_KEY);
+  } catch {
+    // No memory of it; General will do.
+  }
+  for (const v of [asked, fromHash, remembered]) {
+    const id = v?.toLowerCase();
+    if (isPane(id)) return id;
+  }
+  return "general";
+}
+
+// ---------- Rows and controls ----------
+
+let rowSeq = 0;
 
 /**
  * One labelled setting. Every row on this page is a name, a sentence saying
  * what the setting actually does, and a control — the sentence being the part
  * that stops a settings page from being a list of words you have to guess at.
+ * The control is tied to both, so a screen reader announces a switch by the
+ * row's name rather than as "switch, on". `extra` goes under the sentence: a
+ * status line the row's own button fills in.
  */
-function row(label: string, explain: string, control: Node | null): HTMLElement {
-  return el("div", { class: "settings-row" }, [
-    el("div", {}, [
-      el("div", { class: "lbl" }, [label]),
-      el("div", { class: "sub" }, [explain]),
-    ]),
-    control,
-  ]);
+function row(label: string, explain: string, control: Node | null, extra: Node | null = null): HTMLElement {
+  const id = `set-${++rowSeq}`;
+  const lbl = el("div", { class: "lbl", id: `${id}-l` }, [label]);
+  const sub = explain ? el("div", { class: "sub", id: `${id}-s` }, [explain]) : null;
+  if (control instanceof HTMLElement) {
+    const field = control.matches("input, select, [role=radiogroup]")
+      ? control
+      : control.querySelector("input, select");
+    if (field && !field.hasAttribute("aria-label")) {
+      field.setAttribute("aria-labelledby", lbl.id);
+      if (sub) field.setAttribute("aria-describedby", sub.id);
+    }
+  }
+  return el("div", { class: "settings-row" }, [el("div", {}, [lbl, sub, extra]), control]);
+}
+
+/** A sentence on its own at the foot of a block. */
+function note(text: string, control: Node | null = null): HTMLElement {
+  return el("div", { class: "settings-row" }, [el("div", { class: "sub" }, [text]), control]);
+}
+
+function block(title: string, rows: (Node | null)[], cls = ""): HTMLElement {
+  return el("div", { class: `settings-block${cls ? ` ${cls}` : ""}` }, [el("h3", {}, [title]), ...rows]);
+}
+
+function saveFailed(): void {
+  toast("Couldn't save that setting", "error");
 }
 
 /** A `<select>` bound to one config key, saved the moment it changes. */
@@ -40,7 +115,7 @@ function choice(
     class: "control md",
     onChange: (ev: Event) => {
       const value = (ev.target as HTMLSelectElement).value;
-      void api.saveConfig({ [key]: value }).catch(() => toast("Couldn't save that setting", "error"));
+      void api.saveConfig({ [key]: value }).catch(saveFailed);
       onPicked?.(value);
     },
   }, options.map(([value, label]) => el("option", { value }, [label]))) as HTMLSelectElement;
@@ -64,31 +139,51 @@ function batteryRenderChoice(cfg: any): HTMLSelectElement {
   return select;
 }
 
-/** A checkbox-style toggle bound to one config key. */
-function toggle(
-  cfg: any,
-  key: string,
-  labels: [off: string, on: string],
-  onPicked?: (value: boolean) => void
-): HTMLSelectElement {
-  const select = el("select", {
-    class: "control md",
-    onChange: (ev: Event) => {
-      const on = (ev.target as HTMLSelectElement).value === "on";
-      void api.saveConfig({ [key]: on }).catch(() => toast("Couldn't save that setting", "error"));
-      onPicked?.(on);
-    },
-  }, [
-    el("option", { value: "off" }, [labels[0]]),
-    el("option", { value: "on" }, [labels[1]]),
-  ]) as HTMLSelectElement;
-  select.value = cfg[key] === true ? "on" : "off";
-  return select;
+/**
+ * An on/off switch: a real checkbox, so Space flips it and Tab reaches it,
+ * drawn as a track and a thumb.
+ */
+function switchControl(on: boolean, onChange: (on: boolean) => void): HTMLElement {
+  const input = el("input", { type: "checkbox", role: "switch", class: "switch-input" }) as HTMLInputElement;
+  input.checked = on;
+  input.addEventListener("change", () => onChange(input.checked));
+  return el("label", { class: "switch" }, [input, el("span", { class: "switch-track", "aria-hidden": "true" })]);
+}
+
+/** A switch bound to one true/false config key. */
+function toggle(cfg: any, key: string, onPicked?: (value: boolean) => void): HTMLElement {
+  return switchControl(cfg[key] === true, (on) => {
+    void api.saveConfig({ [key]: on }).catch(saveFailed);
+    onPicked?.(on);
+  });
+}
+
+/**
+ * A choice between a few things that are all worth seeing at once. Radio
+ * buttons underneath, so the arrow keys move along it.
+ */
+function segmented<T extends string>(
+  options: [value: T, label: string][],
+  current: T,
+  onPicked: (value: T) => void
+): HTMLElement {
+  const name = `seg-${++rowSeq}`;
+  return el("div", { class: "segmented", role: "radiogroup" }, options.map(([value, label]) => {
+    const input = el("input", { type: "radio", name, value }) as HTMLInputElement;
+    input.checked = value === current;
+    input.addEventListener("change", () => {
+      if (input.checked) onPicked(value);
+    });
+    return el("label", { class: "segment" }, [input, el("span", {}, [label])]);
+  }));
 }
 
 /**
  * A slider that applies to the running player as it moves and saves once the
- * movement stops. `format` turns the raw number into what the readout says.
+ * movement stops. `format` turns the slider's number into what the readout
+ * says. `scale` turns it into the value that is stored and sent to mpv, and
+ * `unscale` reads a stored value back onto the slider, for a setting shown in
+ * other units than it is kept in.
  */
 function slider(
   cfg: any,
@@ -96,10 +191,14 @@ function slider(
   prop: string,
   range: { min: number; max: number; step?: number; fallback: number },
   format: (v: number) => string,
-  scale: (v: number) => number = (v) => v
+  scale: (v: number) => number = (v) => v,
+  unscale: (stored: number) => number = (v) => v
 ): { control: HTMLElement; reset: () => void } {
-  const start = Number(cfg[key]);
-  const initial = isFinite(start) ? start : range.fallback;
+  const stored = Number(cfg[key]);
+  const initial =
+    cfg[key] != null && isFinite(stored)
+      ? Math.max(range.min, Math.min(range.max, unscale(stored)))
+      : range.fallback;
   const readout = el("span", { class: "settings-value" }, [format(initial)]);
   // `pb-range` carries the app's slider look (the two-tone track is drawn from
   // a `--fill` custom property rather than by the browser).
@@ -110,12 +209,12 @@ function slider(
     max: String(range.max),
     step: String(range.step ?? 1),
     value: String(initial),
-    "aria-label": key,
   }) as HTMLInputElement;
   const paint = (v: number): void => {
     const pct = ((v - range.min) / (range.max - range.min)) * 100;
     input.style.setProperty("--fill", `${Math.max(0, Math.min(100, pct))}%`);
     readout.textContent = format(v);
+    input.setAttribute("aria-valuetext", format(v));
   };
   paint(initial);
   input.addEventListener("input", () => {
@@ -188,37 +287,122 @@ const DECODER_NAMES: Record<string, string> = {
   no: "Software (CPU)",
 };
 
-/** How downloads behave on this laptop: the network they use, the server's
- *  encoder, and whether the machine stays up for them. */
-function downloadsBlock(cfg: any): HTMLElement {
+// The player's remembered Fit / Fill (see `fillOn` in main.ts, which reads the
+// same key when a film starts).
+const FILL_KEY = "aquarium.fill";
+
+function fillDefault(): boolean {
+  try {
+    return localStorage.getItem(FILL_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setFillDefault(on: boolean): void {
+  try {
+    localStorage.setItem(FILL_KEY, on ? "1" : "0");
+  } catch {
+    // Not remembered, that's all.
+  }
+  // Whatever is playing now follows, and so does the player bar's Fill pill.
+  void playerCtl.setProp("panscan", on ? 1 : 0).catch(() => {});
+  document.getElementById("pb-fill")?.classList.toggle("on", on);
+}
+
+/** The picker's steps, in milliseconds: half a second either way. */
+const AUDIO_DELAY_MAX_MS = 500;
+
+function audioDelayName(ms: number): string {
+  if (ms === 0) return "In step";
+  return ms < 0 ? `Sound ${-ms} ms earlier` : `Sound ${ms} ms later`;
+}
+
+/**
+ * The saved audio delay, the one the player's own − / + buttons move. Its
+ * steps are theirs; a value set from the keyboard beyond the half second
+ * offered here is listed as well, so opening Settings never changes it.
+ */
+function audioDelayChoice(cfg: any): HTMLSelectElement {
+  const stepMs = Math.round(AUDIO_DELAY_STEP * 1000);
+  const saved = Number(cfg.audio_delay);
+  const current = isFinite(saved) ? Math.round(saved * 1000) : 0;
+  const values: number[] = [];
+  for (let ms = -AUDIO_DELAY_MAX_MS; ms <= AUDIO_DELAY_MAX_MS; ms += stepMs) values.push(ms);
+  if (!values.includes(current)) {
+    values.push(current);
+    values.sort((a, b) => a - b);
+  }
+  const select = el("select", {
+    class: "control md",
+    onChange: () => {
+      // Saves it and, when something is playing, moves the sound there and
+      // then; with nothing playing the second half fails, which is fine.
+      void playerCtl.setAudioDelay(parseInt(select.value, 10) / 1000).catch(() => {});
+    },
+  }, values.map((ms) => el("option", { value: String(ms) }, [audioDelayName(ms)]))) as HTMLSelectElement;
+  select.value = String(current);
+  return select;
+}
+
+// Subtitle size is kept as mpv's font size, where 38 is the size a track asks
+// for; the slider shows it as a percentage of that, as the Apple app does.
+const SUB_FONT_BASE = 38;
+
+/** How downloads behave on this laptop: how many at once, the network they
+ *  use, the server's encoder, whether the machine stays up for them, and
+ *  where they are kept. */
+function downloadsBlock(cfg: any, downloadsDir: string): HTMLElement {
   const changed = (): void => downloadPrefsChanged();
-  return el("div", { class: "settings-block" }, [
-    el("h3", {}, ["Downloads"]),
+  const parallel = el("select", {
+    class: "control md",
+    onChange: () => setDownloadConcurrency(parseInt(parallel.value, 10)),
+  }, Array.from({ length: MAX_DOWNLOAD_CONCURRENCY }, (_, i) =>
+    el("option", { value: String(i + 1) }, [i === 0 ? "1 at a time" : `${i + 1} at a time`])
+  )) as HTMLSelectElement;
+  parallel.value = String(getDownloadConcurrency());
+  return block("Downloads", [
+    row(
+      "Simultaneous downloads",
+      "How many transfers run at once — the Parallel choice on the Downloads page. One at a time is kindest to a server that has to transcode each of them.",
+      parallel
+    ),
     row(
       "Only download on unmetered connections",
       "Downloads wait while the connection is metered — a phone hotspot, mobile broadband, or a network marked metered in GNOME's settings — and carry on from where they stopped when it isn't.",
-      toggle(cfg, "downloads_unmetered_only", ["Off", "On"], changed)
+      toggle(cfg, "downloads_unmetered_only", changed)
     ),
     row(
       "Transcode one at a time",
-      "Converted downloads run one after another so the server's encoder isn't shared between them. Original-quality files still download side by side, up to the Parallel limit on the Downloads page.",
-      toggle(cfg, "downloads_transcode_serial", ["Off", "On"], changed)
+      "Converted downloads run one after another so the server's encoder isn't shared between them. Original-quality files still download side by side, up to the limit above.",
+      toggle(cfg, "downloads_transcode_serial", changed)
     ),
     row(
       "Keep the laptop awake while downloading",
       "Stops the laptop suspending on idle while a download runs. The screen still dims and locks.",
-      // On unless turned off, so the toggle reads an unset key as on.
-      toggle(
-        { downloads_keep_awake: cfg.downloads_keep_awake !== false },
-        "downloads_keep_awake",
-        ["Off", "On"],
-        changed
-      )
+      // On unless turned off, so the switch reads an unset key as on.
+      toggle({ downloads_keep_awake: cfg.downloads_keep_awake !== false }, "downloads_keep_awake", changed)
+    ),
+    row(
+      "Kept in",
+      downloadsDir,
+      el("button", {
+        class: "btn small",
+        onClick: () =>
+          void invoke("downloads_reveal", { itemIds: [] }).catch((e) =>
+            toast(typeof e === "string" ? e : "Couldn't open the downloads folder", "error")
+          ),
+      }, ["Show in Files"])
     ),
   ]);
 }
 
-export async function renderSettings(root: HTMLElement, onLogout: () => void): Promise<void> {
+/**
+ * Settings, a pane at a time. `pane` is the part of the address after
+ * `#/settings/`; without it the address is read here, and failing that the
+ * pane last looked at opens.
+ */
+export async function renderSettings(root: HTMLElement, onLogout: () => void, pane?: string): Promise<void> {
   clear(root);
   const s = api.getSession();
   const cfg = api.getConfig();
@@ -230,110 +414,269 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
   const info: any = await invoke("app_info").catch(() => ({}));
   if (!document.contains(title)) return;
 
-  // Server block
-  root.append(
-    el("div", { class: "settings-block" }, [
-      el("h3", {}, ["Server"]),
-      el("div", { class: "settings-row" }, [
-        el("div", {}, [
-          el("div", { class: "lbl" }, [s?.server ?? "Not connected"]),
-          el("div", { class: "sub" }, [s ? `Signed in as ${s.userName}` : ""]),
+  // ---------- The pane list and the panes ----------
+  const tabs = new Map<PaneId, HTMLButtonElement>();
+  const panels = new Map<PaneId, HTMLElement>();
+  let shown: PaneId | null = null;
+
+  const show = (id: PaneId, byHand: boolean): void => {
+    if (id === shown) return;
+    shown = id;
+    for (const [pid, tab] of tabs) {
+      const on = pid === id;
+      tab.classList.toggle("active", on);
+      tab.setAttribute("aria-selected", String(on));
+      // One stop in the Tab order for the whole list; the arrows move in it.
+      tab.tabIndex = on ? 0 : -1;
+      panels.get(pid)!.toggleAttribute("hidden", !on);
+    }
+    try {
+      localStorage.setItem(PANE_KEY, id);
+    } catch {
+      // The pane just isn't remembered.
+    }
+    if (!byHand) return;
+    // The address follows the pane without a navigation of its own: the page
+    // is not rebuilt, and Back still leaves Settings in one step.
+    history.replaceState(history.state, "", `#/settings/${id}`);
+    root.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+  };
+
+  const paneList = el("div", { class: "settings-panes", role: "tablist", "aria-label": "Settings" });
+  const paneBody = el("div", { class: "settings-pane-body" });
+  for (const [id, name] of PANES) {
+    const tab = el("button", {
+      class: "settings-pane-tab",
+      type: "button",
+      role: "tab",
+      id: `settings-tab-${id}`,
+      "aria-controls": `settings-pane-${id}`,
+      onClick: () => show(id, true),
+    }, [name]) as HTMLButtonElement;
+    const panel = el("section", {
+      class: "settings-pane",
+      role: "tabpanel",
+      id: `settings-pane-${id}`,
+      "aria-labelledby": `settings-tab-${id}`,
+      hidden: "",
+    });
+    tabs.set(id, tab);
+    panels.set(id, panel);
+    paneList.append(tab);
+    paneBody.append(panel);
+  }
+  // The list is a column in a wide window and a strip in a narrow one, so
+  // either pair of arrows steps through it.
+  paneList.addEventListener("keydown", (ev) => {
+    const order = PANES.map(([id]) => id);
+    const at = order.indexOf(shown ?? "general");
+    let to = -1;
+    if (ev.key === "ArrowDown" || ev.key === "ArrowRight") to = (at + 1) % order.length;
+    else if (ev.key === "ArrowUp" || ev.key === "ArrowLeft") to = (at - 1 + order.length) % order.length;
+    else if (ev.key === "Home") to = 0;
+    else if (ev.key === "End") to = order.length - 1;
+    if (to < 0) return;
+    ev.preventDefault();
+    show(order[to]!, true);
+    tabs.get(order[to]!)!.focus();
+  });
+  root.append(el("div", { class: "settings-layout" }, [paneList, paneBody]));
+  show(startingPane(pane), false);
+  const into = (id: PaneId, ...blocks: (Node | null)[]): void => {
+    panels.get(id)!.append(...blocks.filter((b): b is Node => b != null));
+  };
+
+  // ---------- General ----------
+  // Appearance is applied immediately, no Save needed.
+  into(
+    "general",
+    block("Appearance", [
+      row(
+        "Theme",
+        "System follows your desktop's light/dark setting. The video player's own on-screen controls are always dark.",
+        segmented<ThemePref>(
+          [
+            ["auto", "System"],
+            ["light", "Light"],
+            ["dark", "Dark"],
+          ],
+          getThemePref(),
+          (value) => {
+            void setThemePref(value).catch(() => toast("Couldn't save appearance setting", "error"));
+          }
+        )
+      ),
+    ]),
+    block("Home", [
+      row(
+        "Hide Continue Watching",
+        "Leaves the row of part-watched episodes and films off Home, keeping just Next Up, which lists the next episode of each show you're following. Nothing is forgotten: a title you stopped partway through still resumes from where you left it.",
+        toggle(cfg, "hide_continue_watching")
+      ),
+    ]),
+    // Next Up: what the server's Next Up offers, and for how long. Sent with
+    // every Next Up request, so the row follows at once.
+    block("Next Up", [
+      row(
+        "Keep shows on Next Up",
+        "How long a show stays on Next Up after you last watched anything in it. Past that, Aquarium takes it off Next Up on the server as well, so Jellyfin's other apps stop showing it too; nothing is marked watched. Playing an episode or adding the show to Next Up brings it back. Forever keeps a show for as long as it has an episode left.",
+        choice(
+          { next_up_days: String(cfg.next_up_days ?? "0") },
+          "next_up_days",
+          api.NEXT_UP_DAY_CHOICES.map((d) => [String(d), api.nextUpDaysLabel(d)] as [string, string]).sort((a, b) =>
+            a[0] === "0" ? 1 : b[0] === "0" ? -1 : Number(a[0]) - Number(b[0])
+          )
+        )
+      ),
+      row(
+        "Include episodes in progress",
+        "Lets Next Up offer an episode you're partway through, as Continue Watching does. Off, a show whose next episode you've started is left to Continue Watching until you finish it.",
+        toggle({ next_up_in_progress: cfg.next_up_in_progress !== false }, "next_up_in_progress")
+      ),
+      row(
+        "Include shows you're rewatching",
+        "Keeps a show you're watching again on Next Up: after an episode you've already seen, it offers the one after it, watched or not.",
+        toggle(cfg, "next_up_rewatching")
+      ),
+    ]),
+    block("Keyboard", [
+      note(
+        "Video plays embedded in the app window. Shortcuts: Space pause · ←/→ seek · ↑/↓ volume · m mute · [ / ] speed · z / Z subtitle delay · f fullscreen · Esc exit. Media keys on your keyboard control playback too, and the episode appears in your desktop's own media controls. Hover the video for mpv's on-screen controls."
+      ),
+    ]),
+    block(
+      "About",
+      [
+        el("div", { class: "about-row" }, [
+          el("img", { src: "/aquarium-logo.svg", alt: "", width: "48", height: "48" }),
+          el("div", {}, [
+            el("div", { class: "about-name" }, [
+              wordmark(),
+              el("span", { class: "about-version" }, [info.version ? `v${info.version}` : ""]),
+            ]),
+            el("div", { class: "sub" }, ["A lightweight Jellyfin client. Playback engine: mpv."]),
+          ]),
         ]),
+        row(
+          "mpv",
+          `Running ${info.mpv ?? "libmpv2"}, linked in-process — no separate mpv install needed.`,
+          null
+        ),
+      ],
+      "about-block"
+    )
+  );
+
+  // ---------- Account ----------
+  const signOut = async (btn: HTMLButtonElement): Promise<void> => {
+    btn.disabled = true;
+    btn.textContent = "Signing out…";
+    try {
+      const res = await api.logout();
+      // Signing out only means something if the server agrees. When it
+      // can't be reached the token is still live over there, and the
+      // user is the one who needs to know that.
+      if (!res.revoked) {
+        toast(
+          res.pending
+            ? "Signed out here, but the server couldn't be reached to end the session — Aquarium will keep retrying."
+            : "Signed out here, but the session could not be ended on the server. Revoke this device in Jellyfin → Dashboard → Devices.",
+          "error"
+        );
+      }
+    } catch {
+      toast("Sign out failed", "error");
+    }
+    onLogout();
+  };
+  const serverName = s?.server ?? "this server";
+  const offline = api.isOffline();
+  const pill = (ok: boolean, text: string, dot = false): HTMLElement =>
+    el("span", { class: `sync-pill${ok ? " ok" : " warn"}` }, [
+      dot ? el("span", { class: "status-dot", "aria-hidden": "true" }) : null,
+      text,
+    ]);
+  into(
+    "account",
+    block("Server", [
+      row(
+        s?.server ?? "Not connected",
+        s ? `Signed in as ${s.userName}` : "",
         el("button", {
           class: "btn danger",
-          onClick: async (ev: Event) => {
+          onClick: (ev: Event) => {
             const btn = ev.currentTarget as HTMLButtonElement;
-            btn.disabled = true;
-            btn.textContent = "Signing out…";
-            try {
-              const res = await api.logout();
-              // Signing out only means something if the server agrees. When it
-              // can't be reached the token is still live over there, and the
-              // user is the one who needs to know that.
-              if (!res.revoked) {
-                toast(
-                  res.pending
-                    ? "Signed out here, but the server couldn't be reached to end the session — Aquarium will keep retrying."
-                    : "Signed out here, but the session could not be ended on the server. Revoke this device in Jellyfin → Dashboard → Devices.",
-                  "error"
-                );
-              }
-            } catch {
-              toast("Sign out failed", "error");
-            }
-            onLogout();
+            // One click used to end the session. It is asked first now, as
+            // anything that needs a password to undo should be.
+            openDialog({
+              title: `Sign out of ${serverName}?`,
+              body: [
+                el("p", {}, [
+                  "Your session on the server is ended and this account is forgotten on this device. Downloads stay where they are; signing in again asks for the password.",
+                ]),
+              ],
+              actions: [
+                { label: "Cancel", primary: true },
+                { label: "Sign Out", danger: true, run: () => void signOut(btn) },
+              ],
+            });
           },
-        }, ["Sign out"]),
-      ]),
+        }, ["Sign out…"])
+      ),
+      s
+        ? row(
+            "Status",
+            "Whether the server answered the last time Aquarium asked. Offline means the address didn't reply — the server is down, or this computer can't reach it from where it is.",
+            pill(!offline, offline ? "Offline" : "Connected", true)
+          )
+        : null,
       // Whether the link to the server is encrypted. A LAN-only server over
       // plain HTTP is a defensible choice; not knowing which one you have is
       // not, and this used to be invisible.
-      el("div", { class: "settings-row" }, [
-        el("div", {}, [
-          el("div", { class: "lbl" }, ["Connection"]),
-          el("div", { class: "sub" }, [
-            info.server_secure
-              ? "Encrypted (HTTPS). Your password and access token are never sent in the clear."
-              : "Unencrypted (HTTP). Anything on the network path can read your access token and what you watch. Put Jellyfin behind HTTPS if it's reachable from outside your home network.",
-          ]),
-        ]),
-        el("span", {
-          class: `sync-pill${info.server_secure ? " ok" : " warn"}`,
-        }, [info.server_secure ? "HTTPS" : "HTTP"]),
-      ]),
+      row(
+        "Connection",
+        info.server_secure
+          ? "Encrypted (HTTPS). Your password and access token are never sent in the clear."
+          : "Unencrypted (HTTP). Anything on the network path can read your access token and what you watch. Put Jellyfin behind HTTPS if it's reachable from outside your home network.",
+        pill(!!info.server_secure, info.server_secure ? "HTTPS" : "HTTP")
+      ),
       // The server's own id, recorded at sign-in. Re-checked before the app
       // authenticates, so an edited config.json can't quietly redirect the
       // token to somewhere else.
-      el("div", { class: "settings-row" }, [
-        el("div", {}, [
-          el("div", { class: "lbl" }, ["Server identity"]),
-          el("div", { class: "sub" }, [
-            info.server_pinned
-              ? "Pinned. If this address ever answers as a different Jellyfin server, Aquarium stops instead of signing in to it."
-              : "Not pinned yet — it will be recorded the next time this server answers.",
-          ]),
-        ]),
-        el("span", {
-          class: `sync-pill${info.server_pinned ? " ok" : " warn"}`,
-        }, [info.server_pinned ? "Pinned" : "Unpinned"]),
-      ]),
+      row(
+        "Server identity",
+        info.server_pinned
+          ? "Pinned. If this address ever answers as a different Jellyfin server, Aquarium stops instead of signing in to it."
+          : "Not pinned yet — it will be recorded the next time this server answers.",
+        pill(!!info.server_pinned, info.server_pinned ? "Pinned" : "Unpinned")
+      ),
       // Where the access token actually lives. It used to be written in
       // plaintext into config.json; it now goes to the desktop keyring, and
       // when that isn't available the user deserves to know it fell back.
-      el("div", { class: "settings-row" }, [
-        el("div", {}, [
-          el("div", { class: "lbl" }, ["Access token"]),
-          el("div", { class: "sub" }, [
-            info.token_storage === "keyring"
-              ? "Stored in your desktop keyring (Secret Service). Never written to the config file, and never sent in a URL."
-              : "Your desktop keyring is unavailable, so the token is stored in ~/.config/aquarium/config.json. Unlock or install a keyring (gnome-keyring, KWallet) to secure it.",
-          ]),
-        ]),
-        el("span", {
-          class: `sync-pill${info.token_storage === "keyring" ? " ok" : " warn"}`,
-        }, [info.token_storage === "keyring" ? "Keyring" : "Config file"]),
-      ]),
+      row(
+        "Access token",
+        info.token_storage === "keyring"
+          ? "Stored in your desktop keyring (Secret Service). Never written to the config file, and never sent in a URL."
+          : "Your desktop keyring is unavailable, so the token is stored in ~/.config/aquarium/config.json. Unlock or install a keyring (gnome-keyring, KWallet) to secure it.",
+        pill(info.token_storage === "keyring", info.token_storage === "keyring" ? "Keyring" : "Config file")
+      ),
       // A previous sign-out never got confirmed by the server, so that token is
       // still valid over there. The retry runs at every launch, but the user
       // may want to kill it from the Jellyfin dashboard rather than wait.
       info.revocation_pending
-        ? el("div", { class: "settings-row" }, [
-            el("div", {}, [
-              el("div", { class: "lbl" }, ["Unfinished sign-out"]),
-              el("div", { class: "sub" }, [
-                "A previous sign-out couldn't reach the server, so that session may still be active on it. Aquarium retries at every launch; to end it now, remove this device in Jellyfin → Dashboard → Devices.",
-              ]),
-            ]),
-            el("span", { class: "sync-pill warn" }, ["Pending"]),
-          ])
+        ? row(
+            "Unfinished sign-out",
+            "A previous sign-out couldn't reach the server, so that session may still be active on it. Aquarium retries at every launch; to end it now, remove this device in Jellyfin → Dashboard → Devices.",
+            pill(false, "Pending")
+          )
         : null,
     ])
   );
 
   // Accounts: everyone signed in on this device, switched between without a
   // password, each with its own token in the keyring.
-  const accountsBlock = el("div", { class: "settings-block" }, [el("h3", {}, ["Accounts"])]);
-  root.append(accountsBlock);
+  const accountsBlock = block("Accounts", []);
+  into("account", accountsBlock);
   const drawAccounts = async (): Promise<void> => {
     const list = await api.listAccounts();
     if (!document.contains(accountsBlock)) return;
@@ -373,15 +716,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
                 }),
             }, ["Sign Out of This Device"]),
           ]);
-      accountsBlock.append(
-        el("div", { class: "settings-row" }, [
-          el("div", {}, [
-            el("div", { class: "lbl" }, [a.user_name || "Unnamed user"]),
-            el("div", { class: "sub" }, [where]),
-          ]),
-          controls,
-        ])
-      );
+      accountsBlock.append(row(a.user_name || "Unnamed user", where, controls));
     }
     accountsBlock.append(
       row(
@@ -399,7 +734,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
 
   // Requests: a Seerr server beside this Jellyfin server, signed in to with
   // the account in use (views/seerrSettings.ts).
-  if (s) root.append(seerrSettingsBlock());
+  if (s) into("account", seerrSettingsBlock());
 
   // Quick Connect, the approving side: a device signing in to this server
   // shows a code, and entering it here signs that device in as this user.
@@ -458,100 +793,19 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
   qcInput.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") qcConfirm();
   });
-  root.append(
-    el("div", { class: "settings-block" }, [
-      el("h3", {}, ["Quick Connect"]),
-      el("div", { class: "settings-row" }, [
-        el("div", {}, [
-          el("div", { class: "lbl" }, ["Approve a code"]),
-          el("div", { class: "sub" }, [
-            "Another device signing in to this server — a TV, say — can show a code instead of asking for a password. Enter the code here and it is signed in as you.",
-          ]),
-          qcOutcome,
-        ]),
+  into(
+    "account",
+    block("Quick Connect", [
+      row(
+        "Approve a code",
+        "Another device signing in to this server — a TV, say — can show a code instead of asking for a password. Enter the code here and it is signed in as you.",
         el("div", { class: "settings-actions" }, [qcInput, qcButton]),
-      ]),
-    ])
-  );
-
-  // Appearance block — applied immediately, no Save needed.
-  const themeSelect = el("select", {
-    class: "control md",
-    onChange: async (ev: Event) => {
-      const value = (ev.target as HTMLSelectElement).value as ThemePref;
-      try {
-        await setThemePref(value);
-      } catch {
-        toast("Couldn't save appearance setting", "error");
-      }
-    },
-  }, [
-    el("option", { value: "auto" }, ["Match system"]),
-    el("option", { value: "light" }, ["Light"]),
-    el("option", { value: "dark" }, ["Dark"]),
-  ]) as HTMLSelectElement;
-  themeSelect.value = getThemePref();
-  root.append(
-    el("div", { class: "settings-block" }, [
-      el("h3", {}, ["Appearance"]),
-      el("div", { class: "settings-row" }, [
-        el("div", {}, [
-          el("div", { class: "lbl" }, ["Theme"]),
-          el("div", { class: "sub" }, [
-            "Match system follows your desktop's light/dark setting. The video player's own on-screen controls are always dark.",
-          ]),
-        ]),
-        themeSelect,
-      ]),
-      row(
-        "Continue Watching",
-        "The row of part-watched episodes and films on Home. Hide it to keep just Next Up, which lists the next episode of each show you're following.",
-        toggle(cfg, "hide_continue_watching", ["Shown", "Hidden — Next Up only"])
+        qcOutcome
       ),
     ])
   );
 
-  // Next Up: what the server's Next Up offers, and for how long. Sent with
-  // every Next Up request, so the row follows at once.
-  root.append(
-    el("div", { class: "settings-block" }, [
-      el("h3", {}, ["Next Up"]),
-      row(
-        "Keep shows on Next Up",
-        "How long a show stays on Next Up after you last watched anything in it. Past that, Aquarium takes it off Next Up on the server as well, so Jellyfin's other apps stop showing it too; nothing is marked watched. Playing an episode or adding the show to Next Up brings it back. Forever keeps a show for as long as it has an episode left.",
-        choice(
-          { next_up_days: String(cfg.next_up_days ?? "0") },
-          "next_up_days",
-          api.NEXT_UP_DAY_CHOICES.map((d) => [String(d), api.nextUpDaysLabel(d)] as [string, string]).sort((a, b) =>
-            a[0] === "0" ? 1 : b[0] === "0" ? -1 : Number(a[0]) - Number(b[0])
-          )
-        )
-      ),
-      row(
-        "Include episodes in progress",
-        "Lets Next Up offer an episode you're partway through, as Continue Watching does. Off, a show whose next episode you've started is left to Continue Watching until you finish it.",
-        toggle({ next_up_in_progress: cfg.next_up_in_progress !== false }, "next_up_in_progress", ["Off", "On"])
-      ),
-      row(
-        "Include shows you're rewatching",
-        "Keeps a show you're watching again on Next Up: after an episode you've already seen, it offers the one after it, watched or not.",
-        toggle(cfg, "next_up_rewatching", ["Off", "On"])
-      ),
-    ])
-  );
-
-  // Playback block
-  const adaptiveSelect = el("select", {
-    class: "control md",
-    onChange: (ev: Event) => {
-      setAdaptiveEnabled((ev.target as HTMLSelectElement).value === "auto");
-    },
-  }, [
-    el("option", { value: "auto" }, ["Adapt automatically"]),
-    el("option", { value: "off" }, ["Keep my choice"]),
-  ]) as HTMLSelectElement;
-  adaptiveSelect.value = isAdaptiveEnabled() ? "auto" : "off";
-
+  // ---------- Video ----------
   // What the last stream was actually decoded with. Asking for hardware
   // decoding and getting it are different things — mpv falls back to the CPU
   // without saying so, and the only symptom is a hot, loud machine.
@@ -562,18 +816,120 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
       ])
     : el("span", { class: "sync-pill" }, ["Not measured yet"]);
 
-  root.append(
-    el("div", { class: "settings-block" }, [
-      el("h3", {}, ["Playback"]),
+  const pictureSliders = PICTURE_CONTROLS.map((control) => ({
+    control,
+    ui: slider(
+      cfg,
+      control.key,
+      control.prop,
+      { min: -50, max: 50, fallback: 0 },
+      (v) => `${v > 0 ? "+" : ""}${Math.round(v)}`
+    ),
+  }));
+  const zoom = slider(
+    cfg,
+    "video_zoom",
+    "video-zoom",
+    { min: 0, max: 40, fallback: 0 },
+    (v) => `${Math.round(v)}%`,
+    // The slider is in percent; mpv's scale, and what is saved, is a fraction.
+    (v) => v / 100,
+    (stored) => Math.round(stored * 100)
+  );
+  const aspectChoice = choice(cfg, "video_aspect", [
+    ["", "As the file says"],
+    ["16:9", "16:9 — widescreen"],
+    ["4:3", "4:3 — classic"],
+    ["1.85:1", "1.85:1 — flat"],
+    ["2.35:1", "2.35:1 — cinemascope"],
+    ["2.39:1", "2.39:1 — scope"],
+  ]);
+
+  into(
+    "video",
+    block("Quality", [
       row(
-        "Resume where I left off",
-        "Opens something you have already started at the point you stopped, instead of from the beginning.",
-        toggle({ resume_playback: cfg.resume_playback !== false }, "resume_playback", ["Off — always from the start", "On"])
+        "Adapt quality automatically",
+        "Drops to a smaller stream when playback keeps stalling or the machine can't decode fast enough, and climbs back after the connection has been steady for a while. It never goes above the quality you picked, and never touches downloaded files or Live TV. Off keeps your choice.",
+        switchControl(isAdaptiveEnabled(), setAdaptiveEnabled)
       ),
       row(
-        "Play the next episode automatically",
-        "The Up Next card appears over the closing stretch of an episode either way — turning this off just means it won't start on its own.",
-        toggle({ autoplay_next: cfg.autoplay_next !== false }, "autoplay_next", ["Off", "On"])
+        "Check the connection first",
+        "Times a short download from the server before a stream opens and starts at the quality the connection carries, rather than at the original and stepping down from there. Skipped when you have picked a quality yourself, for the next episode in a run, and for Live TV.",
+        toggle({ speed_check: speedCheckEnabled() }, "speed_check")
+      ),
+    ]),
+    block("Picture", [
+      row(
+        "Framing",
+        "Fill is how you put a 2.35:1 film on a 16:9 screen without watching it between black bars. It does cut the edges of the frame off. Also reachable from the player bar, so it can be judged against what's on screen.",
+        segmented<"fit" | "fill">(
+          [
+            ["fit", "Fit"],
+            ["fill", "Fill"],
+          ],
+          fillDefault() ? "fill" : "fit",
+          (v) => setFillDefault(v === "fill")
+        )
+      ),
+      ...pictureSliders.map((p) => row(p.control.label, "", p.ui.control)),
+      row(
+        "Aspect ratio",
+        "Override what the file claims. Only needed for material that's tagged wrong — a stretched or squashed picture that no player gets right.",
+        aspectChoice
+      ),
+      row(
+        "Zoom",
+        "Crops in on the picture about its centre. It does cut the edges of the frame off.",
+        zoom.control
+      ),
+      row(
+        "Night mode",
+        "Evens out the distance between whispered dialogue and the next explosion, so an action film stays watchable at a volume that won't wake the house. Applies to the next thing that starts playing.",
+        toggle(cfg, "night_mode")
+      ),
+      note(
+        "Picture settings apply immediately, and are also reachable from the player bar while something is playing.",
+        el("button", {
+          class: "btn",
+          onClick: () => {
+            for (const p of pictureSliders) p.ui.reset();
+            zoom.reset();
+            aspectChoice.value = "";
+            void api.saveConfig({ video_aspect: "" });
+            toast("Picture reset", "ok");
+          },
+        }, ["Reset picture"])
+      ),
+    ]),
+    block("Player", [
+      row(
+        "Hardware acceleration",
+        "Decoding video on the GPU instead of the processor. Automatic prefers VAAPI on AMD and Intel and NVDEC on NVIDIA, and falls back to the processor for anything they can't take. Change this only if a particular file plays badly — Vulkan decode is newer and still produces a black picture with some drivers.",
+        choice(cfg, "hwdec", [
+          ["auto", "Automatic (recommended)"],
+          ["vaapi", "VAAPI — AMD, Intel"],
+          ["nvdec", "NVDEC — NVIDIA"],
+          ["vulkan", "Vulkan"],
+          ["off", "Off — decode on the processor"],
+        ])
+      ),
+      row(
+        "Last decoded with",
+        seen
+          ? "What the most recent stream actually used. Software here, with hardware acceleration set to automatic, means no GPU path would take the file — usually an unusual codec, or drivers without the matching decoder installed."
+          : "Play something and this will report which decoder was used, rather than which one was asked for.",
+        decoderPill
+      ),
+      row(
+        "Smooth motion",
+        "24fps film shown on a 60Hz screen has to hold every other frame for an extra beat, which is the stutter you see on slow camera pans. This resamples playback onto the display's own refresh rate and blends the frames between — noticeably smoother on panning shots, at the cost of some GPU load. Try turning it off if playback stutters or the fans spin up.",
+        toggle(cfg, "smooth_motion")
+      ),
+      row(
+        "Battery saver rendering",
+        "Draws the picture with the simplest scaler and 8-bit intermediates instead of mpv's default high-quality chain. On a HiDPI screen every scaler pass runs at the panel's full resolution, so this is a real saving on the GPU, and the difference in the picture is hard to see from viewing distance. Automatic switches it on while the computer runs on battery or in power-saver mode, and off again when it doesn't, even partway through a film.",
+        batteryRenderChoice(cfg)
       ),
       row(
         "Skip by",
@@ -596,52 +952,154 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
       ),
       row(
         "Show time remaining",
-        "Whether the time at the right of the timeline counts down to the end or shows the whole length. Clicking it in the player flips this too.",
-        toggle(cfg, "player_show_remaining", ["Off — the whole length", "On — time left"])
+        "The time at the right of the timeline counts down to the end; off, it shows the whole length. Clicking it in the player flips this too.",
+        toggle(cfg, "player_show_remaining")
+      ),
+    ]),
+    block("Playing", [
+      row(
+        "Resume where I left off",
+        "Opens something you have already started at the point you stopped, instead of from the beginning.",
+        toggle({ resume_playback: cfg.resume_playback !== false }, "resume_playback")
       ),
       row(
-        "Streaming quality",
-        "Adapting drops to a smaller stream when playback keeps stalling or the machine can't decode fast enough, and climbs back after the connection has been steady for a while. It never goes above the quality you picked, and never touches downloaded files or Live TV.",
-        adaptiveSelect
+        "Play the next episode automatically",
+        "The Up Next card appears over the closing stretch of an episode either way — turning this off just means it won't start on its own.",
+        toggle({ autoplay_next: cfg.autoplay_next !== false }, "autoplay_next")
       ),
+    ])
+  );
+
+  // ---------- Subtitles ----------
+  // Which track a file opens with, before anyone touches anything. Applies to
+  // the next thing that starts playing, not to what's on screen now.
+  const subSize = slider(
+    cfg,
+    "sub_font_size",
+    "sub-font-size",
+    { min: 60, max: 180, step: 5, fallback: 100 },
+    (v) => `${Math.round(v)}%`,
+    (pct) => Math.round(SUB_FONT_BASE * pct) / 100,
+    // A size saved before this was a percentage lands on the nearest step,
+    // or the end of the range; it is only rewritten if the slider is moved.
+    (size) => Math.round(((size / SUB_FONT_BASE) * 100) / 5) * 5
+  );
+  const subPos = slider(
+    cfg,
+    "sub_pos",
+    "sub-pos",
+    { min: 60, max: 100, fallback: 100 },
+    (v) => (v >= 99 ? "Bottom" : `${Math.round(100 - v)} up`)
+  );
+  into(
+    "subtitles",
+    block("Language", [
       row(
-        "Hardware acceleration",
-        "Decoding video on the GPU instead of the processor. Automatic prefers VAAPI on AMD and Intel and NVDEC on NVIDIA, and falls back to the processor for anything they can't take. Change this only if a particular file plays badly — Vulkan decode is newer and still produces a black picture with some drivers.",
-        choice(cfg, "hwdec", [
-          ["auto", "Automatic (recommended)"],
-          ["vaapi", "VAAPI — AMD, Intel"],
-          ["nvdec", "NVDEC — NVIDIA"],
-          ["vulkan", "Vulkan"],
-          ["off", "Off — decode on the processor"],
+        "Subtitles",
+        "“Never” is the setting to pick if you don't use subtitles: it stops them being switched on by a file that ships with them enabled, which no other option here can do. “Forced only” shows just the track that translates signs and the odd line of foreign dialogue, whatever language the sound is in.",
+        choice(cfg, "sub_lang", [
+          ["", "Only when the file turns them on"],
+          ["off", "Never — no subtitles"],
+          ["forced", "Forced only — signs and foreign lines"],
+          ...LANGUAGES.map(([code, name]) => [code, name] as [string, string]),
         ])
       ),
       row(
-        "Last decoded with",
-        seen
-          ? "What the most recent stream actually used. Software here, with hardware acceleration set to automatic, means no GPU path would take the file — usually an unusual codec, or drivers without the matching decoder installed."
-          : "Play something and this will report which decoder was used, rather than which one was asked for.",
-        decoderPill
+        "Forced subtitles",
+        "With a subtitle language chosen: when the audio is already in your preferred language, show only the forced track — the one that translates signs and the occasional line of foreign dialogue — instead of subtitling the whole thing.",
+        toggle(cfg, "subs_forced_only")
+      ),
+      note(
+        "Changing a track during an episode is remembered for that series on its own, and the next episode opens the same way."
+      ),
+    ]),
+    block("Appearance", [
+      row(
+        "Size",
+        "How large subtitles are drawn, against the size the track asks for. Applies as you drag it, so it can be judged against what's playing.",
+        subSize.control
       ),
       row(
-        "Smooth motion",
-        "24fps film shown on a 60Hz screen has to hold every other frame for an extra beat, which is the stutter you see on slow camera pans. This resamples playback onto the display's own refresh rate and blends the frames between — noticeably smoother on panning shots, at the cost of some GPU load. Try turning it off if playback stutters or the fans spin up.",
-        toggle(cfg, "smooth_motion", ["Off", "On — match the display"])
+        "Position",
+        "Lifts subtitles off the bottom edge — useful on a film with burnt-in captions already down there, or when the player bar is in the way.",
+        subPos.control
       ),
       row(
-        "Battery saver rendering",
-        "Draws the picture with the simplest scaler and 8-bit intermediates instead of mpv's default high-quality chain. On a HiDPI screen every scaler pass runs at the panel's full resolution, so this is a real saving on the GPU, and the difference in the picture is hard to see from viewing distance. Automatic switches it on while the computer runs on battery or in power-saver mode, and off again when it doesn't, even partway through a film.",
-        batteryRenderChoice(cfg)
+        "Background",
+        "An outline is mpv's default and disappears into a bright scene now and then. A solid strip behind the text always stays readable, at the cost of covering a band of the picture.",
+        choice(cfg, "sub_bg", [
+          ["outline", "Outline"],
+          ["shadow", "Drop shadow"],
+          ["box", "Solid strip"],
+        ], (value) => {
+          // `choice` has already saved the setting; this only mirrors it onto a
+          // running player, using the same three properties prefs.rs passes on
+          // the command line for the next one.
+          const spec: Record<string, [back: string, border: string, shadow: string]> = {
+            outline: ["#00000000", "3", "0"],
+            shadow: ["#00000000", "1.5", "2"],
+            box: ["#C0000000", "0", "0"],
+          };
+          const [back, border, shadow] = spec[value] ?? spec.outline!;
+          void playerCtl.setProp("sub-back-color", back).catch(() => {});
+          void playerCtl.setProp("sub-border-size", border).catch(() => {});
+          void playerCtl.setProp("sub-shadow-offset", shadow).catch(() => {});
+        })
       ),
+    ])
+  );
+
+  // ---------- Music ----------
+  const mixPreset = el("span", { class: "settings-value" }, [presetName(getMixPoints())]);
+  into(
+    "music",
+    block("Playing", [
       row(
-        "mpv",
-        `Running ${info.mpv ?? "libmpv2"}, linked in-process — no separate mpv install needed.`,
-        null
+        "Normalize volume",
+        "Sound Check: level songs against each other using the loudness measured for each (ReplayGain), so a quiet album isn't followed by a loud one. The same switch as Sound Check in the music player.",
+        switchControl(audio.soundCheckOn(), (on) => {
+          void audio.setSoundCheck(on).catch(saveFailed);
+        })
       ),
-      el("div", { class: "settings-row" }, [
-        el("div", { class: "sub" }, [
-          "Video plays embedded in the app window. Shortcuts: Space pause · ←/→ seek · ↑/↓ volume · m mute · [ / ] speed · z / Z subtitle delay · f fullscreen · Esc exit. Media keys on your keyboard control playback too, and the episode appears in your desktop's own media controls. Hover the video for mpv's on-screen controls.",
+    ]),
+    block("Stations", [
+      row(
+        "Mixes",
+        "Who builds a mix when you press Instant Mix or start a station. Aquarium's own stations score songs by artist, genre and era (tuned with Station Mix); Jellyfin Instant Mix plays what the server sends, in the server's order.",
+        choice(cfg, "music_mix_source", [
+          ["aquarium", "Aquarium"],
+          ["jellyfin", "Jellyfin Instant Mix"],
         ]),
-      ]),
+        note(
+          "A Jellyfin server running the AudioMuse-AI plugin answers Instant Mix with AudioMuse's similarity automatically. Without a server connection, Aquarium always uses its own mix from your downloads."
+        )
+      ),
+      row(
+        "Station mix",
+        "Twenty points to spend on what stations favour — what you star and play most, or what you have never played. Every station uses them.",
+        el("div", { class: "settings-actions" }, [
+          mixPreset,
+          el("button", {
+            class: "btn small",
+            onClick: () => {
+              openMixDialog();
+              // The dialog saves for itself and says nothing on closing, so
+              // the name beside the button is read again once focus is back
+              // here — a moment after, because its Save is still on its way
+              // to the config when the dialog hands focus back.
+              window.addEventListener(
+                "focusin",
+                () => {
+                  window.setTimeout(() => {
+                    mixPreset.textContent = presetName(getMixPoints());
+                  }, 400);
+                },
+                { once: true }
+              );
+            },
+          }, ["Station Mix…"]),
+        ])
+      ),
     ])
   );
 
@@ -674,7 +1132,7 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
     void api
       .saveConfig({ livetv_user_agent: uaInput.value.trim() || null })
       .then(() => iptv.invalidate())
-      .catch(() => toast("Couldn't save that setting", "error"));
+      .catch(saveFailed);
   });
 
   const refreshChoice = choice(
@@ -840,144 +1298,55 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
       "How often the playlist and guide are read again while the app is open. Never means only when you press Refresh now or change an address.",
       refreshChoice
     ),
-    el("div", { class: "settings-row" }, [
-      el("div", {}, [
-        el("div", { class: "lbl" }, ["Channel artwork"]),
-        el("div", { class: "sub" }, [
-          "Loads every channel's logo the way the guide does and says how many came back, which ones the playlist never named, and which hosts wouldn't serve them.",
-        ]),
-        artStatus,
-      ]),
+    row(
+      "Channel artwork",
+      "Loads every channel's logo the way the guide does and says how many came back, which ones the playlist never named, and which hosts wouldn't serve them.",
       el("button", {
         class: "btn",
         onClick: (ev: Event) => void checkArtwork(ev.currentTarget as HTMLButtonElement),
       }, ["Check artwork"]),
-    ]),
-    el("div", { class: "settings-row" }, [
-      el("div", {}, [
-        el("div", { class: "lbl" }, ["Check and load"]),
-        liveStatus,
-      ]),
+      artStatus
+    ),
+    row(
+      "Check and load",
+      "",
       el("button", {
         class: "btn primary",
         onClick: (ev: Event) => void checkSources(ev.currentTarget as HTMLButtonElement),
       }, ["Load sources"]),
-    ])
+      liveStatus
+    )
   );
   syncLiveRows(cfg.livetv_source === "custom" ? "custom" : "jellyfin");
   syncLastRead();
 
-  root.append(
-    el("div", { class: "settings-block" }, [
-      el("h3", {}, ["Live TV"]),
+  into(
+    "livetv",
+    block("Source", [
       row(
         "Source",
         "Where the Live TV page gets its channels and schedule. Your own playlist replaces Jellyfin's Live TV entirely — the guide, the channel list and playback all come from the two files below.",
         sourceSelect
       ),
       customRows,
-      el("div", { class: "settings-row" }, [
-        el("div", {}, [
-          el("div", { class: "lbl" }, ["Channel list and guide"]),
-          el("div", { class: "sub" }, [
-            "Read the channels and schedule again now, rather than waiting for the next refresh.",
-          ]),
-          lastReadLine,
-        ]),
+      row(
+        "Channel list and guide",
+        "Read the channels and schedule again now, rather than waiting for the next refresh.",
         el("button", {
           class: "btn",
           onClick: (ev: Event) => void refreshNow(ev.currentTarget as HTMLButtonElement),
         }, ["Refresh now"]),
-      ]),
+        lastReadLine
+      ),
     ])
   );
 
-  // ---------- Languages ----------
-  // Which track a file opens with, before anyone touches anything. Applies to
-  // the next thing that starts playing, not to what's on screen now.
-  root.append(
-    el("div", { class: "settings-block" }, [
-      el("h3", {}, ["Languages"]),
-      row(
-        "Audio",
-        "Preferred spoken language. The first track matching it is chosen when a file has more than one; anything without a match opens on whatever the file lists first.",
-        choice(cfg, "audio_lang", [
-          ["", "Whatever the file lists first"],
-          ...LANGUAGES.map(([code, name]) => [code, name] as [string, string]),
-        ])
-      ),
-      row(
-        "Subtitles",
-        "“Never” is the setting to pick if you don't use subtitles: it stops them being switched on by a file that ships with them enabled, which no other option here can do.",
-        choice(cfg, "sub_lang", [
-          ["", "Only when the file turns them on"],
-          ["off", "Never — no subtitles"],
-          ...LANGUAGES.map(([code, name]) => [code, name] as [string, string]),
-        ])
-      ),
-      row(
-        "Forced subtitles",
-        "When the audio is already in your preferred language, show only the forced track — the one that translates signs and the occasional line of foreign dialogue — instead of subtitling the whole thing.",
-        toggle(cfg, "subs_forced_only", ["Off", "On — forced only"])
-      ),
-      el("div", { class: "settings-row" }, [
-        el("div", { class: "sub" }, [
-          "Changing a track during an episode is remembered for that series on its own, and the next episode opens the same way.",
-        ]),
-      ]),
-    ])
-  );
-
-  // ---------- Subtitle appearance ----------
-  const subSize = slider(
-    cfg,
-    "sub_font_size",
-    "sub-font-size",
-    { min: 20, max: 80, fallback: 38 },
-    (v) => `${Math.round(v)}`
-  );
-  const subPos = slider(
-    cfg,
-    "sub_pos",
-    "sub-pos",
-    { min: 60, max: 100, fallback: 100 },
-    (v) => (v >= 99 ? "Bottom" : `${Math.round(100 - v)} up`)
-  );
-  root.append(
-    el("div", { class: "settings-block" }, [
-      el("h3", {}, ["Subtitles"]),
-      row("Size", "Applies as you drag it, so it can be judged against what's playing.", subSize.control),
-      row(
-        "Position",
-        "Lifts subtitles off the bottom edge — useful on a film with burnt-in captions already down there, or when the player bar is in the way.",
-        subPos.control
-      ),
-      row(
-        "Background",
-        "An outline is mpv's default and disappears into a bright scene now and then. A solid strip behind the text always stays readable, at the cost of covering a band of the picture.",
-        choice(cfg, "sub_bg", [
-          ["outline", "Outline"],
-          ["shadow", "Drop shadow"],
-          ["box", "Solid strip"],
-        ], (value) => {
-          // `choice` has already saved the setting; this only mirrors it onto a
-          // running player, using the same three properties prefs.rs passes on
-          // the command line for the next one.
-          const spec: Record<string, [back: string, border: string, shadow: string]> = {
-            outline: ["#00000000", "3", "0"],
-            shadow: ["#00000000", "1.5", "2"],
-            box: ["#C0000000", "0", "0"],
-          };
-          const [back, border, shadow] = spec[value] ?? spec.outline!;
-          void playerCtl.setProp("sub-back-color", back).catch(() => {});
-          void playerCtl.setProp("sub-border-size", border).catch(() => {});
-          void playerCtl.setProp("sub-shadow-offset", shadow).catch(() => {});
-        })
-      ),
-    ])
-  );
+  // ---------- Storage ----------
+  into("storage", downloadsBlock(cfg, info.downloads_dir ?? ""));
 
   // ---------- Audio ----------
+  // Last, because it waits on mpv for the list of outputs and nothing else
+  // on the page should wait with it.
   const devices = await invoke<any[]>("audio_devices").catch(() => [] as any[]);
   if (!document.contains(title)) return;
   const deviceOptions: [string, string][] = [
@@ -986,9 +1355,19 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
       .filter((d) => d?.name && d.name !== "auto")
       .map((d) => [String(d.name), String(d.description ?? d.name)] as [string, string]),
   ];
-  root.append(
-    el("div", { class: "settings-block" }, [
-      el("h3", {}, ["Audio"]),
+  into(
+    "audio",
+    block("Language", [
+      row(
+        "Audio",
+        "Preferred spoken language. The first track matching it is chosen when a file has more than one; anything without a match opens on whatever the file lists first.",
+        choice(cfg, "audio_lang", [
+          ["", "Whatever the file lists first"],
+          ...LANGUAGES.map(([code, name]) => [code, name] as [string, string]),
+        ])
+      ),
+    ]),
+    block("Output", [
       row(
         "Output",
         devices.length
@@ -997,129 +1376,18 @@ export async function renderSettings(root: HTMLElement, onLogout: () => void): P
         choice(cfg, "audio_device", deviceOptions)
       ),
       row(
-        "Night mode",
-        "Evens out the distance between whispered dialogue and the next explosion, so an action film stays watchable at a volume that won't wake the house.",
-        toggle(cfg, "night_mode", ["Off", "On — even out loud scenes"])
-      ),
-      row(
         "Downmix to stereo",
         "Fold surround tracks down to two channels. Worth turning on if you listen on headphones or laptop speakers and find dialogue in 5.1 material too quiet — the centre channel it lives on gets mixed in properly rather than dropped.",
-        toggle(cfg, "stereo_downmix", ["Off — keep surround", "On — stereo"])
-      ),
-      el("div", { class: "settings-row" }, [
-        el("div", { class: "sub" }, ["Audio settings apply to the next thing that starts playing."]),
-      ]),
-    ])
-  );
-
-  // ---------- Music ----------
-  root.append(
-    el("div", { class: "settings-block" }, [
-      el("h3", {}, ["Music"]),
-      row(
-        "Mixes",
-        "Who builds a mix when you press Instant Mix or start a station. Aquarium's own stations score songs by artist, genre and era (tuned with Station Mix); Jellyfin Instant Mix plays what the server sends, in the server's order.",
-        choice(cfg, "music_mix_source", [
-          ["aquarium", "Aquarium"],
-          ["jellyfin", "Jellyfin Instant Mix"],
-        ])
-      ),
-      el("div", { class: "settings-row" }, [
-        el("div", { class: "sub" }, [
-          "A Jellyfin server running the AudioMuse-AI plugin answers Instant Mix with AudioMuse's similarity automatically. Without a server connection, Aquarium always uses its own mix from your downloads.",
-        ]),
-      ]),
-    ])
-  );
-
-  // ---------- Picture ----------
-  const pictureSliders = PICTURE_CONTROLS.map((control) => ({
-    control,
-    ui: slider(
-      cfg,
-      control.key,
-      control.prop,
-      { min: -50, max: 50, fallback: 0 },
-      (v) => `${v > 0 ? "+" : ""}${Math.round(v)}`
-    ),
-  }));
-  const zoom = slider(
-    cfg,
-    "video_zoom",
-    "video-zoom",
-    { min: 0, max: 40, fallback: 0 },
-    (v) => `${Math.round(v)}%`,
-    // The slider is in percent; mpv's scale is a fraction.
-    (v) => v / 100
-  );
-  root.append(
-    el("div", { class: "settings-block" }, [
-      el("h3", {}, ["Picture"]),
-      ...pictureSliders.map((s) =>
-        row(s.control.label, "", s.ui.control)
+        toggle(cfg, "stereo_downmix")
       ),
       row(
-        "Aspect ratio",
-        "Override what the file claims. Only needed for material that's tagged wrong — a stretched or squashed picture that no player gets right.",
-        choice(cfg, "video_aspect", [
-          ["", "As the file says"],
-          ["16:9", "16:9 — widescreen"],
-          ["4:3", "4:3 — classic"],
-          ["2.35:1", "2.35:1 — cinemascope"],
-        ])
+        "Audio delay",
+        "How far the sound is moved against the picture — the lag a television, soundbar or wireless headset adds, which is the same for everything heard through it. Saved and applied to everything you play; the player's own delay buttons move this same value.",
+        audioDelayChoice(cfg)
       ),
-      row(
-        "Zoom",
-        "Crops in on the picture, which is how you fill a 16:9 screen with a 2.35:1 film instead of watching it between black bars. It does cut the edges of the frame off.",
-        zoom.control
+      note(
+        "Output and downmix apply to the next thing that starts playing; the delay moves what is playing now as well. Night mode is under Video."
       ),
-      el("div", { class: "settings-row" }, [
-        el("div", { class: "sub" }, [
-          "Picture settings apply immediately, and are also reachable from the player bar while something is playing.",
-        ]),
-        el("button", {
-          class: "btn",
-          onClick: () => {
-            for (const s of pictureSliders) s.ui.reset();
-            zoom.reset();
-            void api.saveConfig({ video_aspect: "" });
-            toast("Picture reset", "ok");
-          },
-        }, ["Reset picture"]),
-      ]),
-    ])
-  );
-
-  root.append(downloadsBlock(cfg));
-
-  // Storage block
-  root.append(
-    el("div", { class: "settings-block" }, [
-      el("h3", {}, ["Storage"]),
-      el("div", { class: "settings-row" }, [
-        el("div", {}, [
-          el("div", { class: "lbl" }, ["Downloads folder"]),
-          el("div", { class: "sub" }, [info.downloads_dir ?? ""]),
-        ]),
-      ]),
-    ])
-  );
-
-  root.append(
-    el("div", { class: "settings-block about-block" }, [
-      el("h3", {}, ["About"]),
-      el("div", { class: "about-row" }, [
-        el("img", { src: "/aquarium-logo.svg", alt: "", width: "48", height: "48" }),
-        el("div", {}, [
-          el("div", { class: "about-name" }, [
-            wordmark(),
-            el("span", { class: "about-version" }, [info.version ? `v${info.version}` : ""]),
-          ]),
-          el("div", { class: "sub" }, [
-            "A lightweight Jellyfin client. Playback engine: mpv.",
-          ]),
-        ]),
-      ]),
     ])
   );
 }

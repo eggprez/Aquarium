@@ -1104,6 +1104,36 @@ export function itemActions(
     }
   }
 
+  // A show or a season plays from wherever it was left.
+  if (isSeries || item.Type === "Season") {
+    out.push({
+      label: "Play Next Episode",
+      icon: "play",
+      run: async () => {
+        try {
+          const seriesId = isSeries ? item.Id : item.SeriesId;
+          let next: any = null;
+          if (isSeries) {
+            next = await api.getSeriesNextUp(seriesId);
+          } else if (seriesId) {
+            const eps = await api.getEpisodes(seriesId, item.Id);
+            next = eps.find((ep: any) => !ep.UserData?.Played) ?? eps[0] ?? null;
+          }
+          if (!next && seriesId) {
+            const seasons = await api.getSeasons(seriesId);
+            const first = seasons.find((s: any) => s.IndexNumber !== 0) ?? seasons[0];
+            const eps = first ? await api.getEpisodes(seriesId, first.Id) : [];
+            next = eps[0] ?? null;
+          }
+          if (next) await playItem(next, { resume: true });
+          else toast("Nothing to play in it yet", "info");
+        } catch (e: any) {
+          toast(e.message ?? String(e), "error");
+        }
+      },
+    });
+  }
+
   out.push(...queueActions(item));
   out.push(downloadAction(item));
 
@@ -1159,6 +1189,28 @@ export function itemActions(
       icon: "episodes",
       run: () => {
         location.hash = `#/item/${item.SeriesId}`;
+      },
+    });
+  }
+  if (item.Type === "Episode" && item.SeasonId && item.ParentIndexNumber != null) {
+    out.push({
+      label: item.ParentIndexNumber === 0 ? "Go to Specials" : `Go to Season ${item.ParentIndexNumber}`,
+      icon: "episodes",
+      run: () => {
+        location.hash = `#/item/${item.SeasonId}`;
+      },
+    });
+  }
+  if (item.Name) {
+    out.push({
+      label: "Copy Title",
+      run: async () => {
+        try {
+          await navigator.clipboard.writeText(item.SeriesName && item.Type === "Episode" ? `${item.SeriesName} — ${item.Name}` : item.Name);
+          toast("Title copied", "ok");
+        } catch {
+          toast("Couldn't reach the clipboard", "error");
+        }
       },
     });
   }
@@ -1248,9 +1300,16 @@ export function itemCard(
     } else {
       sub = s != null && e != null ? `S${s}:E${e} · ${item.Name}` : item.Name;
     }
-  } else if (item.Type === "Series" && item.UserData?.UnplayedItemCount) {
-    sub = `${item.UserData.UnplayedItemCount} unplayed`;
+  } else if (item.Type === "Movie" || item.Type === "Series") {
+    // Year, length and score, as the Apple card has them. A show's episodes
+    // left to watch are a badge on its poster (below), not a line of text.
+    sub = [
+      item.ProductionYear ? String(item.ProductionYear) : "",
+      item.Type === "Movie" && item.RunTimeTicks ? api.ticksToText(item.RunTimeTicks) : "",
+      item.CommunityRating ? `★ ${Number(item.CommunityRating).toFixed(1)}` : "",
+    ].filter(Boolean).join(" · ");
   }
+  const unplayed = item.Type === "Series" ? Number(item.UserData?.UnplayedItemCount ?? 0) : 0;
 
   const pct = progressPct(item);
   const played = item.UserData?.Played;
@@ -1283,6 +1342,7 @@ export function itemCard(
       ? el("div", { class: "progress-strip" }, [el("div", { style: `width:${pct}%` })])
       : null,
     played ? el("div", { class: "badge played" }, [icon("check")]) : null,
+    unplayed > 0 ? el("div", { class: "badge unplayed", title: `${unplayed} to watch` }, [String(unplayed)]) : null,
     playable
       ? el("div", { class: "play-overlay" }, [
           el("button", {

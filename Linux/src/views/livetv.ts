@@ -1,8 +1,8 @@
 import * as api from "../api";
 import * as iptv from "../iptv";
 import { getNowPlaying } from "../playback";
-import { loadLineup, lineupKey, onNow as lineupOnNow, playChannel } from "../lineup";
-import { el, clear, art, emptyState, icon, openDialog, skeletonRows } from "../ui";
+import { loadLineup, lineupKey, nowNextSync, onNow as lineupOnNow, playChannel, refreshNow } from "../lineup";
+import { el, clear, art, attachContextMenu, emptyState, icon, openDialog, skeletonRows, toast, type MenuAction } from "../ui";
 import { getCached, setCached } from "../cache";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -146,7 +146,14 @@ const SLOT_MIN = 30;
  *  More hours adds another window's worth to the end, up to a day. */
 const WINDOW_MIN = 6 * 60;
 const MAX_WINDOW_MIN = 24 * 60;
-const SHIFT_MIN = 2 * 60;
+const SHIFT_MIN = 3 * 60;
+/** A window left alone this long comes back at now: the arrows put it where
+ *  it was on purpose, but a guide returned to after dinner should show what's
+ *  on. */
+const RESET_AFTER_MS = 30 * 60_000;
+/** How long a click on a programme waits to see whether it is the first half
+ *  of a double-click, which tunes instead of opening the details. */
+const DOUBLE_CLICK_MS = 260;
 /** How far ahead the day-and-time jump reaches; guides rarely hold more. */
 const MAX_AHEAD_DAYS = 14;
 /** The guide can be walked backwards, but only as far as a server typically
@@ -211,8 +218,22 @@ function channelCell(ch: any, onPlay: () => void): HTMLElement {
   ]);
 }
 
-/** Everything the grid can't show: the synopsis, the flags, and the way in. */
-function showProgram(prog: any, ch: any, play: (ch: any) => void): void {
+/** Everything the grid can't show: the synopsis, the flags, and the way in.
+ *  With no programme (a channel with nothing in the guide) it is the channel
+ *  alone. */
+function showProgram(prog: any | null, ch: any, play: (ch: any) => void): void {
+  const actions = [
+    { label: "Close" },
+    { label: `Watch ${ch.Name ?? "channel"}`, primary: true, run: () => play(ch) },
+  ];
+  if (!prog) {
+    openDialog({
+      title: channelLabel(ch),
+      body: [el("p", {}, ["No guide data for this channel."])],
+      actions,
+    });
+    return;
+  }
   const start = new Date(prog.StartDate);
   const end = new Date(prog.EndDate);
   const badges: string[] = [];
@@ -220,6 +241,7 @@ function showProgram(prog: any, ch: any, play: (ch: any) => void): void {
   if (prog.IsNew) badges.push("New");
   if (prog.IsRepeat) badges.push("Repeat");
   if (prog.OfficialRating) badges.push(prog.OfficialRating);
+  const genres: string[] = Array.isArray(prog.Genres) ? prog.Genres.filter(Boolean) : [];
 
   openDialog({
     title: prog.Name ?? "Programme",
@@ -232,12 +254,30 @@ function showProgram(prog: any, ch: any, play: (ch: any) => void): void {
         ? el("div", { class: "guide-dlg-badges" }, badges.map((b) => el("span", { class: "guide-badge" }, [b])))
         : null,
       el("p", {}, [prog.Overview ?? "No description for this programme."]),
+      genres.length ? el("p", { class: "guide-dlg-genres" }, [genres.join(", ")]) : null,
     ].filter(Boolean) as (string | Node)[],
-    actions: [
-      { label: "Close" },
-      { label: `Watch ${ch.Name ?? "channel"}`, primary: true, run: () => play(ch) },
-    ],
+    actions,
   });
+}
+
+/** The right-click menu on a channel or a programme cell: the same three
+ *  verbs on both, as on the Mac. */
+function cellMenu(title: string, onPlay: () => void, onInfo: () => void): MenuAction[] {
+  return [
+    { label: "Play Channel", icon: "play", run: onPlay },
+    { label: "Show Info", run: onInfo },
+    {
+      label: "Copy Title",
+      run: async () => {
+        try {
+          await navigator.clipboard.writeText(title);
+          toast("Title copied", "ok");
+        } catch {
+          toast("Couldn't reach the clipboard", "error");
+        }
+      },
+    },
+  ];
 }
 
 /** The plain list the page used to be, kept for servers with channels but no
@@ -281,7 +321,30 @@ function channelSignature(channels: any[]): string {
 export async function renderLiveTv(root: HTMLElement): Promise<void> {
   clear(root);
   const src = iptv.isCustom() ? customSource : jellyfinSource;
-  const heading = el("h1", { class: "page-title" }, ["Live TV"]);
+  // Re-reads the line-up and the schedule; `aquarium-lineup-changed` (below)
+  // then redraws the page from them.
+  const refresh = el("button", {
+    class: "btn small",
+    title: "Read the channels and the guide again",
+    onClick: () => {
+      refresh.setAttribute("disabled", "");
+      refresh.textContent = "Refreshing…";
+      refreshNow().catch((e: any) => {
+        toast(`Couldn't refresh Live TV: ${e?.message ?? e}`, "error");
+        refresh.removeAttribute("disabled");
+        refresh.textContent = "Refresh";
+      });
+    },
+  }, ["Refresh"]);
+  // The title, the guide's subtitle ("Today · 124 channels") and Refresh. One
+  // node, so every repaint below carries all three along.
+  const heading = el("div", { class: "section-head guide-page-head" }, [
+    el("div", {}, [
+      el("h1", { class: "page-title" }, ["Live TV"]),
+      el("p", { class: "guide-sub" }, [""]),
+    ]),
+    el("div", { class: "head-tools" }, [refresh]),
+  ]);
   root.append(heading);
 
   // The channel line-up barely changes, so the last known one draws the guide
@@ -356,6 +419,8 @@ interface Selection {
  *  holds `heading` and nothing else. */
 function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, channels: any[]): void {
   const watch = (ch: any): void => tune(src, ch);
+  const subtitle = heading.querySelector<HTMLElement>(".guide-sub");
+  if (subtitle) subtitle.textContent = "";
   if (!channels.length) {
     root.append(
       emptyState({
@@ -373,12 +438,12 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
   const range = el("span", { class: "guide-range" }, [""]);
   const earlier = el("button", {
     class: "btn small icon",
-    title: "Earlier (Ctrl+←)",
+    title: "Earlier — three hours back (Ctrl+←)",
     "aria-label": "Earlier",
   }, [icon("chevron-left")]);
   const later = el("button", {
     class: "btn small icon",
-    title: "Later (Ctrl+→)",
+    title: "Later — three hours on (Ctrl+→)",
     "aria-label": "Later",
   }, [icon("chevron-right")]);
   const nowBtn = el("button", { class: "btn small", title: "Back to what's on now (Ctrl+T)" }, ["Now"]);
@@ -401,6 +466,9 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
     spellcheck: "false",
   }) as HTMLInputElement;
 
+  // A fetch that failed with a grid already on screen says so here and leaves
+  // the grid alone.
+  const banner = el("div", { class: "guide-banner", role: "alert", hidden: "" });
   const head = el("div", { class: "guide-head" });
   const rows = el("div", { class: "guide-rows" });
   const nowLine = el("div", { class: "guide-now" });
@@ -421,6 +489,7 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
       el("span", { class: "guide-toolbar-gap" }),
       filterInput, moreBtn,
     ]),
+    banner,
     scroll,
   ]);
 
@@ -435,18 +504,49 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
   const laneWidth = (): number => windowMin * PX_PER_MIN;
 
   let programs: any[] = [];
+  /** The pending details dialog of a single click on a programme. */
+  let infoTimer = 0;
   let filter = "";
   let sel: Selection | null = null;
   /** The drawn rows, by channel, for the keyboard to walk. */
   let drawn: { ch: any; cell: HTMLElement; lane: HTMLElement; blocks: { p: any; el: HTMLElement; s: number; e: number }[] }[] = [];
 
+  /** What is airing on a channel this minute: from the window on screen when
+   *  it covers now, else from the line-up's own near schedule. */
+  const airing = (ch: any): any | null => {
+    const t = Date.now();
+    for (const p of programs) {
+      if (p.ChannelId === ch.Id && Date.parse(p.StartDate) <= t && Date.parse(p.EndDate) > t) return p;
+    }
+    return nowNextSync(ch).now;
+  };
+
   const visibleChannels = (): any[] => {
     const q = filter.trim().toLowerCase();
     if (!q) return channels;
-    return channels.filter((c) =>
-      `${c.ChannelNumber ?? ""} ${c.Name ?? ""} ${c.Group ?? ""}`.toLowerCase().includes(q)
-    );
+    // Programmes on now, by channel, in one pass rather than one per channel.
+    const t = Date.now();
+    const onNowName = new Map<string, string>();
+    for (const p of programs) {
+      if (Date.parse(p.StartDate) <= t && Date.parse(p.EndDate) > t) onNowName.set(p.ChannelId, p.Name ?? "");
+    }
+    return channels.filter((c) => {
+      const now = onNowName.get(c.Id) ?? nowNextSync(c).now?.Name ?? "";
+      return `${c.ChannelNumber ?? ""} ${c.Name ?? ""} ${c.Group ?? ""} ${now}`.toLowerCase().includes(q);
+    });
   };
+
+  /** "Today · 124 channels", or "Today · 12 of 124 channels" while the filter
+   *  narrows them; a playlist of the user's own says so. */
+  function renderSubtitle(shown: number): void {
+    if (!subtitle) return;
+    const count = shown === channels.length
+      ? `${channels.length} channel${channels.length === 1 ? "" : "s"}`
+      : `${shown} of ${channels.length} channels`;
+    subtitle.textContent = [dayLabel(new Date(windowStart)), count, src.custom ? "Custom playlist" : null]
+      .filter(Boolean)
+      .join(" · ");
+  }
 
   function renderHead(): void {
     clear(head);
@@ -478,6 +578,7 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
     jumpInput.max = localInputValue(Date.now() + MAX_AHEAD_DAYS * 86_400_000);
     if (document.activeElement !== jumpInput) jumpInput.value = localInputValue(windowStart);
     body.style.setProperty("--lane-w", `${laneWidth()}px`);
+    renderSubtitle(filter.trim() ? drawn.length : channels.length);
   }
 
   /** Position the red "you are here" line, and hide it when the window being
@@ -505,6 +606,7 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
 
     const end = windowEnd();
     const shown = visibleChannels();
+    renderSubtitle(shown.length);
     if (!shown.length) {
       rows.append(el("p", { class: "guide-empty" }, [`No channels match “${filter.trim()}”.`]));
     }
@@ -527,9 +629,23 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
           class: "guide-prog",
           tabindex: "-1",
           title: `${p.Name ?? ""} · ${fmtTime(new Date(s))} – ${fmtTime(new Date(e))}`,
-          onClick: () => {
+          // A click selects and, unless a second one follows, opens the
+          // details; a double-click tunes. The details are a modal, so they
+          // can't open on the first click and still leave a second to land.
+          onClick: (ev: MouseEvent) => {
             select({ chId: ch.Id, start: s, end: e }, false);
-            showProgram(p, ch, watch);
+            clearTimeout(infoTimer);
+            // A keyboard "click" (detail 0) has no second half to wait for.
+            if (ev.detail === 0) showProgram(p, ch, watch);
+            else if (ev.detail === 1) {
+              infoTimer = window.setTimeout(() => {
+                if (document.contains(block)) showProgram(p, ch, watch);
+              }, DOUBLE_CLICK_MS);
+            }
+          },
+          onDblclick: () => {
+            clearTimeout(infoTimer);
+            watch(ch);
           },
         }, [
           el("span", { class: "guide-prog-title" }, [p.Name ?? "Programme"]),
@@ -541,11 +657,18 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
         block.dataset.end = String(e);
         block.style.left = `${left}px`;
         block.style.width = `${Math.max(2, right - left)}px`;
+        attachContextMenu(block, p.Name ?? null, () => {
+          select({ chId: ch.Id, start: s, end: e }, false);
+          return cellMenu(p.Name ?? "Programme", () => watch(ch), () => showProgram(p, ch, watch));
+        });
         lane.append(block);
         blocks.push({ p, el: block, s, e });
       }
       const cell = channelCell(ch, () => watch(ch));
       cell.tabIndex = -1;
+      attachContextMenu(cell, channelLabel(ch), () =>
+        cellMenu(ch.Name ?? "Channel", () => watch(ch), () => showProgram(airing(ch), ch, watch))
+      );
       rows.append(el("div", { class: "guide-row" }, [cell, lane]));
       drawn.push({ ch, cell, lane, blocks });
     }
@@ -707,6 +830,14 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
 
   let loading = false;
   let again = false;
+  /** The window the grid on screen was drawn for; null until a fetch lands. */
+  let loaded: { start: number; min: number } | null = null;
+
+  function hideBanner(): void {
+    banner.hidden = true;
+    clear(banner);
+  }
+
   async function load(): Promise<void> {
     if (loading) {
       again = true;
@@ -717,11 +848,15 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
     renderHead();
     const floorNow = floorToSlot(Date.now());
     try {
-      programs = await src.programs(ids, new Date(windowStart), new Date(windowEnd()));
+      const fetched = await src.programs(ids, new Date(windowStart), new Date(windowEnd()));
       if (!document.contains(guide)) return;
+      programs = fetched;
+      loaded = { start: windowStart, min: windowMin };
+      hideBanner();
       // Nothing scheduled anywhere means no guide source, not an empty evening.
       if (!programs.length && windowStart === floorNow && windowMin === WINDOW_MIN) {
         clear(root);
+        if (subtitle) subtitle.textContent = `${channels.length} channel${channels.length === 1 ? "" : "s"}`;
         root.append(
           heading,
           el("p", { class: "guide-note" }, [src.noGuide]),
@@ -736,16 +871,42 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
         selectAt(Math.min(p.row, drawn.length - 1), p.t);
       }
     } catch (e: any) {
-      clear(rows);
-      rows.append(
-        emptyState({
-          icon: "error",
-          error: true,
-          title: "Couldn't load the guide",
-          body: e?.message ?? String(e),
-          action: { label: "Try again", run: () => void load() },
-        })
-      );
+      if (!document.contains(guide)) return;
+      pendingSelect = null;
+      const why = e?.message ?? String(e);
+      if (loaded) {
+        // The grid on screen is still a working guide. Put the ruler back on
+        // the window it was drawn for, and offer the one that failed again.
+        const wanted = { start: windowStart, min: windowMin };
+        windowStart = loaded.start;
+        windowMin = loaded.min;
+        renderHead();
+        clear(banner);
+        banner.append(
+          el("span", {}, [`Couldn't load the guide: ${why}`]),
+          el("button", {
+            class: "btn small",
+            onClick: () => {
+              hideBanner();
+              windowStart = Math.max(earliest(), wanted.start);
+              windowMin = wanted.min;
+              void load();
+            },
+          }, ["Retry"])
+        );
+        banner.hidden = false;
+      } else {
+        clear(rows);
+        rows.append(
+          emptyState({
+            icon: "error",
+            error: true,
+            title: "Couldn't load the guide",
+            body: why,
+            action: { label: "Try again", run: () => void load() },
+          })
+        );
+      }
     } finally {
       loading = false;
       guide.classList.remove("busy");
@@ -834,7 +995,27 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
   };
   document.addEventListener("keydown", onKey);
 
+  // Away from the window (another app, a minimised or hidden window) for half
+  // an hour: come back at now. A shorter absence returns where it was left.
+  // Leaving the page itself needs nothing — a route change builds the guide
+  // afresh, at now.
+  let leftAt = 0;
+  const onAway = (): void => {
+    if (!leftAt) leftAt = Date.now();
+  };
+  const onBack = (): void => {
+    if (document.hidden || !leftAt) return;
+    const away = Date.now() - leftAt;
+    leftAt = 0;
+    if (away >= RESET_AFTER_MS && document.contains(guide)) jumpTo(Date.now());
+  };
+  const onVisibility = (): void => (document.hidden ? onAway() : onBack());
+  window.addEventListener("blur", onAway);
+  window.addEventListener("focus", onBack);
+  document.addEventListener("visibilitychange", onVisibility);
+
   renderHead();
+  renderSubtitle(channels.length);
   root.append(guide);
   void load();
 
@@ -843,6 +1024,9 @@ function paintLiveTv(root: HTMLElement, heading: HTMLElement, src: GuideSource, 
   const tick = window.setInterval(() => {
     if (!document.contains(guide)) {
       clearInterval(tick);
+      window.removeEventListener("blur", onAway);
+      window.removeEventListener("focus", onBack);
+      document.removeEventListener("visibilitychange", onVisibility);
       return;
     }
     syncNow();

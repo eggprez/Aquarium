@@ -128,22 +128,23 @@ function personCard(p: any): HTMLElement {
   const img = p.PrimaryImageTag
     ? api.imageUrl({ Id: p.Id, PrimaryImageTag: p.PrimaryImageTag }, "Primary", 240)
     : null;
-  // There's no person route in the app, so the name searches for itself —
-  // which is what you actually want from a cast list anyway.
+  // Their own page (person.ts): who they are and what of theirs is here. A
+  // credit with no id — rare, from a hand-edited NFO — searches the name.
+  const open = (): void => {
+    location.hash = p.Id ? `#/person/${p.Id}` : `#/search/${encodeURIComponent(p.Name)}`;
+  };
   return el(
     "div",
     {
       class: "person-card",
       role: "button",
       tabindex: "0",
-      "aria-label": `Search for ${p.Name}`,
-      onClick: () => {
-        location.hash = `#/search/${encodeURIComponent(p.Name)}`;
-      },
+      "aria-label": p.Name,
+      onClick: open,
       onKeydown: (ev: KeyboardEvent) => {
         if (ev.key !== "Enter" && ev.key !== " ") return;
         ev.preventDefault();
-        location.hash = `#/search/${encodeURIComponent(p.Name)}`;
+        open();
       },
     },
     [
@@ -161,12 +162,21 @@ function personCard(p: any): HTMLElement {
  * "More like this" is a second request and lands when it lands.
  */
 function detailExtras(root: HTMLElement, item: any): void {
-  const cast = (item.People ?? []).filter(
-    (p: any) => p.Type === "Actor" || p.Type === "GuestStar"
-  );
-  if (cast.length) {
+  // Directors and writers lead, then the cast: the Apple page's Cast & Crew.
+  const people: any[] = item.People ?? [];
+  const seen = new Set<string>();
+  const once = (p: any): boolean => {
+    const k = `${p.Id ?? p.Name}:${p.Type}`;
+    return !seen.has(k) && !!seen.add(k);
+  };
+  const crew = people.filter((p) => p.Type === "Director" || p.Type === "Writer").filter(once);
+  const cast = people.filter((p) => p.Type === "Actor" || p.Type === "GuestStar").filter(once);
+  if (cast.length || crew.length) {
     root.append(
-      section("Cast", scrollRow(el("div", { class: "card-row" }, cast.slice(0, 24).map(personCard))))
+      section(
+        crew.length ? "Cast & Crew" : "Cast",
+        scrollRow(el("div", { class: "card-row" }, [...crew.slice(0, 6), ...cast.slice(0, 24)].map(personCard)))
+      )
     );
   }
 
@@ -186,6 +196,32 @@ function detailExtras(root: HTMLElement, item: any): void {
   // And from Seerr, what is like it but not here yet.
   const likeThis = seerrLikeThis(item, (id) => api.getItem(id));
   if (likeThis) root.append(likeThis);
+}
+
+/** The star on a title's page: in or out of Favorites, said either way. */
+function favoriteButton(item: any): HTMLElement {
+  const btn = el("button", {
+    class: "btn",
+    onClick: async () => {
+      const next = !item.UserData?.IsFavorite;
+      try {
+        await api.setFavorite(item.Id, next);
+        item.UserData = item.UserData ?? {};
+        item.UserData.IsFavorite = next;
+        sync();
+      } catch (e: any) {
+        toast(e.message ?? String(e), "error");
+      }
+    },
+  });
+  const sync = (): void => {
+    const on = !!item.UserData?.IsFavorite;
+    btn.title = on ? "Remove from Favorites" : "Add to Favorites";
+    btn.classList.toggle("active", on);
+    btn.replaceChildren(icon(on ? "star" : "star-outline"), on ? "Favorite" : "Favorite");
+  };
+  sync();
+  return btn;
 }
 
 function playButtons(item: any): HTMLElement {
@@ -290,7 +326,7 @@ function playButtons(item: any): HTMLElement {
     watchBtn.replaceChildren(...(on ? [icon("check"), "Watched"] : ["Mark watched"]));
   };
   syncWatchBtn();
-  actions.append(watchBtn);
+  actions.append(watchBtn, favoriteButton(item));
   // Right-clicking the hero reaches everything else (favorites, go to series…).
   (actions as any).__syncWatchLabel = syncWatchBtn;
 
@@ -594,7 +630,10 @@ function paintItem(page: HTMLElement, data: ItemData): void {
   // A show's page can put it on Next Up, on the server (see api.addToNextUp).
   if (!actionBar) {
     const bar = actionNodes[actionNodes.length - 1];
-    bar?.append(el("button", { class: "btn", title: "Put this show on Next Up, here and in Jellyfin's other apps", onClick: () => askAddToNextUp(item) }, [icon("episodes"), "Add to Next Up…"]));
+    bar?.append(
+      el("button", { class: "btn", title: "Put this show on Next Up, here and in Jellyfin's other apps", onClick: () => askAddToNextUp(item) }, [icon("episodes"), "Add to Next Up…"]),
+      favoriteButton(item)
+    );
   }
 
   // The backdrop moves, so it gets its own clipping frame. Putting the clip on
@@ -624,8 +663,12 @@ function paintItem(page: HTMLElement, data: ItemData): void {
             }, [subtitle])
           : null,
         metaChips(item),
+        item.Taglines?.[0] ? el("div", { class: "detail-tagline" }, [item.Taglines[0]]) : null,
         item.Overview ? el("p", { class: "detail-overview" }, [item.Overview]) : null,
         crewLine(item.People ?? []),
+        item.Studios?.length
+          ? el("div", { class: "detail-crew" }, [item.Studios.slice(0, 3).map((s: any) => s.Name).filter(Boolean).join("  ·  ")])
+          : null,
         sourceLine(item),
         ...actionNodes,
       ]),
@@ -685,14 +728,21 @@ function paintItem(page: HTMLElement, data: ItemData): void {
         );
         return;
       }
-      epList.append(seasonDownloadBar(season, eps));
+      const watched = eps.filter((ep: any) => ep.UserData?.Played).length;
+      epList.append(
+        el("div", { class: "ep-count" }, [`${eps.length} episode${eps.length === 1 ? "" : "s"} · ${watched} watched`]),
+        seasonDownloadBar(season, eps)
+      );
       for (const ep of eps) epList.append(episodeRow(ep));
     }
 
     // Open on the season the play button would start from, so the episode
     // you're actually on is the one on screen.
+    // A season asked for by name (its own link, "Go to Season") wins.
+    const asked = pendingSeason?.series === item.Id ? seasons.findIndex((s: any) => s.Id === pendingSeason!.season) : -1;
+    pendingSeason = null;
     const targetSeason = seasons.findIndex((s: any) => s.Id === playTarget?.SeasonId);
-    const openIdx = targetSeason >= 0 ? targetSeason : 0;
+    const openIdx = asked >= 0 ? asked : targetSeason >= 0 ? targetSeason : 0;
     seasons.forEach((season: any, idx: number) => {
       const btn = el("button", { class: "btn small" }, [season.Name ?? `Season ${season.IndexNumber}`]);
       btn.addEventListener("click", () => showSeason(season, btn));
@@ -708,10 +758,22 @@ function paintItem(page: HTMLElement, data: ItemData): void {
   detailExtras(root, item);
 }
 
+/** A season's own address opens its show with that season showing. */
+let pendingSeason: { series: string; season: string } | null = null;
+
+function toSeasonOfShow(item: any): boolean {
+  if (item?.Type !== "Season" || !item.SeriesId) return false;
+  pendingSeason = { series: item.SeriesId, season: item.Id };
+  // Replaced, so Back leaves the show rather than bouncing through here.
+  location.replace(`#/item/${item.SeriesId}`);
+  return true;
+}
+
 export async function renderItem(root: HTMLElement, itemId: string): Promise<void> {
   clear(root);
   const page = el("div", {});
   root.append(page);
+  if (toSeasonOfShow(getCached<ItemData>(itemCacheKey(itemId))?.item)) return;
 
   // A page reached with its data already cached — a revisit, or a card that
   // sat under focus long enough for `prefetch.ts` to warm it — paints
@@ -737,6 +799,7 @@ export async function renderItem(root: HTMLElement, itemId: string): Promise<voi
     return;
   }
   if (!document.contains(page)) return; // navigated away while loading
+  if (toSeasonOfShow(data.item)) return;
   if (!cached || itemDataSignature(cached) !== itemDataSignature(data)) {
     paintItem(page, data);
   }

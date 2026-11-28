@@ -411,7 +411,7 @@ describe("keyboard selection", () => {
     await flush(40);
     expect(selectedChannel()).toBe("Beta");
     expect(toolbarBtn("Now").disabled).toBe(false);
-    // From Alpha's long last show, right moves the window two hours on.
+    // From Alpha's long last show, right moves the window three hours on.
     key(grid(), "Home");
     key(grid(), "ArrowRight");
     key(grid(), "ArrowRight");
@@ -503,7 +503,7 @@ describe("keyboard selection", () => {
 });
 
 describe("moving in time", () => {
-  it("steps two hours with Earlier and Later, comes back with Now, and keeps the selection's row", async () => {
+  it("steps three hours with Earlier and Later, comes back with Now, and keeps the selection's row", async () => {
     const asked: string[] = [];
     programs = (q) => (asked.push(q.get("minEndDate")!), { Items: defaultPrograms() });
     await boot();
@@ -512,12 +512,12 @@ describe("moving in time", () => {
     key(grid(), "ArrowDown");
     click(toolbarBtn("Later"));
     await flush(40);
-    expect(asked.at(-1)).toBe(new Date(START + 2 * H).toISOString());
+    expect(asked.at(-1)).toBe(new Date(START + 3 * H).toISOString());
     expect(selectedChannel()).toBe("Beta");
     click(toolbarBtn("Earlier"));
     click(toolbarBtn("Earlier"));
     await flush(80);
-    expect(asked.at(-1)).toBe(new Date(START - 2 * H).toISOString());
+    expect(asked.at(-1)).toBe(new Date(START - 3 * H).toISOString());
     click(toolbarBtn("Now"));
     await flush(40);
     expect(asked.at(-1)).toBe(new Date(START).toISOString());
@@ -590,7 +590,7 @@ describe("moving in time", () => {
     await flush(40);
     key(document.body, "T", { ctrlKey: true });
     await flush(40);
-    expect(asked.slice(1)).toEqual([START + 2 * H, START, START + 2 * H, START].map((t) => new Date(t).toISOString()));
+    expect(asked.slice(1)).toEqual([START + 3 * H, START, START + 3 * H, START].map((t) => new Date(t).toISOString()));
     const f = root.querySelector<HTMLInputElement>(".guide-filter")!;
     expect(key(f, "ArrowRight", { ctrlKey: true }).defaultPrevented).toBe(false);
     expect(key(document.body, "ArrowRight", { ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(false);
@@ -626,18 +626,46 @@ describe("moving in time", () => {
     release!();
     await flush(60);
     expect(asked).toHaveLength(3);
-    expect(asked[2]).toBe(new Date(START + 4 * H).toISOString());
+    expect(asked[2]).toBe(new Date(START + 6 * H).toISOString());
   });
 
-  it("shows an error in the grid when the schedule fails, with Try again", async () => {
+  it("says so in a banner when a later window fails, keeps the grid and its window, and Retry asks for that window again", async () => {
+    const asked: string[] = [];
     let fail = false;
-    programs = () => (fail ? { __status: 502 } : { Items: defaultPrograms() });
+    programs = (q) => (asked.push(q.get("minEndDate")!), fail ? { __status: 502 } : { Items: defaultPrograms() });
     await boot();
     await open();
+    const banner = root.querySelector<HTMLElement>(".guide-banner")!;
+    expect(banner.hidden).toBe(true);
+    const before = range();
     fail = true;
     click(toolbarBtn("Later"));
     await flush(40);
+    expect(banner.hidden).toBe(false);
+    expect(banner.getAttribute("role")).toBe("alert");
+    expect(banner.querySelector("span")!.textContent).toMatch(/^Couldn't load the guide: .+/);
+    // The grid on screen is still the one that loaded, on the window it was drawn for.
+    expect(root.querySelector(".guide-rows .state")).toBeNull();
+    expect(rowNames()).toEqual(["Alpha", "Beta", "Gamma"]);
+    expect(range()).toBe(before);
+    expect(toolbarBtn("Now").disabled).toBe(true);
+    fail = false;
+    click(byText(banner, "button", "Retry"));
+    await flush(40);
+    expect(asked).toEqual([START, START + 3 * H, START + 3 * H].map((t) => new Date(t).toISOString()));
+    expect(banner.hidden).toBe(true);
+    expect(banner.childElementCount).toBe(0);
+    expect(range()).not.toBe(before);
+    expect(rowNames()).toEqual(["Alpha", "Beta", "Gamma"]);
+  });
+
+  it("shows an error in the grid when the first schedule fails, with Try again", async () => {
+    let fail = true;
+    programs = () => (fail ? { __status: 502 } : { Items: defaultPrograms() });
+    await boot();
+    await open();
     expect(root.querySelector(".guide-rows .state h3")!.textContent).toBe("Couldn't load the guide");
+    expect(root.querySelector<HTMLElement>(".guide-banner")!.hidden).toBe(true);
     fail = false;
     click(byText(root, ".guide-rows .state button", "Try again"));
     await flush(40);

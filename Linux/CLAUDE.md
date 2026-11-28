@@ -19,6 +19,7 @@ Linux Jellyfin client, in the `Linux/` folder of the Aquarium repo (the Apple ap
 - `AQUARIUM_TEST_INPUT=1` sends a synthetic click and touch, `AQUARIUM_TEST_REPLAY` restarts playback mid-stream, and `AQUARIUM_SURFACE_TEST=1` logs geometry, frame gaps and swap times.
 - `AQUARIUM_MPV_CONFIG=<dir>`: point it at a copy of `src-tauri/mpv-config` with `mute=yes` added so test runs stay silent.
 - `AQUARIUM_MPV_LOG=1` writes mpv's own log to `~/.local/share/aquarium/mpv-logs/`. It's off otherwise, and logs are deleted at launch without it and at sign-out, because they contain the access token. Don't share one without revoking that session.
+- `aquarium --action=<continue|shuffle-music|resume-book|open:<itemId>|search:<term>>` is what the launcher's actions and the search provider run; `aquarium --search-provider` serves GNOME Shell's search headless (`desktop.rs`). A test instance (any `AQUARIUM_TEST_*` set) doesn't take the `dev.aquarium.app` bus name, so actions keep going to the user's own copy.
 - The debug log is `~/.local/share/aquarium/debug.log`. Test instances share the user's config and log.
 
 Working without hands on this machine:
@@ -30,6 +31,7 @@ Working without hands on this machine:
 ## Invariants (each one cost a real investigation)
 
 - Any new video geometry path goes through `surface.rs` `intended_alloc()`, which derives size from the overlay. A hidden widget keeps a stale allocation, and an opaque subsurface covering the toplevel stops Mutter's frame callbacks, which freezes GTK's frame clock.
+- Nothing in the page can draw over the video: the video surface sits above the webview. The player bar is 72 px (`BAR_HEIGHT_CSS`), and a card opened from a pill is drawn in `#player-cards`, a band above the bar that the backend clips the video off (`player_set_card_band`, CSS px, in `resize_video_surface`). Anything new that must appear above the bar goes through that band; a popup anywhere else is hidden behind the picture.
 - Pointer-driven UI over the video must ignore out-of-window or repeated `mousemove`s (`fsPointerMoved` in `main.ts`). WebKitGTK turns enter/leave crossings into mousemoves, which caused a reveal/hide loop.
 - Avoid infinite CSS animations on screens that stay visible (pulsing dots, skeleton sweeps, spinners). With `WEBKIT_DMABUF_RENDERER_FORCE_SHM`, one 8 px pulsing dot costs about 60% of the main thread and 1.8 W, because each frame repaints the whole 2880×1920 view.
 - The WebKit env defaults in `main.rs` (FORCE_SHM, THROTTLE_FPS=60, FORCE_VBLANK_TIMER) were measured; the reasoning is in the comments there. Re-measure before changing them.

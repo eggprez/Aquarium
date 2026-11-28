@@ -142,6 +142,13 @@ function nextRungDown(idx: number, sourceBitrate: number | undefined): number {
   return next;
 }
 
+/** Say what the policy just did. A toast sits on the page, which the picture
+ *  covers, so the player bar is told as well (`aquarium-player-note`). */
+function note(text: string, kind?: "ok" | "error" | "info"): void {
+  toast(text, kind as any);
+  document.dispatchEvent(new CustomEvent("aquarium-player-note", { detail: text }));
+}
+
 async function stepDown(reason: "stall" | "drops"): Promise<void> {
   const idx = currentRung();
   if (idx === null || settling()) return;
@@ -149,7 +156,7 @@ async function stepDown(reason: "stall" | "drops"): Promise<void> {
   // A downloaded copy can't stall on the network at all, so it beats any
   // lower rung. Nothing climbs back from it: a file on disk isn't watched.
   if (getQualityState()?.download) {
-    toast(
+    note(
       reason === "drops"
         ? "Playback can't keep up — switching to the downloaded copy"
         : "Buffering — switching to the downloaded copy"
@@ -169,7 +176,7 @@ async function stepDown(reason: "stall" | "drops"): Promise<void> {
     // no explanation reads as a broken app rather than a struggling network.
     if (!floorNoted) {
       floorNoted = true;
-      toast(
+      note(
         `Still struggling at ${QUALITY_CHOICES[idx].label} — the network or the server is the limit`,
         "error"
       );
@@ -185,7 +192,7 @@ async function stepDown(reason: "stall" | "drops"): Promise<void> {
   lastUpshiftAt = 0;
 
   const label = QUALITY_CHOICES[next].label;
-  toast(
+  note(
     reason === "drops"
       ? `Playback can't keep up — switching to ${label}`
       : `Buffering — switching to ${label}`
@@ -194,7 +201,7 @@ async function stepDown(reason: "stall" | "drops"): Promise<void> {
   try {
     await switchQuality(QUALITY_CHOICES[next].maxBitrate, { inherited: true, quiet: true });
   } catch {
-    toast("Couldn't change quality automatically", "error");
+    note("Couldn't change quality automatically", "error");
   } finally {
     switching = false;
   }
@@ -207,7 +214,7 @@ async function stepUp(): Promise<void> {
   if (next < ceiling) return;
 
   const label = QUALITY_CHOICES[next].label;
-  toast(`Connection looks steady — back to ${label}`);
+  note(`Connection looks steady — back to ${label}`);
   switching = true;
   lastUpshiftAt = now();
   try {

@@ -82,10 +82,24 @@ async function mount(world: World = {}): Promise<HTMLElement> {
   return root;
 }
 
-function block(title: string): HTMLElement {
-  const b = [...root.querySelectorAll<HTMLElement>(".settings-block")].find((x) => x.querySelector("h3")?.textContent === title);
+/** One of the page's panes: the id is what follows `#/settings/`. */
+function pane(id: string): HTMLElement {
+  const p = root.querySelector<HTMLElement>(`#settings-pane-${id}`);
+  if (!p) throw new Error(`no pane "${id}"`);
+  return p;
+}
+
+/** A block by its heading. Several panes have a block of the same name
+ *  (Language, Appearance, Playing), so those are asked for with their pane. */
+function block(title: string, paneId?: string): HTMLElement {
+  const within: ParentNode = paneId ? pane(paneId) : root;
+  const b = [...within.querySelectorAll<HTMLElement>(".settings-block")].find((x) => x.querySelector("h3")?.textContent === title);
   if (!b) throw new Error(`no block "${title}"`);
   return b;
+}
+
+function blockTitles(paneId: string): (string | null)[] {
+  return [...pane(paneId).querySelectorAll(".settings-block > h3")].map((h) => h.textContent);
 }
 
 /** The row whose label is `label`, anywhere on the page (or in `within`). */
@@ -97,6 +111,25 @@ function rowNamed(label: string, within: ParentNode = root): HTMLElement {
 
 function selectIn(label: string): HTMLSelectElement {
   return rowNamed(label).querySelector("select")!;
+}
+
+/** The on/off switch in the row named `label`: a checkbox with the switch role. */
+function switchIn(label: string): HTMLInputElement {
+  const input = rowNamed(label).querySelector<HTMLInputElement>('input[type=checkbox][role="switch"]');
+  if (!input) throw new Error(`no switch in "${label}"`);
+  return input;
+}
+
+function flip(input: HTMLInputElement, on: boolean): void {
+  input.checked = on;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+/** The radio buttons of a segmented control, by value. */
+function segments(label: string): Record<string, HTMLInputElement> {
+  const group = rowNamed(label).querySelector('[role="radiogroup"]');
+  if (!group) throw new Error(`no segmented control in "${label}"`);
+  return Object.fromEntries([...group.querySelectorAll<HTMLInputElement>("input[type=radio]")].map((r) => [r.value, r]));
 }
 
 function pick(select: HTMLSelectElement, value: string): void {
@@ -137,31 +170,40 @@ beforeEach(() => {
   tv.lastRead.mockReturnValue(null);
   ln.cachedLineup.mockReturnValue(undefined);
   th.getThemePref.mockReturnValue("dark");
+  // The page opens on the pane last looked at, and on the one in the address.
+  localStorage.removeItem("aquarium.settings-pane");
+  history.replaceState(null, "", "#/settings");
 });
 
 describe("page", () => {
-  it("draws every block in order", async () => {
+  it("draws every pane, with its blocks in order", async () => {
     await mount();
     expect(root.querySelector("h1")!.textContent).toBe("Settings");
-    expect([...root.querySelectorAll(".settings-block > h3")].map((h) => h.textContent)).toEqual([
-      "Server",
-      "Accounts",
-      "Requests",
-      "Quick Connect",
-      "Appearance",
-      "Next Up",
-      "Playback",
-      "Live TV",
-      "Languages",
-      "Subtitles",
+    expect([...root.querySelectorAll('[role="tablist"] [role="tab"]')].map((t) => t.textContent)).toEqual([
+      "General",
+      "Account",
+      "Video",
       "Audio",
+      "Subtitles",
       "Music",
-      "Picture",
-      "Downloads",
+      "Live TV",
       "Storage",
-      "About",
     ]);
-    expect(rowNamed("Downloads folder").textContent).toContain("/home/u/Videos/Aquarium");
+    expect([...root.querySelectorAll(".settings-pane")].map((p) => p.id)).toEqual(
+      ["general", "account", "video", "audio", "subtitles", "music", "livetv", "storage"].map((id) => `settings-pane-${id}`)
+    );
+    expect(blockTitles("general")).toEqual(["Appearance", "Home", "Next Up", "Keyboard", "About"]);
+    expect(blockTitles("account")).toEqual(["Server", "Accounts", "Requests", "Quick Connect"]);
+    expect(blockTitles("video")).toEqual(["Quality", "Picture", "Player", "Playing"]);
+    expect(blockTitles("audio")).toEqual(["Language", "Output"]);
+    expect(blockTitles("subtitles")).toEqual(["Language", "Appearance"]);
+    expect(blockTitles("music")).toEqual(["Playing", "Stations"]);
+    expect(blockTitles("livetv")).toEqual(["Source"]);
+    expect(blockTitles("storage")).toEqual(["Downloads"]);
+    // Every block is in a pane.
+    expect(root.querySelectorAll(".settings-block")).toHaveLength(root.querySelectorAll(".settings-pane > .settings-block").length);
+    // Where downloads are kept is a row of the Downloads block.
+    expect(rowNamed("Kept in", block("Downloads")).textContent).toContain("/home/u/Videos/Aquarium");
     expect(root.querySelector(".about-version")!.textContent).toBe("v1.2.3");
     expect(root.querySelector(".about-name .wordmark")!.getAttribute("aria-label")).toBe("Aquarium");
     expect(root.querySelector(".about-name .wordmark .wm-i")).not.toBeNull();
@@ -179,6 +221,84 @@ describe("page", () => {
     expect(rowNamed("mpv").textContent).toContain("Running libmpv2");
     expect(rowNamed("Output").textContent).toContain("couldn't be asked for the list of outputs");
     expect([...selectIn("Output").options].map((o) => o.textContent)).toEqual(["Automatic"]);
+  });
+});
+
+describe("panes", () => {
+  const tab = (id: string): HTMLButtonElement => root.querySelector<HTMLButtonElement>(`#settings-tab-${id}`)!;
+  const shown = (): string[] =>
+    [...root.querySelectorAll<HTMLElement>(".settings-pane")].filter((p) => !p.hasAttribute("hidden")).map((p) => p.id);
+
+  it("opens on General, one pane showing, each tab tied to its panel", async () => {
+    await mount();
+    expect(shown()).toEqual(["settings-pane-general"]);
+    expect(tab("general").getAttribute("aria-selected")).toBe("true");
+    expect(tab("general").classList.contains("active")).toBe(true);
+    expect(tab("general").tabIndex).toBe(0);
+    expect(tab("video").getAttribute("aria-selected")).toBe("false");
+    expect(tab("video").tabIndex).toBe(-1);
+    expect(tab("video").getAttribute("aria-controls")).toBe("settings-pane-video");
+    expect(pane("video").getAttribute("aria-labelledby")).toBe("settings-tab-video");
+    expect(pane("video").getAttribute("role")).toBe("tabpanel");
+    // Opening the page does not rewrite the address.
+    expect(location.hash).toBe("#/settings");
+  });
+
+  it("shows the pane whose tab is clicked, puts it in the address and remembers it", async () => {
+    await mount();
+    tab("video").click();
+    expect(shown()).toEqual(["settings-pane-video"]);
+    expect(tab("video").getAttribute("aria-selected")).toBe("true");
+    expect(tab("general").getAttribute("aria-selected")).toBe("false");
+    expect(tab("general").classList.contains("active")).toBe(false);
+    expect(location.hash).toBe("#/settings/video");
+    expect(localStorage.getItem("aquarium.settings-pane")).toBe("video");
+    // The next visit, with no pane in the address, opens where this one left off.
+    history.replaceState(null, "", "#/settings");
+    await mount();
+    expect(shown()).toEqual(["settings-pane-video"]);
+  });
+
+  it("opens on the pane asked for, else the one in the address, else General for an unknown one", async () => {
+    await signIn();
+    onInvokes({ app_info: {}, accounts_list: [], audio_devices: [] });
+    const draw = async (asked?: string): Promise<string[]> => {
+      root = document.createElement("div");
+      document.body.append(root);
+      await renderSettings(root, vi.fn(), asked);
+      return shown();
+    };
+    history.replaceState(null, "", "#/settings/livetv");
+    expect(await draw()).toEqual(["settings-pane-livetv"]);
+    expect(await draw("Storage")).toEqual(["settings-pane-storage"]);
+    localStorage.removeItem("aquarium.settings-pane");
+    history.replaceState(null, "", "#/settings/nowhere");
+    expect(await draw()).toEqual(["settings-pane-general"]);
+  });
+
+  it("steps through the panes with the arrows, Home and End, wrapping at the ends", async () => {
+    await mount();
+    const list = root.querySelector<HTMLElement>('[role="tablist"]')!;
+    const key = (k: string): boolean => list.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+    expect(key("ArrowDown")).toBe(false);
+    expect(shown()).toEqual(["settings-pane-account"]);
+    expect(document.activeElement).toBe(tab("account"));
+    key("ArrowRight");
+    expect(shown()).toEqual(["settings-pane-video"]);
+    key("ArrowUp");
+    key("ArrowLeft");
+    expect(shown()).toEqual(["settings-pane-general"]);
+    key("ArrowUp");
+    expect(shown()).toEqual(["settings-pane-storage"]);
+    key("ArrowDown");
+    expect(shown()).toEqual(["settings-pane-general"]);
+    key("End");
+    expect(shown()).toEqual(["settings-pane-storage"]);
+    key("Home");
+    expect(shown()).toEqual(["settings-pane-general"]);
+    // Any other key is left alone.
+    expect(key("a")).toBe(true);
+    expect(shown()).toEqual(["settings-pane-general"]);
   });
 });
 
@@ -226,6 +346,9 @@ describe("server", () => {
     expect(rowNamed("Server identity").textContent).toContain("Pinned");
     expect(rowNamed("Access token").textContent).toContain("Keyring");
     expect(server.textContent).not.toContain("Unfinished sign-out");
+    const status = rowNamed("Status").querySelector(".sync-pill")!;
+    expect(status.className).toBe("sync-pill ok");
+    expect(status.textContent).toBe("Connected");
   });
 
   it("warns about plain HTTP, an unpinned server, a token in the config file and an unfinished sign-out", async () => {
@@ -246,13 +369,32 @@ describe("server", () => {
     document.body.append(root);
     await renderSettings(root, vi.fn());
     expect(block("Server").textContent).toContain("Not connected");
+    // The Status row and the Seerr block are for a signed-in account only.
+    expect(block("Server").textContent).not.toContain("Status");
+    expect(blockTitles("account")).toEqual(["Server", "Accounts", "Quick Connect"]);
+  });
+
+  it("asks before signing out, and does nothing on Cancel", async () => {
+    await mount();
+    onInvoke("jf_logout", { revoked: true });
+    const out = button("Sign out…");
+    out.click();
+    expect(document.querySelector(".dialog h2")!.textContent).toBe("Sign out of http://jf.test:8096?");
+    expect(document.querySelector(".dialog")!.textContent).toContain("Downloads stay where they are");
+    dialogButton("Cancel").click();
+    await settle();
+    expect(invokeCalls("jf_logout")).toHaveLength(0);
+    expect(out.disabled).toBe(false);
+    expect(out.textContent).toBe("Sign out…");
+    expect(onLogout).not.toHaveBeenCalled();
   });
 
   it("signs out and returns to the sign-in screen when the server confirms", async () => {
     await mount();
     onInvoke("jf_logout", { revoked: true });
-    const out = button("Sign out");
+    const out = button("Sign out…");
     out.click();
+    dialogButton("Sign Out").click();
     expect(out.disabled).toBe(true);
     expect(out.textContent).toBe("Signing out…");
     await settle();
@@ -263,14 +405,16 @@ describe("server", () => {
   it("says when the server could not be told, and whether it will keep trying", async () => {
     await mount();
     onInvoke("jf_logout", { revoked: false, pending: true });
-    button("Sign out").click();
+    button("Sign out…").click();
+    dialogButton("Sign Out").click();
     await settle();
     expect(toasts().at(-1)).toContain("Aquarium will keep retrying");
     expect(onLogout).toHaveBeenCalledTimes(1);
 
     await mount();
     onInvoke("jf_logout", { revoked: false, pending: false });
-    button("Sign out").click();
+    button("Sign out…").click();
+    dialogButton("Sign Out").click();
     await settle();
     expect(toasts().at(-1)).toContain("Revoke this device in Jellyfin");
   });
@@ -278,7 +422,8 @@ describe("server", () => {
   it("still leaves when signing out fails outright", async () => {
     await mount();
     onInvoke("jf_logout", () => Promise.reject("io|disk"));
-    button("Sign out").click();
+    button("Sign out…").click();
+    dialogButton("Sign Out").click();
     await settle();
     expect(toasts().at(-1)).toBe("Sign out failed");
     expect(onLogout).toHaveBeenCalledTimes(1);
@@ -465,31 +610,40 @@ describe("Quick Connect", () => {
 describe("appearance and Next Up", () => {
   it("applies the theme at once, and says when it could not be saved", async () => {
     await mount();
-    const theme = selectIn("Theme");
-    expect(theme.value).toBe("dark");
-    pick(theme, "light");
+    const theme = segments("Theme");
+    expect(Object.keys(theme)).toEqual(["auto", "light", "dark"]);
+    expect(Object.values(theme).filter((r) => r.checked).map((r) => r.value)).toEqual(["dark"]);
+    expect(Object.values(theme).map((r) => r.closest("label")!.textContent)).toEqual(["System", "Light", "Dark"]);
+    theme.light!.click();
     await settle();
+    expect(th.setThemePref).toHaveBeenCalledTimes(1);
     expect(th.setThemePref).toHaveBeenCalledWith("light");
     th.setThemePref.mockRejectedValueOnce(new Error("disk"));
-    pick(theme, "auto");
+    theme.auto!.click();
     await settle();
     expect(toasts().at(-1)).toBe("Couldn't save appearance setting");
   });
 
   it("saves a toggle as a boolean the moment it changes", async () => {
     await mount({ config: { hide_continue_watching: true } });
-    const sel = selectIn("Continue Watching");
-    expect(sel.value).toBe("on");
-    expect([...sel.options].map((o) => o.textContent)).toEqual(["Shown", "Hidden — Next Up only"]);
-    pick(sel, "off");
+    const sw = switchIn("Hide Continue Watching");
+    expect(sw.checked).toBe(true);
+    // Named by its row, and described by the row's sentence.
+    const row = rowNamed("Hide Continue Watching");
+    expect(sw.getAttribute("aria-labelledby")).toBe(row.querySelector(".lbl")!.id);
+    expect(sw.getAttribute("aria-describedby")).toBe(row.querySelector(".sub")!.id);
+    flip(sw, false);
     await settle();
     expect(saved().at(-1)).toEqual({ hide_continue_watching: false });
+    flip(sw, true);
+    await settle();
+    expect(saved().at(-1)).toEqual({ hide_continue_watching: true });
   });
 
   it("says when a setting could not be saved", async () => {
     await mount();
     onInvoke("config_save", () => Promise.reject(new Error("disk")));
-    pick(selectIn("Include shows you're rewatching"), "on");
+    flip(switchIn("Include shows you're rewatching"), true);
     pick(selectIn("Skip by"), "30");
     await settle();
     expect(toasts()).toEqual(["Couldn't save that setting", "Couldn't save that setting"]);
@@ -505,22 +659,26 @@ describe("appearance and Next Up", () => {
     pick(days, "30");
     await settle();
     expect(saved().at(-1)).toEqual({ next_up_days: "30" });
-    expect(selectIn("Include episodes in progress").value).toBe("on");
-    expect(selectIn("Include shows you're rewatching").value).toBe("off");
+    expect(switchIn("Include episodes in progress").checked).toBe(true);
+    expect(switchIn("Include shows you're rewatching").checked).toBe(false);
+    flip(switchIn("Include episodes in progress"), false);
+    await settle();
+    expect(saved().at(-1)).toEqual({ next_up_in_progress: false });
   });
 });
 
 describe("playback", () => {
   it("reads defaults for unset keys", async () => {
     await mount();
-    expect(selectIn("Resume where I left off").value).toBe("on");
-    expect(selectIn("Play the next episode automatically").value).toBe("on");
+    expect(switchIn("Resume where I left off").checked).toBe(true);
+    expect(switchIn("Play the next episode automatically").checked).toBe(true);
     expect(selectIn("Skip by").value).toBe("10");
     expect(selectIn("Hide controls after").value).toBe("2");
-    expect(selectIn("Show time remaining").value).toBe("off");
+    expect(switchIn("Show time remaining").checked).toBe(false);
     expect(selectIn("Hardware acceleration").value).toBe("auto");
-    expect(selectIn("Smooth motion").value).toBe("off");
-    expect(selectIn("Streaming quality").value).toBe("auto");
+    expect(switchIn("Smooth motion").checked).toBe(false);
+    expect(switchIn("Adapt quality automatically").checked).toBe(true);
+    expect(switchIn("Check the connection first").checked).toBe(true);
   });
 
   it("reflects saved values", async () => {
@@ -528,20 +686,22 @@ describe("playback", () => {
     await mount({
       config: { resume_playback: false, autoplay_next: false, player_skip_interval: 30, player_hide_after: 6, hwdec: "vaapi" },
     });
-    expect(selectIn("Resume where I left off").value).toBe("off");
-    expect(selectIn("Play the next episode automatically").value).toBe("off");
+    expect(switchIn("Resume where I left off").checked).toBe(false);
+    expect(switchIn("Play the next episode automatically").checked).toBe(false);
     expect(selectIn("Skip by").value).toBe("30");
     expect(selectIn("Hide controls after").value).toBe("6");
     expect(selectIn("Hardware acceleration").value).toBe("vaapi");
-    expect(selectIn("Streaming quality").value).toBe("off");
+    expect(switchIn("Adapt quality automatically").checked).toBe(false);
   });
 
   it("turns adaptive quality on and off without a config write of its own", async () => {
     await mount();
-    pick(selectIn("Streaming quality"), "off");
+    flip(switchIn("Adapt quality automatically"), false);
     expect(pb.setAdaptiveEnabled).toHaveBeenLastCalledWith(false);
-    pick(selectIn("Streaming quality"), "auto");
+    flip(switchIn("Adapt quality automatically"), true);
     expect(pb.setAdaptiveEnabled).toHaveBeenLastCalledWith(true);
+    await settle();
+    expect(saved()).toEqual([]);
   });
 
   it("reports the decoder the last stream used", async () => {
@@ -594,7 +754,7 @@ describe("playback", () => {
 describe("Live TV", () => {
   it("hides the playlist rows for Jellyfin's Live TV and shows them for a custom source", async () => {
     await mount();
-    const custom = block("Live TV").querySelector<HTMLElement>(".settings-sub")!;
+    const custom = block("Source", "livetv").querySelector<HTMLElement>(".settings-sub")!;
     expect(custom.style.display).toBe("none");
     const nav = vi.fn();
     document.addEventListener("aquarium-nav-refresh", nav);
@@ -610,7 +770,7 @@ describe("Live TV", () => {
 
   it("opens with the custom rows shown when the source is custom", async () => {
     await mount({ config: { livetv_source: "custom", livetv_m3u: "http://tv.test/a.m3u", livetv_xmltv: "http://tv.test/g.xml", livetv_user_agent: "Kodi" } });
-    expect(block("Live TV").querySelector<HTMLElement>(".settings-sub")!.style.display).toBe("");
+    expect(block("Source", "livetv").querySelector<HTMLElement>(".settings-sub")!.style.display).toBe("");
     expect(rowNamed("M3U playlist").querySelector("input")!.value).toBe("http://tv.test/a.m3u");
     expect(rowNamed("XMLTV guide").querySelector("input")!.value).toBe("http://tv.test/g.xml");
     expect(rowNamed("User agent").querySelector("input")!.value).toBe("Kodi");
@@ -840,19 +1000,25 @@ describe("languages, subtitles, audio and music", () => {
     pick(audio, "jpn");
     await settle();
     expect(saved().at(-1)).toEqual({ audio_lang: "jpn" });
-    expect(selectIn("Forced subtitles").value).toBe("off");
+    expect(switchIn("Forced subtitles").checked).toBe(false);
+    // Each language is in the pane it belongs to.
+    expect(block("Language", "audio").contains(audio)).toBe(true);
+    expect(block("Language", "subtitles").contains(subs)).toBe(true);
   });
 
   it("applies the subtitle size and position as they are dragged", async () => {
     await mount({ config: { sub_pos: 90 } });
+    // Shown as a percentage of the size a track asks for; kept as mpv's font
+    // size, where 38 is that size.
     const size = rowNamed("Size").querySelector("input")!;
-    expect(size.value).toBe("38");
-    expect(rowNamed("Size").querySelector(".settings-value")!.textContent).toBe("38");
-    size.value = "50";
+    expect(size.value).toBe("100");
+    expect(rowNamed("Size").querySelector(".settings-value")!.textContent).toBe("100%");
+    size.value = "150";
     size.dispatchEvent(new Event("input"));
-    expect(pb.setLiveSetting).toHaveBeenLastCalledWith("sub_font_size", "sub-font-size", 50);
-    expect(size.style.getPropertyValue("--fill")).toBe("50%");
-    expect(rowNamed("Size").querySelector(".settings-value")!.textContent).toBe("50");
+    expect(pb.setLiveSetting).toHaveBeenLastCalledWith("sub_font_size", "sub-font-size", 57);
+    expect(size.style.getPropertyValue("--fill")).toBe("75%");
+    expect(rowNamed("Size").querySelector(".settings-value")!.textContent).toBe("150%");
+    expect(size.getAttribute("aria-valuetext")).toBe("150%");
 
     const pos = rowNamed("Position");
     expect(pos.querySelector("input")!.value).toBe("90");
@@ -860,6 +1026,18 @@ describe("languages, subtitles, audio and music", () => {
     pos.querySelector("input")!.value = "100";
     pos.querySelector("input")!.dispatchEvent(new Event("input"));
     expect(pos.querySelector(".settings-value")!.textContent).toBe("Bottom");
+  });
+
+  it("reads a saved subtitle size back as a percentage, onto the nearest step and inside the range", async () => {
+    await mount({ config: { sub_font_size: 57 } });
+    expect(rowNamed("Size").querySelector("input")!.value).toBe("150");
+    expect(rowNamed("Size").querySelector(".settings-value")!.textContent).toBe("150%");
+    await mount({ config: { sub_font_size: 40 } });
+    expect(rowNamed("Size").querySelector("input")!.value).toBe("105");
+    await mount({ config: { sub_font_size: 80 } });
+    expect(rowNamed("Size").querySelector("input")!.value).toBe("180");
+    await mount({ config: { sub_font_size: 20 } });
+    expect(rowNamed("Size").querySelector("input")!.value).toBe("60");
   });
 
   it("mirrors the subtitle background onto a running player", async () => {
@@ -907,13 +1085,22 @@ describe("languages, subtitles, audio and music", () => {
     ]);
     expect(out.value).toBe("pulse/hdmi");
     expect(rowNamed("Output").textContent).toContain("headphones rather than the television");
-    expect(selectIn("Night mode").value).toBe("off");
-    expect(selectIn("Downmix to stereo").value).toBe("off");
+    expect(block("Output", "audio").contains(out)).toBe(true);
+    expect(switchIn("Downmix to stereo").checked).toBe(false);
+    // Night mode sits with the picture settings, under Video.
+    expect(switchIn("Night mode").checked).toBe(false);
+    expect(block("Picture", "video").contains(switchIn("Night mode"))).toBe(true);
   });
 
   it("picks who builds a music mix", async () => {
     await mount();
     const mixes = selectIn("Mixes");
+    expect(block("Stations", "music").contains(mixes)).toBe(true);
+    expect([...mixes.options].map((o) => [o.value, o.textContent])).toEqual([
+      ["aquarium", "Aquarium"],
+      ["jellyfin", "Jellyfin Instant Mix"],
+    ]);
+    expect(rowNamed("Mixes").textContent).toContain("AudioMuse-AI");
     expect(mixes.value).toBe("aquarium");
     pick(mixes, "jellyfin");
     await settle();
@@ -923,19 +1110,19 @@ describe("languages, subtitles, audio and music", () => {
 
 describe("picture", () => {
   it("applies each picture slider live and resets them all, with the aspect ratio", async () => {
-    await mount({ config: { pic_brightness: 10, pic_contrast: "x", video_zoom: 20, video_aspect: "4:3" } });
+    await mount({ config: { pic_brightness: 10, pic_contrast: "x", video_zoom: 0.2, video_aspect: "4:3" } });
     const bright = rowNamed("Brightness");
     expect(bright.querySelector("input")!.value).toBe("10");
     expect(bright.querySelector(".settings-value")!.textContent).toBe("+10");
     // A value that is not a number starts at the default.
     expect(rowNamed("Contrast").querySelector("input")!.value).toBe("0");
     expect(rowNamed("Contrast").querySelector(".settings-value")!.textContent).toBe("0");
+    // The slider is in percent; what is saved, and mpv's zoom, is a fraction.
     const zoom = rowNamed("Zoom").querySelector("input")!;
     expect(zoom.value).toBe("20");
     expect(rowNamed("Zoom").querySelector(".settings-value")!.textContent).toBe("20%");
     zoom.value = "40";
     zoom.dispatchEvent(new Event("input"));
-    // The slider is in percent; mpv's zoom is a fraction.
     expect(pb.setLiveSetting).toHaveBeenLastCalledWith("video_zoom", "video-zoom", 0.4);
     const sat = rowNamed("Saturation").querySelector("input")!;
     sat.value = "-20";
@@ -959,16 +1146,16 @@ describe("picture", () => {
 describe("downloads", () => {
   it("saves each download setting and tells the queue, reading keep-awake as on unless turned off", async () => {
     await mount({ config: { downloads_unmetered_only: true } });
-    expect(selectIn("Only download on unmetered connections").value).toBe("on");
-    expect(selectIn("Transcode one at a time").value).toBe("off");
-    expect(selectIn("Keep the laptop awake while downloading").value).toBe("on");
-    pick(selectIn("Keep the laptop awake while downloading"), "off");
-    pick(selectIn("Transcode one at a time"), "on");
+    expect(switchIn("Only download on unmetered connections").checked).toBe(true);
+    expect(switchIn("Transcode one at a time").checked).toBe(false);
+    expect(switchIn("Keep the laptop awake while downloading").checked).toBe(true);
+    flip(switchIn("Keep the laptop awake while downloading"), false);
+    flip(switchIn("Transcode one at a time"), true);
     await settle();
     expect(saved().slice(-2)).toEqual([{ downloads_keep_awake: false }, { downloads_transcode_serial: true }]);
     expect(pb.downloadPrefsChanged).toHaveBeenCalledTimes(2);
 
     await mount({ config: { downloads_keep_awake: false } });
-    expect(selectIn("Keep the laptop awake while downloading").value).toBe("off");
+    expect(switchIn("Keep the laptop awake while downloading").checked).toBe(false);
   });
 });

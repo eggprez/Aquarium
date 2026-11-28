@@ -332,12 +332,28 @@ describe("pointer over the bar", () => {
     expect(revealed()).toBe(false);
   });
 
-  it("stays up while a panel is open", async () => {
+  it("stays up while a strip is open in the bar", async () => {
     await fullscreen();
-    click($("pb-tune"));
+    click($("pb-episodes"));
+    expect(document.querySelector("#player-bar .pb-panel")).not.toBeNull();
     vi.advanceTimersByTime(6000);
     expect(revealed()).toBe(true);
-    click($("pb-tune"));
+    click($("pb-episodes"));
+    vi.advanceTimersByTime(2000);
+    expect(revealed()).toBe(false);
+  });
+
+  it("comes up for a card opened from a pill, and stays up while it is open", async () => {
+    await fullscreen();
+    vi.advanceTimersByTime(2000);
+    expect(revealed()).toBe(false);
+    // The band the card is drawn in is cut above the bar, so the bar must be up.
+    click($("pb-audio"));
+    expect(document.querySelector("#player-cards .pb-card")).not.toBeNull();
+    expect(revealed()).toBe(true);
+    vi.advanceTimersByTime(6000);
+    expect(revealed()).toBe(true);
+    click($("pb-audio"));
     vi.advanceTimersByTime(2000);
     expect(revealed()).toBe(false);
   });

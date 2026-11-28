@@ -8,6 +8,7 @@
          rather than an inline script so the CSP can refuse inline scripts. -->
     <script src="/theme-boot.js"></script>
     <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/settings.css" />
   </head>
   <body>
     <div id="app">
@@ -30,13 +31,18 @@
               <input id="search-input" type="search" placeholder="Search movies, shows, episodes…" autocomplete="off" aria-label="Search movies, shows and episodes" />
               <div id="search-recent" class="search-recent" hidden></div>
             </div>
-            <div id="offline-pill" hidden>
-              <span class="offline-dot"></span>
-              <span>Offline</span>
-              <button id="offline-retry" class="btn small" type="button">Retry</button>
-            </div>
-            <div id="topbar-user"></div>
           </header>
+          <!-- Under the top bar on every page while the server can't be
+               reached. A still icon, no pulse: it is up for as long as the
+               machine is offline. -->
+          <div id="offline-strip" role="status" hidden>
+            <svg class="offline-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 8.8a15 15 0 0 1 4.2-2.7M10.7 5.1A15 15 0 0 1 22 8.8M5 12.9a10 10 0 0 1 5.2-2.7M16.9 11.1a10 10 0 0 1 2.1 1.8M8.5 16.4a5 5 0 0 1 7 0"/><path d="M12 20h.01M3 3l18 18"/></svg>
+            <div class="offline-text">
+              <strong>Offline — showing downloads</strong>
+              <span id="offline-status">Your server can't be reached</span>
+            </div>
+            <button id="offline-retry" class="btn small" type="button">Retry</button>
+          </div>
           <div id="content"></div>
         </main>
       </div>

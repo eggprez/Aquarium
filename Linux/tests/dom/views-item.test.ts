@@ -446,51 +446,92 @@ describe("film page: watched and favourite", () => {
 });
 
 describe("film page: cast and More like this", () => {
-  it("lists actors and guest stars, with the part played or the kind of credit", async () => {
+  it("lists directors and writers, then actors and guest stars, with the part played or the kind of credit", async () => {
     const { view, root } = await mount({ item: movie() });
     await view.renderItem(root, "m1");
-    const cast = $$(".section", root).find((s) => $("h2", s)!.textContent === "Cast")!;
+    expect($$(".section h2", root).map((h) => h.textContent)).not.toContain("Cast");
+    const cast = $$(".section", root).find((s) => $("h2", s)!.textContent === "Cast & Crew")!;
+    expect(cast).toBeDefined();
     const cards = $$(".person-card", cast);
-    expect(cards.map((c) => $(".person-name", c)!.textContent)).toEqual(["Ann Actor", "Guy Guest & Co"]);
-    expect(cards.map((c) => $(".person-role", c)!.textContent)).toEqual(["as Hero", "GuestStar"]);
-    expect($<HTMLImageElement>(".person-photo img", cards[0]!)!.getAttribute("src")).toContain(
+    expect(cards.map((c) => $(".person-name", c)!.textContent)).toEqual(["Dana Director", "Will Writer", "Ann Actor", "Guy Guest & Co"]);
+    expect(cards.map((c) => $(".person-role", c)!.textContent)).toEqual(["Director", "Writer", "as Hero", "GuestStar"]);
+    expect($<HTMLImageElement>(".person-photo img", cards[2]!)!.getAttribute("src")).toContain(
       "/Items/a1/Images/Primary?maxWidth=240&tag=pa1"
     );
     // No headshot: an icon tile, not a letter.
-    expect($(".person-photo .noart svg", cards[1]!)).not.toBeNull();
-    expect(cards[0]!.getAttribute("role")).toBe("button");
-    expect(cards[0]!.getAttribute("tabindex")).toBe("0");
-    expect(cards[0]!.getAttribute("aria-label")).toBe("Search for Ann Actor");
+    expect($(".person-photo .noart svg", cards[3]!)).not.toBeNull();
+    expect(cards[2]!.getAttribute("role")).toBe("button");
+    expect(cards[2]!.getAttribute("tabindex")).toBe("0");
+    expect(cards[2]!.getAttribute("aria-label")).toBe("Ann Actor");
   });
 
-  it("shows at most 24 cast members", async () => {
-    const People = Array.from({ length: 30 }, (_, i) => ({ Id: `a${i}`, Name: `Actor ${i}`, Type: "Actor" }));
+  it("calls the section Cast when there are no directors or writers, and lists a person once per kind of credit", async () => {
+    const People = [
+      { Id: "a1", Name: "Ann Actor", Type: "Actor", Role: "Hero" },
+      { Id: "a1", Name: "Ann Actor", Type: "Actor", Role: "Villain" },
+      { Id: "g1", Name: "Guy Guest & Co", Type: "GuestStar" },
+      { Id: "p1", Name: "Pat Producer", Type: "Producer" },
+    ];
     const { view, root } = await mount({ item: movie({ People }) });
     await view.renderItem(root, "m1");
+    const cast = $$(".section", root).find((s) => $("h2", s)!.textContent === "Cast")!;
+    expect(cast).toBeDefined();
+    expect($$(".person-card", cast).map((c) => $(".person-name", c)!.textContent)).toEqual(["Ann Actor", "Guy Guest & Co"]);
+    expect($$(".person-role", cast).map((r) => r.textContent)).toEqual(["as Hero", "GuestStar"]);
+  });
+
+  it("shows at most 24 cast members, after at most 6 directors and writers", async () => {
+    const People = Array.from({ length: 30 }, (_, i) => ({ Id: `a${i}`, Name: `Actor ${i}`, Type: "Actor" }));
+    let { view, root } = await mount({ item: movie({ People }) });
+    await view.renderItem(root, "m1");
     expect($$(".person-card", root)).toHaveLength(24);
+
+    vi.resetModules();
+    const crew = Array.from({ length: 8 }, (_, i) => ({ Id: `d${i}`, Name: `Director ${i}`, Type: "Director" }));
+    ({ view, root } = await mount({ item: movie({ People: [...People, ...crew] }) }));
+    await view.renderItem(root, "m1");
+    const names = $$(".person-card .person-name", root).map((n) => n.textContent);
+    expect(names).toHaveLength(30);
+    expect(names.slice(0, 6)).toEqual(crew.slice(0, 6).map((p) => p.Name));
+    expect(names[6]).toBe("Actor 0");
   });
 
-  it("has no Cast section when nobody is credited as cast", async () => {
-    const { view, root } = await mount({ item: movie({ People: [{ Name: "D", Type: "Director" }] }) });
+  it("has no Cast section when nobody is credited as cast or crew; a director alone makes it Cast & Crew", async () => {
+    let { view, root } = await mount({ item: movie({ People: [{ Name: "P", Type: "Producer" }] }) });
     await view.renderItem(root, "m1");
-    expect($$(".section h2", root).map((h) => h.textContent)).not.toContain("Cast");
+    expect($$(".section h2", root).map((h) => h.textContent).filter((t) => /Cast/.test(t ?? ""))).toEqual([]);
+    expect($$(".person-card", root)).toHaveLength(0);
+
+    vi.resetModules();
+    ({ view, root } = await mount({ item: movie({ People: [{ Name: "D", Type: "Director" }] }) }));
+    await view.renderItem(root, "m1");
+    expect($$(".section h2", root).map((h) => h.textContent).filter((t) => /Cast/.test(t ?? ""))).toEqual(["Cast & Crew"]);
+    expect($$(".person-card .person-name", root).map((n) => n.textContent)).toEqual(["D"]);
   });
 
-  it("a cast member searches for their own name, by click, Enter or Space", async () => {
-    const { view, root } = await mount({ item: movie() });
+  it("a cast member opens their own page, by click, Enter or Space; a credit with no id searches the name", async () => {
+    const People = [
+      { Id: "a1", Name: "Ann Actor", Type: "Actor", Role: "Hero" },
+      { Id: "g1", Name: "Guy Guest & Co", Type: "GuestStar" },
+      { Name: "Nora No-Id & Co", Type: "Actor" },
+    ];
+    const { view, root } = await mount({ item: movie({ People }) });
     await view.renderItem(root, "m1");
-    const [ann, guy] = $$(".person-card", root);
+    const [ann, guy, nora] = $$(".person-card", root);
     ann!.click();
-    expect(location.hash).toBe("#/search/Ann%20Actor");
+    expect(location.hash).toBe("#/person/a1");
 
     const enter = key(guy!, "Enter");
-    expect(location.hash).toBe("#/search/Guy%20Guest%20%26%20Co");
+    expect(location.hash).toBe("#/person/g1");
     expect(enter.defaultPrevented).toBe(true);
 
     location.hash = "";
     const space = key(ann!, " ");
-    expect(location.hash).toBe("#/search/Ann%20Actor");
+    expect(location.hash).toBe("#/person/a1");
     expect(space.defaultPrevented).toBe(true);
+
+    nora!.click();
+    expect(location.hash).toBe("#/search/Nora%20No-Id%20%26%20Co");
 
     location.hash = "";
     const other = key(ann!, "a");

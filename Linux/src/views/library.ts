@@ -11,6 +11,8 @@ import {
   type IconName,
 } from "../ui";
 import { getCached, setCached, itemSignature } from "../cache";
+import * as m from "../musicApi";
+import { shelf, musicCard, songList } from "./musicCommon";
 import { seerrItemHooks, seerrSearchSection } from "./requests";
 
 const PAGE = 60;
@@ -23,6 +25,7 @@ const SORTS: [string, string][] = [
   ["DateCreated|Descending", "Recently added"],
   ["PremiereDate|Descending", "Release date"],
   ["CommunityRating|Descending", "Rating"],
+  ["Runtime|Descending", "Runtime"],
   ["Random|Ascending", "Shuffle"],
 ];
 
@@ -33,12 +36,14 @@ interface LibPrefs {
   unwatched: boolean;
   favorites: boolean;
   genre: string;
+  /** The sort, the other way round. */
+  reverse: boolean;
 }
 
 const prefsKey = (libId: string): string => `aquarium.lib.${libId}`;
 
 function loadPrefs(libId: string): LibPrefs {
-  const fallback: LibPrefs = { sort: "SortName|Ascending", unwatched: false, favorites: false, genre: "" };
+  const fallback: LibPrefs = { sort: "SortName|Ascending", unwatched: false, favorites: false, genre: "", reverse: false };
   try {
     const raw = JSON.parse(localStorage.getItem(prefsKey(libId)) ?? "{}");
     return {
@@ -46,6 +51,7 @@ function loadPrefs(libId: string): LibPrefs {
       unwatched: !!raw.unwatched,
       favorites: !!raw.favorites,
       genre: typeof raw.genre === "string" ? raw.genre : "",
+      reverse: !!raw.reverse,
     };
   } catch {
     return fallback;
@@ -117,8 +123,15 @@ export async function renderLibrary(root: HTMLElement, libId: string): Promise<v
   // into the cache after every successful load so a revisit can replay the
   // whole thing instead of just the first page.
   let loadedItems: any[] = [];
+  // What the name filter holds. Not remembered: a library that reopened on
+  // last week's search would look like most of it had gone missing.
+  let term = "";
+  const order = (): string =>
+    prefs.reverse ? (sortOrder === "Ascending" ? "Descending" : "Ascending") : sortOrder;
   const cacheKey = (): string =>
-    `lib:${libId}:${sortBy}|${sortOrder}:${prefs.unwatched ? 1 : 0}:${prefs.favorites ? 1 : 0}:${prefs.genre}`;
+    `lib:${libId}:${sortBy}|${order()}:${prefs.unwatched ? 1 : 0}:${prefs.favorites ? 1 : 0}:${prefs.genre}:${term}`;
+  const noun = includeTypes === "Movie" ? "film" : includeTypes === "Series" ? "show" : "item";
+  const countText = (n: number): string => (n ? `${n} ${noun}${n === 1 ? "" : "s"}` : "");
 
   clear(root);
   const count = el("span", { class: "lib-count" }, [""]);
@@ -144,6 +157,33 @@ export async function renderLibrary(root: HTMLElement, libId: string): Promise<v
   });
   bar.append(sortSel);
 
+  // The sort the other way round, for any of them.
+  bar.append(
+    toggleChip("Reverse", prefs.reverse, (on) => {
+      prefs.reverse = on;
+      savePrefs(libId, prefs);
+      void loadPage(true);
+    })
+  );
+
+  // Narrow the library by name, as the Apple app's filter field does.
+  const filter = el("input", {
+    type: "search",
+    class: "control lib-filter",
+    placeholder: `Filter ${lib?.Name ?? "library"}`,
+    "aria-label": `Filter ${lib?.Name ?? "library"} by name`,
+  }) as HTMLInputElement;
+  let filterTimer = 0;
+  filter.addEventListener("input", () => {
+    clearTimeout(filterTimer);
+    filterTimer = window.setTimeout(() => {
+      const next = filter.value.trim();
+      if (next === term) return;
+      term = next;
+      void loadPage(true);
+    }, 250);
+  });
+
   bar.append(
     toggleChip("Unwatched", prefs.unwatched, (on) => {
       prefs.unwatched = on;
@@ -168,7 +208,7 @@ export async function renderLibrary(root: HTMLElement, libId: string): Promise<v
     savePrefs(libId, prefs);
     void loadPage(true);
   });
-  bar.append(genreSel);
+  bar.append(genreSel, filter);
   root.append(bar);
 
   // Genres are a nice-to-have: the control only appears once (and if) the
@@ -195,6 +235,8 @@ export async function renderLibrary(root: HTMLElement, libId: string): Promise<v
     prefs.unwatched = false;
     prefs.favorites = false;
     prefs.genre = "";
+    term = "";
+    filter.value = "";
     savePrefs(libId, prefs);
     genreSel.value = "";
     for (const chip of bar.querySelectorAll(".btn.active")) chip.classList.remove("active");
@@ -239,7 +281,8 @@ export async function renderLibrary(root: HTMLElement, libId: string): Promise<v
         limit: PAGE,
         includeTypes,
         sortBy,
-        sortOrder,
+        sortOrder: order(),
+        searchTerm: term || undefined,
         unwatched: prefs.unwatched,
         favorites: prefs.favorites,
         genre: prefs.genre || undefined,
@@ -252,7 +295,7 @@ export async function renderLibrary(root: HTMLElement, libId: string): Promise<v
       loadedItems.push(...items);
       for (const item of items) grid.append(itemCard(item));
       startIndex += PAGE;
-      count.textContent = total ? `${total} item${total === 1 ? "" : "s"}` : "";
+      count.textContent = countText(total);
       moreWrap.style.display = startIndex < total ? "" : "none";
       // Kept in step with what's actually on screen, so a revisit — or the
       // freshness check below — always compares against what this session
@@ -274,7 +317,7 @@ export async function renderLibrary(root: HTMLElement, libId: string): Promise<v
       }
     }
     if (!grid.children.length) {
-      const filtered = prefs.unwatched || prefs.favorites || prefs.genre;
+      const filtered = prefs.unwatched || prefs.favorites || prefs.genre || term;
       grid.append(
         filtered
           ? emptyState({
@@ -311,7 +354,8 @@ export async function renderLibrary(root: HTMLElement, libId: string): Promise<v
         limit: PAGE,
         includeTypes,
         sortBy,
-        sortOrder,
+        sortOrder: order(),
+        searchTerm: term || undefined,
         unwatched: prefs.unwatched,
         favorites: prefs.favorites,
         genre: prefs.genre || undefined,
@@ -353,7 +397,7 @@ export async function renderLibrary(root: HTMLElement, libId: string): Promise<v
     total = cachedPage.total;
     startIndex = loadedItems.length;
     for (const item of loadedItems) grid.append(itemCard(item));
-    count.textContent = total ? `${total} item${total === 1 ? "" : "s"}` : "";
+    count.textContent = countText(total);
     moreWrap.style.display = startIndex < total ? "" : "none";
     void revalidateFirstPage(loadedItems, total);
   } else {
@@ -364,6 +408,10 @@ export async function renderLibrary(root: HTMLElement, libId: string): Promise<v
 // ---------- Search ----------
 
 const SEARCH_PAGE = 48;
+
+/** What the search page narrows to: everything, or one kind. */
+const SCOPES: [string, string][] = [["", "All"], ["Movie", "Films"], ["Series", "Shows"], ["Episode", "Episodes"]];
+let searchScope = "";
 
 const GROUPS: { type: string; label: string; wide?: boolean }[] = [
   { type: "Movie", label: "Movies" },
@@ -386,7 +434,28 @@ export async function renderSearch(root: HTMLElement, term: string): Promise<voi
     ]),
   ]);
   const placeholder = skeletonGrid(12);
-  root.append(heading, placeholder);
+  // One kind at a time, when the answer is forty episodes and one film.
+  const scopes = el("div", { class: "filter-bar search-scopes", role: "tablist", "aria-label": "Show" });
+  // Music and audiobook hits sit above the films, as on the Apple app's
+  // Search page; only under All.
+  const musicBox = el("div", { class: "search-music" });
+  root.append(heading, scopes, musicBox, placeholder);
+  void m.searchMusic(term, 12).then((r) => {
+    if (!document.contains(musicBox)) return;
+    const parts = [
+      shelf("Artists", r.artists.map((a: any) => musicCard(a))),
+      shelf("Albums", r.albums.map((a: any) => musicCard(a))),
+      r.songs.length
+        ? el("section", { class: "mu-shelf" }, [
+            el("div", { class: "section-head" }, [el("h2", {}, ["Songs"])]),
+            songList(r.songs.slice(0, 6), { lead: "art", showAlbum: true }),
+          ])
+        : null,
+    ].filter(Boolean) as HTMLElement[];
+    musicBox.append(...parts);
+  }).catch(() => {
+    // No music library, or the server didn't answer: the films stand alone.
+  });
 
   let startIndex = 0;
   let total = 0;
@@ -401,7 +470,25 @@ export async function renderSearch(root: HTMLElement, term: string): Promise<voi
    *  among forty episodes of it. */
   function paint(): void {
     clear(results);
+    clear(scopes);
+    for (const [type, label] of SCOPES) {
+      const n = type ? found.filter((i) => i.Type === type).length : found.length;
+      if (type && !n) continue;
+      scopes.append(el("button", {
+        class: `btn small${searchScope === type ? " active" : ""}`,
+        role: "tab",
+        "aria-selected": searchScope === type ? "true" : "false",
+        onClick: () => {
+          searchScope = type;
+          paint();
+        },
+      }, [label]));
+    }
+    // A scope with nothing in this search falls back to everything.
+    if (searchScope && !found.some((i) => i.Type === searchScope)) searchScope = "";
+    musicBox.style.display = searchScope ? "none" : "";
     for (const g of GROUPS) {
+      if (searchScope && g.type !== searchScope) continue;
       const items = found.filter((i) => i.Type === g.type);
       if (!items.length) continue;
       results.append(
@@ -415,7 +502,7 @@ export async function renderSearch(root: HTMLElement, term: string): Promise<voi
     }
     // Anything the server returned that isn't one of the three known types.
     const rest = found.filter((i) => !GROUPS.some((g) => g.type === i.Type));
-    if (rest.length) {
+    if (rest.length && !searchScope) {
       results.append(
         el("div", { class: "section" }, [
           el("div", { class: "section-head" }, [el("h2", {}, ["Other"])]),

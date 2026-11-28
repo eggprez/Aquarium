@@ -1223,7 +1223,7 @@ describe("Live TV", () => {
       minEndDate: "2026-11-12T20:00:00.000Z",
       maxStartDate: "2026-11-12T23:00:00.000Z",
       sortBy: "StartDate",
-      fields: "Overview",
+      fields: "Overview,Genres",
       enableImages: "false",
       enableUserData: "false",
       enableTotalRecordCount: "false",

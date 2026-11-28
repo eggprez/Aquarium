@@ -92,7 +92,7 @@ describe("a library", () => {
     await p;
     expect(root.querySelector("h1.page-title")!.textContent).toBe("Films");
     expect(cards()).toEqual(["Film f0", "Film f1"]);
-    expect(root.querySelector(".lib-count")!.textContent).toBe("2 items");
+    expect(root.querySelector(".lib-count")!.textContent).toBe("2 films");
     const q = seen[0]!;
     expect(q.get("userId")).toBe("user-1");
     expect(q.get("ParentId")).toBe("lib1");
@@ -186,14 +186,22 @@ describe("a library", () => {
     observers.at(-1)!([{ isIntersecting: true } as any], null as any);
     await settle();
     expect(seen).toHaveLength(3);
-    expect(root.querySelector(".lib-count")!.textContent).toBe("130 items");
+    expect(root.querySelector(".lib-count")!.textContent).toBe("130 films");
   });
 
-  it("counts one item in the singular, and none as nothing", async () => {
+  it("counts in the library's own noun (films, shows, else items), one in the singular, and none as nothing", async () => {
     srv.items = paged(1);
     await boot();
     await lib.renderLibrary(root, "lib1");
-    expect(root.querySelector(".lib-count")!.textContent).toBe("1 item");
+    expect(root.querySelector(".lib-count")!.textContent).toBe("1 film");
+    for (const [type, n, label] of [["tvshows", 1, "1 show"], ["tvshows", 2, "2 shows"], ["homevideos", 1, "1 item"], ["homevideos", 2, "2 items"]] as const) {
+      srv.items = paged(n);
+      srv.meta = { Id: "lib1", Name: "Lib", CollectionType: type };
+      cache.clearCache();
+      await lib.renderLibrary(root, "lib1");
+      expect(root.querySelector(".lib-count")!.textContent).toBe(label);
+    }
+    srv.meta = undefined;
     srv.items = () => ({});
     cache.clearCache();
     await lib.renderLibrary(root, "lib1");
@@ -209,7 +217,7 @@ describe("the filter bar", () => {
     await boot();
     await lib.renderLibrary(root, "lib1");
     const sort = selects()[0]!;
-    expect(Array.from(sort.options).map((o) => o.textContent)).toEqual(["A – Z", "Z – A", "Recently added", "Release date", "Rating", "Shuffle"]);
+    expect(Array.from(sort.options).map((o) => o.textContent)).toEqual(["A – Z", "Z – A", "Recently added", "Release date", "Rating", "Runtime", "Shuffle"]);
     sort.value = "DateCreated|Descending";
     sort.dispatchEvent(new Event("change"));
     await settle();
@@ -222,7 +230,16 @@ describe("the filter bar", () => {
     click(chip("Favorites"));
     await settle();
     expect(seen.at(-1)!.get("IsFavorite")).toBe("true");
-    expect(JSON.parse(localStorage.getItem("aquarium.lib.lib1")!)).toEqual({ sort: "DateCreated|Descending", unwatched: true, favorites: true, genre: "" });
+    expect(JSON.parse(localStorage.getItem("aquarium.lib.lib1")!)).toEqual({ sort: "DateCreated|Descending", unwatched: true, favorites: true, genre: "", reverse: false });
+    // Reverse flips whichever order the sort has, and is remembered with the rest.
+    click(chip("Reverse"));
+    await settle();
+    expect(seen.at(-1)!.get("SortBy")).toBe("DateCreated");
+    expect(seen.at(-1)!.get("SortOrder")).toBe("Ascending");
+    expect(JSON.parse(localStorage.getItem("aquarium.lib.lib1")!).reverse).toBe(true);
+    click(chip("Reverse"));
+    await settle();
+    expect(seen.at(-1)!.get("SortOrder")).toBe("Descending");
     // Next visit opens the same way.
     await lib.renderLibrary(root, "lib1");
     expect(selects()[0]!.value).toBe("DateCreated|Descending");
@@ -434,7 +451,7 @@ describe("cache-first paint (Linux/CLAUDE.md: getCached/setCached with a signatu
     expect(cards()).toHaveLength(2);
     await settle();
     expect(cards()).toHaveLength(3);
-    expect(root.querySelector(".lib-count")!.textContent).toBe("3 items");
+    expect(root.querySelector(".lib-count")!.textContent).toBe("3 films");
   });
 
   it("keeps the cached grid when the check fails, and drops a check that a newer load overtook", async () => {

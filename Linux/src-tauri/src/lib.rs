@@ -1,5 +1,6 @@
 mod audio;
 mod config;
+mod desktop;
 mod discovery;
 mod download_extras;
 mod downloads;
@@ -196,7 +197,21 @@ async fn jf_login(server: String, username: String, password: String) -> Result<
 
 #[tauri::command]
 async fn jf_logout() -> Result<Value, String> {
+    // The library's titles stop being searchable from the desktop with it.
+    desktop::clear_index();
     server::logout().await
+}
+
+/// The action the app was launched with (`--action=…`), once.
+#[tauri::command]
+fn take_launch_action() -> Option<String> {
+    desktop::take_pending()
+}
+
+/// Write the titles GNOME Shell's search answers from (see `desktop.rs`).
+#[tauri::command]
+fn search_index_write(items: Vec<Value>) -> Result<usize, String> {
+    desktop::write_index(&items)
 }
 
 #[tauri::command]
@@ -579,6 +594,17 @@ fn player_set_viewport(
     Ok(())
 }
 
+/// Cut `px` more CSS pixels off the bottom of the video, above the player
+/// bar, without moving the picture: the band a player card is drawn in. The
+/// page can draw nowhere the video covers, so a card that rises above the bar
+/// needs the video taken off that strip first. Zero puts the picture back.
+#[tauri::command]
+fn player_set_card_band(app: AppHandle, player: State<'_, player::Player>, px: u32) -> Result<(), String> {
+    player.card_band.store(px.min(2000), Ordering::SeqCst);
+    resize_video_surface(&app);
+    Ok(())
+}
+
 /// Move the running video into a small always-on-top window of its own, or
 /// bring it back. Reparents the existing surface, so mpv keeps decoding the
 /// same stream at the same position — nothing restarts and nothing buffers.
@@ -621,6 +647,7 @@ fn resize_video_surface(app: &AppHandle) {
     let player = app.state::<player::Player>();
     let full = player.viewport_full.load(Ordering::SeqCst);
     let reveal = player.bar_reveal.load(Ordering::SeqCst);
+    let band = player.card_band.load(Ordering::SeqCst) as f64;
     let size = win.inner_size().unwrap_or(tauri::PhysicalSize {
         width: 1280,
         height: 800,
@@ -629,9 +656,15 @@ fn resize_video_surface(app: &AppHandle) {
     let ((x, y, w, h), bar) = video_layout(size, scale, full, reveal);
     if full {
         e.resize(x, y, w, h);
+        // A card is only ever open with the bar up, so its band sits on
+        // top of the bar's strip.
+        let bar = if reveal { bar + (band * scale).ceil() as u32 } else { 0 };
         e.set_bottom_clip(w, h, bar);
     } else {
-        e.set_bottom_clip(w, h, 0);
+        // The bar's own strip is reserved by the size; the card's band is
+        // clipped, never more than leaves a sliver of picture.
+        let clip = ((band * scale).ceil() as u32).min((h as u32).saturating_sub(1));
+        e.set_bottom_clip(w, h, clip);
         e.resize(x, y, w, h);
     }
 }
@@ -940,6 +973,23 @@ fn test_sequence(seq: &str) -> Vec<(u64, String)> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// `--search-provider`: answer GNOME Shell's search and leave (no window).
+pub fn run_search_provider() {
+    if let Err(e) = desktop::run_search_provider() {
+        eprintln!("aquarium: search provider: {e}");
+    }
+}
+
+/// `--action=<name>`: give it to the running app and report whether one took
+/// it; otherwise it is kept for this one's page.
+pub fn launch_action(action: &str) -> bool {
+    if desktop::forward(action) {
+        return true;
+    }
+    desktop::set_pending(action);
+    false
+}
+
 pub fn run() {
     config::migrate_legacy_dirs();
     tauri::Builder::default()
@@ -1031,6 +1081,7 @@ pub fn run() {
 
             // Media keys, the lock screen, and the shell's audio menu.
             mpris::start(app.handle().clone());
+            desktop::start(app.handle().clone());
 
             config::harden_data_dir();
             if std::env::var_os("AQUARIUM_MPV_LOG").is_none() {
@@ -1251,6 +1302,9 @@ pub fn run() {
             player_set_next_available,
             audio_devices,
             player_set_viewport,
+            player_set_card_band,
+            take_launch_action,
+            search_index_write,
             player_set_pip,
             player_mpv_command,
             audio_play,

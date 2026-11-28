@@ -96,7 +96,7 @@ export async function music(q: MusicQuery): Promise<{ Items: any[]; TotalRecordC
 /** Artists with an album to their name — what a music library means by
  *  "Artists". `all` is everyone credited anywhere, for search. */
 export async function artists(
-  opts: { all?: boolean; startIndex?: number; limit?: number; favorites?: boolean; searchTerm?: string; sort?: keyof typeof SORTS } = {}
+  opts: { all?: boolean; startIndex?: number; limit?: number; favorites?: boolean; searchTerm?: string; sort?: keyof typeof SORTS; genreIds?: string[] } = {}
 ): Promise<{ Items: any[]; TotalRecordCount: number }> {
   const s = sess();
   const sort = SORTS[opts.sort ?? "name"];
@@ -112,6 +112,7 @@ export async function artists(
   });
   if (opts.favorites) p.set("IsFavorite", "true");
   if (opts.searchTerm) p.set("SearchTerm", opts.searchTerm);
+  if (opts.genreIds?.length) p.set("GenreIds", opts.genreIds.join(","));
   const r = await api(`${opts.all ? "/Artists" : "/Artists/AlbumArtists"}?${p}`);
   return { Items: r?.Items ?? [], TotalRecordCount: r?.TotalRecordCount ?? 0 };
 }
@@ -146,7 +147,7 @@ export async function allSongs(artistId: string): Promise<any[]> {
 }
 
 export async function albumsBy(artistId: string): Promise<any[]> {
-  return (await music({ types: "MusicAlbum", sort: "year", albumArtistIds: [artistId], limit: 200 })).Items;
+  return (await music({ types: "MusicAlbum", sort: "year", albumArtistIds: [artistId], limit: 500 })).Items;
 }
 
 /** Albums the artist is on without being the album artist. */
@@ -384,4 +385,11 @@ export function longDuration(sec: number): string {
   const m = Math.round((sec % 3600) / 60);
   if (h) return m ? `${h} hr ${m} min` : `${h} hr`;
   return `${m} min`;
+}
+
+/** "5h 12m" where a line has room for little: time left in a book. */
+export function shortDuration(sec: number): string {
+  const total = Math.max(0, Math.round(sec / 60));
+  const h = Math.floor(total / 60), min = total % 60;
+  return h ? `${h}h ${min}m` : `${min}m`;
 }

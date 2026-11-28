@@ -35,6 +35,10 @@ interface HomeData {
   onNow?: { channel: any; program: any }[];
   /** Every library, for the chips: video ones and Live TV. */
   libraries?: any[];
+  /** A random draw of films and shows for the spotlight. Left out of the
+   *  signature on purpose: a new draw alone isn't a reason to repaint a page
+   *  someone is looking at. */
+  featured?: any[];
 }
 
 /** Whether the Continue Watching row is turned off in Settings. */
@@ -58,7 +62,8 @@ function homeSignature(d: HomeData): string {
 }
 
 async function fetchHomeData(): Promise<HomeData> {
-  const [resume, nextUp, views, favorites, sections] = await Promise.all([
+  const [featured, resume, nextUp, views, favorites, sections] = await Promise.all([
+    api.getFeatured(6).catch(() => []),
     api.getResume().catch(() => []),
     api.getNextUp().catch(() => []),
     api.getViews().catch(() => []),
@@ -79,7 +84,7 @@ async function fetchHomeData(): Promise<HomeData> {
   const libraries = views.filter(
     (v: any) => api.VIDEO_COLLECTION_TYPES.includes(v.CollectionType) || v.CollectionType === "livetv"
   );
-  return { resume, nextUp, favorites, mediaViews, latest, sections, onNow: airing, libraries };
+  return { resume, nextUp, favorites, mediaViews, latest, sections, onNow: airing, libraries, featured };
 }
 
 /** The library chips: one per library, straight to its page. */
@@ -116,7 +121,7 @@ function homeHero(item: any, eyebrow: string): HTMLElement | null {
   const s = item.ParentIndexNumber;
   const e = item.IndexNumber;
   const sub = isEpisode
-    ? [s != null && e != null ? `S${s}:E${e}` : null, item.Name].filter(Boolean).join(" · ")
+    ? [s != null && e != null ? `Season ${s}: Episode ${e}` : null, item.Name].filter(Boolean).join(" · ")
     : "";
 
   const resumeTicks = item.UserData?.PlaybackPositionTicks ?? 0;
@@ -158,7 +163,19 @@ function homeHero(item: any, eyebrow: string): HTMLElement | null {
       el("div", { class: "hero-actions" }, [
         el("button", {
           class: "btn primary",
-          onClick: () => playItem(item, { resume: resumeTicks > 0 }),
+          onClick: () => {
+            // A show plays from wherever it was left; one with nothing to
+            // play yet opens its page instead.
+            if (item.Type !== "Series") return void playItem(item, { resume: resumeTicks > 0 });
+            void api.getSeriesNextUp(item.Id)
+              .then((next) => {
+                if (next) return playItem(next, { resume: true });
+                location.hash = `#/item/${item.Id}`;
+              })
+              .catch(() => {
+                location.hash = `#/item/${item.Id}`;
+              });
+          },
         }, [
           icon("play"),
           resumeTicks > 0 ? (left ? `Resume · ${left} left` : "Resume") : "Play",
@@ -214,9 +231,9 @@ function wireInputClock(): void {
  * a rotator must never do — and while nobody can see it, because a full-screen
  * crossfade of a backdrop image is not something to do for an empty room.
  */
-function heroRotator(items: any[], eyebrow: string): HTMLElement | null {
+function heroRotator(items: { item: any; eyebrow: string }[]): HTMLElement | null {
   const slides = items
-    .map((item) => ({ item, node: homeHero(item, eyebrow) }))
+    .map(({ item, eyebrow }) => ({ item, node: homeHero(item, eyebrow) }))
     .filter((s) => s.node);
   if (!slides.length) return null;
   const first = slides[0]!.node!;
@@ -262,6 +279,22 @@ function heroRotator(items: any[], eyebrow: string): HTMLElement | null {
     );
   });
   stage.append(dots);
+
+  // Step by hand: chevrons at the edges (shown on hover), and the arrow keys
+  // while the spotlight has the focus.
+  const step = (by: number): void => {
+    show((at + by + slides.length) % slides.length);
+    restart();
+  };
+  stage.append(
+    el("button", { class: "hero-nav prev", "aria-label": "Previous", title: "Previous", onClick: () => step(-1) }, [icon("chevron-left", 22)]),
+    el("button", { class: "hero-nav next", "aria-label": "Next", title: "Next", onClick: () => step(1) }, [icon("chevron-right", 22)])
+  );
+  stage.addEventListener("keydown", (ev: KeyboardEvent) => {
+    if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+    ev.preventDefault();
+    step(ev.key === "ArrowLeft" ? -1 : 1);
+  });
 
   const stop = (): void => {
     if (timer) window.clearInterval(timer);
@@ -311,12 +344,19 @@ function paintHome(page: HTMLElement, data: HomeData): void {
   // when nothing is queued at all (a movies-only account, say), because a
   // hero with something to play beats no hero. The plain "Home" title is the
   // last fallback, for when none of them has usable artwork.
+  //
+  // Ahead of both comes the draw: six films and shows at random, a fresh
+  // hand each time Home is built, as the Apple app's media bar deals them.
+  // Next Up and Continue Watching fill in when the library gives no draw.
   const seen = new Set<string>();
+  const fresh = (i: any): boolean => !!i?.Id && !seen.has(i.Id) && !!seen.add(i.Id);
+  const featured = (data.featured ?? []).filter(fresh).slice(0, 6).map((item: any) => ({ item, eyebrow: "Featured" }));
   const fromNextUp = nextUp.length > 0;
-  const picks = (fromNextUp ? nextUp : resume)
-    .filter((i: any) => i?.Id && !seen.has(i.Id) && seen.add(i.Id))
-    .slice(0, 5);
-  const hero = heroRotator(picks, fromNextUp ? "Next up" : "Continue watching");
+  const fallback = (fromNextUp ? nextUp : resume)
+    .filter(fresh)
+    .slice(0, 5)
+    .map((item: any) => ({ item, eyebrow: fromNextUp ? "Next up" : "Continue watching" }));
+  const hero = heroRotator(featured.length ? featured : fallback);
   page.append(hero ?? el("h1", { class: "page-title" }, ["Home"]));
 
   // The rows, in the order the account's Jellyfin home screen has them

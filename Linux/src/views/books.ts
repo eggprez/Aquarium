@@ -5,14 +5,17 @@
 // not), every book by title, author, date added or last played, and a search
 // of its own. A book's page has its chapters, resume point and speed.
 //
+// With no server, the section is the downloaded books: one page of them, and
+// each book's own page drawn from what was kept with the download.
+//
 // Routes (under #/books/): "" · all · author/<name> · book/<id> · search/<term>
 import * as api from "../api";
 import * as m from "../musicApi";
 import * as audio from "../audio";
 import { getCached, setCached, itemSignature } from "../cache";
 import { el, clear, toast, emptyState, errorState, spinner, skeletonRow, openActionMenu, attachContextMenu } from "../ui";
-import { downloadBookAction } from "./musicDownloads";
-import { mi, musicCard, shelf, grid, pageHeader, iconButton, link } from "./musicCommon";
+import { downloadActions, downloadedItems, matchDownloaded, watchDownloadState, DOWNLOADS_CHANGED } from "./musicDownloads";
+import { mi, musicCard, shelf, grid, pageHeader, iconButton, link, aboutText } from "./musicCommon";
 
 function report(e: any): void {
   toast(e?.message ?? String(e), "error");
@@ -24,6 +27,8 @@ export async function renderBooks(content: HTMLElement, arg: string): Promise<vo
   clear(content);
   const root = el("div", { class: "mu-page" });
   content.append(root);
+  watchDownloadState();
+  if (api.isOffline() && page !== "book") return renderOnDevice(root);
   switch (page) {
     case "all": return renderAll(root);
     case "author": return renderAuthor(root, id);
@@ -37,11 +42,18 @@ function author(book: any): string {
   return m.artistLine(book) || "Unknown author";
 }
 
+/** "42% · 5h 12m left", wherever a book's time left is shown. Empty for a
+ *  book that hasn't been started. */
 function timeLeft(book: any): string {
   const total = m.secondsOf(book.RunTimeTicks);
   const pos = m.secondsOf(book.UserData?.PlaybackPositionTicks);
   if (!total || !pos) return "";
-  return `${m.longDuration(Math.max(0, total - pos))} left`;
+  return `${Math.floor(Math.min(1, pos / total) * 100)}% · ${m.shortDuration(Math.max(0, total - pos))} left`;
+}
+
+/** Whether this book is the one in the player right now. */
+function isCurrent(book: any): boolean {
+  return audio.isActive() && audio.current()?.Id === book.Id;
 }
 
 function bookCard(book: any, sub?: string): HTMLElement {
@@ -68,6 +80,13 @@ function bookCard(book: any, sub?: string): HTMLElement {
 
 function bookActions(book: any): any[] {
   const pos = m.secondsOf(book.UserData?.PlaybackPositionTicks);
+  if (api.isOffline()) {
+    return [
+      pos ? { label: `Resume (${timeLeft(book) || m.clock(pos)})`, icon: "play", run: () => void playBook(book, true) } : null,
+      { label: pos ? "Play from Start" : "Play", icon: pos ? undefined : "play", run: () => void playBook(book, false) },
+      ...downloadActions(book),
+    ];
+  }
   return [
     pos ? { label: `Resume (${timeLeft(book) || m.clock(pos)})`, icon: "play", run: () => void playBook(book, true) } : null,
     { label: pos ? "Play from Start" : "Play", icon: pos ? undefined : "play", run: () => void playBook(book, false) },
@@ -83,7 +102,7 @@ function bookActions(book: any): any[] {
         } catch (e) { report(e); }
       },
     },
-    downloadBookAction(book),
+    ...downloadActions(book),
     { label: "Go to Author", icon: "people", run: () => void (location.hash = `#/books/author/${encodeURIComponent(author(book))}`) },
   ];
 }
@@ -103,6 +122,12 @@ async function partsOf(book: any): Promise<any[]> {
 
 export async function playBook(book: any, resume: boolean, at?: number): Promise<void> {
   try {
+    // A downloaded copy is one file with everything it needs kept beside it.
+    if (book.__localPath) {
+      const pos = at ?? (resume ? m.secondsOf(book.UserData?.PlaybackPositionTicks) : 0);
+      await audio.play([book], 0, { title: book.Name ?? "", book: true, startSeconds: pos || undefined });
+      return;
+    }
     const full = await detailed(book);
     const parts = await partsOf(full);
     // A book in parts resumes at the part that was stopped in.
@@ -123,6 +148,51 @@ function booksTabs(active: string): HTMLElement {
   return el("nav", { class: "mu-tabs", "aria-label": "Audiobooks" }, tabs.map(([r, label]) =>
     el("a", { class: `mu-tab${r === active ? " active" : ""}`, href: `#/books${r ? `/${r}` : ""}` }, [label])
   ));
+}
+
+// ---------- On this device ----------
+
+/** The whole section with no server: the downloaded books, searchable. */
+async function renderOnDevice(root: HTMLElement): Promise<void> {
+  const field = el("input", { type: "search", class: "mu-input mu-search", placeholder: "Titles and authors", "aria-label": "Search downloaded audiobooks" }) as HTMLInputElement;
+  const body = el("div");
+  root.append(
+    el("h1", { class: "page-title" }, ["Audiobooks"]),
+    el("p", { class: "mu-search-note mu-offline-note" }, ["The server can't be reached. These are the books on this device."]),
+    field,
+    body
+  );
+  let books: any[] = [];
+  const paint = () => {
+    clear(body);
+    field.hidden = !books.length;
+    if (!books.length) {
+      body.append(emptyState({
+        icon: "disk",
+        title: "No audiobooks on this device",
+        body: "Next time the server is in reach, open an audiobook's menu and choose Download. It then plays here, chapters and all, with no server.",
+      }));
+      return;
+    }
+    const q = field.value.trim();
+    const shown = matchDownloaded(books, q).sort((a, b) => String(a.SortName ?? a.Name).localeCompare(String(b.SortName ?? b.Name)));
+    if (!shown.length) return body.append(emptyState({ icon: "search", title: "No matches", body: `No downloaded audiobook matches “${q}”.` }));
+    const started = q ? [] : shown.filter((b) => timeLeft(b) && !b.UserData?.Played);
+    const parts = [
+      shelf("Continue Listening", started.map((b) => bookCard(b, timeLeft(b)))),
+      el("h2", { class: "mu-sub-head" }, [`On This Device (${shown.length})`]),
+      grid(shown.map((b) => bookCard(b))),
+    ];
+    body.append(...parts.filter(Boolean) as HTMLElement[]);
+  };
+  const load = async () => {
+    books = (await downloadedItems()).filter((i) => i.Type === "AudioBook");
+    if (root.isConnected) paint();
+  };
+  field.addEventListener("input", paint);
+  const onChange = () => (root.isConnected ? void load() : document.removeEventListener(DOWNLOADS_CHANGED, onChange));
+  document.addEventListener(DOWNLOADS_CHANGED, onChange);
+  await load();
 }
 
 // ---------- Listen Now ----------
@@ -192,6 +262,7 @@ async function renderHome(root: HTMLElement): Promise<void> {
 const BOOK_SORTS: [string, string, (a: any, b: any) => number][] = [
   ["title", "Title", (a, b) => String(a.SortName ?? a.Name).localeCompare(String(b.SortName ?? b.Name))],
   ["author", "Author", (a, b) => author(a).localeCompare(author(b)) || String(a.SortName ?? a.Name).localeCompare(String(b.SortName ?? b.Name))],
+  ["year", "Year", (a, b) => (b.ProductionYear ?? 0) - (a.ProductionYear ?? 0) || String(a.SortName ?? a.Name).localeCompare(String(b.SortName ?? b.Name))],
   ["added", "Date added", (a, b) => String(b.DateCreated ?? "").localeCompare(String(a.DateCreated ?? ""))],
   ["played", "Last played", (a, b) => String(b.UserData?.LastPlayedDate ?? "").localeCompare(String(a.UserData?.LastPlayedDate ?? ""))],
 ];
@@ -275,6 +346,29 @@ async function renderBook(root: HTMLElement, id: string): Promise<void> {
       },
     })), { fixed: true }) }, [`${audio.bookSpeed()}×`]);
     const more = iconButton("more", "More", () => openActionMenu(more, book.Name ?? null, bookActions(book), { fixed: true }));
+    // While this book is the one playing, the main button is the player's:
+    // Pause, or Resume when it is paused.
+    const mainLabel = el("span");
+    const mainIcon = mi("play");
+    const mainBtn = el("button", {
+      class: "btn primary",
+      onClick: () => void (isCurrent(book) ? audio.togglePause() : playBook(book, true)),
+    }, [mainIcon, mainLabel]);
+    let shown = "";
+    const syncMain = () => {
+      const cur = isCurrent(book);
+      const paused = audio.getStatus().paused;
+      const text = cur ? (paused ? " Resume" : " Pause") : pos ? ` Resume at ${m.clock(pos)}` : " Play";
+      if (text === shown) return;
+      shown = text;
+      mainLabel.textContent = text;
+      mainIcon.innerHTML = mi(cur && !paused ? "pause" : "play").innerHTML;
+    };
+    syncMain();
+    const off = audio.onChange(() => {
+      if (!mainBtn.isConnected) return off();
+      syncMain();
+    });
     root.append(pageHeader({
       item: book,
       cover: m.coverUrl(book, 600),
@@ -286,13 +380,13 @@ async function renderBook(root: HTMLElement, id: string): Promise<void> {
         pct ? el("div", { class: "mu-book-progress" }, [el("div", { style: `width:${pct}%` })]) : null,
       ],
       buttons: [
-        el("button", { class: "btn primary", onClick: () => void playBook(book, true) }, [mi("play"), pos ? ` Resume at ${m.clock(pos)}` : " Play"]),
+        mainBtn,
         pos ? el("button", { class: "btn", onClick: () => void playBook(book, false) }, ["Play from Start"]) : null,
         speedBtn,
         more,
       ],
     }));
-    if (book.Overview) root.append(el("p", { class: "mu-about" }, [book.Overview.replace(/<[^>]+>/g, "")]));
+    if (book.Overview) root.append(aboutText(book.Overview.replace(/<[^>]+>/g, "")));
     const chapters: any[] = book.Chapters ?? [];
     if (chapters.length) {
       const list = el("div", { class: "mu-songs" });
@@ -318,6 +412,23 @@ async function renderBook(root: HTMLElement, id: string): Promise<void> {
     }
   };
   const cached = getCached<any>(key);
+  if (api.isOffline()) {
+    // With no server the page is drawn from the downloaded copy, which also
+    // makes Play start from the file.
+    const local = (await downloadedItems()).find((b) => b.Id === id) ?? null;
+    if (!root.isConnected) return;
+    if (local) paint({ ...(cached ?? {}), ...local });
+    else if (cached) paint(cached);
+    else {
+      root.append(emptyState({
+        icon: "disk",
+        title: "Not on this device",
+        body: "This book hasn't been downloaded, and the server is out of reach. It opens as usual once you're back online.",
+        action: { label: "Audiobooks", run: () => void (location.hash = "#/books") },
+      }));
+    }
+    return;
+  }
   if (cached) paint(cached);
   else root.append(spinner());
   try {

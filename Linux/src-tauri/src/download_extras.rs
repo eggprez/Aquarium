@@ -317,10 +317,22 @@ fn reveal_targets(item_ids: &[String]) -> Vec<PathBuf> {
     dirs
 }
 
-/// Show downloads in the file manager, selected. Through the FileManager1
+/// Show downloads in the file manager, selected (or, given no ids, the
+/// downloads folder). Through the FileManager1
 /// D-Bus interface (Nautilus, Dolphin, Nemo, Thunar…), falling back to opening
 /// the folder when nothing answers it.
 pub fn reveal(item_ids: &[String]) -> Result<(), String> {
+    // No items named: the downloads folder itself, opened rather than selected
+    // inside its parent, which is what the Downloads page's button is for.
+    if item_ids.is_empty() {
+        let folder = config::downloads_dir();
+        std::fs::create_dir_all(&folder).map_err(|e| format!("Couldn't open the folder: {e}"))?;
+        return std::process::Command::new("xdg-open")
+            .arg(&folder)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("Couldn't open the folder: {e}"));
+    }
     let targets = reveal_targets(item_ids);
     if targets.is_empty() {
         return Err("Nothing on disk to show".into());
@@ -874,7 +886,8 @@ mod tests {
     fn nothing_on_disk_is_an_error() {
         let _s = sandbox();
         assert_eq!(reveal(&["missing".into()]), Err("Nothing on disk to show".into()));
-        assert_eq!(reveal(&[]), Err("Nothing on disk to show".into()));
+        // No ids at all is the downloads folder itself, which opens a real
+        // file manager window, so it is not run here.
     }
 
     /// Off Linux there is no FileManager1 to ask, so `reveal` goes straight to

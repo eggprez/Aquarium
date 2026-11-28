@@ -1,0 +1,28 @@
+[Desktop Entry]
+Categories={{categories}}
+{{#if comment}}
+Comment={{comment}}
+{{/if}}
+Exec={{exec}}
+StartupWMClass={{exec}}
+Icon={{icon}}
+Name={{name}}
+Terminal=false
+Type=Application
+{{#if mime_type}}
+MimeType={{mime_type}}
+{{/if}}
+Keywords=Jellyfin;Media;Video;Film;Movie;TV;Music;Audiobook;
+Actions=continue;shuffle-music;resume-book;
+
+[Desktop Action continue]
+Name=Continue Watching
+Exec={{exec}} --action=continue
+
+[Desktop Action shuffle-music]
+Name=Shuffle Music
+Exec={{exec}} --action=shuffle-music
+
+[Desktop Action resume-book]
+Name=Resume Audiobook
+Exec={{exec}} --action=resume-book
